@@ -802,6 +802,10 @@ function SignupScreen({ onBack, onComplete }) {
   const [businessName, setBusinessName] = useState("");
   const [address, setAddress] = useState("");
 
+  // Password match validation
+  const passwordsMatch = password && confirmPassword && password === confirmPassword;
+  const passwordsDontMatch = confirmPassword && password !== confirmPassword;
+
   const handleSignup = async () => {
     try {
       setLoading(true);
@@ -898,9 +902,70 @@ function SignupScreen({ onBack, onComplete }) {
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Confirm Password</label>
-              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter password" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }} />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                placeholder="Re-enter password"
+                style={{
+                  width: "100%",
+                  border: `1.5px solid ${passwordsDontMatch ? "#ef4444" : passwordsMatch ? "#10b981" : "#e2e8f0"}`,
+                  borderRadius: 10,
+                  padding: "0 14px",
+                  height: 44,
+                  fontSize: 14,
+                  fontFamily: "inherit",
+                  outline: "none"
+                }}
+              />
+              {confirmPassword && (
+                <div style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: passwordsMatch ? "#10b981" : "#ef4444",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4
+                }}>
+                  {passwordsMatch ? (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      Passwords match
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                      </svg>
+                      Passwords don't match
+                    </>
+                  )}
+                </div>
+              )}
             </div>
-            <button onClick={() => setStep(2)} style={{ width: "100%", height: 46, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg, #E8A838, #F5C563)", color: "#1B2A4A", fontFamily: "inherit", marginTop: 8 }}>
+            <button
+              onClick={() => setStep(2)}
+              disabled={!contactName || !phone || !email || !password || !confirmPassword || passwordsDontMatch}
+              style={{
+                width: "100%",
+                height: 46,
+                border: "none",
+                borderRadius: 10,
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: (!contactName || !phone || !email || !password || !confirmPassword || passwordsDontMatch) ? "not-allowed" : "pointer",
+                background: (!contactName || !phone || !email || !password || !confirmPassword || passwordsDontMatch) ? "#e2e8f0" : "linear-gradient(135deg, #E8A838, #F5C563)",
+                color: (!contactName || !phone || !email || !password || !confirmPassword || passwordsDontMatch) ? "#94a3b8" : "#1B2A4A",
+                fontFamily: "inherit",
+                marginTop: 8,
+                transition: "all 0.2s ease"
+              }}
+            >
               Continue
             </button>
           </>
