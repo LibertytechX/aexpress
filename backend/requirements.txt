@@ -6,4 +6,5 @@ djangorestframework-simplejwt==5.5.1
 python-dotenv==1.2.1
 redis==7.0.1
 django-redis==6.0.0
+requests==2.32.3
 
