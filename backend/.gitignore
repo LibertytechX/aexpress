@@ -39,8 +39,8 @@ staticfiles/
 static/
 
 # Migrations (optional - uncomment if you want to ignore migrations)
-*/migrations/*.py
-!*/migrations/__init__.py
+# */migrations/*.py
+# !*/migrations/__init__.py
 
 # Environment variables
 .env
