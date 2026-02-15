@@ -82,8 +82,8 @@ if [ -d "backend" ]; then
 fi
 
 # Clone the repository
-echo "Cloning from git@github.com:LibertytechX/aexpress.git..."
-git clone git@github.com:LibertytechX/aexpress.git backend
+echo "Cloning from https://github.com/LibertytechX/aexpress.git..."
+git clone https://github.com/LibertytechX/aexpress.git backend
 
 cd backend
 

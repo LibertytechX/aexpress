@@ -120,3 +120,4 @@ celerybeat.pid
 # Documentation builds (optional)
 # docs/_build/
 # site/
+backend/deploy/.env.server
