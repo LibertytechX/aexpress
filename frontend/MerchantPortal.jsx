@@ -870,6 +870,7 @@ function SignupScreen({ onBack, onComplete }) {
           </div>
         </div>
       </div>
+      
 
       <div style={{ width: 480, background: "#fff", display: "flex", flexDirection: "column", justifyContent: "center", padding: 60 }}>
         {error && (
@@ -903,7 +904,7 @@ function SignupScreen({ onBack, onComplete }) {
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Confirm Password</label>
               <input
-                type="password" 
+                type="password"
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
                 placeholder="Re-enter password"
