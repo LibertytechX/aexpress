@@ -1,0 +1,30 @@
+# Systemd service file for AX Merchant Portal API
+# Place this file in: /etc/systemd/system/axpress-api.service
+# Then run:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable axpress-api
+#   sudo systemctl start axpress-api
+
+[Unit]
+Description=AX Merchant Portal API (Gunicorn)
+After=network.target postgresql.service redis.service
+
+[Service]
+Type=notify
+User=root
+Group=root
+WorkingDirectory=/home/backend
+Environment="PATH=/home/backend/venv/bin"
+ExecStart=/home/backend/venv/bin/gunicorn \
+    --config /home/backend/deploy/gunicorn_config.py \
+    ax_merchant_api.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+

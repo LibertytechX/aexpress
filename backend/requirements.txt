@@ -1,0 +1,9 @@
+Django==4.2.28
+djangorestframework==3.16.1
+psycopg2-binary==2.9.11
+django-cors-headers==4.9.0
+djangorestframework-simplejwt==5.5.1
+python-dotenv==1.2.1
+redis==7.0.1
+django-redis==6.0.0
+
