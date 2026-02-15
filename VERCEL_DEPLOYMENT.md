@@ -24,7 +24,7 @@
 
 3. **Configure Project**
    - **Framework Preset**: Other (or None)
-   - **Root Directory**: `frontend` (IMPORTANT!)
+   - **Root Directory**: Leave empty (files are in repository root)
    - **Build Command**: Leave empty (static site)
    - **Output Directory**: Leave empty (uses root)
    - **Install Command**: Leave empty (no build needed)
@@ -106,12 +106,12 @@ Visit your Vercel URL and test:
 The following files will be deployed to Vercel:
 
 ```
-frontend/
+/ (repository root)
 ├── index.html          # Main HTML file
 ├── MerchantPortal.jsx  # React components
 ├── api.js              # API service (points to production backend)
 ├── vercel.json         # Vercel configuration
-└── README.md           # Documentation
+└── backend/            # Backend code (not deployed to Vercel)
 ```
 
 ---
@@ -167,8 +167,8 @@ const API_BASE_URL = 'https://www.orders.axpress.net/api';
 
 ## 📞 Support
 
-**Backend API**: https://www.orders.axpress.net  
-**Repository**: https://github.com/LibertytechX/aexpress.git  
+**Backend API**: https://www.orders.axpress.net
+**Repository**: https://github.com/LibertytechX/aexpress.git
 **Admin Email**: admin@axpress.net
 
 ---
