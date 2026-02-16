@@ -34,15 +34,15 @@ urlpatterns = [
     path('', OrderListView.as_view(), name='order_list'),
     path('stats/', OrderStatsView.as_view(), name='order_stats'),
 
-    # Escrow management endpoints (must come before <str:order_number>/)
+    # Escrow management endpoints
     path('escrow-history/', EscrowHistoryView.as_view(), name='escrow_history'),
     path('cancelable/', CancelableOrdersView.as_view(), name='cancelable_orders'),
 
-    # Order-specific endpoints (must come before <str:order_number>/)
-    path('<str:order_number>/release-escrow/', ReleaseEscrowView.as_view(), name='release_escrow'),
-    path('<str:order_number>/refund-escrow/', RefundEscrowView.as_view(), name='refund_escrow'),
-    path('<str:order_number>/escrow-status/', EscrowStatusView.as_view(), name='escrow_status'),
-    path('<str:order_number>/cancel/', CancelOrderView.as_view(), name='cancel_order'),
+    # Order-specific endpoints (using /action/order_number pattern)
+    path('release-escrow/<str:order_number>/', ReleaseEscrowView.as_view(), name='release_escrow'),
+    path('refund-escrow/<str:order_number>/', RefundEscrowView.as_view(), name='refund_escrow'),
+    path('escrow-status/<str:order_number>/', EscrowStatusView.as_view(), name='escrow_status'),
+    path('cancel/<str:order_number>/', CancelOrderView.as_view(), name='cancel_order'),
 
     # Generic order detail (must come last to avoid matching specific endpoints)
     path('<str:order_number>/', OrderDetailView.as_view(), name='order_detail'),

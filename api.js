@@ -216,7 +216,7 @@ const OrdersAPI = {
   },
 
   cancelOrder: async (orderNumber, reason = 'Canceled by merchant') => {
-    return await apiRequest(`/orders/${orderNumber}/cancel/`, {
+    return await apiRequest(`/orders/cancel/${orderNumber}/`, {
       method: 'POST',
       body: JSON.stringify({ reason }),
     });
