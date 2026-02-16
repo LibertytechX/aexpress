@@ -63,6 +63,10 @@ class Order(models.Model):
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='wallet')
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
+    # Escrow tracking
+    escrow_held = models.BooleanField(default=False, help_text="Whether funds are held in escrow")
+    escrow_released = models.BooleanField(default=False, help_text="Whether escrow funds have been released")
+
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending', db_index=True)
 

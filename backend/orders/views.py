@@ -12,6 +12,7 @@ from .serializers import (
     BulkImportSerializer
 )
 from wallet.models import Wallet
+from wallet.escrow import EscrowManager
 
 
 class VehicleListView(APIView):
@@ -79,26 +80,32 @@ class QuickSendView(APIView):
             sequence=1
         )
 
-        # Auto-debit wallet if payment method is wallet
+        # Hold funds in escrow if payment method is wallet
         if data['payment_method'] == 'wallet':
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
-                # Check if wallet has sufficient balance
-                if not wallet.can_debit(total_amount):
-                    # Delete the order and delivery (rollback)
+                # Hold funds in escrow
+                try:
+                    EscrowManager.hold_funds(
+                        wallet=wallet,
+                        amount=total_amount,
+                        order_number=order.order_number,
+                        description=f'Escrow hold for Quick Send order #{order.order_number}'
+                    )
+
+                    # Mark order as having escrow held
+                    order.escrow_held = True
+                    order.save()
+
+                except ValueError as e:
+                    # Insufficient balance - rollback order
                     order.delete()
                     return Response({
                         'success': False,
-                        'errors': {'wallet': [f'Insufficient wallet balance. Required: ₦{total_amount}, Available: ₦{wallet.balance}']}
+                        'errors': {'wallet': [str(e)]}
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                # Debit wallet
-                wallet.debit(
-                    amount=total_amount,
-                    description=f'Payment for order #{order.order_number}',
-                    reference=f'ORDER-{order.order_number}'
-                )
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
@@ -169,26 +176,32 @@ class MultiDropView(APIView):
                 sequence=idx
             )
 
-        # Auto-debit wallet if payment method is wallet
+        # Hold funds in escrow if payment method is wallet
         if data['payment_method'] == 'wallet':
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
-                # Check if wallet has sufficient balance
-                if not wallet.can_debit(total_amount):
-                    # Delete the order and deliveries (rollback)
+                # Hold funds in escrow
+                try:
+                    EscrowManager.hold_funds(
+                        wallet=wallet,
+                        amount=total_amount,
+                        order_number=order.order_number,
+                        description=f'Escrow hold for Multi-Drop order #{order.order_number} ({num_deliveries} deliveries)'
+                    )
+
+                    # Mark order as having escrow held
+                    order.escrow_held = True
+                    order.save()
+
+                except ValueError as e:
+                    # Insufficient balance - rollback order
                     order.delete()
                     return Response({
                         'success': False,
-                        'errors': {'wallet': [f'Insufficient wallet balance. Required: ₦{total_amount}, Available: ₦{wallet.balance}']}
+                        'errors': {'wallet': [str(e)]}
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                # Debit wallet
-                wallet.debit(
-                    amount=total_amount,
-                    description=f'Payment for order #{order.order_number}',
-                    reference=f'ORDER-{order.order_number}'
-                )
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
@@ -259,26 +272,32 @@ class BulkImportView(APIView):
                 sequence=idx
             )
 
-        # Auto-debit wallet if payment method is wallet
+        # Hold funds in escrow if payment method is wallet
         if data['payment_method'] == 'wallet':
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
-                # Check if wallet has sufficient balance
-                if not wallet.can_debit(total_amount):
-                    # Delete the order and deliveries (rollback)
+                # Hold funds in escrow
+                try:
+                    EscrowManager.hold_funds(
+                        wallet=wallet,
+                        amount=total_amount,
+                        order_number=order.order_number,
+                        description=f'Escrow hold for Bulk Import order #{order.order_number} ({num_deliveries} deliveries)'
+                    )
+
+                    # Mark order as having escrow held
+                    order.escrow_held = True
+                    order.save()
+
+                except ValueError as e:
+                    # Insufficient balance - rollback order
                     order.delete()
                     return Response({
                         'success': False,
-                        'errors': {'wallet': [f'Insufficient wallet balance. Required: ₦{total_amount}, Available: ₦{wallet.balance}']}
+                        'errors': {'wallet': [str(e)]}
                     }, status=status.HTTP_400_BAD_REQUEST)
 
-                # Debit wallet
-                wallet.debit(
-                    amount=total_amount,
-                    description=f'Payment for order #{order.order_number}',
-                    reference=f'ORDER-{order.order_number}'
-                )
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
