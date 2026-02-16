@@ -281,6 +281,7 @@ function MerchantPortal() {
   const transformOrders = (apiOrders) => {
     return apiOrders.map(order => ({
       id: order.order_number,
+      order_number: order.order_number,
       status: order.status,
       pickup: order.pickup_address,
       dropoff: order.deliveries[0]?.dropoff_address || '',
