@@ -6,17 +6,15 @@ from .views import (
     BulkImportView,
     OrderListView,
     OrderDetailView,
-    OrderStatsView
+    OrderStatsView,
+    CancelOrderView,
+    CancelableOrdersView
 )
 from .escrow_views import (
     ReleaseEscrowView,
     RefundEscrowView,
     EscrowStatusView,
     EscrowHistoryView
-)
-from .cancel_views import (
-    CancelOrderView,
-    CancelableOrdersView
 )
 
 app_name = 'orders'
