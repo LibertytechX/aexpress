@@ -230,6 +230,30 @@ function MerchantPortal() {
     }
   };
 
+  const handleCancelOrder = async (orderNumber) => {
+    setLoading(true);
+    try {
+      const response = await window.API.Orders.cancelOrder(orderNumber);
+      if (response.success) {
+        showNotif(response.message, 'success');
+        if (response.refund.processed) {
+          showNotif(`₦${response.refund.amount.toLocaleString()} refunded to wallet`, 'success');
+        }
+        await loadOrders();
+        await loadWalletBalance();
+        await loadTransactions();
+        setOrderDetailId(null); // Go back to orders list
+      } else {
+        showNotif(response.error || 'Failed to cancel order', 'error');
+      }
+    } catch (error) {
+      showNotif('Failed to cancel order', 'error');
+      console.error('Cancel order error:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadWalletBalance = async () => {
     try {
       const response = await window.API.Wallet.getBalance();
@@ -625,6 +649,7 @@ function MerchantPortal() {
               detailId={orderDetailId}
               onSelectOrder={setOrderDetailId}
               onBack={() => setOrderDetailId(null)}
+              onCancelOrder={handleCancelOrder}
             />
           )}
           {screen === "wallet" && (
@@ -870,7 +895,7 @@ function SignupScreen({ onBack, onComplete }) {
           </div>
         </div>
       </div>
-      
+
 
       <div style={{ width: 480, background: "#fff", display: "flex", flexDirection: "column", justifyContent: "center", padding: 60 }}>
         {error && (
@@ -1866,7 +1891,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, detailId, onSelectOrder, onBack }) {
+function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }) {
   const [filter, setFilter] = useState("all");
 
   // Helper function to get vehicle icon
@@ -1990,6 +2015,42 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack }) {
                 <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
               </div>
             ))}
+
+            {/* Cancel Order Button */}
+            {!['Delivered', 'Canceled'].includes(order.status) && (
+              <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
+                <button
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to cancel order #${order.id}?\n\n${order.payment_method === 'wallet' ? 'Your wallet will be refunded automatically.' : ''}`)) {
+                      onCancelOrder(order.order_number);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 20px',
+                    background: '#fee2e2',
+                    color: '#991b1b',
+                    border: '1px solid #fecaca',
+                    borderRadius: 8,
+                    fontSize: 14,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#fecaca';
+                    e.target.style.borderColor = '#fca5a5';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#fee2e2';
+                    e.target.style.borderColor = '#fecaca';
+                  }}
+                >
+                  🚫 Cancel Order
+                </button>
+              </div>
+            )}
 
             {/* Events Timeline */}
             <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>

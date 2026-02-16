@@ -14,6 +14,10 @@ from .escrow_views import (
     EscrowStatusView,
     EscrowHistoryView
 )
+from .cancel_views import (
+    CancelOrderView,
+    CancelableOrdersView
+)
 
 app_name = 'orders'
 
@@ -36,5 +40,9 @@ urlpatterns = [
     path('<str:order_number>/release-escrow/', ReleaseEscrowView.as_view(), name='release_escrow'),
     path('<str:order_number>/refund-escrow/', RefundEscrowView.as_view(), name='refund_escrow'),
     path('<str:order_number>/escrow-status/', EscrowStatusView.as_view(), name='escrow_status'),
+
+    # Order cancellation endpoints
+    path('cancelable/', CancelableOrdersView.as_view(), name='cancelable_orders'),
+    path('<str:order_number>/cancel/', CancelOrderView.as_view(), name='cancel_order'),
 ]
 

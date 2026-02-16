@@ -3,7 +3,7 @@
  * Handles all backend API communication
  */
 
-const API_BASE_URL = 'https://www.orders.axpress.net/api'; 
+const API_BASE_URL = 'https://www.orders.axpress.net/api';
 
 // Token management
 const TokenManager = {
@@ -212,6 +212,13 @@ const OrdersAPI = {
   getOrderStats: async () => {
     return await apiRequest('/orders/stats/', {
       method: 'GET',
+    });
+  },
+
+  cancelOrder: async (orderNumber, reason = 'Canceled by merchant') => {
+    return await apiRequest(`/orders/${orderNumber}/cancel/`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
     });
   },
 };
