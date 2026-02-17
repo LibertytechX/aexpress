@@ -1183,6 +1183,217 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
   );
 }
 
+// ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
+function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const debounceTimer = useRef(null);
+  const autocompleteService = useRef(null);
+  const placesService = useRef(null);
+
+  // Initialize Google Maps services
+  useEffect(() => {
+    const initServices = () => {
+      if (window.google && window.google.maps && window.google.maps.places) {
+        autocompleteService.current = new window.google.maps.places.AutocompleteService();
+        // Create a dummy div for PlacesService (required by Google Maps API)
+        const dummyDiv = document.createElement('div');
+        placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
+        setError(null);
+      } else {
+        setError('Google Maps not loaded');
+      }
+    };
+
+    if (window.googleMapsLoaded) {
+      initServices();
+    } else {
+      window.addEventListener('google-maps-loaded', initServices);
+      return () => window.removeEventListener('google-maps-loaded', initServices);
+    }
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target) &&
+          inputRef.current && !inputRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Fetch suggestions with debouncing
+  const fetchSuggestions = (input) => {
+    if (!input || input.length < 3) {
+      setSuggestions([]);
+      setShowDropdown(false);
+      return;
+    }
+
+    if (!autocompleteService.current) {
+      setError('Google Maps not ready');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    // Debounce API calls
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+    }
+
+    debounceTimer.current = setTimeout(() => {
+      const request = {
+        input: input,
+        componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
+        types: ['address'], // Only addresses
+        // Bias results to Lagos
+        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
+        radius: 50000, // 50km radius
+      };
+
+      autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
+        setLoading(false);
+
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
+          // Filter to only Lagos addresses
+          const lagosResults = predictions.filter(p =>
+            p.description.toLowerCase().includes('lagos')
+          );
+
+          if (lagosResults.length === 0) {
+            setError('No addresses found in Lagos');
+            setSuggestions([]);
+          } else {
+            setSuggestions(lagosResults);
+            setShowDropdown(true);
+            setError(null);
+          }
+        } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          setError('No addresses found in Lagos');
+          setSuggestions([]);
+        } else {
+          setError('Failed to fetch suggestions');
+          setSuggestions([]);
+        }
+      });
+    }, 550); // 550ms debounce
+  };
+
+  const handleInputChange = (e) => {
+    const newValue = e.target.value;
+    onChange(newValue);
+    fetchSuggestions(newValue);
+  };
+
+  const handleSelectSuggestion = (suggestion) => {
+    onChange(suggestion.description);
+    setSuggestions([]);
+    setShowDropdown(false);
+    setError(null);
+  };
+
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={handleInputChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        style={style}
+      />
+
+      {/* Loading indicator */}
+      {loading && (
+        <div style={{
+          position: 'absolute',
+          right: 12,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          fontSize: 12,
+          color: '#94a3b8'
+        }}>
+          ⏳
+        </div>
+      )}
+
+      {/* Dropdown with suggestions */}
+      {showDropdown && suggestions.length > 0 && (
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            right: 0,
+            marginTop: 4,
+            background: '#fff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 10,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+            maxHeight: 240,
+            overflowY: 'auto',
+            zIndex: 1000
+          }}
+        >
+          {suggestions.map((suggestion, idx) => (
+            <div
+              key={suggestion.place_id}
+              onClick={() => handleSelectSuggestion(suggestion)}
+              style={{
+                padding: '10px 14px',
+                cursor: 'pointer',
+                borderBottom: idx < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
+                fontSize: 13,
+                color: '#1e293b',
+                transition: 'background 0.15s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
+              onMouseLeave={(e) => e.currentTarget.style.background = '#fff'}
+            >
+              <div style={{ display: 'flex', alignItems: 'start', gap: 8 }}>
+                <span style={{ color: '#f59e0b', marginTop: 2 }}>📍</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                    {suggestion.structured_formatting?.main_text || suggestion.description}
+                  </div>
+                  {suggestion.structured_formatting?.secondary_text && (
+                    <div style={{ fontSize: 11, color: '#64748b' }}>
+                      {suggestion.structured_formatting.secondary_text}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error message */}
+      {error && value.length >= 3 && !loading && (
+        <div style={{
+          fontSize: 11,
+          color: '#ef4444',
+          marginTop: 4,
+          paddingLeft: 4
+        }}>
+          {error} - You can still enter address manually
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── NEW ORDER SCREEN ───────────────────────────────────────────
 function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   // ─── Mode: "quick" | "multi" | "bulk" ───
@@ -1425,8 +1636,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 ))}
               </div>
             </div>
-            <input value={pickupAddress} onChange={e => setPickupAddress(e.target.value)} placeholder="Enter pickup address in Lagos"
-              style={{ ...inputStyle, marginBottom: 10 }} />
+            <AddressAutocompleteInput
+              value={pickupAddress}
+              onChange={setPickupAddress}
+              placeholder="Enter pickup address in Lagos"
+              style={{ ...inputStyle, marginBottom: 10 }}
+            />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={inputStyle} />
               <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={inputStyle} />
@@ -1440,8 +1655,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.gold }} />
                 <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: 0 }}>Deliver To</h3>
               </div>
-              <input value={dropoffAddress} onChange={e => setDropoffAddress(e.target.value)} placeholder="Enter delivery address"
-                style={{ ...inputStyle, marginBottom: 10 }} />
+              <AddressAutocompleteInput
+                value={dropoffAddress}
+                onChange={setDropoffAddress}
+                placeholder="Enter delivery address"
+                style={{ ...inputStyle, marginBottom: 10 }}
+              />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                 <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={inputStyle} />
                 <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={inputStyle} />
@@ -1485,8 +1704,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     )}
 
                     <div style={{ marginTop: 6 }}>
-                      <input value={drop.address} onChange={e => updateDrop(drop.id, "address", e.target.value)}
-                        placeholder="Delivery address" style={{ ...inputStyle, marginBottom: 8 }} />
+                      <AddressAutocompleteInput
+                        value={drop.address}
+                        onChange={(value) => updateDrop(drop.id, "address", value)}
+                        placeholder="Delivery address"
+                        style={{ ...inputStyle, marginBottom: 8 }}
+                      />
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 8 }}>
                         <input value={drop.name} onChange={e => updateDrop(drop.id, "name", e.target.value)}
                           placeholder="Receiver name" style={inputStyle} />
@@ -1626,8 +1849,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                         background: row.valid === false ? "#FEF2F2" : "#fff"
                       }}>
                         <span style={{ fontSize: 12, fontWeight: 700, color: S.gold }}>{idx + 1}</span>
-                        <input value={row.address} onChange={e => updateBulkRow(row.id, "address", e.target.value)}
-                          style={{ border: "none", fontSize: 13, color: S.navy, fontFamily: "inherit", background: "transparent", width: "100%" }} />
+                        <AddressAutocompleteInput
+                          value={row.address}
+                          onChange={(value) => updateBulkRow(row.id, "address", value)}
+                          placeholder="Address"
+                          style={{ border: "none", fontSize: 13, color: S.navy, fontFamily: "inherit", background: "transparent", width: "100%" }}
+                        />
                         <input value={row.name} onChange={e => updateBulkRow(row.id, "name", e.target.value)}
                           style={{ border: "none", fontSize: 13, color: S.gray, fontFamily: "inherit", background: "transparent", width: "100%" }} />
                         <input value={row.phone} onChange={e => updateBulkRow(row.id, "phone", e.target.value)}
