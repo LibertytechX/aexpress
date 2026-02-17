@@ -79,6 +79,43 @@ export function SettingsScreen() {
                     <div><label style={lSt}>Max Dispatch Radius (KM)</label><input value={maxRadius} onChange={e => setMaxRadius(e.target.value)} style={{ ...iSt, width: 120 }} /><div style={{ fontSize: 11, color: S.textMuted, marginTop: 6 }}>Riders must be within this range to receive requests.</div></div>
                 </div>
             )}
+            {settingsTab === "notif" && (
+                <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 16 }}>Notification Preferences</div>
+                    {[
+                        { l: "Push Notifications", d: "Receive real-time alerts for new orders" },
+                        { l: "Email Alerts", d: "Daily summaries and critical system alerts" },
+                        { l: "SMS Updates", d: "Urgent status changes and rider messages" }
+                    ].map(n => (
+                        <div key={n.l} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, paddingBottom: 16, borderBottom: `1px solid ${S.borderLight}` }}>
+                            <div>
+                                <div style={{ fontSize: 13, fontWeight: 600 }}>{n.l}</div>
+                                <div style={{ fontSize: 11, color: S.textMuted }}>{n.d}</div>
+                            </div>
+                            <div style={{ width: 40, height: 22, borderRadius: 11, background: S.green, position: "relative", cursor: "pointer" }}>
+                                <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#fff", position: "absolute", top: 2, right: 2, boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }} />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {settingsTab === "api" && (
+                <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20 }}>
+                    <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 16 }}>API Configuration</div>
+                    <div style={{ marginBottom: 20 }}>
+                        <label style={lSt}>WEBHOOK URL</label>
+                        <input defaultValue="https://api.aexpress.ng/v1/webhooks/dispatch" style={iSt} />
+                        <div style={{ fontSize: 11, color: S.textMuted, marginTop: 6 }}>Events will be pushed to this URL</div>
+                    </div>
+                    <div>
+                        <label style={lSt}>API KEY</label>
+                        <div style={{ display: "flex", gap: 10 }}>
+                            <input value="pk_test_57283948273948..." readOnly style={{ ...iSt, fontFamily: "'Space Mono',monospace", color: S.textMuted }} />
+                            <button style={{ padding: "0 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.bg, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>Regenerate</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

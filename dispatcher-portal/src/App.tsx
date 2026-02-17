@@ -4,7 +4,7 @@ import { I } from './components/icons';
 import { S } from './components/common/theme';
 import { DashboardScreen, OrdersScreen, RidersScreen, MerchantsScreen, CustomersScreen, MessagingScreen, SettingsScreen } from './components/screens';
 import { CreateOrderModal } from './components/modals/CreateOrderModal';
-import { INIT_ORDERS, INIT_RIDERS, MERCHANTS_DATA, CUSTOMERS_DATA } from './data/mockData';
+import { INIT_ORDERS, INIT_RIDERS, MERCHANTS_DATA, CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
 import type { Order, LogEvent } from './types';
 
 function App() {
@@ -95,22 +95,35 @@ function App() {
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {menus.map(m => (
-            <button key={m.id} onClick={() => { setNav(m.id); setSelectedOrderId(null); setSelectedRiderId(null); }}
-              style={{
-                display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, border: "none", cursor: "pointer",
-                background: nav === m.id ? "rgba(255,255,255,0.1)" : "transparent",
-                color: nav === m.id ? S.gold : "#94a3b8",
-                fontFamily: "inherit", fontWeight: 600, fontSize: 13, textAlign: "left", transition: "all 0.2s"
-              }}>
-              <span style={{ opacity: nav === m.id ? 1 : 0.7 }}>{m.icon}</span>
-              {m.id}
-            </button>
-          ))}
+        <div style={{ padding: "12px 14px", borderBottom: `1px solid rgba(255,255,255,0.08)`, display: "flex", gap: 8 }}>
+          {[{ v: orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "10px 0" }}>
+          {menus.map(m => {
+            let count = 0;
+            if (m.id === "Orders") count = orders.filter(o => o.status === "Pending").length;
+            if (m.id === "Riders") count = riders.filter(r => r.status === "online").length;
+            if (m.id === "Messaging") count = MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0);
+
+            return (
+              <button key={m.id} onClick={() => { setNav(m.id); setSelectedOrderId(null); setSelectedRiderId(null); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, border: "none", cursor: "pointer",
+                  background: nav === m.id ? "rgba(255,255,255,0.1)" : "transparent",
+                  color: nav === m.id ? S.gold : "#94a3b8",
+                  fontFamily: "inherit", fontWeight: 600, fontSize: 13, textAlign: "left", transition: "all 0.2s"
+                }}>
+                <span style={{ opacity: nav === m.id ? 1 : 0.7 }}>{m.icon}</span>
+                <span style={{ flex: 1 }}>{m.id}</span>
+                {count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: nav === m.id ? S.gold : "rgba(255,255,255,0.1)", color: nav === m.id ? "#fff" : "rgba(255,255,255,0.5)" }}>{count}</span>}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ marginTop: "auto" }}>
+          <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)", marginBottom: 10 }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(232,168,56,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>OI</div><div><div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>Otimeyin I.</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Admin</div></div></div></div>
           <div style={{ padding: 16, background: "rgba(255,255,255,0.05)", borderRadius: 12 }}>
             <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>SYSTEM STATUS</div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12, fontWeight: 600 }}>All Systems Operational</span></div>
