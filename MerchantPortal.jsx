@@ -2936,12 +2936,11 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
                 <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
                   Address
                 </label>
-                <textarea
+                <AddressAutocompleteInput
                   value={newAddressText}
-                  onChange={(e) => setNewAddressText(e.target.value)}
-                  placeholder="Enter full address"
-                  rows={3}
-                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", resize: "vertical", background: "#fff" }}
+                  onChange={setNewAddressText}
+                  placeholder="Enter full address (start typing for suggestions)"
+                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 80, fontSize: 14, fontFamily: "inherit", background: "#fff" }}
                 />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
