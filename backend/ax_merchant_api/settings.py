@@ -193,6 +193,7 @@ SIMPLE_JWT = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:9000",
     "http://127.0.0.1:9000",
+    "http://localhost:5173",
 ]
 
 # Add production frontend URL if set

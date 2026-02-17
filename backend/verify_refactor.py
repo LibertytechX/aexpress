@@ -63,9 +63,6 @@ def verify_refactored_flow():
     )
 
     rider.vehicle_type = vehicle_type
-    rider.plate_number = "LAG-555-ZZ"
-    rider.model = "Honda Ace"
-    rider.color = "Black"
     rider.save()
     print("Vehicle details assigned to Rider.")
 
@@ -111,8 +108,8 @@ def verify_refactored_flow():
             if r["rider_id"] == rider.rider_id:
                 found = True
                 print(f"Found Rider via API: {r['rider_id']}")
-                print(f"Vehicle: {r['vehicle']}, Plate: {r['plate_number']}")
-                if r["vehicle"] == "TestBike" and r["plate_number"] == "LAG-555-ZZ":
+                print(f"Vehicle: {r['vehicle']}")
+                if r["vehicle"] == "TestBike":
                     print("SUCCESS: API returns correct refactored fields.")
                 else:
                     print("FAILURE: API data mismatch.")
