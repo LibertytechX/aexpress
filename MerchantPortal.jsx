@@ -357,11 +357,11 @@ function MerchantPortal() {
     { id: "newOrder", label: "New Order", icon: Icons.newOrder },
     { id: "orders", label: "Orders", icon: Icons.orders },
     { id: "wallet", label: "Wallet", icon: Icons.wallet },
-    { id: "website", label: "My Website", icon: Icons.website, badge: "FREE" },
-    { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "NEW" },
+    { id: "website", label: "My Website", icon: Icons.website, badge: "SOON" },
+    { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "SOON" },
     { id: "loans", label: "Business Loans", icon: Icons.loans, badge: "SOON" },
     { id: "accounting", label: "Accounting", icon: Icons.accounting, badge: "SOON" },
-    { id: "support", label: "Support", icon: Icons.support },
+    { id: "support", label: "Support", icon: Icons.support, badge: "SOON" },
     { id: "settings", label: "Settings", icon: Icons.settings },
   ];
 
