@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
+from datetime import timedelta
 from .models import User, Address
 from .serializers import (
     UserSerializer,
@@ -12,6 +13,10 @@ from .serializers import (
     UserProfileSerializer,
     AddressSerializer
 )
+from .emails import send_verification_email
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class SignupView(APIView):
@@ -25,6 +30,14 @@ class SignupView(APIView):
 
         if serializer.is_valid():
             user = serializer.save()
+
+            # Send verification email (non-blocking - don't fail signup if email fails)
+            try:
+                send_verification_email(user)
+                logger.info(f"Verification email sent to {user.email}")
+            except Exception as e:
+                logger.error(f"Failed to send verification email: {str(e)}")
+                # Continue with signup even if email fails
 
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
@@ -238,3 +251,83 @@ class SetDefaultAddressView(APIView):
             'message': 'Default address updated!',
             'address': AddressSerializer(address).data
         }, status=status.HTTP_200_OK)
+
+
+class VerifyEmailView(APIView):
+    """API endpoint for verifying email with token."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        """Verify email using token from query parameter."""
+        token = request.query_params.get('token')
+
+        if not token:
+            return Response({
+                'success': False,
+                'error': 'Verification token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            user = User.objects.get(email_verification_token=token)
+
+            # Check if token is expired (7 days)
+            if user.email_verification_token_created:
+                token_age = timezone.now() - user.email_verification_token_created
+                if token_age > timedelta(days=7):
+                    return Response({
+                        'success': False,
+                        'error': 'Verification link has expired. Please request a new one.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Mark email as verified
+            user.email_verified = True
+            user.email_verification_token = None
+            user.email_verification_token_created = None
+            user.save(update_fields=['email_verified', 'email_verification_token', 'email_verification_token_created'])
+
+            logger.info(f"Email verified successfully for user {user.email}")
+
+            return Response({
+                'success': True,
+                'message': 'Email verified successfully!',
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Invalid verification token'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ResendVerificationEmailView(APIView):
+    """API endpoint for resending verification email."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Resend verification email to authenticated user."""
+        user = request.user
+
+        if user.email_verified:
+            return Response({
+                'success': False,
+                'error': 'Email is already verified'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            send_verification_email(user)
+            logger.info(f"Verification email resent to {user.email}")
+
+            return Response({
+                'success': True,
+                'message': 'Verification email sent successfully! Please check your inbox.'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Failed to resend verification email: {str(e)}")
+            return Response({
+                'success': False,
+                'error': 'Failed to send verification email. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

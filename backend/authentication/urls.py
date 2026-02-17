@@ -7,7 +7,9 @@ from .views import (
     LogoutView,
     AddressListCreateView,
     AddressDetailView,
-    SetDefaultAddressView
+    SetDefaultAddressView,
+    VerifyEmailView,
+    ResendVerificationEmailView
 )
 
 app_name = 'authentication'
@@ -18,6 +20,10 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+
+    # Email verification endpoints
+    path('verify-email/', VerifyEmailView.as_view(), name='verify_email'),
+    path('resend-verification/', ResendVerificationEmailView.as_view(), name='resend_verification'),
 
     # User profile endpoints
     path('me/', UserProfileView.as_view(), name='user_profile'),
