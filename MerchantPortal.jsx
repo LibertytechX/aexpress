@@ -2430,6 +2430,13 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
   const [address, setAddress] = useState(currentUser?.address || "");
   const [loading, setLoading] = useState(false);
 
+  // Addresses state
+  const [addresses, setAddresses] = useState([]);
+  const [showAddAddress, setShowAddAddress] = useState(false);
+  const [editingAddress, setEditingAddress] = useState(null);
+  const [newAddressLabel, setNewAddressLabel] = useState("");
+  const [newAddressText, setNewAddressText] = useState("");
+
   // Update state when currentUser changes
   useEffect(() => {
     if (currentUser) {
@@ -2437,8 +2444,20 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
       setContactName(currentUser.contact_name || "");
       setEmail(currentUser.email || "");
       setAddress(currentUser.address || "");
+      loadAddresses();
     }
   }, [currentUser]);
+
+  const loadAddresses = async () => {
+    try {
+      const response = await window.API.Auth.getAddresses();
+      if (response.success) {
+        setAddresses(response.addresses || []);
+      }
+    } catch (error) {
+      console.error('Failed to load addresses:', error);
+    }
+  };
 
   const handleSaveChanges = async () => {
     try {
@@ -2473,6 +2492,95 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
       console.error('Update profile error:', error);
       if (onShowNotif) {
         onShowNotif(error.message || 'Failed to update profile', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveAddress = async () => {
+    if (!newAddressLabel.trim() || !newAddressText.trim()) {
+      if (onShowNotif) {
+        onShowNotif('Please fill in all address fields', 'error');
+      }
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const addressData = {
+        label: newAddressLabel,
+        address: newAddressText,
+        is_default: addresses.length === 0 // First address is default
+      };
+
+      let response;
+      if (editingAddress) {
+        response = await window.API.Auth.updateAddress(editingAddress.id, addressData);
+      } else {
+        response = await window.API.Auth.createAddress(addressData);
+      }
+
+      if (response.success) {
+        await loadAddresses();
+        setShowAddAddress(false);
+        setEditingAddress(null);
+        setNewAddressLabel("");
+        setNewAddressText("");
+        if (onShowNotif) {
+          onShowNotif(editingAddress ? 'Address updated!' : 'Address added!', 'success');
+        }
+      }
+    } catch (error) {
+      if (onShowNotif) {
+        onShowNotif(error.message || 'Failed to save address', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditAddress = (addr) => {
+    setEditingAddress(addr);
+    setNewAddressLabel(addr.label);
+    setNewAddressText(addr.address);
+    setShowAddAddress(true);
+  };
+
+  const handleDeleteAddress = async (addressId) => {
+    if (!confirm('Are you sure you want to delete this address?')) return;
+
+    try {
+      setLoading(true);
+      const response = await window.API.Auth.deleteAddress(addressId);
+      if (response.success) {
+        await loadAddresses();
+        if (onShowNotif) {
+          onShowNotif('Address deleted!', 'success');
+        }
+      }
+    } catch (error) {
+      if (onShowNotif) {
+        onShowNotif(error.message || 'Failed to delete address', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSetDefault = async (addressId) => {
+    try {
+      setLoading(true);
+      const response = await window.API.Auth.setDefaultAddress(addressId);
+      if (response.success) {
+        await loadAddresses();
+        if (onShowNotif) {
+          onShowNotif('Default address updated!', 'success');
+        }
+      }
+    } catch (error) {
+      if (onShowNotif) {
+        onShowNotif(error.message || 'Failed to set default address', 'error');
       }
     } finally {
       setLoading(false);
@@ -2551,6 +2659,217 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
           >
             {loading ? "Saving..." : "Save Changes"}
           </button>
+        </div>
+      </div>
+
+      {/* Saved Addresses */}
+      <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", overflow: "hidden", marginTop: 16 }}>
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, color: S.navy, margin: 0 }}>Saved Addresses</h3>
+          {addresses.length < 3 && !showAddAddress && (
+            <button
+              onClick={() => {
+                setShowAddAddress(true);
+                setEditingAddress(null);
+                setNewAddressLabel("");
+                setNewAddressText("");
+              }}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: "none",
+                background: S.goldPale,
+                color: S.gold,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit"
+              }}
+            >
+              + Add Address
+            </button>
+          )}
+        </div>
+        <div style={{ padding: 24 }}>
+          {/* Add/Edit Address Form */}
+          {showAddAddress && (
+            <div style={{ marginBottom: 20, padding: 16, background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
+                  Label (e.g., Office, Warehouse, Home)
+                </label>
+                <input
+                  value={newAddressLabel}
+                  onChange={(e) => setNewAddressLabel(e.target.value)}
+                  placeholder="Enter label"
+                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 40, fontSize: 14, fontFamily: "inherit", background: "#fff" }}
+                />
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
+                  Address
+                </label>
+                <textarea
+                  value={newAddressText}
+                  onChange={(e) => setNewAddressText(e.target.value)}
+                  placeholder="Enter full address"
+                  rows={3}
+                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", resize: "vertical", background: "#fff" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={handleSaveAddress}
+                  disabled={loading}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    border: "none",
+                    background: loading ? "#cbd5e1" : S.gold,
+                    color: S.navy,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit"
+                  }}
+                >
+                  {loading ? "Saving..." : (editingAddress ? "Update" : "Save")}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowAddAddress(false);
+                    setEditingAddress(null);
+                    setNewAddressLabel("");
+                    setNewAddressText("");
+                  }}
+                  style={{
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    color: S.gray,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit"
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Address List */}
+          {addresses.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 20, color: S.grayLight }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 14, fontWeight: 600 }}>No saved addresses</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>Add up to 3 addresses for quick order placement</div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {addresses.map((addr) => (
+                <div
+                  key={addr.id}
+                  style={{
+                    padding: 14,
+                    border: addr.is_default ? `2px solid ${S.gold}` : "1px solid #e2e8f0",
+                    borderRadius: 10,
+                    background: addr.is_default ? S.goldPale : "#fff",
+                    position: "relative"
+                  }}
+                >
+                  {addr.is_default && (
+                    <div style={{
+                      position: "absolute",
+                      top: -8,
+                      right: 12,
+                      background: S.gold,
+                      color: S.navy,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: 6
+                    }}>
+                      ⭐ DEFAULT
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: S.navy, marginBottom: 4 }}>
+                        {addr.label}
+                      </div>
+                      <div style={{ fontSize: 13, color: S.gray, lineHeight: 1.5 }}>
+                        {addr.address}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                    {!addr.is_default && (
+                      <button
+                        onClick={() => handleSetDefault(addr.id)}
+                        disabled={loading}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: "1px solid #e2e8f0",
+                          background: "#fff",
+                          color: S.gold,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: loading ? "not-allowed" : "pointer",
+                          fontFamily: "inherit"
+                        }}
+                      >
+                        Set as Default
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleEditAddress(addr)}
+                      disabled={loading}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #e2e8f0",
+                        background: "#fff",
+                        color: S.navy,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: loading ? "not-allowed" : "pointer",
+                        fontFamily: "inherit"
+                      }}
+                    >
+                      ✏️ Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteAddress(addr.id)}
+                      disabled={loading}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: 6,
+                        border: "1px solid #fee",
+                        background: "#fff",
+                        color: S.red,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: loading ? "not-allowed" : "pointer",
+                        fontFamily: "inherit"
+                      }}
+                    >
+                      🗑️ Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {addresses.length >= 3 && (
+            <div style={{ marginTop: 12, padding: 10, background: "#f8fafc", borderRadius: 8, textAlign: "center", fontSize: 12, color: S.gray }}>
+              Maximum of 3 addresses reached
+            </div>
+          )}
         </div>
       </div>
 

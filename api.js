@@ -158,6 +158,39 @@ const AuthAPI = {
 
     return response;
   },
+
+  // Address management
+  getAddresses: async () => {
+    return await apiRequest('/auth/addresses/', {
+      method: 'GET',
+    });
+  },
+
+  createAddress: async (addressData) => {
+    return await apiRequest('/auth/addresses/', {
+      method: 'POST',
+      body: JSON.stringify(addressData),
+    });
+  },
+
+  updateAddress: async (addressId, addressData) => {
+    return await apiRequest(`/auth/addresses/${addressId}/`, {
+      method: 'PUT',
+      body: JSON.stringify(addressData),
+    });
+  },
+
+  deleteAddress: async (addressId) => {
+    return await apiRequest(`/auth/addresses/${addressId}/`, {
+      method: 'DELETE',
+    });
+  },
+
+  setDefaultAddress: async (addressId) => {
+    return await apiRequest(`/auth/addresses/${addressId}/set-default/`, {
+      method: 'POST',
+    });
+  },
 };
 
 // Orders API
