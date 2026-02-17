@@ -1409,6 +1409,28 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
 
+  // ─── Load default address on mount ───
+  useEffect(() => {
+    const loadDefaultAddress = async () => {
+      try {
+        const response = await window.API.Auth.getAddresses();
+        if (response.success && response.addresses) {
+          const defaultAddress = response.addresses.find(addr => addr.is_default);
+          if (defaultAddress && defaultAddress.address) {
+            setPickupAddress(defaultAddress.address);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load default address:', error);
+        // Silently fail - user can still enter address manually
+      }
+    };
+
+    if (currentUser) {
+      loadDefaultAddress();
+    }
+  }, [currentUser]);
+
   // ─── Quick Send state ───
   const [dropoffAddress, setDropoffAddress] = useState("");
   const [receiverName, setReceiverName] = useState("");
