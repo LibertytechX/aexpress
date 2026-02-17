@@ -1,6 +1,14 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
-from .views import SignupView, LoginView, UserProfileView, LogoutView
+from .views import (
+    SignupView,
+    LoginView,
+    UserProfileView,
+    LogoutView,
+    AddressListCreateView,
+    AddressDetailView,
+    SetDefaultAddressView
+)
 
 app_name = 'authentication'
 
@@ -10,9 +18,14 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('logout/', LogoutView.as_view(), name='logout'),
     path('refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    
+
     # User profile endpoints
     path('me/', UserProfileView.as_view(), name='user_profile'),
     path('profile/', UserProfileView.as_view(), name='update_profile'),
+
+    # Address endpoints
+    path('addresses/', AddressListCreateView.as_view(), name='address_list_create'),
+    path('addresses/<uuid:address_id>/', AddressDetailView.as_view(), name='address_detail'),
+    path('addresses/<uuid:address_id>/set-default/', SetDefaultAddressView.as_view(), name='set_default_address'),
 ]
 

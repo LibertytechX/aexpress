@@ -74,3 +74,48 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def get_short_name(self):
         return self.business_name
+
+
+class Address(models.Model):
+    """Model for storing multiple addresses per user."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='addresses')
+    label = models.CharField(max_length=100, help_text="e.g., Office, Warehouse, Home")
+    address = models.TextField(help_text="Full address text")
+    is_default = models.BooleanField(default=False)
+
+    # Timestamps
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'addresses'
+        verbose_name = 'Address'
+        verbose_name_plural = 'Addresses'
+        ordering = ['-is_default', '-created_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'label'],
+                name='unique_user_address_label'
+            )
+        ]
+
+    def __str__(self):
+        default_marker = " (Default)" if self.is_default else ""
+        return f"{self.user.business_name} - {self.label}{default_marker}"
+
+    def save(self, *args, **kwargs):
+        """Override save to ensure only one default address per user."""
+        if self.is_default:
+            # Unset other default addresses for this user
+            Address.objects.filter(user=self.user, is_default=True).exclude(id=self.id).update(is_default=False)
+
+        # Validate max 3 addresses per user
+        if not self.pk:  # New address
+            existing_count = Address.objects.filter(user=self.user).count()
+            if existing_count >= 3:
+                from django.core.exceptions import ValidationError
+                raise ValidationError("Maximum of 3 addresses allowed per user.")
+
+        super().save(*args, **kwargs)

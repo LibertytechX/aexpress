@@ -3,12 +3,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .models import User
+from django.shortcuts import get_object_or_404
+from .models import User, Address
 from .serializers import (
     UserSerializer,
     SignupSerializer,
     LoginSerializer,
-    UserProfileSerializer
+    UserProfileSerializer,
+    AddressSerializer
 )
 
 
@@ -143,3 +145,96 @@ class LogoutView(APIView):
                 'success': False,
                 'message': 'Invalid token or token already blacklisted.'
             }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AddressListCreateView(APIView):
+    """API endpoint for listing and creating addresses."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        """Get all addresses for current user."""
+        addresses = Address.objects.filter(user=request.user)
+        serializer = AddressSerializer(addresses, many=True)
+        return Response({
+            'success': True,
+            'addresses': serializer.data
+        }, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """Create a new address."""
+        serializer = AddressSerializer(data=request.data, context={'request': request})
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'success': True,
+                'message': 'Address added successfully!',
+                'address': serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AddressDetailView(APIView):
+    """API endpoint for updating and deleting a specific address."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, request, address_id):
+        """Get address object ensuring it belongs to current user."""
+        return get_object_or_404(Address, id=address_id, user=request.user)
+
+    def put(self, request, address_id):
+        """Update an address."""
+        address = self.get_object(request, address_id)
+        serializer = AddressSerializer(address, data=request.data, partial=True, context={'request': request})
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                'success': True,
+                'message': 'Address updated successfully!',
+                'address': serializer.data
+            }, status=status.HTTP_200_OK)
+
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, address_id):
+        """Delete an address."""
+        address = self.get_object(request, address_id)
+        address.delete()
+
+        return Response({
+            'success': True,
+            'message': 'Address deleted successfully!'
+        }, status=status.HTTP_200_OK)
+
+
+class SetDefaultAddressView(APIView):
+    """API endpoint for setting an address as default."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, address_id):
+        """Set an address as default."""
+        address = get_object_or_404(Address, id=address_id, user=request.user)
+
+        # Unset other defaults
+        Address.objects.filter(user=request.user, is_default=True).update(is_default=False)
+
+        # Set this as default
+        address.is_default = True
+        address.save()
+
+        return Response({
+            'success': True,
+            'message': 'Default address updated!',
+            'address': AddressSerializer(address).data
+        }, status=status.HTTP_200_OK)
