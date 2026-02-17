@@ -21,7 +21,7 @@ class AddressAdmin(admin.ModelAdmin):
     list_filter = ['is_default', 'created_at']
     search_fields = ['user__business_name', 'user__phone', 'label', 'address']
     ordering = ['-created_at']
-    readonly_fields = ['id', 'created_at', 'updated_at']
+    readonly_fields = ['created_at', 'updated_at']
 
     def address_preview(self, obj):
         """Show preview of address."""
