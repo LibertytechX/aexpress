@@ -12,22 +12,6 @@ class UserAdmin(BaseUserAdmin):
     search_fields = ['phone', 'email', 'business_name', 'contact_name']
     ordering = ['-created_at']
 
-
-@admin.register(Address)
-class AddressAdmin(admin.ModelAdmin):
-    """Admin configuration for Address model."""
-
-    list_display = ['user', 'label', 'address_preview', 'is_default', 'created_at']
-    list_filter = ['is_default', 'created_at']
-    search_fields = ['user__business_name', 'user__phone', 'label', 'address']
-    ordering = ['-created_at']
-    readonly_fields = ['created_at', 'updated_at']
-
-    def address_preview(self, obj):
-        """Show preview of address."""
-        return obj.address[:50] + '...' if len(obj.address) > 50 else obj.address
-    address_preview.short_description = 'Address'
-
     fieldsets = (
         ('Business Information', {
             'fields': ('business_name', 'contact_name', 'phone', 'email', 'address')
@@ -51,3 +35,19 @@ class AddressAdmin(admin.ModelAdmin):
     )
 
     readonly_fields = ['created_at', 'updated_at', 'last_login']
+
+
+@admin.register(Address)
+class AddressAdmin(admin.ModelAdmin):
+    """Admin configuration for Address model."""
+
+    list_display = ['user', 'label', 'address_preview', 'is_default', 'created_at']
+    list_filter = ['is_default', 'created_at']
+    search_fields = ['user__business_name', 'user__phone', 'label', 'address']
+    ordering = ['-created_at']
+    readonly_fields = ['created_at', 'updated_at']
+
+    def address_preview(self, obj):
+        """Show preview of address."""
+        return obj.address[:50] + '...' if len(obj.address) > 50 else obj.address
+    address_preview.short_description = 'Address'
