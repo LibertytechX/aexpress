@@ -98,6 +98,21 @@ const Icons = {
       <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
     </svg>
   ),
+  mail: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+    </svg>
+  ),
+  checkCircle: (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+    </svg>
+  ),
+  xCircle: (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+  ),
   bell: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
@@ -190,14 +205,25 @@ function MerchantPortal() {
   const [notification, setNotification] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [verificationToken, setVerificationToken] = useState(null);
 
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Check if user is logged in on mount
+  // Check if user is logged in on mount and check for verification token
   useEffect(() => {
+    // Check for verification token in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      setVerificationToken(token);
+      setScreen("verify-email");
+      return;
+    }
+
+    // Check if user is logged in
     const user = window.API?.Token?.getUser();
     if (user) {
       setCurrentUser(user);
@@ -333,7 +359,41 @@ function MerchantPortal() {
   const handleSignup = (user) => {
     setCurrentUser(user);
     setScreen("dashboard");
-    showNotif("Welcome to Assured Express!");
+    showNotif("Welcome to Assured Express! Please check your email to verify your account.");
+  };
+
+  const handleResendVerification = async () => {
+    try {
+      const accessToken = window.API?.Token?.getAccessToken();
+      const response = await fetch('https://www.orders.axpress.net/api/auth/resend-verification/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        showNotif(data.message || "Verification email sent! Please check your inbox.", "success");
+      } else {
+        showNotif(data.error || "Failed to send verification email", "error");
+      }
+    } catch (error) {
+      showNotif("Network error. Please try again.", "error");
+      console.error('Resend verification error:', error);
+    }
+  };
+
+  const handleVerificationComplete = () => {
+    // Refresh user data
+    const user = window.API?.Token?.getUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+    setScreen("dashboard");
+    // Clear URL parameters
+    window.history.replaceState({}, document.title, window.location.pathname);
   };
 
   const handleLogout = async () => {
@@ -351,6 +411,7 @@ function MerchantPortal() {
 
   if (screen === "login") return <LoginScreen onLogin={handleLogin} onSignup={() => setScreen("signup")} />;
   if (screen === "signup") return <SignupScreen onBack={() => setScreen("login")} onComplete={handleSignup} />;
+  if (screen === "verify-email") return <VerifyEmailScreen token={verificationToken} onComplete={handleVerificationComplete} />;
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard },
@@ -600,6 +661,7 @@ function MerchantPortal() {
               onViewOrder={(id) => { setOrderDetailId(id); setScreen("orders"); }}
               onGoOrders={() => setScreen("orders")}
               currentUser={currentUser}
+              onResendVerification={handleResendVerification}
             />
           )}
           {screen === "newOrder" && (
@@ -1061,8 +1123,219 @@ function SignupScreen({ onBack, onComplete }) {
   );
 }
 
+// ─── EMAIL VERIFICATION BANNER ──────────────────────────────────
+function EmailVerificationBanner({ currentUser, onResend, onDismiss }) {
+  const [resending, setResending] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  // Don't show if email is verified or banner is dismissed
+  if (!currentUser || currentUser.email_verified || dismissed) return null;
+
+  const handleResend = async () => {
+    setResending(true);
+    await onResend();
+    setResending(false);
+  };
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)",
+      border: "1px solid #FCD34D",
+      borderRadius: 12,
+      padding: "16px 20px",
+      marginBottom: 24,
+      display: "flex",
+      alignItems: "center",
+      gap: 16,
+      boxShadow: "0 2px 8px rgba(252, 211, 77, 0.2)"
+    }}>
+      <div style={{ color: "#92400E", fontSize: 24 }}>
+        {Icons.mail}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#78350F", marginBottom: 4 }}>
+          Verify Your Email Address
+        </div>
+        <div style={{ fontSize: 13, color: "#92400E", lineHeight: 1.5 }}>
+          We sent a verification email to <strong>{currentUser.email}</strong>. Please check your inbox and click the verification link.
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button
+          onClick={handleResend}
+          disabled={resending}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 8,
+            border: "1px solid #D97706",
+            background: "#fff",
+            color: "#92400E",
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: resending ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+            opacity: resending ? 0.6 : 1,
+            whiteSpace: "nowrap"
+          }}
+        >
+          {resending ? "Sending..." : "Resend Email"}
+        </button>
+        <button
+          onClick={() => setDismissed(true)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#92400E",
+            cursor: "pointer",
+            padding: 4,
+            fontSize: 20,
+            lineHeight: 1
+          }}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── VERIFY EMAIL SCREEN ────────────────────────────────────────
+function VerifyEmailScreen({ token, onComplete }) {
+  const [status, setStatus] = useState("verifying"); // verifying, success, error
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    verifyEmail();
+  }, []);
+
+  const verifyEmail = async () => {
+    try {
+      const response = await fetch(`https://www.orders.axpress.net/api/auth/verify-email/?token=${token}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setStatus("success");
+        setMessage(data.message || "Email verified successfully!");
+
+        // Update user in localStorage
+        if (data.user) {
+          window.API?.Token?.setUser(data.user);
+        }
+
+        // Redirect to dashboard after 3 seconds
+        setTimeout(() => {
+          onComplete();
+        }, 3000);
+      } else {
+        setStatus("error");
+        setMessage(data.error || "Verification failed. Please try again.");
+      }
+    } catch (error) {
+      setStatus("error");
+      setMessage("Network error. Please check your connection and try again.");
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: S.grayBg,
+      padding: 24
+    }}>
+      <div style={{
+        background: "#fff",
+        borderRadius: 18,
+        padding: "48px 40px",
+        maxWidth: 480,
+        width: "100%",
+        textAlign: "center",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.08)"
+      }}>
+        {status === "verifying" && (
+          <>
+            <div style={{
+              width: 48,
+              height: 48,
+              border: `4px solid ${S.goldPale}`,
+              borderTop: `4px solid ${S.gold}`,
+              borderRadius: "50%",
+              margin: "0 auto 24px",
+              animation: "spin 1s linear infinite"
+            }} />
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Verifying Your Email
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: 0 }}>
+              Please wait while we verify your email address...
+            </p>
+          </>
+        )}
+
+        {status === "success" && (
+          <>
+            <div style={{ color: S.green, margin: "0 auto 24px" }}>
+              {Icons.checkCircle}
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Email Verified Successfully!
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: "0 0 24px" }}>
+              {message}
+            </p>
+            <p style={{ fontSize: 13, color: S.grayLight, margin: 0 }}>
+              Redirecting to dashboard...
+            </p>
+          </>
+        )}
+
+        {status === "error" && (
+          <>
+            <div style={{ color: S.red, margin: "0 auto 24px" }}>
+              {Icons.xCircle}
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Verification Failed
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: "0 0 32px" }}>
+              {message}
+            </p>
+            <button
+              onClick={onComplete}
+              style={{
+                padding: "12px 32px",
+                borderRadius: 10,
+                border: "none",
+                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy,
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              }}
+            >
+              Go to Dashboard
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Add CSS animation for spinner */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onGoOrders, currentUser }) {
+function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onGoOrders, currentUser, onResendVerification }) {
   const recentOrders = orders.slice(0, 4);
   const delivered = orders.filter(o => o.status === "Done").length;
   const pending = orders.filter(o => o.status === "Pending" || o.status === "Assigned" || o.status === "Started").length;
@@ -1111,6 +1384,13 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
           {Icons.newOrder} New Delivery
         </button>
       </div>
+
+      {/* Email Verification Banner */}
+      <EmailVerificationBanner
+        currentUser={currentUser}
+        onResend={onResendVerification}
+        onDismiss={() => {}}
+      />
 
       {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 28 }}>
