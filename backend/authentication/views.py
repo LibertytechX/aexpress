@@ -13,7 +13,7 @@ from .serializers import (
     UserProfileSerializer,
     AddressSerializer
 )
-from .emails import send_verification_email
+from .emails import send_verification_email, send_password_reset_email
 import logging
 
 logger = logging.getLogger(__name__)
@@ -330,4 +330,118 @@ class ResendVerificationEmailView(APIView):
             return Response({
                 'success': False,
                 'error': 'Failed to send verification email. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class RequestPasswordResetView(APIView):
+    """API endpoint for requesting password reset."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Request password reset email."""
+        email = request.data.get('email')
+
+        if not email:
+            return Response({
+                'success': False,
+                'error': 'Email address is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Try to find user with this email
+            user = User.objects.filter(email=email).first()
+
+            if user:
+                # Send password reset email
+                send_password_reset_email(user)
+                logger.info(f"Password reset email sent to {email}")
+
+            # Always return success to prevent email enumeration
+            return Response({
+                'success': True,
+                'message': 'If an account exists with that email, you will receive a password reset link shortly.'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error in password reset request: {str(e)}")
+            # Still return success to prevent email enumeration
+            return Response({
+                'success': True,
+                'message': 'If an account exists with that email, you will receive a password reset link shortly.'
+            }, status=status.HTTP_200_OK)
+
+
+class ResetPasswordView(APIView):
+    """API endpoint for resetting password with token."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Reset password using token."""
+        token = request.data.get('token')
+        new_password = request.data.get('new_password')
+        confirm_password = request.data.get('confirm_password')
+
+        # Validate input
+        if not token:
+            return Response({
+                'success': False,
+                'error': 'Reset token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if not new_password or not confirm_password:
+            return Response({
+                'success': False,
+                'error': 'Both password fields are required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if new_password != confirm_password:
+            return Response({
+                'success': False,
+                'error': 'Passwords do not match'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(new_password) < 6:
+            return Response({
+                'success': False,
+                'error': 'Password must be at least 6 characters long'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Find user with this token
+            user = User.objects.get(password_reset_token=token)
+
+            # Check if token is expired (1 hour)
+            if user.password_reset_token_created:
+                token_age = timezone.now() - user.password_reset_token_created
+                if token_age > timedelta(hours=1):
+                    return Response({
+                        'success': False,
+                        'error': 'Password reset link has expired. Please request a new one.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Update password
+            user.set_password(new_password)
+            user.password_reset_token = None
+            user.password_reset_token_created = None
+            user.save(update_fields=['password', 'password_reset_token', 'password_reset_token_created'])
+
+            logger.info(f"Password reset successfully for user {user.email}")
+
+            return Response({
+                'success': True,
+                'message': 'Password reset successfully! You can now login with your new password.'
+            }, status=status.HTTP_200_OK)
+
+        except User.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'Invalid or expired reset token'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error resetting password: {str(e)}")
+            return Response({
+                'success': False,
+                'error': 'An error occurred while resetting your password. Please try again.'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
