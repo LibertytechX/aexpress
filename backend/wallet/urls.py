@@ -17,5 +17,11 @@ urlpatterns = [
 
     # Paystack webhook
     path('webhook/', views.paystack_webhook, name='paystack-webhook'),
+
+    # CoreBanking (LibertyPay) virtual account
+    path('virtual-account/', views.get_virtual_account, name='virtual-account'),
+
+    # CoreBanking webhook (receives transfer notifications)
+    path('corebanking-webhook/', views.corebanking_webhook, name='corebanking-webhook'),
 ]
 

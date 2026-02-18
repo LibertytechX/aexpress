@@ -211,6 +211,7 @@ function MerchantPortal() {
   const [fundModal, setFundModal] = useState(false);
   const [bankTransferModal, setBankTransferModal] = useState(false);
   const [bankTransferAmount, setBankTransferAmount] = useState(0);
+  const [bankTransferVirtualAccount, setBankTransferVirtualAccount] = useState(null);
   const [orderDetailId, setOrderDetailId] = useState(null);
   const [notification, setNotification] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
@@ -468,8 +469,9 @@ function MerchantPortal() {
       {fundModal && (
         <FundWalletModal
           onClose={() => setFundModal(false)}
-          onBankTransfer={(amount) => {
+          onBankTransfer={(amount, virtualAccount) => {
             setBankTransferAmount(amount);
+            setBankTransferVirtualAccount(virtualAccount);
             setFundModal(false);
             setBankTransferModal(true);
           }}
@@ -546,6 +548,7 @@ function MerchantPortal() {
       {bankTransferModal && (
         <BankTransferModal
           amount={bankTransferAmount}
+          virtualAccount={bankTransferVirtualAccount}
           onClose={() => setBankTransferModal(false)}
           onSuccess={() => {
             showNotif('Payment confirmation received! Your wallet will be credited once verified.', 'success');
@@ -3906,17 +3909,30 @@ function WalletScreen({ balance, transactions, onFund }) {
 function FundWalletModal({ onClose, onFund, onBankTransfer }) {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("card");
+  const [fetchingAccount, setFetchingAccount] = useState(false);
 
   const presets = [1000, 2000, 5000, 10000, 20000, 50000];
 
-  const handlePay = () => {
+  const handlePay = async () => {
     if (!amount) return;
 
     const amountValue = parseInt(amount);
 
     if (method === "transfer") {
-      // Open bank transfer modal
-      onBankTransfer(amountValue);
+      // Fetch virtual account details then open bank transfer modal
+      setFetchingAccount(true);
+      try {
+        const response = await window.API.Wallet.getVirtualAccount();
+        if (response.success) {
+          onBankTransfer(amountValue, response.data);
+        } else {
+          alert('Failed to load bank account details. Please try again.');
+        }
+      } catch (e) {
+        alert('Failed to load bank account details. Please try again.');
+      } finally {
+        setFetchingAccount(false);
+      }
     } else if (method === "card") {
       // Use existing Paystack flow
       onFund(amountValue);
@@ -3973,14 +3989,15 @@ function FundWalletModal({ onClose, onFund, onBankTransfer }) {
             ))}
           </div>
 
-          <button onClick={handlePay} disabled={!amount}
+          <button onClick={handlePay} disabled={!amount || fetchingAccount}
             style={{
-              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: amount ? "pointer" : "default",
-              background: amount ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#e2e8f0",
-              color: amount ? S.navy : "#94a3b8", fontFamily: "inherit", marginTop: 16,
-              boxShadow: amount ? "0 4px 12px rgba(232,168,56,0.3)" : "none"
+              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700,
+              cursor: (amount && !fetchingAccount) ? "pointer" : "default",
+              background: (amount && !fetchingAccount) ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#e2e8f0",
+              color: (amount && !fetchingAccount) ? S.navy : "#94a3b8", fontFamily: "inherit", marginTop: 16,
+              boxShadow: (amount && !fetchingAccount) ? "0 4px 12px rgba(232,168,56,0.3)" : "none"
             }}>
-            {amount ? `Pay ₦${parseInt(amount).toLocaleString()}` : "Enter Amount"}
+            {fetchingAccount ? 'Loading account...' : amount ? `Pay ₦${parseInt(amount).toLocaleString()}` : "Enter Amount"}
           </button>
         </div>
       </div>
@@ -3989,24 +4006,25 @@ function FundWalletModal({ onClose, onFund, onBankTransfer }) {
 }
 
 // ─── BANK TRANSFER MODAL ────────────────────────────────────────
-function BankTransferModal({ amount, onClose, onSuccess }) {
-  const [state, setState] = useState('loading'); // 'loading', 'show-details', 'confirming', 'success'
+function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
+  // Start directly at 'show-details' since virtual account was already fetched
+  const [state, setState] = useState(virtualAccount ? 'show-details' : 'loading');
   const [copied, setCopied] = useState(false);
 
-  // Bank details
-  const bankDetails = {
-    bankName: "Wema Bank",
-    accountNumber: "7924567890",
-    accountName: "Assured Express Limited"
-  };
+  // Build bank details from the virtual account prop
+  const bankDetails = virtualAccount ? {
+    bankName: virtualAccount.bank_name || "Wema Bank",
+    accountNumber: virtualAccount.account_number,
+    accountName: virtualAccount.account_name,
+  } : null;
 
-  // Initial loading
+  // Fallback: if somehow virtualAccount wasn't provided, show an error after a short delay
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setState('show-details');
-    }, 2500);
-    return () => clearTimeout(timer);
-  }, []);
+    if (!virtualAccount) {
+      const timer = setTimeout(() => setState('show-details'), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [virtualAccount]);
 
   const copyAccountNumber = () => {
     navigator.clipboard.writeText(bankDetails.accountNumber);
@@ -4067,7 +4085,14 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
           {(state === 'loading' || state === 'confirming') && <LoadingSpinner />}
 
           {/* Show Bank Details */}
-          {state === 'show-details' && (
+          {state === 'show-details' && !bankDetails && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ fontSize: 15, color: S.red || "#ef4444", fontWeight: 600 }}>
+                Could not load bank account details. Please close and try again.
+              </p>
+            </div>
+          )}
+          {state === 'show-details' && bankDetails && (
             <div>
               {/* Amount to Transfer */}
               <div style={{ background: S.goldPale, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>

@@ -232,6 +232,12 @@ AUTH_USER_MODEL = 'authentication.User'
 PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY', '')
 PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY', '')
 
+# CoreBanking (LibertyPay) Configuration
+COREBANKING_EMAIL = os.getenv('COREBANKING_EMAIL', '')
+COREBANKING_PASSWORD = os.getenv('COREBANKING_PASSWORD', '')
+COREBANKING_BASE_URL = os.getenv('COREBANKING_BASE_URL', 'https://banking.libertypayng.com')
+COREBANKING_WEBHOOK_SECRET = os.getenv('COREBANKING_WEBHOOK_SECRET', '')
+
 # Production Security Settings
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'

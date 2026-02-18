@@ -309,6 +309,16 @@ const WalletAPI = {
       body: JSON.stringify({ reference }),
     });
   },
+
+  /**
+   * Get (or create) the merchant's CoreBanking virtual account.
+   * Returns account_number, account_name, bank_name, bank_code.
+   */
+  getVirtualAccount: async () => {
+    return await apiRequest('/wallet/virtual-account/', {
+      method: 'GET',
+    });
+  },
 };
 
 // Export API modules
