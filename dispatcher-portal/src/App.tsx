@@ -6,11 +6,12 @@ import { DashboardScreen, OrdersScreen, RidersScreen, MerchantsScreen, Customers
 import { LoginScreen } from './components/auth/LoginScreen';
 import { SignupScreen } from './components/auth/SignupScreen';
 import { CreateOrderModal } from './components/modals/CreateOrderModal';
-import { MERCHANTS_DATA, CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
-import type { Order, LogEvent, User, Rider } from './types';
+import { CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
+import type { Order, LogEvent, User, Rider, Merchant } from './types';
 import { AuthService } from './services/authService';
 import { OrderService } from './services/orderService';
 import { RiderService } from './services/riderService';
+import { MerchantService } from './services/merchantService';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -19,6 +20,7 @@ function App() {
   const [nav, setNav] = useState("Dashboard");
   const [orders, setOrders] = useState<Order[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
+  const [merchants, setMerchants] = useState<Merchant[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
@@ -43,12 +45,15 @@ function App() {
     if (authState === "authenticated") {
       const fetchData = async () => {
         try {
-          const [ridersData, ordersData] = await Promise.all([
+          const [ridersData, ordersData, merchantsData] = await Promise.all([
             RiderService.getRiders(),
-            OrderService.getOrders()
+            OrderService.getOrders(),
+            MerchantService.getMerchants()
           ]);
-          setRiders(ridersData);
-          setOrders(ordersData);
+          console.log("Fetched Data:", { ridersData, ordersData, merchantsData });
+          setRiders(ridersData || []);
+          setOrders(ordersData || []);
+          setMerchants(merchantsData || []);
         } catch (error) {
           console.error("Failed to load data", error);
         }
@@ -123,7 +128,7 @@ function App() {
       case "Riders":
         return <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => { setNav("Orders"); setSelectedOrderId(id); }} />;
       case "Merchants":
-        return <MerchantsScreen data={MERCHANTS_DATA} />;
+        return <MerchantsScreen data={merchants} />;
       case "Customers":
         return <CustomersScreen data={CUSTOMERS_DATA} />;
       case "Messaging":

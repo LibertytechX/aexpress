@@ -3,7 +3,9 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Rider
 from .serializers import RiderSerializer
-from django.contrib.auth import authenticate
+from django.contrib.auth import authenticate, get_user_model
+
+User = get_user_model()
 
 
 class RiderViewSet(viewsets.ModelViewSet):
@@ -28,6 +30,17 @@ class OrderViewSet(viewsets.ModelViewSet):
     from .serializers import OrderSerializer
 
     serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return super().get_queryset().order_by("-created_at")
+
+
+class MerchantViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.filter(usertype="Merchant")
+    from .serializers import MerchantSerializer
+
+    serializer_class = MerchantSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):

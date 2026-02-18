@@ -193,3 +193,59 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
+
+
+class MerchantSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(read_only=True)
+    name = serializers.SerializerMethodField()
+    contact = serializers.SerializerMethodField()
+    phone = serializers.CharField(read_only=True)
+    category = serializers.SerializerMethodField()
+    totalOrders = serializers.SerializerMethodField()
+    monthOrders = serializers.SerializerMethodField()
+    walletBalance = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
+    joined = serializers.DateTimeField(
+        source="created_at", format="%b %Y", read_only=True
+    )
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "name",
+            "contact",
+            "phone",
+            "category",
+            "totalOrders",
+            "monthOrders",
+            "walletBalance",
+            "status",
+            "joined",
+        ]
+
+    def get_name(self, obj):
+        return obj.business_name or "Unknown Business"
+
+    def get_contact(self, obj):
+        return obj.contact_name or "Unknown Contact"
+
+    def get_category(self, obj):
+        return "Retail"  # Mock
+
+    def get_totalOrders(self, obj):
+        return obj.orders.count()
+
+    def get_monthOrders(self, obj):
+        from django.utils import timezone
+
+        now = timezone.now()
+        return obj.orders.filter(
+            created_at__month=now.month, created_at__year=now.year
+        ).count()
+
+    def get_walletBalance(self, obj):
+        return 0  # Mock
+
+    def get_status(self, obj):
+        return "Active" if obj.is_active else "Inactive"
