@@ -86,3 +86,15 @@ export interface User {
     email?: string;
     token?: string;
 }
+
+export interface Vehicle {
+    id: number;
+    name: string;
+    max_weight_kg: number;
+    base_price: string; // Decimal string from backend
+    base_fare: string; // Decimal string
+    rate_per_km: string; // Decimal string
+    rate_per_minute: string; // Decimal string
+    description: string;
+    is_active: boolean;
+}

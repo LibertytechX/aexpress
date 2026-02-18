@@ -64,5 +64,31 @@ export const OrderService = {
             console.error("Create Order Error:", error);
             return false;
         }
+    },
+
+    async getVehicles(): Promise<any[]> {
+        try {
+            const token = localStorage.getItem("access_token");
+            const response = await fetch("http://localhost:8000/api/orders/vehicles/", {
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+            if (!response.ok) throw new Error("Failed to fetch vehicles");
+            const data = await response.json();
+            return data.vehicles || [];
+        } catch (error) {
+            console.error("Vehicle fetch error:", error);
+            return [];
+        }
+    },
+
+    calculatePrice(vehicle: any, distanceKm: number, durationMinutes: number): number {
+        const base = parseFloat(vehicle.base_fare);
+        const rateKm = parseFloat(vehicle.rate_per_km);
+        const rateMin = parseFloat(vehicle.rate_per_minute);
+
+        const total = base + (distanceKm * rateKm) + (durationMinutes * rateMin);
+        return Math.round(total * 100) / 100;
     }
 };

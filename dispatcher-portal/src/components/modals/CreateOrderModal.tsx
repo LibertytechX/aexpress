@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { OrderService } from "../../services/orderService";
-import type { Rider, Merchant } from "../../types";
+import type { Rider, Merchant, Vehicle } from "../../types";
 import { S } from "../common/theme";
 import { I } from "../icons";
 import { AddressAutocompleteInput } from "../common/AddressAutocompleteInput";
@@ -13,13 +13,14 @@ interface CreateOrderModalProps {
 
 export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModalProps) {
     const [vehicle, setVehicle] = useState("Bike");
+    const [vehicles, setVehicles] = useState<Vehicle[]>([]);
     const [codOn, setCodOn] = useState(false);
 
     // Form States
     const [merchantId, setMerchantId] = useState("");
     const [customerName, setCustomerName] = useState("");
     const [customerPhone, setCustomerPhone] = useState("");
-    const [receiverName, setReceiverName] = useState(""); // Add receiver fields if needed, reusing customer for now as "Sender/Receiver" logic
+    const [receiverName, setReceiverName] = useState("");
     const [receiverPhone, setReceiverPhone] = useState("");
     const [pickup, setPickup] = useState("");
     const [dropoff, setDropoff] = useState("");
@@ -29,36 +30,89 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
     const [price, setPrice] = useState("");
     const [loading, setLoading] = useState(false);
 
+    // Route info
+    const [distanceKm, setDistanceKm] = useState(0);
+    const [durationMinutes, setDurationMinutes] = useState(0);
+
     const iSt = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 10, padding: "0 14px", height: 42, fontSize: 13, fontFamily: "inherit", color: S.navy, background: "#fff" };
     const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.5px" };
 
+    useEffect(() => {
+        loadVehicles();
+    }, []);
+
+    // Calculate route when addresses change
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (pickup && dropoff && window.google) {
+                calculateRoute();
+            }
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [pickup, dropoff]);
+
+    const loadVehicles = async () => {
+        const data = await OrderService.getVehicles();
+        setVehicles(data);
+        if (data.length > 0) setVehicle(data[0].name);
+    };
+
+    const calculateRoute = () => {
+        const directionsService = new window.google.maps.DirectionsService();
+        directionsService.route(
+            {
+                origin: pickup,
+                destination: dropoff,
+                travelMode: window.google.maps.TravelMode.DRIVING,
+            },
+            (result: any, status: any) => {
+                if (status === window.google.maps.DirectionsStatus.OK && result) {
+                    const route = result.routes[0].legs[0];
+                    const km = (route.distance?.value || 0) / 1000;
+                    const mins = Math.ceil((route.duration?.value || 0) / 60);
+                    setDistanceKm(km);
+                    setDurationMinutes(mins);
+                    console.log(`Route Calculated: ${km}km, ${mins}mins`);
+                }
+            }
+        );
+    };
+
     const handleSubmit = async () => {
         setLoading(true);
-        // Map form to payload
 
         const payload = {
-            merchantId, // Send selected merchant ID (6-char)
+            merchantId,
             pickup,
             dropoff,
             senderName: customerName || "Dispatcher",
             senderPhone: customerPhone || "0000000000",
-            receiverName: receiverName || "Receiver", // We need inputs for receiver
+            receiverName: receiverName || "Receiver",
             receiverPhone: receiverPhone || "0000000000",
             vehicle,
             packageType: pkgType,
             price: price ? parseFloat(price) : null,
             cod: codOn ? parseFloat(codAmount) : 0,
-            riderId: riderId || ""
+            riderId: riderId || "",
+            distance_km: distanceKm,
+            duration_minutes: durationMinutes
         };
 
         const success = await OrderService.createOrder(payload);
         setLoading(false);
         if (success) {
             onClose();
-            window.location.reload(); // Simple reload to refresh data
+            window.location.reload();
         } else {
             alert("Failed to create order");
         }
+    };
+
+    const getVehicleIcon = (name: string) => {
+        if (name.toLowerCase().includes("bike")) return "🏍️";
+        if (name.toLowerCase().includes("car")) return "🚗";
+        if (name.toLowerCase().includes("van") || name.toLowerCase().includes("truck")) return "🚐";
+        return "🚚";
     };
 
     return (
@@ -77,12 +131,9 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
                             ))}
                         </select>
                     </div>
-                    {/* Customer is Sender */}
+
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Sender (Customer)</label><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><input placeholder="Name" style={iSt} value={customerName} onChange={e => setCustomerName(e.target.value)} /><input placeholder="Phone" style={iSt} value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} /></div></div>
 
-
-
-                    {/* Pickup Address */}
                     <div style={{ marginBottom: 16 }}>
                         <label style={lSt}>Pickup Address</label>
                         <AddressAutocompleteInput
@@ -93,10 +144,8 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
                         />
                     </div>
 
-                    {/* Receiver */}
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Receiver</label><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><input placeholder="Name" style={iSt} value={receiverName} onChange={e => setReceiverName(e.target.value)} /><input placeholder="Phone" style={iSt} value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} /></div></div>
 
-                    {/* Dropoff Address */}
                     <div style={{ marginBottom: 16 }}>
                         <label style={lSt}>Dropoff Address</label>
                         <AddressAutocompleteInput
@@ -107,10 +156,32 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
                         />
                     </div>
 
-                    <div style={{ marginBottom: 16 }}><label style={lSt}>Vehicle Type</label>
-                        <div style={{ display: "flex", gap: 8 }}>
-                            {[{ id: "Bike", icon: "🏍️", p: "₦1,210" }, { id: "Car", icon: "🚗", p: "₦4,500" }, { id: "Van", icon: "🚐", p: "₦8,500" }].map(v => (<button key={v.id} onClick={() => setVehicle(v.id)} style={{ flex: 1, padding: 10, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", border: vehicle === v.id ? `2px solid ${S.gold}` : `1px solid ${S.border}`, background: vehicle === v.id ? S.goldPale : S.borderLight, textAlign: "center" }}><div style={{ fontSize: 20 }}>{v.icon}</div><div style={{ fontSize: 12, fontWeight: 600, color: vehicle === v.id ? S.gold : S.text, marginTop: 2 }}>{v.id}</div><div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{v.p}</div></button>))}
+                    {/* Route Stats */}
+                    {(distanceKm > 0) && (
+                        <div style={{ marginBottom: 16, padding: "8px 12px", background: S.blueBg, borderRadius: 8, fontSize: 12, color: S.blue, display: "flex", gap: 12, fontWeight: 600 }}>
+                            <span>📏 {distanceKm.toFixed(1)} km</span>
+                            <span>⏱️ {durationMinutes} mins</span>
                         </div>
+                    )}
+
+                    <div style={{ marginBottom: 16 }}><label style={lSt}>Vehicle Type</label>
+                        {vehicles.length === 0 ? (
+                            <div style={{ fontSize: 13, color: S.textMuted }}>Loading vehicles...</div>
+                        ) : (
+                            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                                {vehicles.map(v => {
+                                    const estimatedPrice = OrderService.calculatePrice(v, distanceKm, durationMinutes);
+                                    const isSelected = vehicle === v.name;
+                                    return (
+                                        <button key={v.id} onClick={() => setVehicle(v.name)} style={{ flex: 1, minWidth: 80, padding: 10, borderRadius: 10, cursor: "pointer", fontFamily: "inherit", border: isSelected ? `2px solid ${S.gold}` : `1px solid ${S.border}`, background: isSelected ? S.goldPale : S.borderLight, textAlign: "center" }}>
+                                            <div style={{ fontSize: 20 }}>{getVehicleIcon(v.name)}</div>
+                                            <div style={{ fontSize: 12, fontWeight: 600, color: isSelected ? S.gold : S.text, marginTop: 2 }}>{v.name}</div>
+                                            <div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{estimatedPrice.toLocaleString()}</div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
 
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Package Type</label><select style={{ ...iSt, cursor: "pointer" }} value={pkgType} onChange={e => setPkgType(e.target.value)}>{["Box", "Envelope", "Document", "Food", "Fragile"].map(p => <option key={p}>{p}</option>)}</select></div>
