@@ -2484,16 +2484,23 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         hasPickup: !!pickupAddress,
         hasDropoff: !!dropoffAddress
       });
+			setCalculatingRoute(false);
       setEarlyRouteDistance(null);
       setEarlyRouteDuration(null);
       setRouteError(null);
       return;
     }
 
+		// Reset any previous early-route result so pricing never stays stuck on an old route
+		// (especially after navigating Step 2 → Step 1 and editing addresses)
+		setEarlyRouteDistance(null);
+		setEarlyRouteDuration(null);
+		setRouteError(null);
+		setCalculatingRoute(true);
+
     const calculateEarlyRoute = async () => {
       console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
-      setCalculatingRoute(true);
-      setRouteError(null);
+			setRouteError(null);
 
       try {
         // Check if Google Maps is loaded
@@ -2590,6 +2597,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   // ─── Route information state (for pricing) ───
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
+
+	// When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
+	// Step 1 should always reflect the *current* addresses via early-route calculation.
+	useEffect(() => {
+		if (step === 1) {
+			setRouteDistance(null);
+			setRouteDuration(null);
+		}
+	}, [step]);
 
   const addDrop = () => {
     setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
@@ -2717,8 +2733,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // If we have route data, use dynamic pricing
-    if (routeDistance && routeDuration) {
+		// Step 2 uses the full route (map) calculation.
+		// IMPORTANT: Don't use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
+		// after navigating Step 2 → Step 1 and editing addresses.
+		if (step === 2 && routeDistance && routeDuration) {
       const distanceCost = routeDistance * pricing.rate_per_km;
       const timeCost = routeDuration * pricing.rate_per_minute;
       const total = pricing.base_fare + distanceCost + timeCost;
