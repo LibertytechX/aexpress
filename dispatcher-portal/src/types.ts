@@ -77,3 +77,11 @@ export interface LogEvent {
     by: string;
     type: string;
 }
+
+export interface User {
+    id: string;
+    name: string;
+    phone: string;
+    email?: string;
+    token?: string;
+}

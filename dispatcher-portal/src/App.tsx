@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './index.css';
 import { I } from './components/icons';
 import { S } from './components/common/theme';
 import { DashboardScreen, OrdersScreen, RidersScreen, MerchantsScreen, CustomersScreen, MessagingScreen, SettingsScreen } from './components/screens';
+import { LoginScreen } from './components/auth/LoginScreen';
+import { SignupScreen } from './components/auth/SignupScreen';
 import { CreateOrderModal } from './components/modals/CreateOrderModal';
 import { INIT_ORDERS, INIT_RIDERS, MERCHANTS_DATA, CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
-import type { Order, LogEvent } from './types';
+import type { Order, LogEvent, User } from './types';
+import { AuthService } from './services/authService';
 
 function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authState, setAuthState] = useState<"login" | "signup" | "authenticated">("login");
+
   const [nav, setNav] = useState("Dashboard");
   const [orders, setOrders] = useState<Order[]>(INIT_ORDERS);
   const [riders] = useState(INIT_RIDERS);
@@ -15,6 +21,31 @@ function App() {
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
   const [eventLogs, setEventLogs] = useState<Record<string, LogEvent[]>>({});
+
+  useEffect(() => {
+    // Check for existing token
+    if (AuthService.isAuthenticated()) {
+      // In a real app, we might validate the token with a /me endpoint or decode it.
+      // For now, we assume if token exists, we are logged in.
+      // We might not have user details if we just refreshed.
+      // We'll set a dummy user or try to recover it.
+      // Ideally we should have a generic /users/me endpoint.
+      // But for now, let's just show the dashboard.
+      setUser({ id: "cached", name: "Dispatcher", phone: "" });
+      setAuthState("authenticated");
+    }
+  }, []);
+
+  const handleLoginSuccess = (userData: User) => {
+    setUser(userData);
+    setAuthState("authenticated");
+  };
+
+  const handleLogout = () => {
+    AuthService.logout();
+    setUser(null);
+    setAuthState("login");
+  };
 
   const menus = [
     { id: "Dashboard", icon: I.dashboard },
@@ -83,6 +114,14 @@ function App() {
     }
   };
 
+  if (authState === "login") {
+    return <LoginScreen onLoginSuccess={handleLoginSuccess} onSwitchToSignup={() => setAuthState("signup")} />;
+  }
+
+  if (authState === "signup") {
+    return <SignupScreen onSignupSuccess={() => setAuthState("login")} onSwitchToLogin={() => setAuthState("login")} />;
+  }
+
   return (
     <div style={{ display: "flex", height: "100vh", background: S.bg, color: S.text }}>
       {/* Sidebar */}
@@ -123,11 +162,12 @@ function App() {
         </div>
 
         <div style={{ marginTop: "auto" }}>
-          <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)", marginBottom: 10 }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(232,168,56,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>OI</div><div><div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>Otimeyin I.</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Admin</div></div></div></div>
-          <div style={{ padding: 16, background: "rgba(255,255,255,0.05)", borderRadius: 12 }}>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 6 }}>SYSTEM STATUS</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12, fontWeight: 600 }}>All Systems Operational</span></div>
-          </div>
+          <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)", marginBottom: 10 }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><div style={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(232,168,56,0.15)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>{user?.name?.slice(0, 2).toUpperCase() || "CN"}</div><div><div style={{ fontSize: 12, fontWeight: 600, color: "#fff" }}>{user?.name || "Dispatcher"}</div><div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)" }}>Dispatcher</div></div></div></div>
+
+          {/* Logout Button */}
+          <button onClick={handleLogout} style={{ width: "100%", padding: "10px", background: "rgba(255,255,255,0.05)", border: "none", color: S.textMuted, fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: "pointer" }}>
+            Log Out
+          </button>
         </div>
       </div>
 
@@ -138,7 +178,7 @@ function App() {
           <h1 style={{ fontSize: 20, fontWeight: 800 }}>{nav}</h1>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ textAlign: "right" }}><div style={{ fontSize: 13, fontWeight: 700 }}>Dispatcher Jane</div><div style={{ fontSize: 11, color: S.textMuted }}>Admin</div></div>
+              <div style={{ textAlign: "right" }}><div style={{ fontSize: 13, fontWeight: 700 }}>{user?.name || "Dispatcher"}</div><div style={{ fontSize: 11, color: S.textMuted }}>Admin</div></div>
               <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#e2e8f0" }} />
             </div>
             <button onClick={() => setShowCreateModal(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "10px 18px", background: S.navy, color: "#fff", border: "none", borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
