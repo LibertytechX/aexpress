@@ -34,7 +34,7 @@ export interface Rider {
 
 export interface Merchant {
     id: string; // This will now be the 6-char external ID
-    userId: string; // The UUID
+    userId?: string; // The UUID
     name: string;
     contact: string;
     phone: string;

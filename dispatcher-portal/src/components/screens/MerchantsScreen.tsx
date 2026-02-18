@@ -2,38 +2,114 @@ import { useState } from "react";
 import type { Merchant } from "../../types";
 import { S } from "../common/theme";
 import { I } from "../icons";
-import { StatCard } from "../common/StatCard";
 
-export function MerchantsScreen({ data }: { data: Merchant[] }) {
-    const [search, setSearch] = useState("");
-    const f = data.filter(m => !search || (m.name || "").toLowerCase().includes(search.toLowerCase()) || (m.contact || "").toLowerCase().includes(search.toLowerCase()));
+
+// Helper function simplified from MerchantPortal
+const getMerchantInitials = (name: string) => {
+    return name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .substring(0, 2)
+        .toUpperCase();
+};
+
+interface MerchantsScreenProps {
+    data: Merchant[];
+}
+
+export function MerchantsScreen({ data }: MerchantsScreenProps) {
+    const [searchTerm, setSearchTerm] = useState("");
+
+    const filtered = data.filter(m =>
+        m.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        m.phone.includes(searchTerm) ||
+        (m.id && m.id.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
+
+
     return (
-        <div>
-            <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-                <StatCard label="Total Merchants" value={data.length} />
-                <StatCard label="Active" value={data.filter(m => m.status === "Active").length} color={S.green} />
-                <StatCard label="This Month" value={data.reduce((s, m) => s + (m.monthOrders || 0), 0)} color={S.gold} />
-                <StatCard label="Wallet Balance" value={`₦${(data.reduce((s, m) => s + (m.walletBalance || 0), 0) / 1000).toFixed(0)}K`} color={S.gold} />
-            </div>
-            <div style={{ marginBottom: 14, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
-                <span style={{ opacity: 0.4 }}>{I.search}</span>
-                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search merchants..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
-            </div>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-                <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-                    <span>ID</span><span>Business</span><span>Contact</span><span>Category</span><span>Total</span><span>Month</span><span>Wallet</span><span>Status</span><span>Joined</span>
+        <div style={{ animation: "fadeIn 0.3s ease" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+                <div>
+                    <h2 style={{ fontSize: 24, fontWeight: 700, color: S.navy, margin: 0 }}>Merchants</h2>
+                    <p style={{ color: S.textMuted, fontSize: 14, margin: "4px 0 0" }}>Manage registered businesses</p>
                 </div>
-                {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                    <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.id}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700 }}>{m.name || "Unknown"}</span>
-                    <div><div style={{ fontSize: 12 }}>{m.contact || "Unknown"}</div><div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.phone || "No Phone"}</div></div>
-                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, background: S.borderLight, color: S.textDim }}>{m.category || "Uncategorized"}</span>
-                    <span style={{ fontSize: 12, fontWeight: 600 }}>{m.totalOrders || 0}</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: S.gold }}>{m.monthOrders || 0}</span>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: S.gold, fontFamily: "'Space Mono',monospace" }}>₦{(m.walletBalance || 0).toLocaleString()}</span>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: m.status === "Active" ? S.greenBg : S.redBg, color: m.status === "Active" ? S.green : S.red }}>{m.status || "Inactive"}</span>
-                    <span style={{ fontSize: 11, color: S.textMuted }}>{m.joined}</span>
-                </div>))}
+                <div style={{ position: "relative" }}>
+                    <input
+                        placeholder="Search merchants..."
+                        style={{
+                            padding: "10px 16px 10px 40px",
+                            borderRadius: 10,
+                            border: `1px solid ${S.border}`,
+                            width: 280,
+                            fontFamily: "inherit",
+                            fontSize: 14
+                        }}
+                        value={searchTerm}
+                        onChange={e => setSearchTerm(e.target.value)}
+                    />
+                    <div style={{ position: "absolute", left: 14, top: 11, color: S.textMuted }}>{I.search}</div>
+                </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 20 }}>
+                {filtered.map(m => (
+                    <div key={m.id} style={{
+                        background: "#fff",
+                        borderRadius: 14,
+                        border: `1px solid ${S.border}`,
+                        padding: 20,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 16
+                    }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+                            <div style={{ display: "flex", gap: 12 }}>
+                                <div style={{
+                                    width: 48, height: 48, borderRadius: 12,
+                                    background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+                                    color: S.gold, display: "flex", alignItems: "center", justifyContent: "center",
+                                    fontSize: 18, fontWeight: 700
+                                }}>
+                                    {getMerchantInitials(m.name)}
+                                </div>
+                                <div>
+                                    <div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{m.name}</div>
+                                    <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{m.category || "General"}</div>
+                                </div>
+                            </div>
+                            <div style={{
+                                fontSize: 10, fontWeight: 700, padding: "4px 8px", borderRadius: 6,
+                                background: m.status === "Active" ? S.greenBg : S.redBg,
+                                color: m.status === "Active" ? S.green : S.red
+                            }}>
+                                {m.status.toUpperCase()}
+                            </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, paddingTop: 16, borderTop: `1px solid ${S.borderLight}` }}>
+                            <div>
+                                <div style={{ fontSize: 11, color: S.textMuted, marginBottom: 4 }}>TOTAL ORDERS</div>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono', monospace" }}>{m.totalOrders}</div>
+                            </div>
+                            <div>
+                                <div style={{ fontSize: 11, color: S.textMuted, marginBottom: 4 }}>WALLET</div>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono', monospace" }}>₦{m.walletBalance?.toLocaleString()}</div>
+                            </div>
+                        </div>
+
+                        <div style={{ fontSize: 12, color: S.textDim, display: "flex", flexDirection: "column", gap: 6, paddingTop: 12, borderTop: `1px solid ${S.borderLight}` }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span>📱</span> {m.phone}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <span>🆔</span> {m.id}
+                            </div>
+                        </div>
+                    </div>
+                ))}
             </div>
         </div>
     );

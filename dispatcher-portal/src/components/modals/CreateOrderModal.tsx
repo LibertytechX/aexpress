@@ -3,6 +3,7 @@ import { OrderService } from "../../services/orderService";
 import type { Rider, Merchant } from "../../types";
 import { S } from "../common/theme";
 import { I } from "../icons";
+import { AddressAutocompleteInput } from "../common/AddressAutocompleteInput";
 
 interface CreateOrderModalProps {
     riders: Rider[];
@@ -79,12 +80,32 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
                     {/* Customer is Sender */}
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Sender (Customer)</label><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><input placeholder="Name" style={iSt} value={customerName} onChange={e => setCustomerName(e.target.value)} /><input placeholder="Phone" style={iSt} value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} /></div></div>
 
-                    <div style={{ marginBottom: 16 }}><label style={lSt}>Pickup Address</label><input placeholder="Enter pickup address..." style={iSt} value={pickup} onChange={e => setPickup(e.target.value)} /></div>
+
+
+                    {/* Pickup Address */}
+                    <div style={{ marginBottom: 16 }}>
+                        <label style={lSt}>Pickup Address</label>
+                        <AddressAutocompleteInput
+                            placeholder="Enter pickup address..."
+                            value={pickup}
+                            onChange={setPickup}
+                            style={iSt}
+                        />
+                    </div>
 
                     {/* Receiver */}
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Receiver</label><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><input placeholder="Name" style={iSt} value={receiverName} onChange={e => setReceiverName(e.target.value)} /><input placeholder="Phone" style={iSt} value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} /></div></div>
 
-                    <div style={{ marginBottom: 16 }}><label style={lSt}>Dropoff Address</label><input placeholder="Enter delivery address..." style={iSt} value={dropoff} onChange={e => setDropoff(e.target.value)} /></div>
+                    {/* Dropoff Address */}
+                    <div style={{ marginBottom: 16 }}>
+                        <label style={lSt}>Dropoff Address</label>
+                        <AddressAutocompleteInput
+                            placeholder="Enter delivery address..."
+                            value={dropoff}
+                            onChange={setDropoff}
+                            style={iSt}
+                        />
+                    </div>
 
                     <div style={{ marginBottom: 16 }}><label style={lSt}>Vehicle Type</label>
                         <div style={{ display: "flex", gap: 8 }}>
