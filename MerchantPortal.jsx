@@ -2422,6 +2422,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
   });
 
+  // ─── Early price estimation (Step 1) ───
+  const [earlyRouteDistance, setEarlyRouteDistance] = useState(null);
+  const [earlyRouteDuration, setEarlyRouteDuration] = useState(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [routeError, setRouteError] = useState(null);
+
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
@@ -2452,6 +2458,72 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
     loadVehiclePricing();
   }, []);
+
+  // ─── Calculate route for early price estimation ───
+  useEffect(() => {
+    // Only calculate for Quick Send mode when both addresses are available
+    if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+      setEarlyRouteDistance(null);
+      setEarlyRouteDuration(null);
+      setRouteError(null);
+      return;
+    }
+
+    const calculateEarlyRoute = async () => {
+      setCalculatingRoute(true);
+      setRouteError(null);
+
+      try {
+        // Use Google Maps Directions API to calculate route
+        const directionsService = new google.maps.DirectionsService();
+
+        const request = {
+          origin: pickupAddress,
+          destination: dropoffAddress,
+          travelMode: google.maps.TravelMode.DRIVING,
+          drivingOptions: {
+            departureTime: new Date(),
+            trafficModel: google.maps.TrafficModel.BEST_GUESS
+          }
+        };
+
+        directionsService.route(request, (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+            const route = result.routes[0];
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            // Sum up all legs
+            route.legs.forEach(leg => {
+              totalDistance += leg.distance.value; // in meters
+              totalDuration += leg.duration_in_traffic?.value || leg.duration.value; // in seconds
+            });
+
+            const distanceKm = (totalDistance / 1000).toFixed(1);
+            const durationMin = Math.ceil(totalDuration / 60);
+
+            setEarlyRouteDistance(parseFloat(distanceKm));
+            setEarlyRouteDuration(durationMin);
+            setCalculatingRoute(false);
+
+            console.log('📏 Early route calculated:', { distanceKm, durationMin });
+          } else {
+            console.error('Route calculation failed:', status);
+            setRouteError('Unable to calculate route');
+            setCalculatingRoute(false);
+          }
+        });
+      } catch (error) {
+        console.error('Error calculating route:', error);
+        setRouteError('Error calculating route');
+        setCalculatingRoute(false);
+      }
+    };
+
+    // Debounce the calculation to avoid too many API calls
+    const timeoutId = setTimeout(calculateEarlyRoute, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, dropoffAddress]);
 
   // ─── Load default address on mount ───
   useEffect(() => {
@@ -2590,6 +2662,20 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   // ─── Price calculation ───
+  // Calculate price for a specific vehicle using early route data
+  const calculateEarlyPrice = (vehicleName) => {
+    if (!earlyRouteDistance || !earlyRouteDuration) return null;
+
+    const pricing = vehiclePricing[vehicleName];
+    if (!pricing) return null;
+
+    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
+    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
+    const total = pricing.base_fare + distanceCost + timeCost;
+
+    return Math.round(total);
+  };
+
   const getActiveDropoffs = () => {
     if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
     if (mode === "multi") return drops.filter(d => d.address.trim());
@@ -2762,6 +2848,116 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: 10 }}
               />
+
+              {/* ═══ EARLY PRICE ESTIMATION ═══ */}
+              {pickupAddress && dropoffAddress && (
+                <div style={{
+                  background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
+                  borderRadius: 12,
+                  padding: 16,
+                  marginBottom: 14,
+                  border: "1px solid #fbbf24"
+                }}>
+                  {calculatingRoute ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 20,
+                        height: 20,
+                        border: "3px solid #f59e0b",
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "spin 0.8s linear infinite"
+                      }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
+                        Calculating route and prices...
+                      </span>
+                    </div>
+                  ) : routeError ? (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>
+                      ⚠️ {routeError}
+                    </div>
+                  ) : earlyRouteDistance && earlyRouteDuration ? (
+                    <div>
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 12
+                      }}>
+                        <h4 style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#92400e",
+                          margin: 0
+                        }}>
+                          💰 Estimated Prices
+                        </h4>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#b45309",
+                          background: "#fef3c7",
+                          padding: "2px 8px",
+                          borderRadius: 6
+                        }}>
+                          📏 {earlyRouteDistance}km • 🕐 {earlyRouteDuration}min
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                        {["Bike", "Car", "Van"].map(vehicleName => {
+                          const price = calculateEarlyPrice(vehicleName);
+                          const isSelected = vehicle === vehicleName;
+
+                          return (
+                            <div
+                              key={vehicleName}
+                              onClick={() => setVehicle(vehicleName)}
+                              style={{
+                                background: isSelected ? "#fff" : "#fef3c7",
+                                border: isSelected ? "2px solid #f59e0b" : "1px solid #fbbf24",
+                                borderRadius: 10,
+                                padding: "10px 8px",
+                                textAlign: "center",
+                                cursor: "pointer",
+                                transition: "all 0.2s ease",
+                                boxShadow: isSelected ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none"
+                              }}
+                            >
+                              <div style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: "#92400e",
+                                marginBottom: 4
+                              }}>
+                                {vehicleName === "Bike" ? "🏍️" : vehicleName === "Car" ? "🚗" : "🚐"} {vehicleName}
+                              </div>
+                              <div style={{
+                                fontSize: 16,
+                                fontWeight: 800,
+                                color: "#b45309"
+                              }}>
+                                ₦{price?.toLocaleString() || "—"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{
+                        fontSize: 10,
+                        color: "#92400e",
+                        marginTop: 8,
+                        textAlign: "center",
+                        fontStyle: "italic"
+                      }}>
+                        Click a vehicle to select it
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                 <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={inputStyle} />
                 <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={inputStyle} />
