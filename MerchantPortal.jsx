@@ -2575,6 +2575,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [notes, setNotes] = useState("");
   const [estimatedCost, setEstimatedCost] = useState(null);
 
+  // Wrapper to log dropoff address changes
+  const handleDropoffChange = (value) => {
+    console.log('📍 Dropoff address changed:', value);
+    setDropoffAddress(value);
+  };
+
   // ─── Multi-Drop state ───
   const [drops, setDrops] = useState([
     { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
@@ -2865,7 +2871,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               </div>
               <AddressAutocompleteInput
                 value={dropoffAddress}
-                onChange={setDropoffAddress}
+                onChange={handleDropoffChange}
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: 10 }}
               />
