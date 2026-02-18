@@ -691,11 +691,12 @@ function MerchantPortal() {
               currentUser={currentUser}
               onPlaceOrder={async (orderData) => {
                 try {
+                  console.log('🎯 onPlaceOrder called with:', orderData);
                   let response;
 
                   // Call appropriate API based on order mode
                   if (orderData.mode === 'quick') {
-                    response = await window.API.Orders.createQuickSend({
+                    const apiPayload = {
                       pickup_address: orderData.pickup,
                       sender_name: orderData.senderName || currentUser?.contact_name || '',
                       sender_phone: orderData.senderPhone || currentUser?.phone || '',
@@ -708,7 +709,9 @@ function MerchantPortal() {
                       notes: orderData.notes || '',
                       distance_km: orderData.distance_km || 0,
                       duration_minutes: orderData.duration_minutes || 0
-                    });
+                    };
+                    console.log('📡 Sending to API (Quick Send):', apiPayload);
+                    response = await window.API.Orders.createQuickSend(apiPayload);
                   } else if (orderData.mode === 'multi') {
                     response = await window.API.Orders.createMultiDrop({
                       pickup_address: orderData.pickup,
@@ -2574,7 +2577,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const deliveries = getActiveDropoffs();
 
     // Debug: Log route data
-    console.log('Route data:', { routeDistance, routeDuration });
+    console.log('🚀 handleConfirmAll called!');
+    console.log('📏 Route data:', { routeDistance, routeDuration });
 
     // Prepare order data based on mode
     const orderData = {
@@ -2591,7 +2595,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     };
 
     // Debug: Log order data
-    console.log('Order data being sent:', orderData);
+    console.log('📦 Order data being sent:', orderData);
+    console.log('💰 Pricing data:', {
+      distance_km: orderData.distance_km,
+      duration_minutes: orderData.duration_minutes,
+      vehicle: orderData.vehicle
+    });
 
     if (mode === 'quick') {
       // Quick Send - single delivery
