@@ -196,7 +196,8 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class MerchantSerializer(serializers.ModelSerializer):
-    id = serializers.CharField(read_only=True)
+    id = serializers.CharField(source="merchant_profile.merchant_id", read_only=True)
+    userId = serializers.CharField(source="id", read_only=True)
     name = serializers.SerializerMethodField()
     contact = serializers.SerializerMethodField()
     phone = serializers.CharField(read_only=True)
@@ -213,6 +214,7 @@ class MerchantSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id",
+            "userId",
             "name",
             "contact",
             "phone",

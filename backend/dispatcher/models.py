@@ -62,3 +62,28 @@ class DispatcherProfile(models.Model):
 
     def __str__(self):
         return f"Dispatcher: {self.user.contact_name or self.user.phone}"
+
+
+class Merchant(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_profile",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        if not self.merchant_id:
+            # Generate unique 6-digit ID
+            while True:
+                new_id = "".join(random.choices(string.digits, k=6))
+                if not Merchant.objects.filter(merchant_id=new_id).exists():
+                    self.merchant_id = new_id
+                    break
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.user.business_name} ({self.merchant_id})"
