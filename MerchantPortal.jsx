@@ -2032,6 +2032,22 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
   const directionsRendererRef = useRef(null);
   const animationIntervalRef = useRef(null);
 
+  // State for route information
+  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState(null); // in minutes
+  const [routeDurationInTraffic, setRouteDurationInTraffic] = useState(null); // in minutes
+
+  // Helper function to format duration
+  const formatDuration = (minutes) => {
+    if (!minutes) return '';
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+  };
+
   // Function to animate the pulse along the route
   const startPulseAnimation = () => {
     // Clear any existing animation
@@ -2235,6 +2251,38 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
             if (status === 'OK') {
               directionsRendererRef.current.setDirections(result);
 
+              // Extract distance and duration from route
+              if (result.routes && result.routes[0] && result.routes[0].legs) {
+                let totalDistanceMeters = 0;
+                let totalDurationSeconds = 0;
+                let totalDurationInTrafficSeconds = 0;
+                let hasTrafficData = false;
+
+                // Sum up all legs (for multi-stop routes)
+                result.routes[0].legs.forEach(leg => {
+                  if (leg.distance && leg.distance.value) {
+                    totalDistanceMeters += leg.distance.value;
+                  }
+                  if (leg.duration && leg.duration.value) {
+                    totalDurationSeconds += leg.duration.value;
+                  }
+                  if (leg.duration_in_traffic && leg.duration_in_traffic.value) {
+                    totalDurationInTrafficSeconds += leg.duration_in_traffic.value;
+                    hasTrafficData = true;
+                  }
+                });
+
+                // Convert to user-friendly units
+                const distanceKm = (totalDistanceMeters / 1000).toFixed(1); // kilometers with 1 decimal
+                const durationMin = Math.round(totalDurationSeconds / 60); // minutes
+                const durationInTrafficMin = hasTrafficData ? Math.round(totalDurationInTrafficSeconds / 60) : null;
+
+                // Update state
+                setRouteDistance(parseFloat(distanceKm));
+                setRouteDuration(durationMin);
+                setRouteDurationInTraffic(durationInTrafficMin);
+              }
+
               // Re-apply polyline options with icons after setDirections
               // (setDirections replaces the polyline, losing our custom icons)
               const polylineOptions = {
@@ -2307,6 +2355,29 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{totalDeliveries} × {vehicle} Delivery</div>
             <div style={{ fontSize: 11, color: S.grayLight }}>from {pickupAddress.split(",")[0]}</div>
+            {/* Distance and Duration Row */}
+            {(routeDistance || routeDuration) && (
+              <div style={{ fontSize: 11, color: S.gray, marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                {routeDistance && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span>📏</span>
+                    <span>{routeDistance} km</span>
+                  </span>
+                )}
+                {routeDistance && routeDuration && <span>•</span>}
+                {routeDuration && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span>🕐</span>
+                    <span>
+                      {formatDuration(routeDuration)}
+                      {routeDurationInTraffic && routeDurationInTraffic !== routeDuration && (
+                        <span style={{ color: S.grayLight }}> ({formatDuration(routeDurationInTraffic)} in traffic)</span>
+                      )}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ fontSize: 18, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>₦{totalCost.toLocaleString()}</div>
