@@ -2235,6 +2235,28 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
             if (status === 'OK') {
               directionsRendererRef.current.setDirections(result);
 
+              // Re-apply polyline options with icons after setDirections
+              // (setDirections replaces the polyline, losing our custom icons)
+              const polylineOptions = {
+                strokeColor: '#E8A838',
+                strokeWeight: 4,
+                strokeOpacity: 0.7,
+                icons: [{
+                  icon: {
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    scale: 4,
+                    fillColor: '#ffffff',
+                    fillOpacity: 0.8,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 2,
+                    strokeOpacity: 0.6
+                  },
+                  offset: '0%',
+                  repeat: '100px'
+                }]
+              };
+              directionsRendererRef.current.setOptions({ polylineOptions });
+
               // Start animated pulse effect
               startPulseAnimation();
             } else {
