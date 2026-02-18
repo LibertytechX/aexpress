@@ -2470,10 +2470,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     }
 
     const calculateEarlyRoute = async () => {
+      console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
       setCalculatingRoute(true);
       setRouteError(null);
 
       try {
+        // Check if Google Maps is loaded
+        if (typeof google === 'undefined' || !google.maps) {
+          console.error('❌ Google Maps not loaded yet');
+          setRouteError('Maps not loaded');
+          setCalculatingRoute(false);
+          return;
+        }
+
         // Use Google Maps Directions API to calculate route
         const directionsService = new google.maps.DirectionsService();
 
@@ -2487,7 +2496,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           }
         };
 
+        console.log('📡 Sending directions request...', request);
+
         directionsService.route(request, (result, status) => {
+          console.log('📥 Directions response:', { status, result });
+
           if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
             const route = result.routes[0];
             let totalDistance = 0;
@@ -2506,15 +2519,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             setEarlyRouteDuration(durationMin);
             setCalculatingRoute(false);
 
-            console.log('📏 Early route calculated:', { distanceKm, durationMin });
+            console.log('✅ Early route calculated:', { distanceKm, durationMin });
           } else {
-            console.error('Route calculation failed:', status);
+            console.error('❌ Route calculation failed:', status);
             setRouteError('Unable to calculate route');
             setCalculatingRoute(false);
           }
         });
       } catch (error) {
-        console.error('Error calculating route:', error);
+        console.error('❌ Error calculating route:', error);
         setRouteError('Error calculating route');
         setCalculatingRoute(false);
       }
