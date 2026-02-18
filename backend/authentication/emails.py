@@ -267,8 +267,8 @@ def send_password_reset_email(user):
         user.password_reset_token_created = timezone.now()
         user.save(update_fields=['password_reset_token', 'password_reset_token_created'])
 
-        # Create reset link
-        reset_link = f"{frontend_url}/?token={token}"
+        # Create reset link with reset parameter to differentiate from email verification
+        reset_link = f"{frontend_url}/?token={token}&reset=true"
 
         # Create HTML email template
         html_content = get_password_reset_email_template(
