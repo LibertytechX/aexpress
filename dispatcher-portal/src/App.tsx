@@ -6,17 +6,19 @@ import { DashboardScreen, OrdersScreen, RidersScreen, MerchantsScreen, Customers
 import { LoginScreen } from './components/auth/LoginScreen';
 import { SignupScreen } from './components/auth/SignupScreen';
 import { CreateOrderModal } from './components/modals/CreateOrderModal';
-import { INIT_ORDERS, INIT_RIDERS, MERCHANTS_DATA, CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
-import type { Order, LogEvent, User } from './types';
+import { MERCHANTS_DATA, CUSTOMERS_DATA, MSG_RIDER, MSG_CUSTOMER } from './data/mockData';
+import type { Order, LogEvent, User, Rider } from './types';
 import { AuthService } from './services/authService';
+import { OrderService } from './services/orderService';
+import { RiderService } from './services/riderService';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authState, setAuthState] = useState<"login" | "signup" | "authenticated">("login");
 
   const [nav, setNav] = useState("Dashboard");
-  const [orders, setOrders] = useState<Order[]>(INIT_ORDERS);
-  const [riders] = useState(INIT_RIDERS);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [riders, setRiders] = useState<Rider[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
@@ -35,6 +37,25 @@ function App() {
       setAuthState("authenticated");
     }
   }, []);
+
+  // Fetch riders and orders when authenticated
+  useEffect(() => {
+    if (authState === "authenticated") {
+      const fetchData = async () => {
+        try {
+          const [ridersData, ordersData] = await Promise.all([
+            RiderService.getRiders(),
+            OrderService.getOrders()
+          ]);
+          setRiders(ridersData);
+          setOrders(ordersData);
+        } catch (error) {
+          console.error("Failed to load data", error);
+        }
+      };
+      fetchData();
+    }
+  }, [authState]);
 
   const handleLoginSuccess = (userData: User) => {
     setUser(userData);
@@ -155,7 +176,7 @@ function App() {
                 }}>
                 <span style={{ opacity: nav === m.id ? 1 : 0.7 }}>{m.icon}</span>
                 <span style={{ flex: 1 }}>{m.id}</span>
-                {count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: nav === m.id ? S.gold : "rgba(255,255,255,0.1)", color: nav === m.id ? "#fff" : "rgba(255,255,255,0.5)" }}>{count}</span>}
+                {(count > 0 || m.id === "Riders") && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: nav === m.id ? S.gold : "rgba(255,255,255,0.1)", color: nav === m.id ? "#fff" : "rgba(255,255,255,0.5)" }}>{count}</span>}
               </button>
             );
           })}

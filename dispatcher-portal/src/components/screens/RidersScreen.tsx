@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { Rider, Order } from "../../types";
 import { S } from "../common/theme";
 import { I } from "../icons";
 import { StatCard } from "../common/StatCard";
 import { Badge } from "../common/Badge";
-import { RiderService } from "../../services/riderService";
 
 interface RidersScreenProps {
     riders: Rider[];
@@ -15,23 +14,10 @@ interface RidersScreenProps {
     onViewOrder: (id: string) => void;
 }
 
-export function RidersScreen({ riders: initialRiders, orders, selectedId, onSelect, onBack, onViewOrder }: RidersScreenProps) {
-    const [riders, setRiders] = useState<Rider[]>(initialRiders);
+export function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder }: RidersScreenProps) {
     const [filter, setFilter] = useState("All");
     const [search, setSearch] = useState("");
-    const [loading, setLoading] = useState(false);
 
-    useEffect(() => {
-        const fetchRiders = async () => {
-            setLoading(true);
-            const data = await RiderService.getRiders();
-            if (data.length > 0) {
-                setRiders(data);
-            }
-            setLoading(false);
-        };
-        fetchRiders();
-    }, []);
 
     if (selectedId) {
         const rider = riders.find(r => r.id === selectedId);
@@ -116,25 +102,21 @@ export function RidersScreen({ riders: initialRiders, orders, selectedId, onSele
                     <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
                 </div>
                 <div style={{ maxHeight: "calc(100vh - 310px)", overflowY: "auto" }}>
-                    {loading ? (
-                        <div style={{ padding: 20, textAlign: "center", color: S.textMuted }}>Loading riders...</div>
-                    ) : (
-                        filtered.map(r => (
-                            <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                                <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
-                                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                                    <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name ? r.name.split(" ").map(n => n[0]).join("") : "?"}</div>
-                                    <span style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</span>
-                                </div>
-                                <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
-                                <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
-                                <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
-                                <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
-                                <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
-                                <span style={{ fontSize: 12, color: S.gold }}>⭐ {r.rating}</span>
+                    {filtered.map(r => (
+                        <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name ? r.name.split(" ").map(n => n[0]).join("") : "?"}</div>
+                                <span style={{ fontSize: 12, fontWeight: 600 }}>{r.name}</span>
                             </div>
-                        ))
-                    )}
+                            <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
+                            <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
+                            <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
+                            <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
+                            <span style={{ fontSize: 12, color: S.gold }}>⭐ {r.rating}</span>
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
