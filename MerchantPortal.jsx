@@ -2557,7 +2557,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   // ─── Price calculation ───
-  const costs = { Bike: 1210, Car: 4500, Van: 12000 };
+  // ─── Pricing structure (new dynamic pricing) ───
+  const vehiclePricing = {
+    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
+    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
+    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+  };
 
   const getActiveDropoffs = () => {
     if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
@@ -2567,7 +2572,25 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   const totalDeliveries = getActiveDropoffs().length;
-  const unitCost = costs[vehicle] || 1210;
+
+  // Calculate dynamic cost based on route distance and duration
+  const calculateCost = () => {
+    const pricing = vehiclePricing[vehicle];
+    if (!pricing) return 0;
+
+    // If we have route data, use dynamic pricing
+    if (routeDistance && routeDuration) {
+      const distanceCost = routeDistance * pricing.rate_per_km;
+      const timeCost = routeDuration * pricing.rate_per_minute;
+      const total = pricing.base_fare + distanceCost + timeCost;
+      return Math.round(total); // Round to nearest naira
+    }
+
+    // Fallback: estimate based on base fare only (will be updated when route loads)
+    return pricing.base_fare;
+  };
+
+  const unitCost = calculateCost();
   const totalCost = totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
