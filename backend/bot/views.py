@@ -10,7 +10,7 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 
 from authentication.models import User
-from wallet.models import Wallet, Transaction
+from wallet.models import Wallet, Transaction, VirtualAccount
 from orders.models import Order, Delivery, Vehicle
 from .authentication import BotAPIKeyAuthentication
 from .permissions import IsBotService, IsBotWithMerchant
@@ -577,4 +577,49 @@ class TransactionHistoryView(APIView):
             'data': serializer.data,
             'bot_response': bot_msg
         })
+
+class GetVirtualAccountView(APIView):
+    """Get or create a virtual account for the merchant."""
+    authentication_classes = [BotAPIKeyAuthentication]
+    permission_classes = [IsBotWithMerchant]
+
+    def get(self, request):
+        merchant = request.merchant
+
+        try:
+            # Try to get existing virtual account
+            try:
+                virtual_account = VirtualAccount.objects.get(user=merchant)
+            except VirtualAccount.DoesNotExist:
+                # Create new virtual account via CoreBanking
+                from wallet.corebanking_service import create_virtual_account
+                virtual_account = create_virtual_account(merchant)
+
+            # Format bot response
+            bot_msg = (
+                f"Your Wema Bank account:\n"
+                f"{virtual_account.account_number}\n"
+                f"{virtual_account.account_name}\n\n"
+                f"Transfer money to this account to fund your wallet."
+            )
+
+            return Response({
+                'success': True,
+                'data': {
+                    'account_number': virtual_account.account_number,
+                    'account_name': virtual_account.account_name,
+                    'bank_name': virtual_account.bank_name,
+                    'bank_code': virtual_account.bank_code,
+                    'is_active': virtual_account.is_active,
+                },
+                'bot_response': bot_msg
+            })
+
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': str(e),
+                'bot_response': 'Sorry, we couldn\'t get your account details right now. Please try again later.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
