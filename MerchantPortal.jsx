@@ -205,9 +205,9 @@ const S = {
 function MerchantPortal() {
   const [screen, setScreen] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(8790);
+  const [walletBalance, setWalletBalance] = useState(0);
   const [orders, setOrders] = useState([]);
-  const [transactions, setTransactions] = useState(MOCK_TRANSACTIONS);
+  const [transactions, setTransactions] = useState([]);
   const [fundModal, setFundModal] = useState(false);
   const [bankTransferModal, setBankTransferModal] = useState(false);
   const [bankTransferAmount, setBankTransferAmount] = useState(0);
