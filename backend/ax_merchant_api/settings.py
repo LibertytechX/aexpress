@@ -194,6 +194,16 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:9000",
     "http://127.0.0.1:9000",
     "http://localhost:5173",
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost',
+    'http://127.0.0.1',
 ]
 
 # Add production frontend URL if set
@@ -233,8 +243,14 @@ SESSION_CACHE_ALIAS = "default"
 AUTH_USER_MODEL = "authentication.User"
 
 # Paystack Configuration
-PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
-PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY", "")
+PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY', '')
+PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY', '')
+
+# CoreBanking (LibertyPay) Configuration
+COREBANKING_EMAIL = os.getenv('COREBANKING_EMAIL', '')
+COREBANKING_PASSWORD = os.getenv('COREBANKING_PASSWORD', '')
+COREBANKING_BASE_URL = os.getenv('COREBANKING_BASE_URL', 'https://banking.libertypayng.com')
+COREBANKING_WEBHOOK_SECRET = os.getenv('COREBANKING_WEBHOOK_SECRET', '')
 
 # Production Security Settings
 if not DEBUG:

@@ -98,6 +98,21 @@ const Icons = {
       <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
     </svg>
   ),
+  mail: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+    </svg>
+  ),
+  checkCircle: (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+    </svg>
+  ),
+  xCircle: (
+    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+    </svg>
+  ),
   bell: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
@@ -121,6 +136,16 @@ const Icons = {
   accounting: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="12" y2="14"/><line x1="8" y1="18" x2="10" y2="18"/>
+    </svg>
+  ),
+  lock: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  ),
+  key: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
     </svg>
   ),
 };
@@ -180,22 +205,45 @@ const S = {
 function MerchantPortal() {
   const [screen, setScreen] = useState("login");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(8790);
+  const [walletBalance, setWalletBalance] = useState(0);
   const [orders, setOrders] = useState([]);
-  const [transactions, setTransactions] = useState(MOCK_TRANSACTIONS);
+  const [transactions, setTransactions] = useState([]);
   const [fundModal, setFundModal] = useState(false);
+  const [bankTransferModal, setBankTransferModal] = useState(false);
+  const [bankTransferAmount, setBankTransferAmount] = useState(0);
+  const [bankTransferVirtualAccount, setBankTransferVirtualAccount] = useState(null);
   const [orderDetailId, setOrderDetailId] = useState(null);
   const [notification, setNotification] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [verificationToken, setVerificationToken] = useState(null);
+  const [passwordResetToken, setPasswordResetToken] = useState(null);
 
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // Check if user is logged in on mount
+  // Check if user is logged in on mount and check for tokens in URL
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const resetParam = urlParams.get('reset');
+
+    if (token) {
+      // If there's a 'reset' parameter or we're on a reset path, it's a password reset token
+      if (resetParam === 'true' || window.location.pathname.includes('reset')) {
+        setPasswordResetToken(token);
+        setScreen("reset-password");
+      } else {
+        // Otherwise, it's an email verification token
+        setVerificationToken(token);
+        setScreen("verify-email");
+      }
+      return;
+    }
+
+    // Check if user is logged in
     const user = window.API?.Token?.getUser();
     if (user) {
       setCurrentUser(user);
@@ -331,7 +379,41 @@ function MerchantPortal() {
   const handleSignup = (user) => {
     setCurrentUser(user);
     setScreen("dashboard");
-    showNotif("Welcome to Assured Express!");
+    showNotif("Welcome to Assured Express! Please check your email to verify your account.");
+  };
+
+  const handleResendVerification = async () => {
+    try {
+      const accessToken = window.API?.Token?.getAccessToken();
+      const response = await fetch('https://www.orders.axpress.net/api/auth/resend-verification/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        showNotif(data.message || "Verification email sent! Please check your inbox.", "success");
+      } else {
+        showNotif(data.error || "Failed to send verification email", "error");
+      }
+    } catch (error) {
+      showNotif("Network error. Please try again.", "error");
+      console.error('Resend verification error:', error);
+    }
+  };
+
+  const handleVerificationComplete = () => {
+    // Refresh user data
+    const user = window.API?.Token?.getUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+    setScreen("dashboard");
+    // Clear URL parameters
+    window.history.replaceState({}, document.title, window.location.pathname);
   };
 
   const handleLogout = async () => {
@@ -347,19 +429,22 @@ function MerchantPortal() {
     }
   };
 
-  if (screen === "login") return <LoginScreen onLogin={handleLogin} onSignup={() => setScreen("signup")} />;
+  if (screen === "login") return <LoginScreen onLogin={handleLogin} onSignup={() => setScreen("signup")} onForgotPassword={() => setScreen("forgot-password")} />;
   if (screen === "signup") return <SignupScreen onBack={() => setScreen("login")} onComplete={handleSignup} />;
+  if (screen === "verify-email") return <VerifyEmailScreen token={verificationToken} onComplete={handleVerificationComplete} />;
+  if (screen === "forgot-password") return <ForgotPasswordScreen onBack={() => setScreen("login")} />;
+  if (screen === "reset-password") return <ResetPasswordScreen token={passwordResetToken} onComplete={() => setScreen("login")} />;
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard },
     { id: "newOrder", label: "New Order", icon: Icons.newOrder },
     { id: "orders", label: "Orders", icon: Icons.orders },
     { id: "wallet", label: "Wallet", icon: Icons.wallet },
-    { id: "website", label: "My Website", icon: Icons.website, badge: "FREE" },
-    { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "NEW" },
+    { id: "website", label: "My Website", icon: Icons.website, badge: "SOON" },
+    { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "SOON" },
     { id: "loans", label: "Business Loans", icon: Icons.loans, badge: "SOON" },
     { id: "accounting", label: "Accounting", icon: Icons.accounting, badge: "SOON" },
-    { id: "support", label: "Support", icon: Icons.support },
+    { id: "support", label: "Support", icon: Icons.support, badge: "SOON" },
     { id: "settings", label: "Settings", icon: Icons.settings },
   ];
 
@@ -384,6 +469,12 @@ function MerchantPortal() {
       {fundModal && (
         <FundWalletModal
           onClose={() => setFundModal(false)}
+          onBankTransfer={(amount, virtualAccount) => {
+            setBankTransferAmount(amount);
+            setBankTransferVirtualAccount(virtualAccount);
+            setFundModal(false);
+            setBankTransferModal(true);
+          }}
           onFund={async (amount) => {
             try {
               setLoading(true);
@@ -449,6 +540,20 @@ function MerchantPortal() {
               showNotif(error.message || 'Failed to fund wallet', 'error');
               setLoading(false);
             }
+          }}
+        />
+      )}
+
+      {/* Bank Transfer Modal */}
+      {bankTransferModal && (
+        <BankTransferModal
+          amount={bankTransferAmount}
+          virtualAccount={bankTransferVirtualAccount}
+          onClose={() => setBankTransferModal(false)}
+          onSuccess={() => {
+            showNotif('Payment confirmation received! Your wallet will be credited once verified.', 'success');
+            loadWalletBalance();
+            loadTransactions();
           }}
         />
       )}
@@ -580,6 +685,7 @@ function MerchantPortal() {
               onViewOrder={(id) => { setOrderDetailId(id); setScreen("orders"); }}
               onGoOrders={() => setScreen("orders")}
               currentUser={currentUser}
+              onResendVerification={handleResendVerification}
             />
           )}
           {screen === "newOrder" && (
@@ -588,11 +694,12 @@ function MerchantPortal() {
               currentUser={currentUser}
               onPlaceOrder={async (orderData) => {
                 try {
+                  console.log('🎯 onPlaceOrder called with:', orderData);
                   let response;
 
                   // Call appropriate API based on order mode
                   if (orderData.mode === 'quick') {
-                    response = await window.API.Orders.createQuickSend({
+                    const apiPayload = {
                       pickup_address: orderData.pickup,
                       sender_name: orderData.senderName || currentUser?.contact_name || '',
                       sender_phone: orderData.senderPhone || currentUser?.phone || '',
@@ -602,8 +709,12 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       package_type: orderData.packageType || 'Box',
-                      notes: orderData.notes || ''
-                    });
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
+                    };
+                    console.log('📡 Sending to API (Quick Send):', apiPayload);
+                    response = await window.API.Orders.createQuickSend(apiPayload);
                   } else if (orderData.mode === 'multi') {
                     response = await window.API.Orders.createMultiDrop({
                       pickup_address: orderData.pickup,
@@ -612,7 +723,9 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || ''
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
                     });
                   } else if (orderData.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
@@ -622,7 +735,9 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || ''
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
                     });
                   }
 
@@ -689,7 +804,7 @@ function MerchantPortal() {
 }
 
 // ─── LOGIN SCREEN ───────────────────────────────────────────────
-function LoginScreen({ onLogin, onSignup }) {
+function LoginScreen({ onLogin, onSignup, onForgotPassword }) {
   const [phone, setPhone] = useState("");
   const [pass, setPass] = useState("");
   const [loading, setLoading] = useState(false);
@@ -788,10 +903,16 @@ function LoginScreen({ onLogin, onSignup }) {
           </div>
         </div>
 
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 16 }}>
           <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Password</label>
           <input type="password" value={pass} onChange={e => setPass(e.target.value)} onKeyPress={handleKeyPress} placeholder="Enter password"
             style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 46, fontSize: 15, fontFamily: "inherit" }} />
+        </div>
+
+        <div style={{ textAlign: "right", marginBottom: 24 }}>
+          <button onClick={onForgotPassword} style={{ background: "none", border: "none", color: "#E8A838", fontWeight: 600, cursor: "pointer", fontSize: 13, fontFamily: "inherit", textDecoration: "none" }}>
+            Forgot Password?
+          </button>
         </div>
 
         <button onClick={handleLogin} disabled={loading} style={{
@@ -806,6 +927,309 @@ function LoginScreen({ onLogin, onSignup }) {
             Sign Up
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── FORGOT PASSWORD SCREEN ─────────────────────────────────────
+function ForgotPasswordScreen({ onBack }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async () => {
+    if (!email) {
+      setError("Please enter your email address");
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      setError("Please enter a valid email address");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+
+      const response = await fetch('https://www.orders.axpress.net/api/auth/request-password-reset/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSubmitted(true);
+      } else {
+        setError(data.error || "Failed to send reset link. Please try again.");
+      }
+    } catch (err) {
+      setError("Network error. Please check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !submitted) {
+      handleSubmit();
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", fontFamily: "'DM Sans', sans-serif", padding: 20 }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      <div style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 18, boxShadow: "0 8px 32px rgba(0,0,0,0.08)", padding: 48 }}>
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 14, background: `linear-gradient(135deg, #E8A838, #F5C563)`,
+            display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16,
+            boxShadow: "0 4px 16px rgba(232,168,56,0.25)"
+          }}>
+            <div style={{ color: "#1B2A4A" }}>{Icons.lock}</div>
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>Forgot Password?</h2>
+          <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.5 }}>
+            {submitted ? "Check your email for reset instructions" : "Enter your email and we'll send you a reset link"}
+          </p>
+        </div>
+
+        {!submitted ? (
+          <>
+            {error && (
+              <div style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 20, color: "#dc2626", fontSize: 14 }}>
+                {error}
+              </div>
+            )}
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Email Address</label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="your@email.com"
+                style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 46, fontSize: 15, fontFamily: "inherit" }}
+              />
+            </div>
+
+            <button onClick={handleSubmit} disabled={loading} style={{
+              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer",
+              background: loading ? "#e2e8f0" : `linear-gradient(135deg, #E8A838, #F5C563)`, color: loading ? "#94a3b8" : "#1B2A4A", fontFamily: "inherit",
+              boxShadow: loading ? "none" : "0 4px 12px rgba(232,168,56,0.3)", marginBottom: 16
+            }}>
+              {loading ? "Sending..." : "Send Reset Link"}
+            </button>
+          </>
+        ) : (
+          <div style={{ textAlign: "center", padding: "24px 0" }}>
+            <div style={{ color: "#10b981", marginBottom: 16 }}>{Icons.checkCircle}</div>
+            <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+              If an account exists with <strong style={{ color: "#1B2A4A" }}>{email}</strong>, you will receive a password reset link shortly. Please check your inbox and spam folder.
+            </p>
+          </div>
+        )}
+
+        <div style={{ textAlign: "center" }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: "#E8A838", fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>
+            ← Back to Login
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RESET PASSWORD SCREEN ──────────────────────────────────────
+function ResetPasswordScreen({ token, onComplete }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [status, setStatus] = useState("form"); // form, success, error
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Password validation states
+  const [passwordFocused, setPasswordFocused] = useState(false);
+  const hasMinLength = newPassword.length >= 6;
+  const passwordsMatch = newPassword && confirmPassword && newPassword === confirmPassword;
+
+  const handleSubmit = async () => {
+    // Validate passwords
+    if (!newPassword || !confirmPassword) {
+      setMessage("Please fill in both password fields");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setMessage("Passwords do not match");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setMessage("Password must be at least 6 characters long");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setMessage("");
+
+      const response = await fetch('https://www.orders.axpress.net/api/auth/reset-password/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token,
+          new_password: newPassword,
+          confirm_password: confirmPassword
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setStatus("success");
+        // Auto-redirect to login after 3 seconds
+        setTimeout(() => onComplete(), 3000);
+      } else {
+        setStatus("error");
+        setMessage(data.error || "Failed to reset password. Please try again.");
+      }
+    } catch (err) {
+      setStatus("error");
+      setMessage("Network error. Please check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && status === "form") {
+      handleSubmit();
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8fafc", fontFamily: "'DM Sans', sans-serif", padding: 20 }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      <div style={{ width: "100%", maxWidth: 440, background: "#fff", borderRadius: 18, boxShadow: "0 8px 32px rgba(0,0,0,0.08)", padding: 48 }}>
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 14,
+            background: status === "success" ? `linear-gradient(135deg, #10b981, #34d399)` : status === "error" ? `linear-gradient(135deg, #ef4444, #f87171)` : `linear-gradient(135deg, #E8A838, #F5C563)`,
+            display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16,
+            boxShadow: status === "success" ? "0 4px 16px rgba(16,185,129,0.25)" : status === "error" ? "0 4px 16px rgba(239,68,68,0.25)" : "0 4px 16px rgba(232,168,56,0.25)"
+          }}>
+            <div style={{ color: status === "form" ? "#1B2A4A" : "#fff" }}>
+              {status === "success" ? Icons.checkCircle : status === "error" ? Icons.xCircle : Icons.key}
+            </div>
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>
+            {status === "success" ? "Password Reset!" : status === "error" ? "Reset Failed" : "Create New Password"}
+          </h2>
+          <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.5 }}>
+            {status === "success" ? "Redirecting you to login..." : status === "error" ? "There was a problem resetting your password" : "Enter your new password below"}
+          </p>
+        </div>
+
+        {status === "form" && (
+          <>
+            {message && (
+              <div style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 20, color: "#dc2626", fontSize: 14 }}>
+                {message}
+              </div>
+            )}
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>New Password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={e => setNewPassword(e.target.value)}
+                onFocus={() => setPasswordFocused(true)}
+                onBlur={() => setPasswordFocused(false)}
+                onKeyPress={handleKeyPress}
+                placeholder="Enter new password"
+                style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 46, fontSize: 15, fontFamily: "inherit" }}
+              />
+
+              {/* Password strength indicator */}
+              {(passwordFocused || newPassword) && (
+                <div style={{ marginTop: 8, fontSize: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, color: hasMinLength ? "#10b981" : "#94a3b8" }}>
+                    <span>{hasMinLength ? "✓" : "○"}</span>
+                    <span>At least 6 characters</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Confirm Password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Confirm new password"
+                style={{
+                  width: "100%",
+                  border: `1.5px solid ${confirmPassword && !passwordsMatch ? "#fecaca" : "#e2e8f0"}`,
+                  borderRadius: 10,
+                  padding: "0 14px",
+                  height: 46,
+                  fontSize: 15,
+                  fontFamily: "inherit"
+                }}
+              />
+
+              {confirmPassword && !passwordsMatch && (
+                <div style={{ marginTop: 6, fontSize: 12, color: "#dc2626" }}>
+                  Passwords do not match
+                </div>
+              )}
+            </div>
+
+            <button onClick={handleSubmit} disabled={loading} style={{
+              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer",
+              background: loading ? "#e2e8f0" : `linear-gradient(135deg, #E8A838, #F5C563)`, color: loading ? "#94a3b8" : "#1B2A4A", fontFamily: "inherit",
+              boxShadow: loading ? "none" : "0 4px 12px rgba(232,168,56,0.3)"
+            }}>
+              {loading ? "Resetting Password..." : "Reset Password"}
+            </button>
+          </>
+        )}
+
+        {status === "success" && (
+          <div style={{ textAlign: "center", padding: "24px 0" }}>
+            <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>
+              Your password has been reset successfully! You can now login with your new password.
+            </p>
+          </div>
+        )}
+
+        {status === "error" && (
+          <>
+            <div style={{ padding: "12px 16px", background: "#fee2e2", border: "1px solid #fecaca", borderRadius: 10, marginBottom: 20, color: "#dc2626", fontSize: 14 }}>
+              {message}
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <button onClick={onComplete} style={{ background: "none", border: "none", color: "#E8A838", fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>
+                ← Back to Login
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1041,8 +1465,219 @@ function SignupScreen({ onBack, onComplete }) {
   );
 }
 
+// ─── EMAIL VERIFICATION BANNER ──────────────────────────────────
+function EmailVerificationBanner({ currentUser, onResend, onDismiss }) {
+  const [resending, setResending] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  // Don't show if email is verified or banner is dismissed
+  if (!currentUser || currentUser.email_verified || dismissed) return null;
+
+  const handleResend = async () => {
+    setResending(true);
+    await onResend();
+    setResending(false);
+  };
+
+  return (
+    <div style={{
+      background: "linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)",
+      border: "1px solid #FCD34D",
+      borderRadius: 12,
+      padding: "16px 20px",
+      marginBottom: 24,
+      display: "flex",
+      alignItems: "center",
+      gap: 16,
+      boxShadow: "0 2px 8px rgba(252, 211, 77, 0.2)"
+    }}>
+      <div style={{ color: "#92400E", fontSize: 24 }}>
+        {Icons.mail}
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#78350F", marginBottom: 4 }}>
+          Verify Your Email Address
+        </div>
+        <div style={{ fontSize: 13, color: "#92400E", lineHeight: 1.5 }}>
+          We sent a verification email to <strong>{currentUser.email}</strong>. Please check your inbox and click the verification link.
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <button
+          onClick={handleResend}
+          disabled={resending}
+          style={{
+            padding: "8px 16px",
+            borderRadius: 8,
+            border: "1px solid #D97706",
+            background: "#fff",
+            color: "#92400E",
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: resending ? "not-allowed" : "pointer",
+            fontFamily: "inherit",
+            opacity: resending ? 0.6 : 1,
+            whiteSpace: "nowrap"
+          }}
+        >
+          {resending ? "Sending..." : "Resend Email"}
+        </button>
+        <button
+          onClick={() => setDismissed(true)}
+          style={{
+            background: "none",
+            border: "none",
+            color: "#92400E",
+            cursor: "pointer",
+            padding: 4,
+            fontSize: 20,
+            lineHeight: 1
+          }}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── VERIFY EMAIL SCREEN ────────────────────────────────────────
+function VerifyEmailScreen({ token, onComplete }) {
+  const [status, setStatus] = useState("verifying"); // verifying, success, error
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    verifyEmail();
+  }, []);
+
+  const verifyEmail = async () => {
+    try {
+      const response = await fetch(`https://www.orders.axpress.net/api/auth/verify-email/?token=${token}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setStatus("success");
+        setMessage(data.message || "Email verified successfully!");
+
+        // Update user in localStorage
+        if (data.user) {
+          window.API?.Token?.setUser(data.user);
+        }
+
+        // Redirect to dashboard after 3 seconds
+        setTimeout(() => {
+          onComplete();
+        }, 3000);
+      } else {
+        setStatus("error");
+        setMessage(data.error || "Verification failed. Please try again.");
+      }
+    } catch (error) {
+      setStatus("error");
+      setMessage("Network error. Please check your connection and try again.");
+    }
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      background: S.grayBg,
+      padding: 24
+    }}>
+      <div style={{
+        background: "#fff",
+        borderRadius: 18,
+        padding: "48px 40px",
+        maxWidth: 480,
+        width: "100%",
+        textAlign: "center",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.08)"
+      }}>
+        {status === "verifying" && (
+          <>
+            <div style={{
+              width: 48,
+              height: 48,
+              border: `4px solid ${S.goldPale}`,
+              borderTop: `4px solid ${S.gold}`,
+              borderRadius: "50%",
+              margin: "0 auto 24px",
+              animation: "spin 1s linear infinite"
+            }} />
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Verifying Your Email
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: 0 }}>
+              Please wait while we verify your email address...
+            </p>
+          </>
+        )}
+
+        {status === "success" && (
+          <>
+            <div style={{ color: S.green, margin: "0 auto 24px" }}>
+              {Icons.checkCircle}
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Email Verified Successfully!
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: "0 0 24px" }}>
+              {message}
+            </p>
+            <p style={{ fontSize: 13, color: S.grayLight, margin: 0 }}>
+              Redirecting to dashboard...
+            </p>
+          </>
+        )}
+
+        {status === "error" && (
+          <>
+            <div style={{ color: S.red, margin: "0 auto 24px" }}>
+              {Icons.xCircle}
+            </div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>
+              Verification Failed
+            </h2>
+            <p style={{ fontSize: 14, color: S.gray, margin: "0 0 32px" }}>
+              {message}
+            </p>
+            <button
+              onClick={onComplete}
+              style={{
+                padding: "12px 32px",
+                borderRadius: 10,
+                border: "none",
+                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy,
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              }}
+            >
+              Go to Dashboard
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Add CSS animation for spinner */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onGoOrders, currentUser }) {
+function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onGoOrders, currentUser, onResendVerification }) {
   const recentOrders = orders.slice(0, 4);
   const delivered = orders.filter(o => o.status === "Done").length;
   const pending = orders.filter(o => o.status === "Pending" || o.status === "Assigned" || o.status === "Started").length;
@@ -1091,6 +1726,13 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
           {Icons.newOrder} New Delivery
         </button>
       </div>
+
+      {/* Email Verification Banner */}
+      <EmailVerificationBanner
+        currentUser={currentUser}
+        onResend={onResendVerification}
+        onDismiss={() => {}}
+      />
 
       {/* Stat Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16, marginBottom: 28 }}>
@@ -1394,6 +2036,378 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   );
 }
 
+// ─── DELIVERY MAP VIEW COMPONENT ────────────────────────────────
+function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, totalCost, onRouteCalculated }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const directionsRendererRef = useRef(null);
+  const animationIntervalRef = useRef(null);
+
+  // State for route information
+  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState(null); // in minutes
+  const [routeDurationInTraffic, setRouteDurationInTraffic] = useState(null); // in minutes
+
+  // Helper function to format duration
+  const formatDuration = (minutes) => {
+    if (!minutes) return '';
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+  };
+
+  // Function to animate the pulse along the route
+  const startPulseAnimation = () => {
+    // Clear any existing animation
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+    }
+
+    let offset = 0;
+    const speed = 2; // Pixels per frame (adjust for speed)
+
+    animationIntervalRef.current = setInterval(() => {
+      offset = (offset + speed) % 200; // Reset after 200px (2 complete cycles)
+
+      if (directionsRendererRef.current) {
+        const polylineOptions = directionsRendererRef.current.get('polylineOptions');
+        if (polylineOptions && polylineOptions.icons) {
+          // Update the offset of the pulse icon
+          polylineOptions.icons[0].offset = offset + 'px';
+          directionsRendererRef.current.setOptions({ polylineOptions });
+        }
+      }
+    }, 50); // Update every 50ms for smooth animation (~20 fps)
+  };
+
+  useEffect(() => {
+    // Wait for Google Maps to load
+    if (!window.google || !window.google.maps) {
+      console.error('Google Maps not loaded');
+      return;
+    }
+
+    // Initialize map
+    const initMap = () => {
+      if (!mapRef.current) return;
+
+      // Create map centered on Lagos
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, // Lagos, Nigeria
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [
+          {
+            featureType: "poi",
+            elementType: "labels",
+            stylers: [{ visibility: "off" }]
+          }
+        ]
+      });
+
+      mapInstanceRef.current = map;
+
+      // Initialize directions renderer with burnt orange color and animated pulse
+      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+        map: map,
+        suppressMarkers: true, // We'll add custom markers
+        polylineOptions: {
+          strokeColor: '#E8A838', // Burnt orange to match app theme (S.gold)
+          strokeWeight: 4,
+          strokeOpacity: 0.7,
+          icons: [{
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 4,
+              fillColor: '#ffffff',
+              fillOpacity: 0.8,
+              strokeColor: '#ffffff',
+              strokeWeight: 2,
+              strokeOpacity: 0.6
+            },
+            offset: '0%',
+            repeat: '100px'
+          }]
+        }
+      });
+    };
+
+    initMap();
+
+    // Cleanup
+    return () => {
+      if (markersRef.current) {
+        markersRef.current.forEach(marker => marker.setMap(null));
+        markersRef.current = [];
+      }
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setMap(null);
+      }
+      if (animationIntervalRef.current) {
+        clearInterval(animationIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Update markers and route when addresses change
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.google) return;
+
+    const updateMapMarkersAndRoute = async () => {
+      const map = mapInstanceRef.current;
+      const geocoder = new window.google.maps.Geocoder();
+
+      // Clear existing markers
+      markersRef.current.forEach(marker => marker.setMap(null));
+      markersRef.current = [];
+
+      // Geocode pickup address
+      const geocodeAddress = (address) => {
+        return new Promise((resolve) => {
+          geocoder.geocode({ address: address + ', Lagos, Nigeria' }, (results, status) => {
+            if (status === 'OK' && results[0]) {
+              resolve(results[0].geometry.location);
+            } else {
+              console.warn(`Geocoding failed for ${address}:`, status);
+              resolve(null);
+            }
+          });
+        });
+      };
+
+      try {
+        // Geocode pickup
+        const pickupLocation = await geocodeAddress(pickupAddress);
+
+        if (pickupLocation) {
+          // Add green pickup marker
+          const pickupMarker = new window.google.maps.Marker({
+            position: pickupLocation,
+            map: map,
+            title: 'Pickup: ' + pickupAddress,
+            icon: {
+              path: window.google.maps.SymbolPath.CIRCLE,
+              scale: 10,
+              fillColor: '#10b981',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 3
+            },
+            label: {
+              text: '📍',
+              fontSize: '16px'
+            }
+          });
+          markersRef.current.push(pickupMarker);
+        }
+
+        // Geocode dropoffs
+        const dropoffLocations = [];
+        for (let i = 0; i < dropoffs.length; i++) {
+          const dropoff = dropoffs[i];
+          const location = await geocodeAddress(dropoff.address);
+
+          if (location) {
+            dropoffLocations.push({ location, dropoff, index: i });
+
+            // Add numbered gold marker for each dropoff
+            const dropoffMarker = new window.google.maps.Marker({
+              position: location,
+              map: map,
+              title: `Delivery ${i + 1}: ${dropoff.address}`,
+              icon: {
+                path: window.google.maps.SymbolPath.CIRCLE,
+                scale: 12,
+                fillColor: '#E8A838',
+                fillOpacity: 1,
+                strokeColor: '#ffffff',
+                strokeWeight: 3
+              },
+              label: {
+                text: String(i + 1),
+                color: '#1B2A4A',
+                fontSize: '12px',
+                fontWeight: 'bold'
+              }
+            });
+            markersRef.current.push(dropoffMarker);
+          }
+        }
+
+        // Draw route if we have pickup and at least one dropoff
+        if (pickupLocation && dropoffLocations.length > 0 && directionsRendererRef.current) {
+          const directionsService = new window.google.maps.DirectionsService();
+
+          // Prepare waypoints for multi-stop route
+          const waypoints = dropoffLocations.slice(0, -1).map(d => ({
+            location: d.location,
+            stopover: true
+          }));
+
+          const request = {
+            origin: pickupLocation,
+            destination: dropoffLocations[dropoffLocations.length - 1].location,
+            waypoints: waypoints,
+            travelMode: window.google.maps.TravelMode.DRIVING,
+            optimizeWaypoints: true
+          };
+
+          directionsService.route(request, (result, status) => {
+            if (status === 'OK') {
+              directionsRendererRef.current.setDirections(result);
+
+              // Extract distance and duration from route
+              if (result.routes && result.routes[0] && result.routes[0].legs) {
+                let totalDistanceMeters = 0;
+                let totalDurationSeconds = 0;
+                let totalDurationInTrafficSeconds = 0;
+                let hasTrafficData = false;
+
+                // Sum up all legs (for multi-stop routes)
+                result.routes[0].legs.forEach(leg => {
+                  if (leg.distance && leg.distance.value) {
+                    totalDistanceMeters += leg.distance.value;
+                  }
+                  if (leg.duration && leg.duration.value) {
+                    totalDurationSeconds += leg.duration.value;
+                  }
+                  if (leg.duration_in_traffic && leg.duration_in_traffic.value) {
+                    totalDurationInTrafficSeconds += leg.duration_in_traffic.value;
+                    hasTrafficData = true;
+                  }
+                });
+
+                // Convert to user-friendly units
+                const distanceKm = (totalDistanceMeters / 1000).toFixed(1); // kilometers with 1 decimal
+                const durationMin = Math.round(totalDurationSeconds / 60); // minutes
+                const durationInTrafficMin = hasTrafficData ? Math.round(totalDurationInTrafficSeconds / 60) : null;
+
+                // Update state
+                setRouteDistance(parseFloat(distanceKm));
+                setRouteDuration(durationMin);
+                setRouteDurationInTraffic(durationInTrafficMin);
+
+                // Notify parent component of route calculation
+                if (onRouteCalculated) {
+                  onRouteCalculated(parseFloat(distanceKm), durationMin);
+                }
+              }
+
+              // Re-apply polyline options with icons after setDirections
+              // (setDirections replaces the polyline, losing our custom icons)
+              const polylineOptions = {
+                strokeColor: '#E8A838',
+                strokeWeight: 4,
+                strokeOpacity: 0.7,
+                icons: [{
+                  icon: {
+                    path: window.google.maps.SymbolPath.CIRCLE,
+                    scale: 4,
+                    fillColor: '#ffffff',
+                    fillOpacity: 0.8,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 2,
+                    strokeOpacity: 0.6
+                  },
+                  offset: '0%',
+                  repeat: '100px'
+                }]
+              };
+              directionsRendererRef.current.setOptions({ polylineOptions });
+
+              // Start animated pulse effect
+              startPulseAnimation();
+            } else {
+              console.warn('Directions request failed:', status);
+            }
+          });
+        }
+
+        // Fit bounds to show all markers
+        if (markersRef.current.length > 0) {
+          const bounds = new window.google.maps.LatLngBounds();
+          markersRef.current.forEach(marker => {
+            bounds.extend(marker.getPosition());
+          });
+          map.fitBounds(bounds);
+
+          // Add padding
+          const padding = { top: 50, right: 50, bottom: 100, left: 50 };
+          map.fitBounds(bounds, padding);
+        }
+
+      } catch (error) {
+        console.error('Error updating map:', error);
+      }
+    };
+
+    if (pickupAddress && dropoffs.length > 0) {
+      updateMapMarkersAndRoute();
+    }
+  }, [pickupAddress, dropoffs]);
+
+  return (
+    <div style={{ flex: 1, minWidth: 0, minHeight: 520, borderRadius: 14, overflow: "hidden", position: "relative", border: "1px solid #e2e8f0" }}>
+      {/* Google Map Container */}
+      <div ref={mapRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0 }} />
+
+      {/* Summary card on map */}
+      <div style={{
+        position: "absolute", bottom: 14, left: 14, right: 14, zIndex: 10,
+        background: "rgba(255,255,255,0.95)", backdropFilter: "blur(8px)",
+        borderRadius: 12, padding: "12px 16px", boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
+        display: "flex", alignItems: "center", justifyContent: "space-between"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
+            {vehicle === "Bike" ? Icons.bike : vehicle === "Car" ? Icons.car : Icons.van}
+          </div>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{totalDeliveries} × {vehicle} Delivery</div>
+            <div style={{ fontSize: 11, color: S.grayLight }}>from {pickupAddress.split(",")[0]}</div>
+            {/* Distance and Duration Row */}
+            {(routeDistance || routeDuration) && (
+              <div style={{ fontSize: 11, color: S.gray, marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+                {routeDistance && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span>📏</span>
+                    <span>{routeDistance} km</span>
+                  </span>
+                )}
+                {routeDistance && routeDuration && <span>•</span>}
+                {routeDuration && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span>🕐</span>
+                    <span>
+                      {formatDuration(routeDuration)}
+                      {routeDurationInTraffic && routeDurationInTraffic !== routeDuration && (
+                        <span style={{ color: S.grayLight }}> ({formatDuration(routeDurationInTraffic)} in traffic)</span>
+                      )}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>₦{totalCost.toLocaleString()}</div>
+      </div>
+
+      {/* Location badge */}
+      <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.85)", borderRadius: 6, padding: "4px 8px", fontSize: 10, color: S.grayLight, zIndex: 10 }}>
+        🗺️ Lagos, Nigeria
+      </div>
+    </div>
+  );
+}
+
 // ─── NEW ORDER SCREEN ───────────────────────────────────────────
 function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   // ─── Mode: "quick" | "multi" | "bulk" ───
@@ -1404,10 +2418,156 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [payMethod, setPayMethod] = useState("wallet");
   const [step, setStep] = useState(1); // 1=form, 2=review
 
+  // ─── Vehicle pricing from backend ───
+  const [vehiclePricing, setVehiclePricing] = useState({
+    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
+    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
+    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+  });
+
+  // ─── Early price estimation (Step 1) ───
+  const [earlyRouteDistance, setEarlyRouteDistance] = useState(null);
+  const [earlyRouteDuration, setEarlyRouteDuration] = useState(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [routeError, setRouteError] = useState(null);
+
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
+
+  // ─── Quick Send state (declare BEFORE effects that depend on it) ───
+  const [dropoffAddress, setDropoffAddress] = useState("");
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [estimatedCost, setEstimatedCost] = useState(null);
+
+  // Wrapper to log dropoff address changes
+  const handleDropoffChange = (value) => {
+    console.log('📍 Dropoff address changed:', value);
+    setDropoffAddress(value);
+  };
+
+  // ─── Load vehicle pricing from backend ───
+  useEffect(() => {
+    const loadVehiclePricing = async () => {
+      try {
+        const response = await window.API.Orders.getVehicles();
+        if (response.success && response.vehicles) {
+          const pricing = {};
+          response.vehicles.forEach(v => {
+            pricing[v.name] = {
+              base_fare: parseFloat(v.base_fare),
+              rate_per_km: parseFloat(v.rate_per_km),
+              rate_per_minute: parseFloat(v.rate_per_minute)
+            };
+          });
+          setVehiclePricing(pricing);
+          console.log('✅ Loaded vehicle pricing from backend:', pricing);
+        }
+      } catch (error) {
+        console.error('Failed to load vehicle pricing:', error);
+        // Keep default pricing as fallback
+      }
+    };
+
+    loadVehiclePricing();
+  }, []);
+
+  // ─── Calculate route for early price estimation ───
+  useEffect(() => {
+    console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
+
+    // Only calculate for Quick Send mode when both addresses are available
+    if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+      console.log('⏭️ Skipping route calculation:', {
+        reason: mode !== 'quick' ? 'Not quick mode' : !pickupAddress ? 'No pickup' : 'No dropoff',
+        mode,
+        hasPickup: !!pickupAddress,
+        hasDropoff: !!dropoffAddress
+      });
+			setCalculatingRoute(false);
+      setEarlyRouteDistance(null);
+      setEarlyRouteDuration(null);
+      setRouteError(null);
+      return;
+    }
+
+		// Reset any previous early-route result so pricing never stays stuck on an old route
+		// (especially after navigating Step 2 → Step 1 and editing addresses)
+		setEarlyRouteDistance(null);
+		setEarlyRouteDuration(null);
+		setRouteError(null);
+		setCalculatingRoute(true);
+
+    const calculateEarlyRoute = async () => {
+      console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
+			setRouteError(null);
+
+      try {
+        // Check if Google Maps is loaded
+        if (typeof google === 'undefined' || !google.maps) {
+          console.error('❌ Google Maps not loaded yet');
+          setRouteError('Maps not loaded');
+          setCalculatingRoute(false);
+          return;
+        }
+
+        // Use Google Maps Directions API to calculate route
+        const directionsService = new google.maps.DirectionsService();
+
+        const request = {
+          origin: pickupAddress,
+          destination: dropoffAddress,
+          travelMode: google.maps.TravelMode.DRIVING,
+          drivingOptions: {
+            departureTime: new Date(),
+            trafficModel: google.maps.TrafficModel.BEST_GUESS
+          }
+        };
+
+        console.log('📡 Sending directions request...', request);
+
+        directionsService.route(request, (result, status) => {
+          console.log('📥 Directions response:', { status, result });
+
+          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+            const route = result.routes[0];
+            let totalDistance = 0;
+            let totalDuration = 0;
+
+            // Sum up all legs
+            route.legs.forEach(leg => {
+              totalDistance += leg.distance.value; // in meters
+              totalDuration += leg.duration_in_traffic?.value || leg.duration.value; // in seconds
+            });
+
+            const distanceKm = (totalDistance / 1000).toFixed(1);
+            const durationMin = Math.ceil(totalDuration / 60);
+
+            setEarlyRouteDistance(parseFloat(distanceKm));
+            setEarlyRouteDuration(durationMin);
+            setCalculatingRoute(false);
+
+            console.log('✅ Early route calculated:', { distanceKm, durationMin });
+          } else {
+            console.error('❌ Route calculation failed:', status);
+            setRouteError('Unable to calculate route');
+            setCalculatingRoute(false);
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error calculating route:', error);
+        setRouteError('Error calculating route');
+        setCalculatingRoute(false);
+      }
+    };
+
+    // Debounce the calculation to avoid too many API calls
+    const timeoutId = setTimeout(calculateEarlyRoute, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, dropoffAddress]);
 
   // ─── Load default address on mount ───
   useEffect(() => {
@@ -1431,18 +2591,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     }
   }, [currentUser]);
 
-  // ─── Quick Send state ───
-  const [dropoffAddress, setDropoffAddress] = useState("");
-  const [receiverName, setReceiverName] = useState("");
-  const [receiverPhone, setReceiverPhone] = useState("");
-  const [notes, setNotes] = useState("");
-  const [estimatedCost, setEstimatedCost] = useState(null);
-
   // ─── Multi-Drop state ───
   const [drops, setDrops] = useState([
     { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
   ]);
   const nextDropId = useRef(2);
+
+  // ─── Route information state (for pricing) ───
+  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState(null); // in minutes
+
+	// When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
+	// Step 1 should always reflect the *current* addresses via early-route calculation.
+	useEffect(() => {
+		if (step === 1) {
+			setRouteDistance(null);
+			setRouteDuration(null);
+		}
+	}, [step]);
 
   const addDrop = () => {
     setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
@@ -1542,7 +2708,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   // ─── Price calculation ───
-  const costs = { Bike: 1210, Car: 4500, Van: 12000 };
+  // Calculate price for a specific vehicle using early route data
+  const calculateEarlyPrice = (vehicleName) => {
+    if (!earlyRouteDistance || !earlyRouteDuration) return null;
+
+    const pricing = vehiclePricing[vehicleName];
+    if (!pricing) return null;
+
+    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
+    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
+    const total = pricing.base_fare + distanceCost + timeCost;
+
+    return Math.round(total);
+  };
 
   const getActiveDropoffs = () => {
     if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
@@ -1552,7 +2730,35 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   const totalDeliveries = getActiveDropoffs().length;
-  const unitCost = costs[vehicle] || 1210;
+
+  // Calculate dynamic cost based on route distance and duration
+  const calculateCost = () => {
+    const pricing = vehiclePricing[vehicle];
+    if (!pricing) return 0;
+
+		// Step 2 uses the full route (map) calculation.
+		// IMPORTANT: Don't use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
+		// after navigating Step 2 → Step 1 and editing addresses.
+		if (step === 2 && routeDistance && routeDuration) {
+      const distanceCost = routeDistance * pricing.rate_per_km;
+      const timeCost = routeDuration * pricing.rate_per_minute;
+      const total = pricing.base_fare + distanceCost + timeCost;
+      return Math.round(total); // Round to nearest naira
+    }
+
+    // Step 1 (Quick Send): if we already calculated an early route, use it
+    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
+      const distanceCost = earlyRouteDistance * pricing.rate_per_km;
+      const timeCost = earlyRouteDuration * pricing.rate_per_minute;
+      const total = pricing.base_fare + distanceCost + timeCost;
+      return Math.round(total);
+    }
+
+    // Fallback: estimate based on base fare only (will be updated when route loads)
+    return pricing.base_fare;
+  };
+
+  const unitCost = calculateCost();
   const totalCost = totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
@@ -1560,6 +2766,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const handleConfirmAll = () => {
     const deliveries = getActiveDropoffs();
+
+    // Debug: Log route data
+    console.log('🚀 handleConfirmAll called!');
+    console.log('📏 Route data:', { routeDistance, routeDuration });
 
     // Prepare order data based on mode
     const orderData = {
@@ -1569,8 +2779,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       senderPhone: senderPhone,
       vehicle: vehicle,
       payMethod: payMethod,
-      notes: notes
+      notes: notes,
+      // Include route information for pricing calculation
+      distance_km: routeDistance || 0,
+      duration_minutes: routeDuration || 0
     };
+
+    // Debug: Log order data
+    console.log('📦 Order data being sent:', orderData);
+    console.log('💰 Pricing data:', {
+      distance_km: orderData.distance_km,
+      duration_minutes: orderData.duration_minutes,
+      vehicle: orderData.vehicle
+    });
 
     if (mode === 'quick') {
       // Quick Send - single delivery
@@ -1602,9 +2823,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const pkgTypes = ["Box", "Envelope", "Fragile", "Food", "Document"];
 
   const vehicles = [
-    { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg", from: "₦1,200" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", from: "₦4,500" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", from: "₦12,000" },
+    { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
   ];
 
   const modeConfig = [
@@ -1679,10 +2900,120 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               </div>
               <AddressAutocompleteInput
                 value={dropoffAddress}
-                onChange={setDropoffAddress}
+                onChange={handleDropoffChange}
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: 10 }}
               />
+
+              {/* ═══ EARLY PRICE ESTIMATION ═══ */}
+              {pickupAddress && dropoffAddress && (
+                <div style={{
+                  background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
+                  borderRadius: 12,
+                  padding: 16,
+                  marginBottom: 14,
+                  border: "1px solid #fbbf24"
+                }}>
+                  {calculatingRoute ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 20,
+                        height: 20,
+                        border: "3px solid #f59e0b",
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "spin 0.8s linear infinite"
+                      }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
+                        Calculating route and prices...
+                      </span>
+                    </div>
+                  ) : routeError ? (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>
+                      ⚠️ {routeError}
+                    </div>
+                  ) : earlyRouteDistance && earlyRouteDuration ? (
+                    <div>
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 12
+                      }}>
+                        <h4 style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#92400e",
+                          margin: 0
+                        }}>
+                          💰 Estimated Prices
+                        </h4>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#b45309",
+                          background: "#fef3c7",
+                          padding: "2px 8px",
+                          borderRadius: 6
+                        }}>
+                          📏 {earlyRouteDistance}km • 🕐 {earlyRouteDuration}min
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                        {["Bike", "Car", "Van"].map(vehicleName => {
+                          const price = calculateEarlyPrice(vehicleName);
+                          const isSelected = vehicle === vehicleName;
+
+                          return (
+                            <div
+                              key={vehicleName}
+                              onClick={() => setVehicle(vehicleName)}
+                              style={{
+                                background: isSelected ? "#fff" : "#fef3c7",
+                                border: isSelected ? "2px solid #f59e0b" : "1px solid #fbbf24",
+                                borderRadius: 10,
+                                padding: "10px 8px",
+                                textAlign: "center",
+                                cursor: "pointer",
+                                transition: "all 0.2s ease",
+                                boxShadow: isSelected ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none"
+                              }}
+                            >
+                              <div style={{
+                                fontSize: 11,
+                                fontWeight: 700,
+                                color: "#92400e",
+                                marginBottom: 4
+                              }}>
+                                {vehicleName === "Bike" ? "🏍️" : vehicleName === "Car" ? "🚗" : "🚐"} {vehicleName}
+                              </div>
+                              <div style={{
+                                fontSize: 16,
+                                fontWeight: 800,
+                                color: "#b45309"
+                              }}>
+                                ₦{price?.toLocaleString() || "—"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{
+                        fontSize: 10,
+                        color: "#92400e",
+                        marginTop: 8,
+                        textAlign: "center",
+                        fontStyle: "italic"
+                      }}>
+                        Click a vehicle to select it
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
                 <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={inputStyle} />
                 <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={inputStyle} />
@@ -1900,18 +3231,34 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 14 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Vehicle</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-              {vehicles.map(v => (
-                <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                  background: vehicle === v.id ? S.goldPale : "#f8fafc", border: vehicle === v.id ? `2px solid ${S.gold}` : "2px solid transparent",
-                  borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                  transition: "all 0.2s"
-                }}>
-                  <div style={{ color: vehicle === v.id ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
-                  <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: S.gold, marginTop: 4 }}>{v.from}</div>
-                </button>
-              ))}
+              {vehicles.map(v => {
+                const isSelected = vehicle === v.id;
+                const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
+                const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
+
+                const baseFare = vehiclePricing?.[v.id]?.base_fare;
+                const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
+                const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
+
+                return (
+                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
+                    background: isSelected ? S.goldPale : "#f8fafc",
+                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
+                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                    transition: "all 0.2s"
+                  }}>
+                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
+                    <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+                      {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+                    </div>
+                    <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
+                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1934,7 +3281,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   <div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
-                      ₦{totalCost.toLocaleString()}
+                      ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
                     </div>
                   </div>
                 )}
@@ -2078,62 +3425,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           </div>
 
           {/* RIGHT — Map */}
-          <div style={{ flex: 1, minWidth: 0, minHeight: 520, borderRadius: 14, overflow: "hidden", position: "relative", border: "1px solid #e2e8f0" }}>
-            <iframe title="Delivery Route"
-              src="https://www.openstreetmap.org/export/embed.html?bbox=3.28%2C6.40%2C3.50%2C6.55&layer=mapnik"
-              style={{ width: "100%", height: "100%", border: "none", position: "absolute", inset: 0 }} loading="eager" />
-
-            {/* Pickup marker */}
-            <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -100%)", zIndex: 10, pointerEvents: "none" }}>
-              <div style={{ background: S.green, color: "#fff", padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>📍 Pickup</div>
-              <div style={{ width: 2, height: 12, background: S.green, margin: "0 auto" }} />
-              <div style={{ width: 8, height: 8, borderRadius: "50%", background: S.green, border: "2px solid #fff", margin: "0 auto", boxShadow: "0 1px 4px rgba(0,0,0,0.3)" }} />
-            </div>
-
-            {/* Dropoff markers (spread around) */}
-            {getActiveDropoffs().slice(0, 8).map((d, i) => {
-              const positions = [
-                { top: "30%", left: "35%" }, { top: "25%", left: "60%" },
-                { top: "40%", left: "25%" }, { top: "65%", left: "70%" },
-                { top: "55%", left: "30%" }, { top: "35%", left: "75%" },
-                { top: "70%", left: "45%" }, { top: "20%", left: "45%" },
-              ];
-              const pos = positions[i] || positions[0];
-              return (
-                <div key={i} style={{ position: "absolute", ...pos, transform: "translate(-50%, -100%)", zIndex: 10, pointerEvents: "none" }}>
-                  <div style={{
-                    background: S.gold, color: S.navy, padding: "3px 8px", borderRadius: 6,
-                    fontSize: 10, fontWeight: 800, boxShadow: "0 2px 6px rgba(0,0,0,0.2)"
-                  }}>{i + 1}</div>
-                  <div style={{ width: 2, height: 8, background: S.gold, margin: "0 auto" }} />
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.gold, border: "2px solid #fff", margin: "0 auto" }} />
-                </div>
-              );
-            })}
-
-            {/* Summary card on map */}
-            <div style={{
-              position: "absolute", bottom: 14, left: 14, right: 14, zIndex: 10,
-              background: "rgba(255,255,255,0.95)", backdropFilter: "blur(8px)",
-              borderRadius: 12, padding: "12px 16px", boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
-              display: "flex", alignItems: "center", justifyContent: "space-between"
-            }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 8, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
-                  {vehicle === "Bike" ? Icons.bike : vehicle === "Car" ? Icons.car : Icons.van}
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{totalDeliveries} × {vehicle} Delivery</div>
-                  <div style={{ fontSize: 11, color: S.grayLight }}>from {pickupAddress.split(",")[0]}</div>
-                </div>
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>₦{totalCost.toLocaleString()}</div>
-            </div>
-
-            <div style={{ position: "absolute", top: 10, right: 10, background: "rgba(255,255,255,0.85)", borderRadius: 6, padding: "4px 8px", fontSize: 10, color: S.grayLight, zIndex: 10 }}>
-              🗺️ Lagos, Nigeria
-            </div>
-          </div>
+          <DeliveryMapView
+            pickupAddress={pickupAddress}
+            dropoffs={getActiveDropoffs()}
+            vehicle={vehicle}
+            totalDeliveries={totalDeliveries}
+            totalCost={totalCost}
+            onRouteCalculated={(distance, duration) => {
+              console.log('onRouteCalculated called:', { distance, duration });
+              setRouteDistance(distance);
+              setRouteDuration(duration);
+            }}
+          />
         </div>
       )}
     </div>
@@ -2603,11 +3906,41 @@ function WalletScreen({ balance, transactions, onFund }) {
 }
 
 // ─── FUND WALLET MODAL ──────────────────────────────────────────
-function FundWalletModal({ onClose, onFund }) {
+function FundWalletModal({ onClose, onFund, onBankTransfer }) {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("card");
+  const [fetchingAccount, setFetchingAccount] = useState(false);
 
   const presets = [1000, 2000, 5000, 10000, 20000, 50000];
+
+  const handlePay = async () => {
+    if (!amount) return;
+
+    const amountValue = parseInt(amount);
+
+    if (method === "transfer") {
+      // Fetch virtual account details then open bank transfer modal
+      setFetchingAccount(true);
+      try {
+        const response = await window.API.Wallet.getVirtualAccount();
+        if (response.success) {
+          onBankTransfer(amountValue, response.data);
+        } else {
+          alert('Failed to load bank account details. Please try again.');
+        }
+      } catch (e) {
+        alert('Failed to load bank account details. Please try again.');
+      } finally {
+        setFetchingAccount(false);
+      }
+    } else if (method === "card") {
+      // Use existing Paystack flow
+      onFund(amountValue);
+    } else {
+      // Other payment methods (LibertyPay, etc.)
+      alert(`${method} payment coming soon!`);
+    }
+  };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
@@ -2656,17 +3989,261 @@ function FundWalletModal({ onClose, onFund }) {
             ))}
           </div>
 
-          <button onClick={() => amount && onFund(parseInt(amount))} disabled={!amount}
+          <button onClick={handlePay} disabled={!amount || fetchingAccount}
             style={{
-              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: amount ? "pointer" : "default",
-              background: amount ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#e2e8f0",
-              color: amount ? S.navy : "#94a3b8", fontFamily: "inherit", marginTop: 16,
-              boxShadow: amount ? "0 4px 12px rgba(232,168,56,0.3)" : "none"
+              width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700,
+              cursor: (amount && !fetchingAccount) ? "pointer" : "default",
+              background: (amount && !fetchingAccount) ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#e2e8f0",
+              color: (amount && !fetchingAccount) ? S.navy : "#94a3b8", fontFamily: "inherit", marginTop: 16,
+              boxShadow: (amount && !fetchingAccount) ? "0 4px 12px rgba(232,168,56,0.3)" : "none"
             }}>
-            {amount ? `Pay ₦${parseInt(amount).toLocaleString()}` : "Enter Amount"}
+            {fetchingAccount ? 'Loading account...' : amount ? `Pay ₦${parseInt(amount).toLocaleString()}` : "Enter Amount"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── BANK TRANSFER MODAL ────────────────────────────────────────
+function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
+  // Start directly at 'show-details' since virtual account was already fetched
+  const [state, setState] = useState(virtualAccount ? 'show-details' : 'loading');
+  const [copied, setCopied] = useState(false);
+
+  // Build bank details from the virtual account prop
+  const bankDetails = virtualAccount ? {
+    bankName: virtualAccount.bank_name || "Wema Bank",
+    accountNumber: virtualAccount.account_number,
+    accountName: virtualAccount.account_name,
+  } : null;
+
+  // Fallback: if somehow virtualAccount wasn't provided, show an error after a short delay
+  useEffect(() => {
+    if (!virtualAccount) {
+      const timer = setTimeout(() => setState('show-details'), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [virtualAccount]);
+
+  const copyAccountNumber = () => {
+    navigator.clipboard.writeText(bankDetails.accountNumber);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleConfirmPayment = () => {
+    setState('confirming');
+    setTimeout(() => {
+      setState('success');
+    }, 2500);
+  };
+
+  const handleClose = () => {
+    if (state === 'success' && onSuccess) {
+      onSuccess();
+    }
+    onClose();
+  };
+
+  // Loading Spinner Component
+  const LoadingSpinner = () => (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px" }}>
+      <div style={{
+        width: 60,
+        height: 60,
+        border: `4px solid ${S.goldPale}`,
+        borderTop: `4px solid ${S.gold}`,
+        borderRadius: "50%",
+        animation: "spin 1s linear infinite"
+      }} />
+      <p style={{ marginTop: 24, fontSize: 15, fontWeight: 600, color: S.navy }}>
+        {state === 'loading' ? 'Generating account details...' : 'Processing confirmation...'}
+      </p>
+      <p style={{ marginTop: 8, fontSize: 13, color: S.grayLight }}>Please wait</p>
+    </div>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
+      <div onClick={handleClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} />
+      <div style={{ position: "relative", background: "#fff", borderRadius: 18, width: 440, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.3s ease" }}>
+
+        {/* Header */}
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>
+            {state === 'success' ? 'Payment Confirmed' : 'Bank Transfer'}
+          </h3>
+          <button onClick={handleClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.gray, padding: 4 }}>
+            {Icons.close}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: 24 }}>
+          {/* Loading State */}
+          {(state === 'loading' || state === 'confirming') && <LoadingSpinner />}
+
+          {/* Show Bank Details */}
+          {state === 'show-details' && !bankDetails && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ fontSize: 15, color: S.red || "#ef4444", fontWeight: 600 }}>
+                Could not load bank account details. Please close and try again.
+              </p>
+            </div>
+          )}
+          {state === 'show-details' && bankDetails && (
+            <div>
+              {/* Amount to Transfer */}
+              <div style={{ background: S.goldPale, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: S.grayLight, marginBottom: 6 }}>Amount to Transfer</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
+                  ₦{amount.toLocaleString()}
+                </div>
+              </div>
+
+              {/* Bank Details */}
+              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: S.grayLight, marginBottom: 4 }}>Bank Name</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: S.navy }}>{bankDetails.bankName}</div>
+                </div>
+
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: S.grayLight, marginBottom: 4 }}>Account Number</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace", flex: 1 }}>
+                      {bankDetails.accountNumber}
+                    </div>
+                    <button onClick={copyAccountNumber} style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: copied ? S.greenBg : S.goldPale,
+                      color: copied ? S.green : S.gold,
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      transition: "all 0.2s"
+                    }}>
+                      {copied ? '✓ Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: S.grayLight, marginBottom: 4 }}>Account Name</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: S.navy }}>{bankDetails.accountName}</div>
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div style={{ background: "#fffbeb", border: "1px solid #fef3c7", borderRadius: 10, padding: 16, marginBottom: 20 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 8 }}>⚠️ Important Instructions</div>
+                <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: "#78350f", lineHeight: 1.6 }}>
+                  <li>Transfer exactly <strong>₦{amount.toLocaleString()}</strong> to the account above</li>
+                  <li>Your wallet will be credited within 5-10 minutes after payment</li>
+                  <li>Click "I have paid" only after completing the transfer</li>
+                </ul>
+              </div>
+
+              {/* Confirm Button */}
+              <button onClick={handleConfirmPayment} style={{
+                width: "100%",
+                height: 48,
+                border: "none",
+                borderRadius: 10,
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy,
+                fontFamily: "inherit",
+                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              }}>
+                I have paid
+              </button>
+            </div>
+          )}
+
+          {/* Success State */}
+          {state === 'success' && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              {/* Success Icon */}
+              <div style={{
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
+                background: S.greenBg,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 24px",
+                animation: "scaleIn 0.5s ease"
+              }}>
+                <div style={{ fontSize: 40, color: S.green }}>✓</div>
+              </div>
+
+              {/* Success Message */}
+              <h3 style={{ fontSize: 20, fontWeight: 800, color: S.navy, margin: "0 0 12px" }}>
+                Payment Confirmation Received!
+              </h3>
+              <p style={{ fontSize: 14, color: S.gray, lineHeight: 1.6, margin: "0 0 24px" }}>
+                Your wallet will be credited once payment is verified. This usually takes 5-10 minutes.
+              </p>
+
+              {/* Transaction Details */}
+              <div style={{ background: "#f8fafc", borderRadius: 10, padding: 16, marginBottom: 24, textAlign: "left" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: S.grayLight }}>Amount</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>₦{amount.toLocaleString()}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 13, color: S.grayLight }}>Bank</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{bankDetails.bankName}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 13, color: S.grayLight }}>Status</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#fef3c7", color: "#92400e" }}>
+                    Pending Verification
+                  </span>
+                </div>
+              </div>
+
+              {/* Done Button */}
+              <button onClick={handleClose} style={{
+                width: "100%",
+                height: 48,
+                border: "none",
+                borderRadius: 10,
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy,
+                fontFamily: "inherit",
+                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              }}>
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Add keyframe animations */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        @keyframes scaleIn {
+          0% { transform: scale(0); }
+          50% { transform: scale(1.1); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
     </div>
   );
 }

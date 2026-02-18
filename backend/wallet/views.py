@@ -11,12 +11,13 @@ import hashlib
 import hmac
 from decimal import Decimal
 
-from .models import Wallet, Transaction
+from .models import Wallet, Transaction, VirtualAccount
 from .serializers import (
     WalletSerializer,
     TransactionSerializer,
     FundWalletSerializer,
-    VerifyPaymentSerializer
+    VerifyPaymentSerializer,
+    VirtualAccountSerializer,
 )
 
 
@@ -269,6 +270,104 @@ def verify_payment(request):
         return Response({
             'success': False,
             'errors': {'detail': str(e)}
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_virtual_account(request):
+    """Get or create a CoreBanking virtual account for the authenticated user."""
+    try:
+        try:
+            virtual_account = VirtualAccount.objects.get(user=request.user)
+        except VirtualAccount.DoesNotExist:
+            from .corebanking_service import create_virtual_account
+            virtual_account = create_virtual_account(request.user)
+
+        serializer = VirtualAccountSerializer(virtual_account)
+        return Response({
+            'success': True,
+            'data': serializer.data,
+        })
+
+    except Exception as e:
+        return Response({
+            'success': False,
+            'errors': {'detail': str(e)},
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([])
+@csrf_exempt
+def corebanking_webhook(request):
+    """
+    Handle CoreBanking (LibertyPay) webhook for incoming transfer notifications.
+    Credits the merchant's wallet when a CREDIT settlement is received.
+    """
+    try:
+        # Optional signature verification
+        webhook_secret = settings.COREBANKING_WEBHOOK_SECRET
+        if webhook_secret:
+            signature = request.headers.get('X-Webhook-Signature', '')
+            expected = hmac.new(
+                webhook_secret.encode('utf-8'),
+                request.body,
+                hashlib.sha256,
+            ).hexdigest()
+            if signature != expected:
+                return Response({
+                    'success': False,
+                    'errors': {'detail': 'Invalid signature'},
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data
+
+        # Only process settled credit transactions
+        if data.get('transaction_type') != 'CREDIT' or not data.get('settlement_status'):
+            return Response({'success': True})
+
+        recipient_account_number = data.get('recipient_account_number', '').strip()
+        amount = data.get('amount', 0)
+        transaction_reference = data.get('transaction_reference', '').strip()
+        payer_name = data.get('payer_account_name', 'Bank Transfer')
+
+        if not recipient_account_number or not transaction_reference:
+            return Response({
+                'success': False,
+                'errors': {'detail': 'Missing required fields'},
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Idempotency: skip if already processed
+        if Transaction.objects.filter(reference=transaction_reference).exists():
+            return Response({'success': True})
+
+        # Find the merchant via virtual account
+        try:
+            virtual_account = VirtualAccount.objects.select_related('user').get(
+                account_number=recipient_account_number
+            )
+        except VirtualAccount.DoesNotExist:
+            return Response({
+                'success': False,
+                'errors': {'detail': 'Virtual account not found'},
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        wallet, _ = Wallet.objects.get_or_create(user=virtual_account.user)
+
+        with db_transaction.atomic():
+            wallet.credit(
+                amount=Decimal(str(amount)),
+                description=f'Bank transfer from {payer_name}',
+                reference=transaction_reference,
+            )
+
+        return Response({'success': True})
+
+    except Exception as e:
+        return Response({
+            'success': False,
+            'errors': {'detail': str(e)},
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

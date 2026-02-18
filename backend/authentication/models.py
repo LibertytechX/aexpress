@@ -64,6 +64,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     email_verified = models.BooleanField(default=False)
     phone_verified = models.BooleanField(default=False)
 
+    # Email verification
+    email_verification_token = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    email_verification_token_created = models.DateTimeField(null=True, blank=True)
+
+    # Password reset
+    password_reset_token = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    password_reset_token_created = models.DateTimeField(null=True, blank=True)
+
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

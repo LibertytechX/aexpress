@@ -127,3 +127,31 @@ class Transaction(models.Model):
             self.balance_before = self.wallet.balance
 
         super().save(*args, **kwargs)
+
+
+class VirtualAccount(models.Model):
+    """
+    VirtualAccount model - One Wema Bank virtual account per user (permanent)
+    Created via CoreBanking (LibertyPay) API on first wallet funding via transfer.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='virtual_account'
+    )
+    account_number = models.CharField(max_length=20, unique=True, db_index=True)
+    account_name = models.CharField(max_length=255)
+    bank_name = models.CharField(max_length=100, default="Wema Bank")
+    bank_code = models.CharField(max_length=10, default="000017")
+    # ID returned by CoreBanking API for this virtual account
+    corebanking_account_id = models.CharField(max_length=100, unique=True, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'virtual_accounts'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.business_name} - {self.account_number} ({self.bank_name})"
