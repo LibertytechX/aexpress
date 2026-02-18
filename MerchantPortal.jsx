@@ -2725,6 +2725,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       return Math.round(total); // Round to nearest naira
     }
 
+    // Step 1 (Quick Send): if we already calculated an early route, use it
+    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
+      const distanceCost = earlyRouteDistance * pricing.rate_per_km;
+      const timeCost = earlyRouteDuration * pricing.rate_per_minute;
+      const total = pricing.base_fare + distanceCost + timeCost;
+      return Math.round(total);
+    }
+
     // Fallback: estimate based on base fare only (will be updated when route loads)
     return pricing.base_fare;
   };
@@ -2794,9 +2802,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const pkgTypes = ["Box", "Envelope", "Fragile", "Food", "Document"];
 
   const vehicles = [
-    { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg", from: "₦1,200" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", from: "₦4,500" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", from: "₦12,000" },
+    { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
   ];
 
   const modeConfig = [
@@ -3202,18 +3210,34 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 14 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Vehicle</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-              {vehicles.map(v => (
-                <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                  background: vehicle === v.id ? S.goldPale : "#f8fafc", border: vehicle === v.id ? `2px solid ${S.gold}` : "2px solid transparent",
-                  borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                  transition: "all 0.2s"
-                }}>
-                  <div style={{ color: vehicle === v.id ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
-                  <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: S.gold, marginTop: 4 }}>{v.from}</div>
-                </button>
-              ))}
+              {vehicles.map(v => {
+                const isSelected = vehicle === v.id;
+                const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
+                const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
+
+                const baseFare = vehiclePricing?.[v.id]?.base_fare;
+                const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
+                const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
+
+                return (
+                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
+                    background: isSelected ? S.goldPale : "#f8fafc",
+                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
+                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                    transition: "all 0.2s"
+                  }}>
+                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
+                    <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+                      {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+                    </div>
+                    <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
+                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -3236,7 +3260,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   <div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
-                      ₦{totalCost.toLocaleString()}
+                      ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
                     </div>
                   </div>
                 )}
