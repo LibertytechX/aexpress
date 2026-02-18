@@ -2415,10 +2415,43 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [payMethod, setPayMethod] = useState("wallet");
   const [step, setStep] = useState(1); // 1=form, 2=review
 
+  // ─── Vehicle pricing from backend ───
+  const [vehiclePricing, setVehiclePricing] = useState({
+    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
+    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
+    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+  });
+
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
+
+  // ─── Load vehicle pricing from backend ───
+  useEffect(() => {
+    const loadVehiclePricing = async () => {
+      try {
+        const response = await window.API.Orders.getVehicles();
+        if (response.success && response.vehicles) {
+          const pricing = {};
+          response.vehicles.forEach(v => {
+            pricing[v.name] = {
+              base_fare: parseFloat(v.base_fare),
+              rate_per_km: parseFloat(v.rate_per_km),
+              rate_per_minute: parseFloat(v.rate_per_minute)
+            };
+          });
+          setVehiclePricing(pricing);
+          console.log('✅ Loaded vehicle pricing from backend:', pricing);
+        }
+      } catch (error) {
+        console.error('Failed to load vehicle pricing:', error);
+        // Keep default pricing as fallback
+      }
+    };
+
+    loadVehiclePricing();
+  }, []);
 
   // ─── Load default address on mount ───
   useEffect(() => {
@@ -2557,13 +2590,6 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   // ─── Price calculation ───
-  // ─── Pricing structure (new dynamic pricing) ───
-  const vehiclePricing = {
-    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
-    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
-    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
-  };
-
   const getActiveDropoffs = () => {
     if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
     if (mode === "multi") return drops.filter(d => d.address.trim());
