@@ -2433,6 +2433,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
 
+  // ─── Quick Send state (declare BEFORE effects that depend on it) ───
+  const [dropoffAddress, setDropoffAddress] = useState("");
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [estimatedCost, setEstimatedCost] = useState(null);
+
+  // Wrapper to log dropoff address changes
+  const handleDropoffChange = (value) => {
+    console.log('📍 Dropoff address changed:', value);
+    setDropoffAddress(value);
+  };
+
   // ─── Load vehicle pricing from backend ───
   useEffect(() => {
     const loadVehiclePricing = async () => {
@@ -2567,19 +2580,6 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       loadDefaultAddress();
     }
   }, [currentUser]);
-
-  // ─── Quick Send state ───
-  const [dropoffAddress, setDropoffAddress] = useState("");
-  const [receiverName, setReceiverName] = useState("");
-  const [receiverPhone, setReceiverPhone] = useState("");
-  const [notes, setNotes] = useState("");
-  const [estimatedCost, setEstimatedCost] = useState(null);
-
-  // Wrapper to log dropoff address changes
-  const handleDropoffChange = (value) => {
-    console.log('📍 Dropoff address changed:', value);
-    setDropoffAddress(value);
-  };
 
   // ─── Multi-Drop state ───
   const [drops, setDrops] = useState([
