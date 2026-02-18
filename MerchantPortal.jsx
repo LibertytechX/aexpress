@@ -2573,6 +2573,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const handleConfirmAll = () => {
     const deliveries = getActiveDropoffs();
 
+    // Debug: Log route data
+    console.log('Route data:', { routeDistance, routeDuration });
+
     // Prepare order data based on mode
     const orderData = {
       mode: mode,
@@ -2586,6 +2589,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       distance_km: routeDistance || 0,
       duration_minutes: routeDuration || 0
     };
+
+    // Debug: Log order data
+    console.log('Order data being sent:', orderData);
 
     if (mode === 'quick') {
       // Quick Send - single delivery
@@ -3100,6 +3106,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             totalDeliveries={totalDeliveries}
             totalCost={totalCost}
             onRouteCalculated={(distance, duration) => {
+              console.log('onRouteCalculated called:', { distance, duration });
               setRouteDistance(distance);
               setRouteDuration(duration);
             }}
