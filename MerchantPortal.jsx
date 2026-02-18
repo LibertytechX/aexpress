@@ -2461,8 +2461,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Calculate route for early price estimation ───
   useEffect(() => {
+    console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
+
     // Only calculate for Quick Send mode when both addresses are available
     if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+      console.log('⏭️ Skipping route calculation:', {
+        reason: mode !== 'quick' ? 'Not quick mode' : !pickupAddress ? 'No pickup' : 'No dropoff',
+        mode,
+        hasPickup: !!pickupAddress,
+        hasDropoff: !!dropoffAddress
+      });
       setEarlyRouteDistance(null);
       setEarlyRouteDuration(null);
       setRouteError(null);
