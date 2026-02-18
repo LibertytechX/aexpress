@@ -5,8 +5,8 @@ const API_BASE_URL = "http://localhost:8000/api/dispatch"; // Adjust port if nee
 export const RiderService = {
     async getRiders(): Promise<Rider[]> {
         try {
-            // Retrieve token from localStorage (assuming auth is implemented this way in other apps)
-            const token = localStorage.getItem("accessToken") || localStorage.getItem("token");
+            // Retrieve token from localStorage
+            const token = localStorage.getItem("access_token");
 
             const headers: HeadersInit = {
                 "Content-Type": "application/json",
