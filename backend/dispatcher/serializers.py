@@ -1,7 +1,30 @@
 from rest_framework import serializers
-from .models import Rider
+from .models import Rider, DispatcherProfile
 from authentication.serializers import UserSerializer
-from orders.models import Vehicle
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class DispatcherProfileSerializer(serializers.ModelSerializer):
+    user_details = UserSerializer(source="user", read_only=True)
+
+    class Meta:
+        model = DispatcherProfile
+        fields = ["id", "user_details", "created_at"]
+
+
+class DispatcherSignupSerializer(serializers.ModelSerializer):
+    password = serializers.CharField(write_only=True)
+
+    class Meta:
+        model = User
+        fields = ["phone", "email", "password", "contact_name", "business_name"]
+
+    def create(self, validated_data):
+        validated_data["usertype"] = "Dispatcher"
+        user = User.objects.create_user(**validated_data)
+        return user
 
 
 class RiderSerializer(serializers.ModelSerializer):
@@ -10,7 +33,6 @@ class RiderSerializer(serializers.ModelSerializer):
 
     # Vehicle fields from Rider model
     vehicle = serializers.SerializerMethodField()
-    vehicle_details = serializers.SerializerMethodField()
 
     # Mock/Computed fields to match frontend interface
     todayOrders = serializers.IntegerField(default=0, read_only=True)
@@ -29,10 +51,6 @@ class RiderSerializer(serializers.ModelSerializer):
             "name",
             "phone",
             "vehicle",
-            "vehicle_details",
-            "plate_number",
-            "model",
-            "color",
             "status",
             "rating",
             "total_deliveries",
@@ -48,13 +66,3 @@ class RiderSerializer(serializers.ModelSerializer):
         if obj.vehicle_type:
             return obj.vehicle_type.name
         return "None"
-
-    def get_vehicle_details(self, obj):
-        if obj.vehicle_type:
-            return {
-                "type": obj.vehicle_type.name,
-                "plate_number": obj.plate_number,
-                "model": obj.model,
-                "color": obj.color,
-            }
-        return None

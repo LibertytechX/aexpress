@@ -49,3 +49,16 @@ class Rider(models.Model):
 
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
+
+
+class DispatcherProfile(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="dispatcher_profile",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Dispatcher: {self.user.contact_name or self.user.phone}"

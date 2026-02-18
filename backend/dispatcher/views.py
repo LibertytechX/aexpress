@@ -1,6 +1,9 @@
-from rest_framework import viewsets, permissions
+from rest_framework import viewsets, permissions, status, views
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Rider
 from .serializers import RiderSerializer
+from django.contrib.auth import authenticate
 
 
 class RiderViewSet(viewsets.ModelViewSet):

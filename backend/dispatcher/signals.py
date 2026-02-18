@@ -1,12 +1,15 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.auth import get_user_model
-from .models import Rider
+from .models import Rider, DispatcherProfile
 
 User = get_user_model()
 
 
 @receiver(post_save, sender=User)
-def create_rider_profile(sender, instance, created, **kwargs):
-    if created and instance.usertype == "Rider":
-        Rider.objects.create(user=instance)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        if instance.usertype == "Rider":
+            Rider.objects.create(user=instance)
+        elif instance.usertype == "Dispatcher":
+            DispatcherProfile.objects.create(user=instance)
