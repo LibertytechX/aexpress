@@ -53,8 +53,10 @@ class QuickSendView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
 
-        # Calculate total amount (single delivery)
-        total_amount = vehicle.base_price
+        # Calculate total amount using new fare structure
+        distance_km = data.get('distance_km', 0)
+        duration_minutes = data.get('duration_minutes', 0)
+        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
@@ -66,6 +68,8 @@ class QuickSendView(APIView):
             sender_phone=data['sender_phone'],
             payment_method=data['payment_method'],
             total_amount=total_amount,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
             notes=data.get('notes', ''),
             scheduled_pickup_time=data.get('scheduled_pickup_time')
         )
@@ -147,9 +151,11 @@ class MultiDropView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
 
-        # Calculate total amount (number of deliveries * vehicle price)
+        # Calculate total amount using new fare structure
         num_deliveries = len(data['deliveries'])
-        total_amount = vehicle.base_price * num_deliveries
+        distance_km = data.get('distance_km', 0)
+        duration_minutes = data.get('duration_minutes', 0)
+        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
@@ -161,6 +167,8 @@ class MultiDropView(APIView):
             sender_phone=data['sender_phone'],
             payment_method=data['payment_method'],
             total_amount=total_amount,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
             notes=data.get('notes', ''),
             scheduled_pickup_time=data.get('scheduled_pickup_time')
         )
@@ -243,9 +251,11 @@ class BulkImportView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
 
-        # Calculate total amount (number of deliveries * vehicle price)
+        # Calculate total amount using new fare structure
         num_deliveries = len(data['deliveries'])
-        total_amount = vehicle.base_price * num_deliveries
+        distance_km = data.get('distance_km', 0)
+        duration_minutes = data.get('duration_minutes', 0)
+        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
@@ -257,6 +267,8 @@ class BulkImportView(APIView):
             sender_phone=data['sender_phone'],
             payment_method=data['payment_method'],
             total_amount=total_amount,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
             notes=data.get('notes', ''),
             scheduled_pickup_time=data.get('scheduled_pickup_time')
         )

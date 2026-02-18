@@ -705,7 +705,9 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       package_type: orderData.packageType || 'Box',
-                      notes: orderData.notes || ''
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
                     });
                   } else if (orderData.mode === 'multi') {
                     response = await window.API.Orders.createMultiDrop({
@@ -715,7 +717,9 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || ''
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
                     });
                   } else if (orderData.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
@@ -725,7 +729,9 @@ function MerchantPortal() {
                       vehicle: orderData.vehicle,
                       payment_method: orderData.payMethod,
                       deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || ''
+                      notes: orderData.notes || '',
+                      distance_km: orderData.distance_km || 0,
+                      duration_minutes: orderData.duration_minutes || 0
                     });
                   }
 
@@ -2025,7 +2031,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
 }
 
 // ─── DELIVERY MAP VIEW COMPONENT ────────────────────────────────
-function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, totalCost }) {
+function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, totalCost, onRouteCalculated }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
@@ -2281,6 +2287,11 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
                 setRouteDistance(parseFloat(distanceKm));
                 setRouteDuration(durationMin);
                 setRouteDurationInTraffic(durationInTrafficMin);
+
+                // Notify parent component of route calculation
+                if (onRouteCalculated) {
+                  onRouteCalculated(parseFloat(distanceKm), durationMin);
+                }
               }
 
               // Re-apply polyline options with icons after setDirections
@@ -2441,6 +2452,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   ]);
   const nextDropId = useRef(2);
 
+  // ─── Route information state (for pricing) ───
+  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState(null); // in minutes
+
   const addDrop = () => {
     setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
   };
@@ -2566,7 +2581,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       senderPhone: senderPhone,
       vehicle: vehicle,
       payMethod: payMethod,
-      notes: notes
+      notes: notes,
+      // Include route information for pricing calculation
+      distance_km: routeDistance || 0,
+      duration_minutes: routeDuration || 0
     };
 
     if (mode === 'quick') {
@@ -3081,6 +3099,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             vehicle={vehicle}
             totalDeliveries={totalDeliveries}
             totalCost={totalCost}
+            onRouteCalculated={(distance, duration) => {
+              setRouteDistance(distance);
+              setRouteDuration(duration);
+            }}
           />
         </div>
       )}

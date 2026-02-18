@@ -9,16 +9,41 @@ class Vehicle(models.Model):
 
     name = models.CharField(max_length=50, unique=True)
     max_weight_kg = models.IntegerField()
-    base_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # Pricing structure
+    base_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Legacy flat rate (deprecated)")
+    base_fare = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Base fare for any delivery")
+    rate_per_km = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per kilometer")
+    rate_per_minute = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per minute")
+
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = 'vehicles'
-        ordering = ['base_price']
+        ordering = ['base_fare']
 
     def __str__(self):
-        return f"{self.name} - ₦{self.base_price}"
+        return f"{self.name} - Base: ₦{self.base_fare} + ₦{self.rate_per_km}/km + ₦{self.rate_per_minute}/min"
+
+    def calculate_fare(self, distance_km, duration_minutes):
+        """
+        Calculate total fare based on distance and duration.
+
+        Args:
+            distance_km (float): Distance in kilometers
+            duration_minutes (int): Duration in minutes
+
+        Returns:
+            Decimal: Total calculated fare
+        """
+        from decimal import Decimal
+
+        distance_cost = Decimal(str(distance_km)) * self.rate_per_km
+        time_cost = Decimal(str(duration_minutes)) * self.rate_per_minute
+        total = self.base_fare + distance_cost + time_cost
+
+        return total.quantize(Decimal('0.01'))
 
 
 class Order(models.Model):
@@ -62,6 +87,10 @@ class Order(models.Model):
     # Payment
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='wallet')
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # Route information for pricing
+    distance_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Total distance in kilometers")
+    duration_minutes = models.IntegerField(null=True, blank=True, help_text="Total duration in minutes")
 
     # Escrow tracking
     escrow_held = models.BooleanField(default=False, help_text="Whether funds are held in escrow")
