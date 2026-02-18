@@ -40,5 +40,29 @@ export const OrderService = {
             console.error("Failed to fetch orders:", error);
             return [];
         }
+    },
+
+    async createOrder(orderData: any): Promise<boolean> {
+        try {
+            const token = localStorage.getItem("access_token");
+            const response = await fetch(`${API_BASE_URL}/orders/`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify(orderData)
+            });
+
+            if (!response.ok) {
+                const err = await response.json();
+                console.error("Create Order Failed:", err);
+                throw new Error("Failed to create order");
+            }
+            return true;
+        } catch (error) {
+            console.error("Create Order Error:", error);
+            return false;
+        }
     }
 };

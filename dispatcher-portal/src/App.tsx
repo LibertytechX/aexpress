@@ -219,7 +219,7 @@ function App() {
         </div>
       </div>
 
-      {showCreateModal && <CreateOrderModal riders={riders} onClose={() => setShowCreateModal(false)} />}
+      {showCreateModal && <CreateOrderModal riders={riders} merchants={merchants} onClose={() => setShowCreateModal(false)} />}
     </div>
   );
 }

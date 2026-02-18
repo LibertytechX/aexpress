@@ -195,6 +195,123 @@ class OrderSerializer(serializers.ModelSerializer):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
 
 
+class OrderCreateSerializer(serializers.ModelSerializer):
+    # Input fields from Frontend
+    pickup = serializers.CharField(write_only=True)
+    dropoff = serializers.CharField(write_only=True)
+    senderName = serializers.CharField(write_only=True)
+    senderPhone = serializers.CharField(write_only=True)
+    receiverName = serializers.CharField(write_only=True)
+    receiverPhone = serializers.CharField(write_only=True)
+    vehicle = serializers.CharField(write_only=True)  # "Bike", "Car", etc.
+    packageType = serializers.CharField(write_only=True)
+    price = serializers.DecimalField(
+        write_only=True, required=False, max_digits=10, decimal_places=2
+    )
+    cod = serializers.DecimalField(
+        write_only=True, required=False, max_digits=10, decimal_places=2
+    )
+    riderId = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    merchantId = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+
+    class Meta:
+        from orders.models import Order
+
+        model = Order
+        fields = [
+            "id",
+            "pickup",
+            "dropoff",
+            "senderName",
+            "senderPhone",
+            "receiverName",
+            "receiverPhone",
+            "vehicle",
+            "packageType",
+            "price",
+            "cod",
+            "riderId",
+            "merchantId",
+        ]
+
+    def create(self, validated_data):
+        from orders.models import Order, Delivery, Vehicle
+        from .models import Rider, User
+
+        # Extract non-model fields
+        pickup = validated_data.pop("pickup")
+        dropoff = validated_data.pop("dropoff")
+        sender_name = validated_data.pop("senderName")
+        sender_phone = validated_data.pop("senderPhone")
+        receiver_name = validated_data.pop("receiverName")
+        receiver_phone = validated_data.pop("receiverPhone")
+        vehicle_name = validated_data.pop("vehicle")
+        package_type = validated_data.pop("packageType")
+        price = validated_data.get("price")
+        # cod = validated_data.get("cod") # Unused
+        rider_id = validated_data.get("riderId")
+        merchant_id = validated_data.get("merchantId")
+
+        # Resolve Vehicle
+        vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
+        if not vehicle_obj:
+            vehicle_obj = Vehicle.objects.first()
+
+        # Resolve Rider
+        rider_obj = None
+        if rider_id:
+            rider_obj = Rider.objects.filter(id=rider_id).first()
+
+        # Resolve User (Merchant or Request User)
+        order_user = self.context["request"].user
+        if merchant_id:
+            # Try to find merchant by profile id (6 chars) or user id (uuid)
+            # The frontend sends the 6-char ID usually if using the dropdown which likely uses the proper ID
+            # But wait, Merchant object in frontend has `id` (6 chars) and `userId` (UUID).
+            # Let's check how we want to look it up.
+            # If we send the UUID (userId), it's a direct User lookup.
+            # If we send the 6-char ID, we need to look up via Merchant profile.
+            # Let's assume we might send the 6-char ID.
+            from .models import Merchant as MerchantProfile
+
+            try:
+                profile = MerchantProfile.objects.filter(
+                    merchant_id=merchant_id
+                ).first()
+                if profile:
+                    order_user = profile.user
+            except Exception:
+                pass
+
+        # Calculate Price
+        total_amount = price if price else vehicle_obj.base_price
+
+        # Create Order
+        order = Order.objects.create(
+            user=order_user,
+            pickup_address=pickup,
+            sender_name=sender_name,
+            sender_phone=sender_phone,
+            vehicle=vehicle_obj,
+            total_amount=total_amount,
+            rider=rider_obj,
+            status="Assigned" if rider_obj else "Pending",
+        )
+
+        # Create Delivery
+        Delivery.objects.create(
+            order=order,
+            dropoff_address=dropoff,
+            receiver_name=receiver_name,
+            receiver_phone=receiver_phone,
+            package_type=package_type,
+        )
+
+        return order
+
+
 class MerchantSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="merchant_profile.merchant_id", read_only=True)
     userId = serializers.CharField(source="id", read_only=True)

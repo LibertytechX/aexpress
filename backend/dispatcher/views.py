@@ -27,9 +27,15 @@ class OrderViewSet(viewsets.ModelViewSet):
         .select_related("user", "rider", "rider__user")
         .prefetch_related("deliveries")
     )
-    from .serializers import OrderSerializer
+    from .serializers import OrderSerializer, OrderCreateSerializer
 
     serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return self.OrderCreateSerializer
+        return self.OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
