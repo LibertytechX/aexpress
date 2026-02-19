@@ -65,6 +65,7 @@ export default function LoginPage() {
         return () => clearInterval(timer);
     }, []);
 
+
     const handleLogin = async () => {
         if (!phone || !pass) {
             setError("Please enter phone and password");
