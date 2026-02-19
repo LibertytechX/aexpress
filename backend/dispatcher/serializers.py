@@ -378,3 +378,11 @@ class MerchantSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj):
         return "Active" if obj.is_active else "Inactive"
+
+
+class SystemSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import SystemSettings
+
+        model = SystemSettings
+        fields = "__all__"

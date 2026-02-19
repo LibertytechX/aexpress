@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { S } from "../common/theme";
 import { LagosMap } from "../map/LagosMap";
 import { VehicleService, type Vehicle } from "../../services/vehicleService";
+import { SettingsService } from "../../services/settingsService";
 
 export function SettingsScreen() {
     // ─── PRICING STATE (Research-based Lagos defaults) ───
@@ -17,6 +18,8 @@ export function SettingsScreen() {
     const [vanPerKm, setVanPerKm] = useState(400);
     const [vanMinKm, setVanMinKm] = useState(3);
     const [vanMin, setVanMin] = useState(5000);
+
+    // Global Settings State
     const [codFee, setCodFee] = useState(500);
     const [codPct, setCodPct] = useState(1.5);
     const [bridgeSurcharge, setBridgeSurcharge] = useState(500);
@@ -48,6 +51,7 @@ export function SettingsScreen() {
     const [notifUnassigned, setNotifUnassigned] = useState(true);
     const [notifComplete, setNotifComplete] = useState(true);
     const [notifCod, setNotifCod] = useState(true);
+
     const [settingsTab, setSettingsTab] = useState("pricing");
     const [saved, setSaved] = useState(false);
     const [simKm, setSimKm] = useState(8);
@@ -58,37 +62,66 @@ export function SettingsScreen() {
     const [vehicles, setVehicles] = useState<Vehicle[]>([]);
 
     useEffect(() => {
-        fetchVehicles();
+        fetchData();
     }, []);
 
-    const fetchVehicles = async () => {
-        const data = await VehicleService.getVehicles();
-        if (data && data.length > 0) {
-            setVehicles(data);
-            data.forEach(v => {
+    const fetchData = async () => {
+        const [vData, sData] = await Promise.all([
+            VehicleService.getVehicles(),
+            SettingsService.getSettings()
+        ]);
+
+        if (vData && vData.length > 0) {
+            setVehicles(vData);
+            vData.forEach(v => {
                 const base = parseFloat(v.base_fare);
                 const perKm = parseFloat(v.rate_per_km);
                 const minKm = parseFloat(v.min_distance_km || "0");
                 const minFee = parseFloat(v.min_fee || "0");
                 const name = v.name.toLowerCase();
-                
+
                 if (name === 'bike') {
-                    setBikeBase(base);
-                    setBikePerKm(perKm);
-                    setBikeMinKm(minKm);
-                    setBikeMin(minFee);
+                    setBikeBase(base); setBikePerKm(perKm); setBikeMinKm(minKm); setBikeMin(minFee);
                 } else if (name === 'car') {
-                    setCarBase(base);
-                    setCarPerKm(perKm);
-                    setCarMinKm(minKm);
-                    setCarMin(minFee);
+                    setCarBase(base); setCarPerKm(perKm); setCarMinKm(minKm); setCarMin(minFee);
                 } else if (name === 'van') {
-                    setVanBase(base);
-                    setVanPerKm(perKm);
-                    setVanMinKm(minKm);
-                    setVanMin(minFee);
+                    setVanBase(base); setVanPerKm(perKm); setVanMinKm(minKm); setVanMin(minFee);
                 }
             });
+        }
+
+        if (sData) {
+            setBridgeSurcharge(Number(sData.bridge_surcharge));
+            setOuterZoneSurcharge(Number(sData.outer_zone_surcharge));
+            setIslandPremium(Number(sData.island_premium));
+            setWeightThreshold(sData.weight_threshold_kg);
+            setWeightSurcharge(Number(sData.weight_surcharge_per_unit));
+            setWeightUnit(sData.weight_unit_kg);
+            setSurgeEnabled(sData.surge_enabled);
+            setSurgeMultiplier(Number(sData.surge_multiplier));
+            setSurgeMorningStart(sData.surge_morning_start?.slice(0, 5) || "07:00");
+            setSurgeMorningEnd(sData.surge_morning_end?.slice(0, 5) || "09:30");
+            setSurgeEveningStart(sData.surge_evening_start?.slice(0, 5) || "17:00");
+            setSurgeEveningEnd(sData.surge_evening_end?.slice(0, 5) || "20:00");
+            setRainSurge(sData.rain_surge_enabled);
+            setRainMultiplier(Number(sData.rain_surge_multiplier));
+            setTierEnabled(sData.tier_enabled);
+            setTier1Km(sData.tier1_km);
+            setTier1Discount(sData.tier1_discount_pct);
+            setTier2Km(sData.tier2_km);
+            setTier2Discount(sData.tier2_discount_pct);
+            setAutoAssign(sData.auto_assign_enabled);
+            setAssignRadius(sData.auto_assign_radius_km);
+            setAcceptTimeout(sData.accept_timeout_sec);
+            setMaxBike(sData.max_concurrent_bike);
+            setMaxCar(sData.max_concurrent_car);
+            setMaxVan(sData.max_concurrent_van);
+            setCodFee(Number(sData.cod_flat_fee));
+            setCodPct(Number(sData.cod_pct_fee));
+            setNotifNew(sData.notif_new_order);
+            setNotifUnassigned(sData.notif_unassigned);
+            setNotifComplete(sData.notif_completed);
+            setNotifCod(sData.notif_cod_settled);
         }
     };
 
@@ -120,31 +153,16 @@ export function SettingsScreen() {
 
     const handleSave = async () => {
         // Update vehicles in backend
-        const promises = vehicles.map(v => {
+        const vehiclePromises = vehicles.map(v => {
             const name = v.name.toLowerCase();
             let updates: any = {};
 
             if (name === 'bike') {
-                updates = { 
-                    base_fare: bikeBase, 
-                    rate_per_km: bikePerKm,
-                    min_distance_km: bikeMinKm,
-                    min_fee: bikeMin
-                };
+                updates = { base_fare: bikeBase, rate_per_km: bikePerKm, min_distance_km: bikeMinKm, min_fee: bikeMin };
             } else if (name === 'car') {
-                updates = { 
-                    base_fare: carBase, 
-                    rate_per_km: carPerKm,
-                    min_distance_km: carMinKm,
-                    min_fee: carMin
-                };
+                updates = { base_fare: carBase, rate_per_km: carPerKm, min_distance_km: carMinKm, min_fee: carMin };
             } else if (name === 'van') {
-                updates = { 
-                    base_fare: vanBase, 
-                    rate_per_km: vanPerKm,
-                    min_distance_km: vanMinKm,
-                    min_fee: vanMin
-                };
+                updates = { base_fare: vanBase, rate_per_km: vanPerKm, min_distance_km: vanMinKm, min_fee: vanMin };
             }
 
             if (Object.keys(updates).length > 0) {
@@ -153,7 +171,42 @@ export function SettingsScreen() {
             return Promise.resolve();
         });
 
-        await Promise.all(promises);
+        // Update Global Settings
+        const settingsPromise = SettingsService.updateSettings({
+            bridge_surcharge: bridgeSurcharge,
+            outer_zone_surcharge: outerZoneSurcharge,
+            island_premium: islandPremium,
+            weight_threshold_kg: weightThreshold,
+            weight_surcharge_per_unit: weightSurcharge,
+            weight_unit_kg: weightUnit,
+            surge_enabled: surgeEnabled,
+            surge_multiplier: surgeMultiplier,
+            surge_morning_start: surgeMorningStart,
+            surge_morning_end: surgeMorningEnd,
+            surge_evening_start: surgeEveningStart,
+            surge_evening_end: surgeEveningEnd,
+            rain_surge_enabled: rainSurge,
+            rain_surge_multiplier: rainMultiplier,
+            tier_enabled: tierEnabled,
+            tier1_km: tier1Km,
+            tier1_discount_pct: tier1Discount,
+            tier2_km: tier2Km,
+            tier2_discount_pct: tier2Discount,
+            auto_assign_enabled: autoAssign,
+            auto_assign_radius_km: assignRadius,
+            accept_timeout_sec: acceptTimeout,
+            max_concurrent_bike: maxBike,
+            max_concurrent_car: maxCar,
+            max_concurrent_van: maxVan,
+            cod_flat_fee: codFee,
+            cod_pct_fee: codPct,
+            notif_new_order: notifNew,
+            notif_unassigned: notifUnassigned,
+            notif_completed: notifComplete,
+            notif_cod_settled: notifCod
+        });
+
+        await Promise.all([...vehiclePromises, settingsPromise]);
 
         setSaved(true);
         setTimeout(() => setSaved(false), 2500);

@@ -80,3 +80,26 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+
+class SystemSettingsView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .models import SystemSettings
+        from .serializers import SystemSettingsSerializer
+
+        settings, created = SystemSettings.objects.get_or_create(id=1)
+        serializer = SystemSettingsSerializer(settings)
+        return Response(serializer.data)
+
+    def post(self, request):
+        from .models import SystemSettings
+        from .serializers import SystemSettingsSerializer
+
+        settings, created = SystemSettings.objects.get_or_create(id=1)
+        serializer = SystemSettingsSerializer(settings, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

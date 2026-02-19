@@ -87,3 +87,75 @@ class Merchant(models.Model):
 
     def __str__(self):
         return f"{self.user.business_name} ({self.merchant_id})"
+
+
+class SystemSettings(models.Model):
+    """
+    Singleton model to store global system settings/pricing configuration.
+    """
+
+    # Zone Surcharges
+    bridge_surcharge = models.DecimalField(max_digits=10, decimal_places=2, default=500)
+    outer_zone_surcharge = models.DecimalField(
+        max_digits=10, decimal_places=2, default=800
+    )
+    island_premium = models.DecimalField(max_digits=10, decimal_places=2, default=300)
+
+    # Weight Surcharges
+    weight_threshold_kg = models.IntegerField(default=5)
+    weight_surcharge_per_unit = models.DecimalField(
+        max_digits=10, decimal_places=2, default=200
+    )
+    weight_unit_kg = models.IntegerField(default=5)
+
+    # Surge Pricing
+    surge_enabled = models.BooleanField(default=True)
+    surge_multiplier = models.DecimalField(max_digits=3, decimal_places=1, default=1.5)
+    surge_morning_start = models.TimeField(default="07:00")
+    surge_morning_end = models.TimeField(default="09:30")
+    surge_evening_start = models.TimeField(default="17:00")
+    surge_evening_end = models.TimeField(default="20:00")
+    rain_surge_enabled = models.BooleanField(default=True)
+    rain_surge_multiplier = models.DecimalField(
+        max_digits=3, decimal_places=1, default=1.3
+    )
+
+    # Tiered Pricing (Distance)
+    tier_enabled = models.BooleanField(default=True)
+    tier1_km = models.IntegerField(default=15)
+    tier1_discount_pct = models.IntegerField(default=10)
+    tier2_km = models.IntegerField(default=25)
+    tier2_discount_pct = models.IntegerField(default=15)
+
+    # Dispatch Rules
+    auto_assign_enabled = models.BooleanField(default=True)
+    auto_assign_radius_km = models.IntegerField(default=5)
+    accept_timeout_sec = models.IntegerField(default=120)
+
+    # Max Concurrent Orders
+    max_concurrent_bike = models.IntegerField(default=2)
+    max_concurrent_car = models.IntegerField(default=1)
+    max_concurrent_van = models.IntegerField(default=1)
+
+    # Fees
+    cod_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=500)
+    cod_pct_fee = models.DecimalField(max_digits=4, decimal_places=2, default=1.5)
+
+    # Notifications
+    notif_new_order = models.BooleanField(default=True)
+    notif_unassigned = models.BooleanField(default=True)
+    notif_completed = models.BooleanField(default=True)
+    notif_cod_settled = models.BooleanField(default=True)
+
+    class Meta:
+        verbose_name = "System Settings"
+        verbose_name_plural = "System Settings"
+
+    def save(self, *args, **kwargs):
+        # Singleton pattern enforcement
+        if not self.pk and SystemSettings.objects.exists():
+            return SystemSettings.objects.first()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return "Global Settings"
