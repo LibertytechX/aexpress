@@ -81,6 +81,16 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
     const handleSubmit = async () => {
         setLoading(true);
 
+        // Determine price: Manual override > Calculated > null
+        let finalPrice = price ? parseFloat(price) : null;
+
+        if (finalPrice === null && distanceKm > 0) {
+            const selectedVehicle = vehicles.find(v => v.name === vehicle);
+            if (selectedVehicle) {
+                finalPrice = OrderService.calculatePrice(selectedVehicle, distanceKm, durationMinutes);
+            }
+        }
+
         const payload = {
             merchantId,
             pickup,
@@ -91,7 +101,7 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
             receiverPhone: receiverPhone || "0000000000",
             vehicle,
             packageType: pkgType,
-            price: price ? parseFloat(price) : null,
+            price: finalPrice,
             cod: codOn ? parseFloat(codAmount) : 0,
             riderId: riderId || "",
             distance_km: distanceKm,
