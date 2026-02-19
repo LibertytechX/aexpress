@@ -11,17 +11,42 @@ class Vehicle(models.Model):
     max_weight_kg = models.IntegerField()
 
     # Pricing structure
-    base_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Legacy flat rate (deprecated)")
-    base_fare = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Base fare for any delivery")
-    rate_per_km = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per kilometer")
-    rate_per_minute = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per minute")
-
+    base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, help_text="Legacy flat rate (deprecated)"
+    )
+    base_fare = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Base fare for any delivery",
+    )
+    rate_per_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Rate charged per kilometer",
+    )
+    rate_per_minute = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, help_text="Rate charged per minute"
+    )
+    min_distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Minimum distance covered by base fare/min fee",
+    )
+    min_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Minimum fee charged for any trip",
+    )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        db_table = 'vehicles'
-        ordering = ['base_fare']
+        db_table = "vehicles"
+        ordering = ["base_fare"]
 
     def __str__(self):
         return f"{self.name} - Base: ₦{self.base_fare} + ₦{self.rate_per_km}/km + ₦{self.rate_per_minute}/min"
@@ -43,7 +68,14 @@ class Vehicle(models.Model):
         time_cost = Decimal(str(duration_minutes)) * self.rate_per_minute
         total = self.base_fare + distance_cost + time_cost
 
-        return total.quantize(Decimal('0.01'))
+        # Apply minimum fee logic
+        if Decimal(str(distance_km)) <= self.min_distance_km:
+            total = max(total, self.min_fee)
+
+        # Ensure total is at least min_fee regardless of distance
+        total = max(total, self.min_fee)
+
+        return total.quantize(Decimal("0.01"))
 
 
 class Order(models.Model):
@@ -100,8 +132,16 @@ class Order(models.Model):
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     # Route information for pricing
-    distance_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Total distance in kilometers")
-    duration_minutes = models.IntegerField(null=True, blank=True, help_text="Total duration in minutes")
+    distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Total distance in kilometers",
+    )
+    duration_minutes = models.IntegerField(
+        null=True, blank=True, help_text="Total duration in minutes"
+    )
 
     # Escrow tracking
     escrow_held = models.BooleanField(

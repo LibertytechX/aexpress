@@ -7,6 +7,8 @@ export interface Vehicle {
     base_fare: string;
     rate_per_km: string;
     rate_per_minute: string;
+    min_distance_km: string;
+    min_fee: string;
     description: string;
     is_active: boolean;
 }

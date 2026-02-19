@@ -68,17 +68,25 @@ export function SettingsScreen() {
             data.forEach(v => {
                 const base = parseFloat(v.base_fare);
                 const perKm = parseFloat(v.rate_per_km);
+                const minKm = parseFloat(v.min_distance_km || "0");
+                const minFee = parseFloat(v.min_fee || "0");
                 const name = v.name.toLowerCase();
-
+                
                 if (name === 'bike') {
                     setBikeBase(base);
                     setBikePerKm(perKm);
+                    setBikeMinKm(minKm);
+                    setBikeMin(minFee);
                 } else if (name === 'car') {
                     setCarBase(base);
                     setCarPerKm(perKm);
+                    setCarMinKm(minKm);
+                    setCarMin(minFee);
                 } else if (name === 'van') {
                     setVanBase(base);
                     setVanPerKm(perKm);
+                    setVanMinKm(minKm);
+                    setVanMin(minFee);
                 }
             });
         }
@@ -117,11 +125,26 @@ export function SettingsScreen() {
             let updates: any = {};
 
             if (name === 'bike') {
-                updates = { base_fare: bikeBase, rate_per_km: bikePerKm };
+                updates = { 
+                    base_fare: bikeBase, 
+                    rate_per_km: bikePerKm,
+                    min_distance_km: bikeMinKm,
+                    min_fee: bikeMin
+                };
             } else if (name === 'car') {
-                updates = { base_fare: carBase, rate_per_km: carPerKm };
+                updates = { 
+                    base_fare: carBase, 
+                    rate_per_km: carPerKm,
+                    min_distance_km: carMinKm,
+                    min_fee: carMin
+                };
             } else if (name === 'van') {
-                updates = { base_fare: vanBase, rate_per_km: vanPerKm };
+                updates = { 
+                    base_fare: vanBase, 
+                    rate_per_km: vanPerKm,
+                    min_distance_km: vanMinKm,
+                    min_fee: vanMin
+                };
             }
 
             if (Object.keys(updates).length > 0) {

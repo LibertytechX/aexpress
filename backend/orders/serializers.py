@@ -16,6 +16,8 @@ class VehicleSerializer(serializers.ModelSerializer):
             "base_fare",
             "rate_per_km",
             "rate_per_minute",
+            "min_distance_km",
+            "min_fee",
             "description",
             "is_active",
         ]

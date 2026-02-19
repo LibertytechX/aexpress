@@ -133,8 +133,19 @@ export const OrderService = {
         const base = parseFloat(vehicle.base_fare);
         const rateKm = parseFloat(vehicle.rate_per_km);
         const rateMin = parseFloat(vehicle.rate_per_minute);
+        const minKm = parseFloat(vehicle.min_distance_km || "0");
+        const minFee = parseFloat(vehicle.min_fee || "0");
 
-        const total = base + (distanceKm * rateKm) + (durationMinutes * rateMin);
+        let total = base + (distanceKm * rateKm) + (durationMinutes * rateMin);
+
+        // Apply minimums
+        if (distanceKm <= minKm) {
+            total = Math.max(total, minFee);
+        }
+
+        // Ensure total is at least minFee
+        total = Math.max(total, minFee);
+
         return Math.round(total * 100) / 100;
     }
 };
