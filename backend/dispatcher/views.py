@@ -36,10 +36,39 @@ class OrderViewSet(viewsets.ModelViewSet):
         if self.action == "create":
             return self.OrderCreateSerializer
         return self.OrderSerializer
+
     permission_classes = [permissions.IsAuthenticated]
+    lookup_field = "order_number"
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+    from rest_framework.decorators import action
+
+    @action(detail=True, methods=["post"])
+    def assign_rider(self, request, order_number=None):
+        order = self.get_object()
+        rider_id = request.data.get("rider_id")
+
+        if not rider_id:
+            # If rider_id is empty/null, it might be an unassign request
+            order.rider = None
+            order.status = "Pending"
+            order.save()
+            return Response(self.get_serializer(order).data)
+
+        try:
+            rider = Rider.objects.get(
+                rider_id=rider_id
+            )  # Should use correct lookup field if different
+            order.rider = rider
+            order.status = "Assigned"
+            order.save()
+            return Response(self.get_serializer(order).data)
+        except Rider.DoesNotExist:
+            return Response(
+                {"error": "Rider not found"}, status=status.HTTP_404_NOT_FOUND
+            )
 
 
 class MerchantViewSet(viewsets.ModelViewSet):

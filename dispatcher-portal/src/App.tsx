@@ -102,21 +102,33 @@ function App() {
     addLog(oid, `Status changed to ${status}`);
   };
 
-  const handleAssign = (oid: string, rid: string) => {
-    if (!rid) {
-      // Unassign
-      handleUpdateOrder(oid, "riderId", null);
-      handleUpdateOrder(oid, "rider", null);
-      handleStatusChange(oid, "Pending");
-      addLog(oid, "Rider unassigned", "issue");
-    } else {
-      const r = riders.find(rx => rx.id === rid);
-      if (r) {
-        handleUpdateOrder(oid, "riderId", rid);
-        handleUpdateOrder(oid, "rider", r.name);
-        handleStatusChange(oid, "Assigned");
-        addLog(oid, `Assigned to ${r.name} (${r.vehicle})`);
+  const handleAssign = async (oid: string, rid: string) => {
+    try {
+      if (!rid) {
+        // Unassign - Backend logic for unassign might need check, but for now we pass empty string or null?
+        // Our backend logic checks `if not rider_id`.
+        await OrderService.assignRider(oid, "");
+        handleUpdateOrder(oid, "riderId", null);
+        handleUpdateOrder(oid, "rider", null);
+        handleStatusChange(oid, "Pending");
+        addLog(oid, "Rider unassigned", "issue");
+      } else {
+        const success = await OrderService.assignRider(oid, rid);
+        if (success) {
+          const r = riders.find(rx => rx.id === rid);
+          if (r) {
+            handleUpdateOrder(oid, "riderId", rid);
+            handleUpdateOrder(oid, "rider", r.name);
+            handleStatusChange(oid, "Assigned");
+            addLog(oid, `Assigned to ${r.name} (${r.vehicle})`);
+          }
+        } else {
+          alert("Failed to assign rider");
+        }
       }
+    } catch (e) {
+      console.error("Assign Error", e);
+      alert("Error assigning rider");
     }
   };
 

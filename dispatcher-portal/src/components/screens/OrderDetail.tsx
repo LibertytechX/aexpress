@@ -4,6 +4,7 @@ import { S } from "../common/theme";
 import { I } from "../icons";
 import { LagosMap } from "../map/LagosMap";
 import { Badge } from "../common/Badge";
+import { SelectRiderModal } from "../modals/SelectRiderModal";
 
 interface OrderDetailProps {
     order: Order;
@@ -116,16 +117,13 @@ export function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onCh
                                         </div>
                                     ) : (
                                         <div>
-                                            {!showAssign ? (
-                                                <button onClick={() => setShowAssign(true)} style={{ width: "100%", padding: "6px 0", background: S.navy, color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+ Assign Rider</button>
-                                            ) : (
-                                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                                                    <select onChange={(e) => { if (e.target.value) { onAssign(order.id, e.target.value); setShowAssign(false); } }} style={{ width: "100%", padding: 6, borderRadius: 6, border: `1px solid ${S.border}`, fontSize: 11 }}>
-                                                        <option value="">Select rider...</option>
-                                                        {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => <option key={r.id} value={r.id}>{r.name} ({r.vehicle})</option>)}
-                                                    </select>
-                                                    <button onClick={() => setShowAssign(false)} style={{ fontSize: 10, color: S.textMuted, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
-                                                </div>
+                                            <button onClick={() => setShowAssign(true)} style={{ width: "100%", padding: "6px 0", background: S.navy, color: "#fff", border: "none", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>+ Assign Rider</button>
+                                            {showAssign && (
+                                                <SelectRiderModal
+                                                    riders={riders}
+                                                    onClose={() => setShowAssign(false)}
+                                                    onSelect={(rid) => { onAssign(order.id, rid); setShowAssign(false); }}
+                                                />
                                             )}
                                         </div>
                                     )}

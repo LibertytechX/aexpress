@@ -92,6 +92,26 @@ export const OrderService = {
         }
     },
 
+    async assignRider(orderId: string, riderId: string): Promise<boolean> {
+        try {
+            const token = localStorage.getItem("access_token");
+            const response = await fetch(`${API_BASE_URL}/orders/${orderId}/assign_rider/`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ rider_id: riderId })
+            });
+
+            if (!response.ok) throw new Error("Failed to assign rider");
+            return true;
+        } catch (error) {
+            console.error("Assign Rider Error:", error);
+            return false;
+        }
+    },
+
     async getVehicles(): Promise<any[]> {
         try {
             const token = localStorage.getItem("access_token");
