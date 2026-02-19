@@ -47,6 +47,7 @@ export function SettingsScreen() {
 
     // Calculator State
     const [simKm, setSimKm] = useState(8);
+    const [simDuration, setSimDuration] = useState(20);
     const [simVehicleId, setSimVehicleId] = useState<number | null>(null);
     const [simZone, setSimZone] = useState("same");
     const [simWeight, setSimWeight] = useState(3);
@@ -107,27 +108,12 @@ export function SettingsScreen() {
         setVehicles(prev => prev.map(v => v.id === id ? { ...v, [field]: value } : v));
     };
 
-    const getEstDuration = (km: number, vehicleName: string): number => {
-        // Estimate duration based on vehicle type average speeds in Lagos
-        // Bike: ~30km/h, Car: ~25km/h (traffic), Van: ~20km/h
-        const name = vehicleName.toLowerCase();
-        let speed = 30;
-        if (name.includes('bike') || name.includes('motorcycle')) speed = 35;
-        else if (name.includes('car')) speed = 25;
-        else if (name.includes('van') || name.includes('truck')) speed = 20;
-
-        // Time = Distance / Speed * 60 min
-        return Math.ceil((km / speed) * 60);
-    };
-
-    const calcPrice = (vehicle: Vehicle, km: number, zone: string, weight: number) => {
+    const calcPrice = (vehicle: Vehicle, km: number, duration: number, zone: string, weight: number) => {
         const base = parseFloat(vehicle.base_fare);
         const perKm = parseFloat(vehicle.rate_per_km);
         const perMin = parseFloat(vehicle.rate_per_minute);
         const minKm = parseFloat(vehicle.min_distance_km);
         const minFee = parseFloat(vehicle.min_fee);
-
-        const duration = getEstDuration(km, vehicle.name);
 
         // Backend Logic:
         // distance_cost = distance * rate_per_km
@@ -153,13 +139,13 @@ export function SettingsScreen() {
         if (zone === "island") price += islandPremium;
         if (weight > weightThreshold) price += Math.ceil((weight - weightThreshold) / weightUnit) * weightSurcharge;
 
-        return { price: Math.round(price), duration };
+        return { price: Math.round(price) };
     };
 
     const selectedVehicle = vehicles.find(v => v.id === simVehicleId) || vehicles[0];
-    const { price: simPrice, duration: simDuration } = selectedVehicle
-        ? calcPrice(selectedVehicle, simKm, simZone, simWeight)
-        : { price: 0, duration: 0 };
+    const { price: simPrice } = selectedVehicle
+        ? calcPrice(selectedVehicle, simKm, simDuration, simZone, simWeight)
+        : { price: 0 };
 
     const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
 
@@ -271,18 +257,7 @@ export function SettingsScreen() {
 
             {/* ═══ PRICING TAB ═══ */}
             {settingsTab === "pricing" && (<div style={{ animation: "fadeIn 0.3s ease" }}>
-                <div style={{ background: `linear-gradient(135deg, ${S.navy} 0%, ${S.navyLight} 100%)`, borderRadius: 14, padding: "18px 22px", marginBottom: 18 }}>
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
-                        <span style={{ fontSize: 24, marginTop: 2 }}>💡</span>
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 6 }}>Lagos Delivery Market Research — Recommended Pricing</div>
-                            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.7, marginBottom: 12 }}>Based on analysis of Kwik, Gokada, GIG Logistics, and 50+ independent dispatch riders across Lagos. Defaults below are calibrated for competitive positioning while maintaining healthy margins.</div>
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-                                {[{ label: "Same Area", range: "₦1,200 – ₦3,000", desc: "Within Ikeja, Lekki, etc.", km: "1–5 km" }, { label: "Mainland↔Island", range: "₦3,000 – ₦7,000", desc: "Bridge crossing required", km: "10–25 km" }, { label: "Outer Lagos", range: "₦5,000 – ₦12,000", desc: "Ikorodu, Ojo, Badagry", km: "20–40 km" }].map(r => (<div key={r.label} style={{ background: "rgba(255,255,255,0.08)", borderRadius: 10, padding: "10px 12px" }}><div style={{ fontSize: 10, fontWeight: 700, color: S.gold, marginBottom: 3 }}>{r.label}</div><div style={{ fontSize: 14, fontWeight: 800, color: "#fff", fontFamily: "'Space Mono',monospace" }}>{r.range}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", marginTop: 3 }}>{r.desc} • ~{r.km}</div></div>))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+
 
                 {vehicles.map(v => {
                     const name = v.name.toLowerCase();
@@ -357,7 +332,7 @@ export function SettingsScreen() {
                                     <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
                                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                         {[1, 3, 5, 8, 12, 20, 30].map(km => {
-                                            const { price } = calcPrice(v, km, "same", 0);
+                                            const { price } = calcPrice(v, km, 0, "same", 0);
                                             const minKm = parseFloat(v.min_distance_km);
                                             return (
                                                 <div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= minKm ? `${color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}>
@@ -370,7 +345,7 @@ export function SettingsScreen() {
                                         })}
                                     </div>
                                     <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>
-                                        Formula: Base ₦{v.base_fare} + (Km × ₦{v.rate_per_km}) + (Time × ₦{v.rate_per_minute}). Min Fee: ₦{v.min_fee} for ≤{v.min_distance_km}km.
+                                        Formula: Base ₦{v.base_fare} + (Km × ₦{v.rate_per_km}) + (Time extra). Min Fee: ₦{v.min_fee} for ≤{v.min_distance_km}km.
                                     </div>
                                 </div>
                             </div>
@@ -431,17 +406,6 @@ export function SettingsScreen() {
                             <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Ikorodu, Ojo, Badagry, Epe, Agbara</div>
                         </div>
                     </div>
-                    <div style={{ background: "#f8fafc", borderRadius: 10, padding: "14px 16px" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10 }}>ZONE EXAMPLES (BIKE, 10KM)</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-                            {[{ l: "Same Zone", z: "same", d: "Ikeja→Ikeja", i: "🏠" }, { l: "Bridge", z: "bridge", d: "Yaba→V.I.", i: "🌉" }, { l: "Island", z: "island", d: "V.I.→Lekki", i: "🏝️" }, { l: "Outer", z: "outer", d: "Ikeja→Ikorodu", i: "🛤️" }].map(z => {
-                                const refVehicle = vehicles.find(v => v.name.toLowerCase().includes('bike')) || vehicles[0];
-                                if (!refVehicle) return null;
-                                const { price } = calcPrice(refVehicle, 10, z.z, 3);
-                                return (<div key={z.z} style={{ textAlign: "center", padding: "10px 8px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}` }}><div style={{ fontSize: 16 }}>{z.i}</div><div style={{ fontSize: 10, fontWeight: 700, color: S.navy, marginTop: 2 }}>{z.l}</div><div style={{ fontSize: 16, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace", margin: "4px 0" }}>₦{price.toLocaleString()}</div><div style={{ fontSize: 9, color: S.textMuted }}>{z.d}</div></div>);
-                            })}
-                        </div>
-                    </div>
                 </SC>
 
                 <SC title="Weight-Based Surcharges" icon="⚖️" desc="Extra charge for heavy packages">
@@ -498,6 +462,7 @@ export function SettingsScreen() {
                                 </div>
                             </div>
                             <div style={{ marginBottom: 16 }}><label style={labelStyle}>Distance: <span style={{ color: S.gold, fontFamily: "'Space Mono',monospace" }}>{simKm} km</span></label><input type="range" min="1" max="50" value={simKm} onChange={e => setSimKm(Number(e.target.value))} style={{ width: "100%", accentColor: S.gold }} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: S.textMuted }}><span>1km</span><span>5km</span><span>15km</span><span>50km</span></div></div>
+                            <div style={{ marginBottom: 16 }}><label style={labelStyle}>Duration: <span style={{ color: S.gold, fontFamily: "'Space Mono',monospace" }}>{simDuration} min</span></label><input type="range" min="1" max="120" value={simDuration} onChange={e => setSimDuration(Number(e.target.value))} style={{ width: "100%", accentColor: S.gold }} /><div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: S.textMuted }}><span>1min</span><span>30min</span><span>60min</span><span>120min</span></div></div>
                             <div style={{ marginBottom: 16 }}><label style={labelStyle}>Delivery Zone</label>
                                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>{[{ id: "same", l: "Same Area", i: "🏠" }, { id: "bridge", l: "Bridge Cross", i: "🌉" }, { id: "island", l: "Island Only", i: "🏝️" }, { id: "outer", l: "Outer Lagos", i: "🛤️" }].map(z => (<button key={z.id} onClick={() => setSimZone(z.id)} style={{ padding: "8px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", border: simZone === z.id ? `2px solid ${S.gold}` : `1px solid ${S.border}`, background: simZone === z.id ? S.goldPale : "#fff", fontSize: 11, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><span>{z.i}</span>{z.l}</button>))}</div>
                             </div>
@@ -564,7 +529,7 @@ export function SettingsScreen() {
                                 <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, marginBottom: 6 }}>COMPARE ALL VEHICLES</div>
                                 <div style={{ display: "flex", gap: 8 }}>
                                     {vehicles.map(v => {
-                                        const { price } = calcPrice(v, simKm, simZone, simWeight);
+                                        const { price } = calcPrice(v, simKm, simDuration, simZone, simWeight);
                                         const f = simSurge ? Math.round(price * surgeMultiplier) : price;
                                         const emoji = v.name.toLowerCase().includes('bike') ? "🏍️" : v.name.toLowerCase().includes('car') ? "🚗" : "🚐";
 
@@ -581,27 +546,7 @@ export function SettingsScreen() {
                     </div>
                 </div>
 
-                <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginTop: 14, overflow: "hidden" }}>
-                    <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}` }}><div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>🚀 Common Lagos Routes — Quick Reference</div></div>
-                    <div style={{ padding: 16, overflowX: "auto" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                            <thead><tr style={{ borderBottom: `2px solid ${S.border}` }}>
-                                {["Route", "KM", "Zone", ...vehicles.map(v => v.name)].map(h => (<th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase" }}>{h}</th>))}
-                            </tr></thead>
-                            <tbody>{[{ r: "Ikeja → Allen Ave", km: 3, z: "same", d: "Local" }, { r: "Yaba → V.I.", km: 12, z: "bridge", d: "Bridge" }, { r: "Surulere → Lekki Ph1", km: 18, z: "bridge", d: "Bridge" }, { r: "V.I. → Lekki", km: 8, z: "island", d: "Island" }, { r: "Ikeja → Ikorodu", km: 28, z: "outer", d: "Outer" }, { r: "Maryland → Ajah", km: 32, z: "bridge", d: "Bridge" }, { r: "Apapa → Ojo", km: 15, z: "outer", d: "Outer" }, { r: "V.I. → Ajah", km: 22, z: "island", d: "Island" }].map((r, i) => (
-                                <tr key={i} style={{ borderBottom: `1px solid ${S.borderLight}` }}>
-                                    <td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.r}</td>
-                                    <td style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>{r.km}</td>
-                                    <td style={{ padding: "8px 10px" }}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: r.z === "bridge" ? "rgba(232,168,56,0.1)" : r.z === "island" ? "rgba(139,92,246,0.08)" : r.z === "outer" ? "rgba(16,185,129,0.08)" : "#f1f5f9", color: r.z === "bridge" ? S.gold : r.z === "island" ? "#8B5CF6" : r.z === "outer" ? S.green : S.textMuted, fontWeight: 700 }}>{r.d}</span></td>
-                                    {vehicles.map(v => {
-                                        const { price } = calcPrice(v, r.km, r.z, 3);
-                                        return <td key={v.id} style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>₦{price.toLocaleString()}</td>;
-                                    })}
-                                </tr>
-                            ))}</tbody>
-                        </table>
-                    </div>
-                </div>
+
             </div>)}
 
             {/* ═══ DISPATCH RULES TAB ═══ */}
