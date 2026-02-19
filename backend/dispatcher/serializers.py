@@ -335,9 +335,7 @@ class MerchantSerializer(serializers.ModelSerializer):
     monthOrders = serializers.SerializerMethodField()
     walletBalance = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
-    joined = serializers.DateTimeField(
-        source="created_at", format="%b %Y", read_only=True
-    )
+    joined = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
         model = User
