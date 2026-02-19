@@ -215,6 +215,11 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     merchantId = serializers.CharField(
         write_only=True, required=False, allow_blank=True
     )
+    # Route stats
+    distance_km = serializers.DecimalField(
+        write_only=True, required=False, max_digits=10, decimal_places=2
+    )
+    duration_minutes = serializers.IntegerField(write_only=True, required=False)
 
     class Meta:
         from orders.models import Order
@@ -234,11 +239,14 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "cod",
             "riderId",
             "merchantId",
+            "distance_km",
+            "duration_minutes",
         ]
 
     def create(self, validated_data):
         from orders.models import Order, Delivery, Vehicle
-        from .models import Rider, User
+        from .models import Rider
+        from authentication.models import User
 
         # Extract non-model fields
         pickup = validated_data.pop("pickup")
@@ -253,6 +261,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         # cod = validated_data.get("cod") # Unused
         rider_id = validated_data.get("riderId")
         merchant_id = validated_data.get("merchantId")
+        distance_km = validated_data.get("distance_km")
+        duration_minutes = validated_data.get("duration_minutes")
 
         # Resolve Vehicle
         vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
@@ -298,6 +308,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             total_amount=total_amount,
             rider=rider_obj,
             status="Assigned" if rider_obj else "Pending",
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
         )
 
         # Create Delivery

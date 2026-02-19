@@ -66,6 +66,32 @@ export const OrderService = {
         }
     },
 
+    async calculateFare(vehicle: string, distanceKm: number, durationMinutes: number): Promise<number | null> {
+        try {
+            const token = localStorage.getItem("access_token");
+            const response = await fetch("http://localhost:8000/api/orders/calculate-fare/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    vehicle,
+                    distance_km: distanceKm,
+                    duration_minutes: durationMinutes
+                })
+            });
+
+            if (!response.ok) throw new Error("Failed to calculate fare");
+
+            const data = await response.json();
+            return data.price;
+        } catch (error) {
+            console.error("Calculate Fare Error:", error);
+            return null;
+        }
+    },
+
     async getVehicles(): Promise<any[]> {
         try {
             const token = localStorage.getItem("access_token");

@@ -27,7 +27,7 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
     const [pkgType, setPkgType] = useState("Box");
     const [codAmount, setCodAmount] = useState("");
     const [riderId, setRiderId] = useState("");
-    const [price, setPrice] = useState("");
+    const [price, setPrice] = useState<number | undefined>(undefined);
     const [loading, setLoading] = useState(false);
 
     // Route info
@@ -82,12 +82,13 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
         setLoading(true);
 
         // Determine price: Manual override > Calculated > null
-        let finalPrice = price ? parseFloat(price) : null;
-
+        // let finalPrice = price ? parseFloat(price) : null;
+        let finalPrice = price ? Number(price) : null;
         if (finalPrice === null && distanceKm > 0) {
-            const selectedVehicle = vehicles.find(v => v.name === vehicle);
-            if (selectedVehicle) {
-                finalPrice = OrderService.calculatePrice(selectedVehicle, distanceKm, durationMinutes);
+            // Use backend calculation
+            const calculated = await OrderService.calculateFare(vehicle, distanceKm, durationMinutes);
+            if (calculated !== null) {
+                finalPrice = calculated;
             }
         }
 
@@ -104,7 +105,7 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
             price: finalPrice,
             cod: codOn ? parseFloat(codAmount) : 0,
             riderId: riderId || "",
-            distance_km: distanceKm,
+            distance_km: parseFloat(distanceKm.toFixed(2)),
             duration_minutes: durationMinutes
         };
 
