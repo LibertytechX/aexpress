@@ -24,6 +24,7 @@ function App() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [selectedRiderId, setSelectedRiderId] = useState<string | null>(null);
+  const [selectedMerchantId, setSelectedMerchantId] = useState<string | null>(null);
   const [eventLogs, setEventLogs] = useState<Record<string, LogEvent[]>>({});
 
   useEffect(() => {
@@ -128,7 +129,7 @@ function App() {
       case "Riders":
         return <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => { setNav("Orders"); setSelectedOrderId(id); }} />;
       case "Merchants":
-        return <MerchantsScreen data={merchants} />;
+        return <MerchantsScreen data={merchants} orders={orders} selectedId={selectedMerchantId} onSelect={setSelectedMerchantId} onBack={() => setSelectedMerchantId(null)} />;
       case "Customers":
         return <CustomersScreen data={CUSTOMERS_DATA} />;
       case "Messaging":
@@ -172,7 +173,7 @@ function App() {
             if (m.id === "Messaging") count = MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0);
 
             return (
-              <button key={m.id} onClick={() => { setNav(m.id); setSelectedOrderId(null); setSelectedRiderId(null); }}
+              <button key={m.id} onClick={() => { setNav(m.id); setSelectedOrderId(null); setSelectedRiderId(null); setSelectedMerchantId(null); }}
                 style={{
                   display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderRadius: 10, border: "none", cursor: "pointer",
                   background: nav === m.id ? "rgba(255,255,255,0.1)" : "transparent",
