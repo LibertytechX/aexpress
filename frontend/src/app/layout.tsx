@@ -14,6 +14,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head>
         <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              function initMap() {
+                console.log('🗺️ Google Maps loaded via callback');
+                window.googleMapsLoaded = true;
+                window.dispatchEvent(new Event('google-maps-loaded'));
+              }
+            `,
+          }}
+        />
+        <script
           src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places&callback=initMap`}
           async
           defer
