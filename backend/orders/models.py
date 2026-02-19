@@ -54,26 +54,35 @@ class Vehicle(models.Model):
     def calculate_fare(self, distance_km, duration_minutes):
         """
         Calculate total fare based on distance and duration.
-
-        Args:
-            distance_km (float): Distance in kilometers
-            duration_minutes (int): Duration in minutes
-
-        Returns:
-            Decimal: Total calculated fare
+        Logic: Use Min Fee as floor for the first 'min_distance_km'.
+        Any distance beyond 'min_distance_km' is added on top of the higher of (MinFee) or (Calculated Price at MinDist).
         """
         from decimal import Decimal
 
-        distance_cost = Decimal(str(distance_km)) * self.rate_per_km
-        time_cost = Decimal(str(duration_minutes)) * self.rate_per_minute
-        total = self.base_fare + distance_cost + time_cost
+        dist = Decimal(str(distance_km))
+        min_dist = self.min_distance_km
+        duration = Decimal(str(duration_minutes))
 
-        # Apply minimum fee logic
-        if Decimal(str(distance_km)) <= self.min_distance_km:
-            total = max(total, self.min_fee)
+        # 1. Calculate the price for the minimum distance (keeping duration constant as it's the trip duration)
+        # Note: We use the actual duration for the base calculation, assuming the min fee covers "up to X km" of the trip.
+        base_calc_at_min = (
+            self.base_fare
+            + (min_dist * self.rate_per_km)
+            + (duration * self.rate_per_minute)
+        )
+        effective_base = max(base_calc_at_min, self.min_fee)
 
-        # Ensure total is at least min_fee regardless of distance
-        total = max(total, self.min_fee)
+        # 2. Add cost for excess distance
+        if dist > min_dist:
+            excess_dist = dist - min_dist
+            total = effective_base + (excess_dist * self.rate_per_km)
+        else:
+            total = max(
+                self.base_fare
+                + (dist * self.rate_per_km)
+                + (duration * self.rate_per_minute),
+                self.min_fee,
+            )
 
         return total.quantize(Decimal("0.01"))
 

@@ -115,20 +115,23 @@ export function SettingsScreen() {
         const minKm = parseFloat(vehicle.min_distance_km);
         const minFee = parseFloat(vehicle.min_fee);
 
-        // Backend Logic:
-        // distance_cost = distance * rate_per_km
-        // time_cost = duration * rate_per_minute
-        // total = base + distance_cost + time_cost
+        // Logic: Min Fee acts as the floor for the first 'minKm'.
+        // Distance > minKm is charged additionally on top of that floor.
 
-        let price = base + (km * perKm) + (duration * perMin);
+        let price = 0;
 
-        // Apply min fee logic
         if (km <= minKm) {
-            price = Math.max(price, minFee);
-        }
+            const rawPrice = base + (km * perKm) + (duration * perMin);
+            price = Math.max(rawPrice, minFee);
+        } else {
+            // Calculate what the price WOULD be at exactly minKm
+            const priceAtMinDist = base + (minKm * perKm) + (duration * perMin);
+            const effectiveBase = Math.max(priceAtMinDist, minFee);
 
-        // Ensure total is at least min_fee
-        price = Math.max(price, minFee);
+            // Add excess distance cost
+            const excessKm = km - minKm;
+            price = effectiveBase + (excessKm * perKm);
+        }
 
         // Frontend-specific discounts/surcharges (applied on top of base calculation)
         if (tierEnabled && km >= tier2Km) price = price * (1 - tier2Discount / 100);
