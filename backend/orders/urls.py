@@ -10,6 +10,7 @@ from .views import (
     CancelOrderView,
     CancelableOrdersView,
     CalculateFareView,
+    VehicleUpdateView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -23,6 +24,7 @@ app_name = "orders"
 urlpatterns = [
     # Vehicle endpoints
     path("vehicles/", VehicleListView.as_view(), name="vehicle_list"),
+    path("vehicles/<int:id>/", VehicleUpdateView.as_view(), name="vehicle_update"),
     # Order creation endpoints
     path("quick-send/", QuickSendView.as_view(), name="quick_send"),
     path("multi-drop/", MultiDropView.as_view(), name="multi_drop"),

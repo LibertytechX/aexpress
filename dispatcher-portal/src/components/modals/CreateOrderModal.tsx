@@ -213,7 +213,7 @@ export function CreateOrderModal({ riders, merchants, onClose }: CreateOrderModa
                         </select>
                     </div>
 
-                    <div style={{ marginBottom: 20 }}><label style={lSt}>Price Override</label><input placeholder="Leave blank for standard" style={{ ...iSt, fontFamily: "'Space Mono',monospace" }} value={price} onChange={e => setPrice(e.target.value)} /></div>
+                    <div style={{ marginBottom: 20 }}><label style={lSt}>Price Override</label><input placeholder="Leave blank for standard" style={{ ...iSt, fontFamily: "'Space Mono',monospace" }} value={price ?? ""} onChange={e => setPrice(e.target.value ? parseFloat(e.target.value) : undefined)} /></div>
 
                     <div style={{ display: "flex", gap: 10 }}>
                         <button onClick={onClose} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "transparent", color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600 }}>Cancel</button>

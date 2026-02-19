@@ -8,7 +8,18 @@ class VehicleSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Vehicle
-        fields = ['id', 'name', 'max_weight_kg', 'base_price', 'base_fare', 'rate_per_km', 'rate_per_minute', 'description', 'is_active']
+        fields = [
+            "id",
+            "name",
+            "max_weight_kg",
+            "base_price",
+            "base_fare",
+            "rate_per_km",
+            "rate_per_minute",
+            "description",
+            "is_active",
+        ]
+        read_only_fields = ["id", "name"]
 
 
 class DeliverySerializer(serializers.ModelSerializer):
@@ -17,36 +28,73 @@ class DeliverySerializer(serializers.ModelSerializer):
     class Meta:
         model = Delivery
         fields = [
-            'id', 'dropoff_address', 'receiver_name', 'receiver_phone',
-            'package_type', 'notes', 'status', 'sequence',
-            'created_at', 'delivered_at'
+            "id",
+            "dropoff_address",
+            "receiver_name",
+            "receiver_phone",
+            "package_type",
+            "notes",
+            "status",
+            "sequence",
+            "created_at",
+            "delivered_at",
         ]
-        read_only_fields = ['id', 'created_at', 'delivered_at']
+        read_only_fields = ["id", "created_at", "delivered_at"]
 
 
 class OrderSerializer(serializers.ModelSerializer):
     """Serializer for Order model - for listing and detail views."""
 
     deliveries = DeliverySerializer(many=True, read_only=True)
-    vehicle_name = serializers.CharField(source='vehicle.name', read_only=True)
-    vehicle_price = serializers.DecimalField(source='vehicle.base_price', max_digits=10, decimal_places=2, read_only=True)
-    vehicle_base_fare = serializers.DecimalField(source='vehicle.base_fare', max_digits=10, decimal_places=2, read_only=True)
-    vehicle_rate_per_km = serializers.DecimalField(source='vehicle.rate_per_km', max_digits=10, decimal_places=2, read_only=True)
-    vehicle_rate_per_minute = serializers.DecimalField(source='vehicle.rate_per_minute', max_digits=10, decimal_places=2, read_only=True)
-    user_business_name = serializers.CharField(source='user.business_name', read_only=True)
+    vehicle_name = serializers.CharField(source="vehicle.name", read_only=True)
+    vehicle_price = serializers.DecimalField(
+        source="vehicle.base_price", max_digits=10, decimal_places=2, read_only=True
+    )
+    vehicle_base_fare = serializers.DecimalField(
+        source="vehicle.base_fare", max_digits=10, decimal_places=2, read_only=True
+    )
+    vehicle_rate_per_km = serializers.DecimalField(
+        source="vehicle.rate_per_km", max_digits=10, decimal_places=2, read_only=True
+    )
+    vehicle_rate_per_minute = serializers.DecimalField(
+        source="vehicle.rate_per_minute",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
+    user_business_name = serializers.CharField(
+        source="user.business_name", read_only=True
+    )
     delivery_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
-            'id', 'order_number', 'user_business_name', 'mode', 'vehicle_name', 'vehicle_price',
-            'vehicle_base_fare', 'vehicle_rate_per_km', 'vehicle_rate_per_minute',
-            'pickup_address', 'sender_name', 'sender_phone',
-            'payment_method', 'total_amount', 'distance_km', 'duration_minutes', 'status',
-            'created_at', 'updated_at', 'scheduled_pickup_time',
-            'notes', 'deliveries', 'delivery_count'
+            "id",
+            "order_number",
+            "user_business_name",
+            "mode",
+            "vehicle_name",
+            "vehicle_price",
+            "vehicle_base_fare",
+            "vehicle_rate_per_km",
+            "vehicle_rate_per_minute",
+            "pickup_address",
+            "sender_name",
+            "sender_phone",
+            "payment_method",
+            "total_amount",
+            "distance_km",
+            "duration_minutes",
+            "status",
+            "created_at",
+            "updated_at",
+            "scheduled_pickup_time",
+            "notes",
+            "deliveries",
+            "delivery_count",
         ]
-        read_only_fields = ['id', 'order_number', 'created_at', 'updated_at']
+        read_only_fields = ["id", "order_number", "created_at", "updated_at"]
 
     def get_delivery_count(self, obj):
         """Get the number of deliveries for this order."""
@@ -69,18 +117,19 @@ class QuickSendSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=['wallet', 'cash_on_pickup', 'receiver_pays'],
-        default='wallet'
+        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     package_type = serializers.ChoiceField(
-        choices=['Box', 'Envelope', 'Fragile', 'Food', 'Document', 'Other'],
-        default='Box'
+        choices=["Box", "Envelope", "Fragile", "Food", "Document", "Other"],
+        default="Box",
     )
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
     # Route information for pricing
-    distance_km = serializers.DecimalField(required=True, max_digits=10, decimal_places=2)
+    distance_km = serializers.DecimalField(
+        required=True, max_digits=10, decimal_places=2
+    )
     duration_minutes = serializers.IntegerField(required=True)
 
     def validate_vehicle(self, value):
@@ -88,7 +137,9 @@ class QuickSendSerializer(serializers.Serializer):
         try:
             Vehicle.objects.get(name=value, is_active=True)
         except Vehicle.DoesNotExist:
-            raise serializers.ValidationError(f"Vehicle '{value}' not found or inactive.")
+            raise serializers.ValidationError(
+                f"Vehicle '{value}' not found or inactive."
+            )
         return value
 
 
@@ -99,8 +150,8 @@ class MultiDropDeliverySerializer(serializers.Serializer):
     receiver_name = serializers.CharField(required=True, max_length=255)
     receiver_phone = serializers.CharField(required=True, max_length=20)
     package_type = serializers.ChoiceField(
-        choices=['Box', 'Envelope', 'Fragile', 'Food', 'Document', 'Other'],
-        default='Box'
+        choices=["Box", "Envelope", "Fragile", "Food", "Document", "Other"],
+        default="Box",
     )
     notes = serializers.CharField(required=False, allow_blank=True)
 
@@ -119,14 +170,15 @@ class MultiDropSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=['wallet', 'cash_on_pickup', 'receiver_pays'],
-        default='wallet'
+        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
     # Route information for pricing
-    distance_km = serializers.DecimalField(required=True, max_digits=10, decimal_places=2)
+    distance_km = serializers.DecimalField(
+        required=True, max_digits=10, decimal_places=2
+    )
     duration_minutes = serializers.IntegerField(required=True)
 
     def validate_vehicle(self, value):
@@ -134,7 +186,9 @@ class MultiDropSerializer(serializers.Serializer):
         try:
             Vehicle.objects.get(name=value, is_active=True)
         except Vehicle.DoesNotExist:
-            raise serializers.ValidationError(f"Vehicle '{value}' not found or inactive.")
+            raise serializers.ValidationError(
+                f"Vehicle '{value}' not found or inactive."
+            )
         return value
 
     def validate_deliveries(self, value):
@@ -158,14 +212,15 @@ class BulkImportSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=['wallet', 'cash_on_pickup', 'receiver_pays'],
-        default='wallet'
+        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
     # Route information for pricing
-    distance_km = serializers.DecimalField(required=True, max_digits=10, decimal_places=2)
+    distance_km = serializers.DecimalField(
+        required=True, max_digits=10, decimal_places=2
+    )
     duration_minutes = serializers.IntegerField(required=True)
 
     def validate_vehicle(self, value):
@@ -173,7 +228,9 @@ class BulkImportSerializer(serializers.Serializer):
         try:
             Vehicle.objects.get(name=value, is_active=True)
         except Vehicle.DoesNotExist:
-            raise serializers.ValidationError(f"Vehicle '{value}' not found or inactive.")
+            raise serializers.ValidationError(
+                f"Vehicle '{value}' not found or inactive."
+            )
         return value
 
     def validate_deliveries(self, value):
@@ -181,4 +238,3 @@ class BulkImportSerializer(serializers.Serializer):
         if not value or len(value) == 0:
             raise serializers.ValidationError("At least one delivery is required.")
         return value
-

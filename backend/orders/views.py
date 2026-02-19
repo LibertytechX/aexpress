@@ -31,6 +31,32 @@ class VehicleListView(APIView):
         )
 
 
+class VehicleUpdateView(generics.UpdateAPIView):
+    """API endpoint to update vehicle pricing."""
+    
+    queryset = Vehicle.objects.all()
+    serializer_class = VehicleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'id'
+
+    def update(self, request, *args, **kwargs):
+        """Update vehicle details."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Vehicle {instance.name} updated successfully",
+                "vehicle": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
+
+
 class QuickSendView(APIView):
     """API endpoint for Quick Send order creation."""
 

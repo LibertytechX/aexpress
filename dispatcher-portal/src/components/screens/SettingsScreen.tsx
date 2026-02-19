@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { S } from "../common/theme";
 import { LagosMap } from "../map/LagosMap";
+import { VehicleService, type Vehicle } from "../../services/vehicleService";
 
 export function SettingsScreen() {
     // ─── PRICING STATE (Research-based Lagos defaults) ───
@@ -54,6 +55,34 @@ export function SettingsScreen() {
     const [simZone, setSimZone] = useState("same");
     const [simWeight, setSimWeight] = useState(3);
     const [simSurge, setSimSurge] = useState(false);
+    const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+
+    useEffect(() => {
+        fetchVehicles();
+    }, []);
+
+    const fetchVehicles = async () => {
+        const data = await VehicleService.getVehicles();
+        if (data && data.length > 0) {
+            setVehicles(data);
+            data.forEach(v => {
+                const base = parseFloat(v.base_fare);
+                const perKm = parseFloat(v.rate_per_km);
+                const name = v.name.toLowerCase();
+
+                if (name === 'bike') {
+                    setBikeBase(base);
+                    setBikePerKm(perKm);
+                } else if (name === 'car') {
+                    setCarBase(base);
+                    setCarPerKm(perKm);
+                } else if (name === 'van') {
+                    setVanBase(base);
+                    setVanPerKm(perKm);
+                }
+            });
+        }
+    };
 
     const calcPrice = (base: number, perKm: number, minKm: number, minFee: number, km: number, zone: string, weight: number) => {
         let price;
@@ -81,7 +110,31 @@ export function SettingsScreen() {
     const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight);
     const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
 
-    const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2500); };
+    const handleSave = async () => {
+        // Update vehicles in backend
+        const promises = vehicles.map(v => {
+            const name = v.name.toLowerCase();
+            let updates: any = {};
+
+            if (name === 'bike') {
+                updates = { base_fare: bikeBase, rate_per_km: bikePerKm };
+            } else if (name === 'car') {
+                updates = { base_fare: carBase, rate_per_km: carPerKm };
+            } else if (name === 'van') {
+                updates = { base_fare: vanBase, rate_per_km: vanPerKm };
+            }
+
+            if (Object.keys(updates).length > 0) {
+                return VehicleService.updateVehicle(v.id, updates);
+            }
+            return Promise.resolve();
+        });
+
+        await Promise.all(promises);
+
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2500);
+    };
     const handleReset = () => {
         setBikeBase(500); setBikePerKm(150); setBikeMinKm(3); setBikeMin(1200);
         setCarBase(1000); setCarPerKm(250); setCarMinKm(3); setCarMin(2500);
