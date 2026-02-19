@@ -587,6 +587,21 @@ export default function DashboardPage() {
           width: collapsed ? 80 : 260,
         }}
       >
+        {/* Sidebar corner accents */}
+        <div className="absolute bottom-0 left-0 pointer-events-none z-0 overflow-hidden w-28 h-28">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 left-0 w-full h-full opacity-[0.08]">
+            <circle cx="0" cy="200" r="60" fill="none" stroke="#2F3758" strokeWidth="24" />
+            <circle cx="0" cy="200" r="100" fill="none" stroke="#FBB12F" strokeWidth="14" />
+            <circle cx="0" cy="200" r="140" fill="none" stroke="#2F3758" strokeWidth="8" />
+          </svg>
+        </div>
+        <div className="absolute bottom-0 right-0 pointer-events-none z-0 overflow-hidden w-28 h-28">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 right-0 w-full h-full opacity-[0.08]">
+            <circle cx="200" cy="200" r="60" fill="none" stroke="#FBB12F" strokeWidth="24" />
+            <circle cx="200" cy="200" r="100" fill="none" stroke="#2F3758" strokeWidth="14" />
+            <circle cx="200" cy="200" r="140" fill="none" stroke="#FBB12F" strokeWidth="8" />
+          </svg>
+        </div>
         {/* Logo */}
         <div style={{ padding: "24px 20px 20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: collapsed ? "center" : "flex-start" }}>
@@ -680,103 +695,131 @@ export default function DashboardPage() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col min-w-0 bg-[#F8FAFC] md:rounded-[30px] shadow-2xl overflow-hidden relative">
+
+        {/* Corner accent patterns */}
+        {/* Bottom-left corner */}
+        <div className="absolute bottom-0 left-0 pointer-events-none z-0 overflow-hidden w-52 h-52">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 left-0 w-full h-full opacity-[0.07]">
+            <circle cx="0" cy="200" r="60" fill="none" stroke="#2F3758" strokeWidth="20" />
+            <circle cx="0" cy="200" r="100" fill="none" stroke="#FBB12F" strokeWidth="12" />
+            <circle cx="0" cy="200" r="140" fill="none" stroke="#2F3758" strokeWidth="8" />
+            <circle cx="0" cy="200" r="175" fill="none" stroke="#FBB12F" strokeWidth="5" />
+          </svg>
+        </div>
+        {/* Bottom-right corner */}
+        <div className="absolute bottom-0 right-0 pointer-events-none z-0 overflow-hidden w-52 h-52">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 right-0 w-full h-full opacity-[0.07]">
+            <circle cx="200" cy="200" r="60" fill="none" stroke="#FBB12F" strokeWidth="20" />
+            <circle cx="200" cy="200" r="100" fill="none" stroke="#2F3758" strokeWidth="12" />
+            <circle cx="200" cy="200" r="140" fill="none" stroke="#FBB12F" strokeWidth="8" />
+            <circle cx="200" cy="200" r="175" fill="none" stroke="#2F3758" strokeWidth="5" />
+          </svg>
+        </div>
+
         {/* Top Bar */}
-        <header style={{
-          background: "#fff", padding: "0 24px", height: 64, display: "flex", alignItems: "center", gap: 16,
-          borderBottom: `1px solid ${S.grayBg}`, position: "sticky", top: 0, zIndex: 30
-        }}>
-          <button onClick={() => setSidebarOpen(true)} className="md:hidden flex items-center justify-center p-1 cursor-pointer bg-transparent border-none">
+        <header className="bg-white/80 backdrop-blur-md sticky top-0 z-30 flex items-center h-16 px-4 md:px-6 border-b border-slate-100/50 transition-all">
+          <button onClick={() => setSidebarOpen(true)} className="md:hidden flex items-center justify-center p-2 mr-2 text-[#2F3758] rounded-full hover:bg-slate-100 transition-colors">
             {Icons.menu}
           </button>
 
-          <button onClick={() => setCollapsed(!collapsed)} className="hidden md:flex items-center justify-center p-1 cursor-pointer bg-transparent border-none" style={{ color: S.navy }}>
+          <button onClick={() => setCollapsed(!collapsed)} className="hidden md:flex items-center justify-center p-2 mr-4 text-[#2F3758] rounded-full hover:bg-slate-100 transition-colors">
             {collapsed ? Icons.menu : Icons.close}
           </button>
 
-          <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>
-              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : ""}
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg md:text-xl font-bold text-[#2F3758] truncate">
+              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : "Page"}
             </h1>
           </div>
 
-          <button onClick={() => setFundModal(true)} style={{
-            padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit",
-            background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy,
-            fontWeight: 700, fontSize: 13, display: "flex", alignItems: "center", gap: 6
-          }}>
-            <span style={{ fontSize: 16 }}>+</span> Fund Wallet
-          </button>
+          <div className="flex items-center gap-3 md:gap-4 pl-2">
 
-          <div style={{ position: "relative" }}>
-            <button style={{ background: "none", border: "none", cursor: "pointer", color: S.gray, padding: 4 }}>{Icons.bell}</button>
-            <div style={{ position: "absolute", top: 2, right: 2, width: 8, height: 8, borderRadius: "50%", background: S.red }} />
-          </div>
-
-          {/* User Profile Dropdown */}
-          <div style={{ position: "relative", marginLeft: 8 }}>
+            {/* Fund Wallet - Responsive */}
             <button
-              onClick={() => setProfileOpen(!profileOpen)}
-              className="flex items-center gap-3 hover:bg-slate-50 p-1 pr-3 rounded-full transition-all group"
-              style={{ border: `1px solid ${profileOpen ? S.gold : "transparent"}` }}
+              onClick={() => setFundModal(true)}
+              className="md:hidden flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-[#FBB12F] to-[#F5C563] text-[#2F3758] shadow-md shadow-[#FBB12F]/20 active:scale-95 transition-transform"
+              title="Fund Wallet"
             >
-              <div style={{
-                width: 38, height: 38, borderRadius: "50%", background: S.goldPale,
-                display: "flex", alignItems: "center", justifyContent: "center", color: S.navy, fontWeight: 700, fontSize: 14,
-                border: `2px solid ${S.white}`, boxShadow: "0 2px 8px rgba(0,0,0,0.05)"
-              }}>
-                {currentUser?.business_name?.substring(0, 2).toUpperCase() || "AX"}
-              </div>
-              <div className="hidden md:block text-left">
-                <div style={{ color: S.navy, fontSize: 13, fontWeight: 700, lineHeight: 1.2 }}>
-                  {currentUser?.business_name || "Business"}
-                </div>
-                <div style={{ color: S.grayLight, fontSize: 10, fontWeight: 600 }}> {currentUser?.email}</div>
-              </div>
-              <div style={{ color: S.grayLight, transform: profileOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
-                <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+              <div className="flex items-center justify-center transform scale-90">
+                {Icons.wallet}
+                <div className="absolute -top-1 -right-1 bg-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold border border-[#FBB12F]">+</div>
               </div>
             </button>
 
-            {/* Backdrop for closing */}
-            {profileOpen && (
-              <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setProfileOpen(false)} />
-            )}
+            <button
+              onClick={() => setFundModal(true)}
+              className="hidden md:flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-br from-[#FBB12F] to-[#F5C563] text-[#2F3758] font-bold text-sm shadow-lg shadow-[#FBB12F]/20 hover:shadow-xl hover:-translate-y-0.5 transition-all"
+            >
+              <span className="bg-white/20 w-5 h-5 rounded-full flex items-center justify-center text-xs">+</span> Fund Wallet
+            </button>
 
-            {/* Popover Menu */}
-            {profileOpen && (
-              <div style={{
-                position: "absolute", top: "120%", right: 0, width: 240,
-                background: "#fff", borderRadius: 16,
-                boxShadow: "0 10px 40px rgba(0,0,0,0.1), 0 2px 10px rgba(0,0,0,0.05)",
-                border: "1px solid #f1f5f9", overflow: "hidden", zIndex: 50,
-                animation: "fadeIn 0.2s ease"
-              }}>
-                <div style={{ padding: "16px", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>{currentUser?.business_name}</div>
-                  <div style={{ fontSize: 11, color: S.gray, marginTop: 2 }}>{currentUser?.email}</div>
-                </div>
+            {/* Notifications */}
+            <div className="relative">
+              <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-slate-50 transition-colors text-slate-500 hover:text-[#2F3758]">
+                {Icons.bell}
+              </button>
+              <div className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white" />
+            </div>
 
-                <div style={{ padding: 6 }}>
-                  <button onClick={() => { setScreen("settings"); setProfileOpen(false); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 transition-colors text-left group">
-                    <span style={{ color: S.gray, fontSize: 16 }} className="group-hover:text-navy transition-colors">{Icons.settings}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Settings</span>
-                  </button>
-                  <button onClick={() => { setScreen("website"); setProfileOpen(false); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 transition-colors text-left group">
-                    <span style={{ color: S.gray, fontSize: 16 }} className="group-hover:text-navy transition-colors">{Icons.website}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>My Website</span>
-                  </button>
+            {/* Profile Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setProfileOpen(!profileOpen)}
+                className="flex items-center gap-2 md:gap-3 pl-1 pr-1 md:pr-3 py-1 rounded-full hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100"
+              >
+                <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-[#FFF8E1] border-2 border-white shadow-sm flex items-center justify-center text-[#2F3758] font-bold text-sm">
+                  {currentUser?.business_name?.substring(0, 2).toUpperCase() || "AX"}
                 </div>
+                <div className="hidden md:block text-left">
+                  <div className="text-[13px] font-bold text-[#2F3758] leading-tight max-w-[100px] truncate">
+                    {currentUser?.business_name || "Business"}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">Verified Merchant</div>
+                </div>
+                <div className={`hidden md:block text-slate-400 transition-transform duration-200 ${profileOpen ? 'rotate-180' : ''}`}>
+                  {Icons.arrowDown}
+                </div>
+              </button>
 
-                <div style={{ borderTop: "1px solid #f1f5f9", padding: 6 }}>
-                  <button onClick={() => setScreen("login")} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-left group">
-                    <span style={{ color: "#EF4444", fontSize: 16 }}>{Icons.logout}</span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#EF4444" }}>Log Out</span>
-                  </button>
+              {/* Backdrop for closing */}
+              {profileOpen && (
+                <div style={{ position: "fixed", inset: 0, zIndex: 40 }} onClick={() => setProfileOpen(false)} />
+              )}
+
+              {/* Popover Menu */}
+              {profileOpen && (
+                <div style={{
+                  position: "absolute", top: "120%", right: 0, width: 240,
+                  background: "#fff", borderRadius: 16,
+                  boxShadow: "0 10px 40px rgba(0,0,0,0.1), 0 2px 10px rgba(0,0,0,0.05)",
+                  border: "1px solid #f1f5f9", overflow: "hidden", zIndex: 50,
+                  animation: "fadeIn 0.2s ease"
+                }}>
+                  <div style={{ padding: "16px", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>{currentUser?.business_name}</div>
+                    <div style={{ fontSize: 11, color: S.gray, marginTop: 2 }}>{currentUser?.email}</div>
+                  </div>
+
+                  <div style={{ padding: 6 }}>
+                    <button onClick={() => { setScreen("settings"); setProfileOpen(false); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 transition-colors text-left group">
+                      <span style={{ color: S.gray, fontSize: 16 }} className="group-hover:text-navy transition-colors">{Icons.settings}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Settings</span>
+                    </button>
+                    <button onClick={() => { setScreen("website"); setProfileOpen(false); }} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 transition-colors text-left group">
+                      <span style={{ color: S.gray, fontSize: 16 }} className="group-hover:text-navy transition-colors">{Icons.website}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>My Website</span>
+                    </button>
+                  </div>
+
+                  <div style={{ borderTop: "1px solid #f1f5f9", padding: 6 }}>
+                    <button onClick={() => setScreen("login")} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-left group">
+                      <span style={{ color: "#EF4444", fontSize: 16 }}>{Icons.logout}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#EF4444" }}>Log Out</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </header>
 
