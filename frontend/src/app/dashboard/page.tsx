@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import API, { TokenManager } from '@/lib/api';
 import NotificationSidebar from '@/components/common/NotificationSidebar';
+import { useRouter } from 'next/navigation';
 
 // declare global window interface extension
 declare global {
@@ -215,7 +216,8 @@ const S = {
 
 // ─── MAIN APP ───────────────────────────────────────────────────
 export default function DashboardPage() {
-  const [screen, setScreen] = useState("login");
+  const router = useRouter();
+  const [screen, setScreen] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -267,14 +269,16 @@ export default function DashboardPage() {
       setCurrentUser(user);
       const savedScreen = localStorage.getItem('lastDashboardScreen') || "dashboard";
       setScreen(savedScreen);
-    } // else defaults to 'login'
 
-    // Fake a small delay to prevent rough visual pop-in
-    setTimeout(() => {
-      setIsInitializing(false);
-    }, 500);
+      // Fake a small delay to prevent rough visual pop-in
+      setTimeout(() => {
+        setIsInitializing(false);
+      }, 500);
+    } else {
+      router.push('/login');
+    }
 
-  }, []);
+  }, [router]);
 
   // Persist screen state
   useEffect(() => {
@@ -456,7 +460,7 @@ export default function DashboardPage() {
     } finally {
       setCurrentUser(null);
       setOrders([]);
-      setScreen("login");
+      router.push('/login');
       showNotif("Logged out successfully");
     }
   };
@@ -480,11 +484,12 @@ export default function DashboardPage() {
     );
   }
 
-  if (screen === "login") return <LoginScreen onLogin={handleLogin} onSignup={() => setScreen("signup")} onForgotPassword={() => setScreen("forgot-password")} />;
-  if (screen === "signup") return <SignupScreen onBack={() => setScreen("login")} onComplete={handleSignup} />;
+  // Fallback for when redirecting
+  if (screen === "login") return null;
+  if (screen === "signup") return null;
   if (screen === "verify-email") return <VerifyEmailScreen token={verificationToken} onComplete={handleVerificationComplete} />;
-  if (screen === "forgot-password") return <ForgotPasswordScreen onBack={() => setScreen("login")} />;
-  if (screen === "reset-password") return <ResetPasswordScreen token={passwordResetToken} onComplete={() => setScreen("login")} />;
+  if (screen === "forgot-password") return null;
+  if (screen === "reset-password") return <ResetPasswordScreen token={passwordResetToken} onComplete={() => router.push('/login')} />;
 
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: Icons.dashboard },
@@ -861,7 +866,7 @@ export default function DashboardPage() {
                   </div>
 
                   <div style={{ borderTop: "1px solid #f1f5f9", padding: 6 }}>
-                    <button onClick={() => setScreen("login")} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-left group">
+                    <button onClick={() => handleLogout()} className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-red-50 transition-colors text-left group">
                       <span style={{ color: "#EF4444", fontSize: 16 }}>{Icons.logout}</span>
                       <span style={{ fontSize: 13, fontWeight: 600, color: "#EF4444" }}>Log Out</span>
                     </button>
