@@ -238,6 +238,9 @@ export default function DashboardPage() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  // ─── INITIALIZATION LOGIC ───
+  const [isInitializing, setIsInitializing] = useState(true);
+
   // Check if user is logged in on mount and check for tokens in URL
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -254,6 +257,7 @@ export default function DashboardPage() {
         setVerificationToken(token);
         setScreen("verify-email");
       }
+      setIsInitializing(false);
       return;
     }
 
@@ -261,9 +265,23 @@ export default function DashboardPage() {
     const user = API?.Token?.getUser();
     if (user) {
       setCurrentUser(user);
-      setScreen("dashboard");
-    }
+      const savedScreen = localStorage.getItem('lastDashboardScreen') || "dashboard";
+      setScreen(savedScreen);
+    } // else defaults to 'login'
+
+    // Fake a small delay to prevent rough visual pop-in
+    setTimeout(() => {
+      setIsInitializing(false);
+    }, 500);
+
   }, []);
+
+  // Persist screen state
+  useEffect(() => {
+    if (screen && !["login", "signup", "forgot-password", "reset-password", "verify-email"].includes(screen)) {
+      localStorage.setItem('lastDashboardScreen', screen);
+    }
+  }, [screen]);
 
   // Load orders when dashboard is shown
   useEffect(() => {
@@ -442,6 +460,25 @@ export default function DashboardPage() {
       showNotif("Logged out successfully");
     }
   };
+
+  if (isInitializing) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        background: `linear-gradient(145deg, ${S.navy} 0%, #0f1b33 100%)`
+      }}>
+        <div style={{
+          width: 64, height: 64, borderRadius: 16, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+          display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 24, color: S.navy,
+          fontFamily: "'Space Mono', monospace", marginBottom: 24,
+          boxShadow: "0 8px 32px rgba(251, 177, 47, 0.3)",
+          animation: "pulse 1.5s ease-in-out infinite"
+        }}>AX</div>
+        <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 14, fontWeight: 500, letterSpacing: "1px" }}>Loading Merchant Portal...</div>
+        <style>{`@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.95); opacity: 0.8; } }`}</style>
+      </div>
+    );
+  }
 
   if (screen === "login") return <LoginScreen onLogin={handleLogin} onSignup={() => setScreen("signup")} onForgotPassword={() => setScreen("forgot-password")} />;
   if (screen === "signup") return <SignupScreen onBack={() => setScreen("login")} onComplete={handleSignup} />;
@@ -1607,7 +1644,7 @@ function SignupScreen({ onBack, onComplete }) {
               <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               </div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>You're all set!</h2>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>You&apos;re all set!</h2>
               <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>Your merchant account has been created. Fund your wallet to start sending deliveries.</p>
             </div>
             <button onClick={onComplete} style={{ width: "100%", height: 46, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg, #E8A838, #F5C563)", color: "#1B2A4A", fontFamily: "inherit" }}>
@@ -4297,6 +4334,7 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
         <div style={{ padding: 24 }}>
           {/* Loading State */}
           {
+            // eslint-disable-next-line react-hooks/static-components
             (state === 'loading' || state === 'confirming') && <LoadingSpinner />}
 
           {/* Show Bank Details */}
@@ -4352,7 +4390,7 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: "#78350f", lineHeight: 1.6 }}>
                   <li>Transfer exactly <strong>₦{amount.toLocaleString()}</strong> to the account above</li>
                   <li>Your wallet will be credited within 5-10 minutes after payment</li>
-                  <li>Click "I have paid" only after completing the transfer</li>
+                  <li>Click &quot;I have paid&quot; only after completing the transfer</li>
                 </ul>
               </div>
 
@@ -4634,7 +4672,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
               value={businessName}
               onChange={(e) => setBusinessName(e.target.value)}
               placeholder="Enter business name"
-              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }}
+              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit", color: "#1B2A4A", fontWeight: 600 }}
             />
           </div>
 
@@ -4644,7 +4682,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
               placeholder="Enter contact name"
-              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }}
+              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit", color: "#1B2A4A", fontWeight: 600 }}
             />
           </div>
 
@@ -4653,7 +4691,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
             <input
               value={currentUser?.phone ? `+234 ${currentUser.phone}` : "N/A"}
               disabled
-              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit", background: "#f8fafc", color: "#94a3b8", cursor: "not-allowed" }}
+              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit", background: "#f8fafc", color: "#64748b", fontWeight: 600, cursor: "not-allowed" }}
             />
             <p style={{ fontSize: 12, color: "#64748b", marginTop: 4, marginBottom: 0 }}>Phone number cannot be changed</p>
           </div>
@@ -4665,7 +4703,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter email address"
-              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }}
+              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit", color: "#1B2A4A", fontWeight: 600 }}
             />
           </div>
 
@@ -4676,7 +4714,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
               onChange={(e) => setAddress(e.target.value)}
               placeholder="Enter business address"
               rows={3}
-              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", resize: "vertical" }}
+              style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", fontSize: 14, fontFamily: "inherit", color: "#1B2A4A", fontWeight: 600, resize: "vertical" }}
             />
           </div>
 
@@ -4736,7 +4774,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
                   value={newAddressLabel}
                   onChange={(e) => setNewAddressLabel(e.target.value)}
                   placeholder="Enter label"
-                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 40, fontSize: 14, fontFamily: "inherit", background: "#fff" }}
+                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 40, fontSize: 14, fontFamily: "inherit", background: "#fff", color: "#1B2A4A", fontWeight: 600 }}
                 />
               </div>
               <div style={{ marginBottom: 12 }}>
@@ -4747,7 +4785,7 @@ function SettingsScreen({ currentUser, onUpdateUser, onShowNotif }) {
                   value={newAddressText}
                   onChange={setNewAddressText}
                   placeholder="Enter full address (start typing for suggestions)"
-                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 80, fontSize: 14, fontFamily: "inherit", background: "#fff" }}
+                  style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 80, fontSize: 14, fontFamily: "inherit", background: "#fff", color: "#1B2A4A", fontWeight: 600 }}
                 />
               </div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -5226,7 +5264,7 @@ function WebsiteScreen({ onCreateDelivery }) {
             <span style={{ fontSize: 20 }}>⚙️</span>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Customise Your Pipeline</div>
-              <div style={{ fontSize: 12, color: S.gray }}>Add, remove, or rename stages to match your workflow. Orders in "Ready for Delivery" auto-create AX dispatch requests.</div>
+              <div style={{ fontSize: 12, color: S.gray }}>Add, remove, or rename stages to match your workflow. Orders in &quot;Ready for Delivery&quot; auto-create AX dispatch requests.</div>
             </div>
           </div>
         </div>
@@ -5868,7 +5906,7 @@ function WebPOSScreen() {
             boxShadow: "0 24px 48px rgba(0,0,0,0.15)"
           }}>
             <h2 style={{ fontSize: 20, fontWeight: 800, color: S.navy, margin: "0 0 4px" }}>Add New Staff</h2>
-            <p style={{ fontSize: 13, color: S.grayLight, margin: "0 0 20px" }}>They'll login to the POS with their PIN</p>
+            <p style={{ fontSize: 13, color: S.grayLight, margin: "0 0 20px" }}>They&apos;`,ll login to the POS with their PIN</p>
 
             {[
               { label: "Full Name", placeholder: "e.g. Blessing Okonkwo" },
