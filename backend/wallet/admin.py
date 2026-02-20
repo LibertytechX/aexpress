@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Wallet, Transaction, VirtualAccount
+from .models import Wallet, Transaction, VirtualAccount, WebhookLog
 
 @admin.register(Wallet)
 class WalletAdmin(admin.ModelAdmin):
@@ -78,3 +78,40 @@ class VirtualAccountAdmin(admin.ModelAdmin):
             'fields': ('created_at',)
         }),
     )
+
+
+@admin.register(WebhookLog)
+class WebhookLogAdmin(admin.ModelAdmin):
+    """Admin configuration for WebhookLog model."""
+
+    list_display = ['created_at', 'source', 'status', 'transaction_reference', 'amount', 'recipient_account_number', 'signature_valid']
+    list_filter = ['source', 'status', 'signature_valid', 'created_at']
+    search_fields = ['transaction_reference', 'recipient_account_number', 'error_message']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'processing_started_at', 'processing_completed_at']
+    ordering = ['-created_at']
+    date_hierarchy = 'created_at'
+
+    fieldsets = (
+        ('Webhook Information', {
+            'fields': ('id', 'source', 'status', 'created_at', 'updated_at')
+        }),
+        ('Processing Timeline', {
+            'fields': ('processing_started_at', 'processing_completed_at')
+        }),
+        ('Webhook Data', {
+            'fields': ('payload', 'headers')
+        }),
+        ('Extracted Metadata', {
+            'fields': ('transaction_reference', 'recipient_account_number', 'amount')
+        }),
+        ('Signature Verification', {
+            'fields': ('signature_valid', 'signature_received')
+        }),
+        ('Processing Results', {
+            'fields': ('transaction', 'error_message', 'error_traceback')
+        }),
+    )
+
+    def has_add_permission(self, request):
+        """Disable manual creation of webhook logs"""
+        return False

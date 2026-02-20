@@ -157,3 +157,105 @@ class VirtualAccount(models.Model):
 
     def __str__(self):
         return f"{self.user.business_name} - {self.account_number} ({self.bank_name})"
+
+
+class WebhookLog(models.Model):
+    """
+    WebhookLog model - Stores all incoming webhook calls for audit and debugging.
+    Records are created BEFORE processing to ensure we never lose webhook data.
+    """
+    WEBHOOK_SOURCE_CHOICES = [
+        ('corebanking', 'CoreBanking (LibertyPay)'),
+        ('paystack', 'Paystack'),
+    ]
+
+    STATUS_CHOICES = [
+        ('received', 'Received'),
+        ('processing', 'Processing'),
+        ('processed', 'Processed'),
+        ('failed', 'Failed'),
+        ('skipped', 'Skipped'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source = models.CharField(max_length=20, choices=WEBHOOK_SOURCE_CHOICES, db_index=True)
+
+    # Raw webhook data
+    payload = models.JSONField(help_text="Complete webhook payload as received")
+    headers = models.JSONField(null=True, blank=True, help_text="HTTP headers from webhook request")
+
+    # Processing status
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='received', db_index=True)
+    processing_started_at = models.DateTimeField(null=True, blank=True)
+    processing_completed_at = models.DateTimeField(null=True, blank=True)
+
+    # Processing results
+    transaction = models.ForeignKey(
+        Transaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='webhook_logs',
+        help_text="Transaction created from this webhook (if any)"
+    )
+    error_message = models.TextField(null=True, blank=True, help_text="Error message if processing failed")
+    error_traceback = models.TextField(null=True, blank=True, help_text="Full error traceback for debugging")
+
+    # Webhook metadata
+    transaction_reference = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    recipient_account_number = models.CharField(max_length=20, null=True, blank=True, db_index=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+    # Signature verification
+    signature_valid = models.BooleanField(null=True, blank=True)
+    signature_received = models.CharField(max_length=255, null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'webhook_logs'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['source', '-created_at']),
+            models.Index(fields=['status', '-created_at']),
+            models.Index(fields=['transaction_reference']),
+        ]
+
+    def __str__(self):
+        return f"{self.source.upper()} - {self.status} - {self.created_at.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    def mark_processing(self):
+        """Mark webhook as being processed"""
+        from django.utils import timezone
+        self.status = 'processing'
+        self.processing_started_at = timezone.now()
+        self.save(update_fields=['status', 'processing_started_at', 'updated_at'])
+
+    def mark_processed(self, transaction=None):
+        """Mark webhook as successfully processed"""
+        from django.utils import timezone
+        self.status = 'processed'
+        self.processing_completed_at = timezone.now()
+        if transaction:
+            self.transaction = transaction
+        self.save(update_fields=['status', 'processing_completed_at', 'transaction', 'updated_at'])
+
+    def mark_failed(self, error_message, error_traceback=None):
+        """Mark webhook as failed with error details"""
+        from django.utils import timezone
+        self.status = 'failed'
+        self.processing_completed_at = timezone.now()
+        self.error_message = error_message
+        self.error_traceback = error_traceback
+        self.save(update_fields=['status', 'processing_completed_at', 'error_message', 'error_traceback', 'updated_at'])
+
+    def mark_skipped(self, reason):
+        """Mark webhook as skipped with reason"""
+        from django.utils import timezone
+        self.status = 'skipped'
+        self.processing_completed_at = timezone.now()
+        self.error_message = reason
+        self.save(update_fields=['status', 'processing_completed_at', 'error_message', 'updated_at'])
