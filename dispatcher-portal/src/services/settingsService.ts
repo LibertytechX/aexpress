@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://localhost:8000/api/dispatch";
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/dispatch`;
 
 export interface SystemSettings {
     id: number;

@@ -1,6 +1,6 @@
 import type { Rider } from "../types";
 
-const API_BASE_URL = "http://localhost:8000/api/dispatch"; // Adjust port if needed, assuming Django runs on 8000 or use env var
+const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/dispatch`;
 
 export const RiderService = {
     async getRiders(): Promise<Rider[]> {
