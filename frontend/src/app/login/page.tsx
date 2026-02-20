@@ -387,7 +387,7 @@ export default function LoginPage() {
                         {/* Sign up link */}
                         <div className="text-center pt-1">
                             <p className="text-slate-500 text-sm">
-                                Don't have an account?{' '}
+                                Don&apos;t have an account?{' '}
                                 <Link href="/signup" className="font-bold text-[#FBB12F] hover:text-[#e0981e] transition-colors">
                                     Create Merchant Account
                                 </Link>

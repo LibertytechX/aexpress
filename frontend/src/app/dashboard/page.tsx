@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import API, { TokenManager } from '@/lib/api';
+import NotificationSidebar from '@/components/common/NotificationSidebar';
 
 // declare global window interface extension
 declare global {
@@ -230,6 +231,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [verificationToken, setVerificationToken] = useState(null);
   const [passwordResetToken, setPasswordResetToken] = useState(null);
+  const [notificationOpen, setNotificationOpen] = useState(false);
 
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
@@ -576,29 +578,35 @@ export default function DashboardPage() {
         />
       )}
 
+      {/* Notification Sidebar */}
+      <NotificationSidebar
+        isOpen={notificationOpen}
+        onClose={() => setNotificationOpen(false)}
+      />
+
       {/* Mobile overlay */}
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 40 }} />}
 
       {/* SIDEBAR */}
-      {/* SIDEBAR */}
       <aside
-        className={`shrink-0 fixed inset-y-0 md:relative md:inset-auto z-50 flex flex-col transition-[width,left] duration-300 ${sidebarOpen ? "left-0" : "-left-[260px]"} md:left-0 bg-white md:rounded-[30px] shadow-2xl overflow-y-auto no-scrollbar`}
+        className={`shrink-0 fixed inset-y-0 md:relative md:inset-auto z-50 flex flex-col transition-[width,left] duration-300 ${sidebarOpen ? "left-0" : "-left-[260px]"} md:left-0 bg-[${S.navy}] md:rounded-[30px] shadow-2xl overflow-y-auto no-scrollbar`}
         style={{
           width: collapsed ? 80 : 260,
+          background: S.navy, // Ensure background is explicitly set
         }}
       >
         {/* Sidebar corner accents */}
         <div className="absolute bottom-0 left-0 pointer-events-none z-0 overflow-hidden w-28 h-28">
-          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 left-0 w-full h-full opacity-[0.08]">
-            <circle cx="0" cy="200" r="60" fill="none" stroke="#2F3758" strokeWidth="24" />
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 left-0 w-full h-full opacity-[0.05]">
+            <circle cx="0" cy="200" r="60" fill="none" stroke="#fff" strokeWidth="24" />
             <circle cx="0" cy="200" r="100" fill="none" stroke="#FBB12F" strokeWidth="14" />
-            <circle cx="0" cy="200" r="140" fill="none" stroke="#2F3758" strokeWidth="8" />
+            <circle cx="0" cy="200" r="140" fill="none" stroke="#fff" strokeWidth="8" />
           </svg>
         </div>
         <div className="absolute bottom-0 right-0 pointer-events-none z-0 overflow-hidden w-28 h-28">
-          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 right-0 w-full h-full opacity-[0.08]">
+          <svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" className="absolute bottom-0 right-0 w-full h-full opacity-[0.05]">
             <circle cx="200" cy="200" r="60" fill="none" stroke="#FBB12F" strokeWidth="24" />
-            <circle cx="200" cy="200" r="100" fill="none" stroke="#2F3758" strokeWidth="14" />
+            <circle cx="200" cy="200" r="100" fill="none" stroke="#fff" strokeWidth="14" />
             <circle cx="200" cy="200" r="140" fill="none" stroke="#FBB12F" strokeWidth="8" />
           </svg>
         </div>
@@ -612,8 +620,8 @@ export default function DashboardPage() {
             }}>AX</div>
             {!collapsed && (
               <div>
-                <div style={{ color: S.navy, fontWeight: 700, fontSize: 18, letterSpacing: "-0.5px", fontFamily: "'Outfit', sans-serif" }}>Donezo</div>
-                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 500, marginTop: -2 }}>Merchant Portal</div>
+                <div style={{ color: "#fff", fontWeight: 700, fontSize: 18, letterSpacing: "-0.5px", fontFamily: "'Outfit', sans-serif" }}>Donezo</div>
+                <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 500, marginTop: -2 }}>Merchant Portal</div>
               </div>
             )}
           </div>
@@ -629,16 +637,16 @@ export default function DashboardPage() {
                 className={`relative group flex items-center gap-3 rounded-xl transition-all duration-200 ${collapsed ? "justify-center py-3" : "px-4 py-3"}`}
                 style={{
                   background: active ? S.gold : "transparent",
-                  color: active ? S.navy : S.gray,
+                  color: active ? S.navy : "rgba(255,255,255,0.7)",
                   fontWeight: active ? 600 : 500,
                   boxShadow: active ? "0 4px 12px rgba(251, 177, 47, 0.25)" : "none"
                 }}
               >
                 <span style={{
-                  color: active ? S.navy : S.gray,
+                  color: active ? S.navy : "rgba(255,255,255,0.7)",
                   transition: "color 0.2s",
                   transform: active ? "scale(1.05)" : "scale(1)"
-                }}>
+                }} className="group-hover:text-white">
                   {React.cloneElement(item.icon, {
                     strokeWidth: active ? 2.5 : 2,
                     stroke: "currentColor"
@@ -647,11 +655,11 @@ export default function DashboardPage() {
 
                 {!collapsed && (
                   <>
-                    <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]!'>{item.label}</span>
+                    <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]! group-hover:text-white transition-colors'>{item.label}</span>
                     {item.badge && (
                       <span style={{
                         marginLeft: "auto",
-                        background: item.badge === "FREE" ? S.green : S.navy,
+                        background: item.badge === "FREE" ? S.green : "rgba(255,255,255,0.1)",
                         color: "#fff",
                         fontSize: 10, fontWeight: 700,
                         padding: "2px 8px", borderRadius: 20
@@ -666,11 +674,12 @@ export default function DashboardPage() {
 
         {/* Promo Card (Download App) - Only visible when not collapsed */}
         {!collapsed && (
-          <div style={{ padding: 20 }}>
+          <div style={{ padding: 20, marginTop: "auto" }}>
             <div style={{
-              background: `linear-gradient(135deg, ${S.navy} 0%, #1a2035 100%)`,
+              background: "rgba(255,255,255,0.05)",
+              border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: 20, padding: 20, position: "relative", overflow: "hidden",
-              boxShadow: "0 10px 25px rgba(47, 55, 88, 0.15)"
+              boxShadow: "0 10px 25px rgba(0, 0, 0, 0.2)"
             }}>
               <div style={{ position: "absolute", top: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }}></div>
               <div style={{ position: "relative", zIndex: 10 }}>
@@ -755,7 +764,10 @@ export default function DashboardPage() {
 
             {/* Notifications */}
             <div className="relative">
-              <button className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-slate-50 transition-colors text-slate-500 hover:text-[#2F3758]">
+              <button
+                onClick={() => setNotificationOpen(true)}
+                className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-slate-50 transition-colors text-slate-500 hover:text-[#2F3758]"
+              >
                 {Icons.bell}
               </button>
               <div className="absolute top-2 right-2 w-2.5 h-2.5 rounded-full bg-red-500 border-2 border-white" />
@@ -1070,7 +1082,7 @@ function LoginScreen({ onLogin, onSignup, onForgotPassword }) {
         }}>{loading ? "Signing in..." : "Sign In"}</button>
 
         <div style={{ textAlign: "center", marginTop: 24 }}>
-          <span style={{ color: "#64748b", fontSize: 14 }}>Don't have an account? </span>
+          <span style={{ color: "#64748b", fontSize: 14 }}>Don&apos;t have an account? </span>
           <button onClick={onSignup} style={{ background: "none", border: "none", color: "#E8A838", fontWeight: 700, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>
             Sign Up
           </button>
@@ -1542,7 +1554,7 @@ function SignupScreen({ onBack, onComplete }) {
                         <line x1="15" y1="9" x2="9" y2="15" />
                         <line x1="9" y1="9" x2="15" y2="15" />
                       </svg>
-                      Passwords don't match
+                      Passwords don&apos;t match
                     </>
                   )}
                 </div>
@@ -1619,7 +1631,7 @@ function EmailVerificationBanner({ currentUser, onResend, onDismiss }) {
   const [resending, setResending] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
-  // Don't show if email is verified or banner is dismissed
+  // Don&apos;t show if email is verified or banner is dismissed
   if (!currentUser || currentUser.email_verified || dismissed) return null;
 
   const handleResend = async () => {
@@ -1695,10 +1707,6 @@ function VerifyEmailScreen({ token, onComplete }) {
   const [status, setStatus] = useState("verifying"); // verifying, success, error
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    verifyEmail();
-  }, []);
-
   const verifyEmail = async () => {
     try {
       const response = await fetch(`https://www.orders.axpress.net/api/auth/verify-email/?token=${token}`);
@@ -1726,6 +1734,14 @@ function VerifyEmailScreen({ token, onComplete }) {
       setMessage("Network error. Please check your connection and try again.");
     }
   };
+
+  useEffect(() => {
+
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    verifyEmail();
+  }, []);
+
+
 
   return (
     <div style={{
@@ -2663,13 +2679,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           const pricing = {};
           response.vehicles.forEach(v => {
             pricing[v.name] = {
-              base_fare: v.base_fare,
-              rate_per_km: v.rate_per_km,
-              rate_per_minute: v.rate_per_minute
+              //@ts-ignore
+              base_fare: parseFloat(v.base_fare),
+              //@ts-ignore
+              rate_per_km: parseFloat(v.rate_per_km),
+              //@ts-ignore
+              rate_per_minute: parseFloat(v.rate_per_minute)
             };
           });
           setVehiclePricing(pricing as any);
-          console.log('✅ Loaded vehicle pricing from backend:', pricing);
         }
       } catch (error) {
         console.error('Failed to load vehicle pricing:', error);
@@ -2692,9 +2710,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         hasPickup: !!pickupAddress,
         hasDropoff: !!dropoffAddress
       });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCalculatingRoute(false);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEarlyRouteDistance(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEarlyRouteDuration(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRouteError(null);
       return;
     }
@@ -2806,11 +2828,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
 
-  // When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
+  // When navigating back to Step 1, ensure we don&apos;t keep using stale Step 2 route data.
   // Step 1 should always reflect the *current* addresses via early-route calculation.
   useEffect(() => {
     if (step === 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRouteDistance(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRouteDuration(null);
     }
   }, [step]);
@@ -2942,7 +2966,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return 0;
 
     // Step 2 uses the full route (map) calculation.
-    // IMPORTANT: Don't use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
+    // IMPORTANT: Don&apos;t use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
     // after navigating Step 2 → Step 1 and editing addresses.
     if (step === 2 && routeDistance && routeDuration) {
       const distanceCost = routeDistance * pricing.rate_per_km;
@@ -4272,7 +4296,8 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
         {/* Content */}
         <div style={{ padding: 24 }}>
           {/* Loading State */}
-          {(state === 'loading' || state === 'confirming') && <LoadingSpinner />}
+          {
+            (state === 'loading' || state === 'confirming') && <LoadingSpinner />}
 
           {/* Show Bank Details */}
           {state === 'show-details' && (
