@@ -48,6 +48,7 @@ export function DispatcherProvider({ children }: { children: React.ReactNode }) 
 
     useEffect(() => {
         if (AuthService.isAuthenticated()) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect
             setUser({ id: "cached", name: "Dispatcher", phone: "" });
             setAuthState("authenticated");
         }
