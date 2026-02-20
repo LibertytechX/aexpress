@@ -6,7 +6,7 @@ const outfit = Outfit({ subsets: ['latin'] })
 
 export const metadata = {
   title: 'Assured Express Merchant Portal',
-  description: 'Manage your deliveries and wallet',
+  description: 'Manage your deliveries and wallet.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
