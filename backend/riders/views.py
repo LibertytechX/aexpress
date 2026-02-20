@@ -91,3 +91,62 @@ class RiderLoginView(APIView):
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class RiderTokenRefreshView(APIView):
+    """
+    Custom Token Refresh View for Riders.
+    Updates the RiderSession with the new refresh token if rotation is enabled.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        refresh_token = request.data.get("refresh")
+
+        if not refresh_token:
+            return Response(
+                {"success": False, "message": "Refresh token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # 1. Validate the old refresh token (checks expiration/blacklist)
+            # This ensures we only proceed if the token is valid per SimpleJWT
+            RefreshToken(refresh_token)
+
+            # 2. Match with our session tracking
+            session = RiderSession.objects.filter(refresh_token=refresh_token).first()
+
+            # 3. Generate new tokens (SimpleJWT handles rotation if configured)
+            # We use the standard serializer logic to stay consistent with SimpleJWT settings.
+            from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+
+            serializer = TokenRefreshSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            res_data = serializer.validated_data
+
+            new_refresh_token = res_data.get("refresh")
+            new_access_token = res_data.get("access")
+
+            # 4. Update session if we found one and rotation happened
+            if session and new_refresh_token:
+                session.refresh_token = new_refresh_token
+                session.save(update_fields=["refresh_token", "last_used_at"])
+
+            return Response(
+                {
+                    "success": True,
+                    "tokens": {
+                        "access": new_access_token,
+                        "refresh": new_refresh_token or refresh_token,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response(
+                {"success": False, "message": str(e)},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )

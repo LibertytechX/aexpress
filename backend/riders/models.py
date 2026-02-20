@@ -102,6 +102,14 @@ class RiderDevice(models.Model):
     os_version = models.CharField(max_length=50, blank=True, default="")
     app_version = models.CharField(max_length=20, blank=True, default="")
 
+    # Permission states (tracked for support/debugging)
+    location_permission = models.CharField(
+        max_length=30, default="not_asked"
+    )  # granted/denied/not_asked
+    camera_permission = models.CharField(max_length=30, default="not_asked")
+    notification_permission = models.CharField(max_length=30, default="not_asked")
+    battery_optimization = models.CharField(max_length=30, default="not_asked")
+
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

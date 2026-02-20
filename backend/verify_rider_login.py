@@ -107,8 +107,47 @@ def test_login(phone, password):
             print(f"Error: {response.json()}")
         except Exception:
             print(f"Raw Output: {response.content[:500]}")
+        return None, None
+
+    tokens = response.json().get("tokens", {})
+    return tokens.get("access"), tokens.get("refresh")
+
+
+def test_token_refresh(refresh_token):
+    client = APIClient()
+    url = "/api/riders/auth/refresh/"
+    data = {"refresh": refresh_token}
+
+    print(f"Testing Token Refresh at {url}...")
+    response = client.post(url, data, format="json")
+
+    if response.status_code == 200:
+        print("✅ Token Refresh Successful!")
+        res_json = response.json()
+        print(f"Response: {res_json}")
+
+        new_refresh = res_json.get("tokens", {}).get("refresh")
+
+        # Verify Session update
+        session = RiderSession.objects.filter(refresh_token=new_refresh).first()
+        if session:
+            print("✅ RiderSession correctly updated with new refresh token.")
+        else:
+            # Check if it didn't rotate (if ROTATE_REFRESH_TOKENS is False, this is expected)
+            if new_refresh == refresh_token:
+                print("ℹ️ Token did not rotate (Expected if rotation is disabled).")
+            else:
+                print("❌ RiderSession NOT updated with new refresh token!")
+    else:
+        print(f"❌ Token Refresh Failed! Status: {response.status_code}")
+        try:
+            print(f"Error: {response.json()}")
+        except Exception:
+            print(f"Raw Output: {response.content[:500]}")
 
 
 if __name__ == "__main__":
     phone, password = setup_test_rider()
-    test_login(phone, password)
+    access, refresh = test_login(phone, password)
+    if refresh:
+        test_token_refresh(refresh)

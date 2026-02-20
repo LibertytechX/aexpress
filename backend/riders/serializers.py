@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from dispatcher.models import Rider
 from authentication.models import User
-from .models import RiderAuth
+from .models import RiderAuth, RiderDevice
 
 
 class RiderMeSerializer(serializers.ModelSerializer):
@@ -31,6 +31,32 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "rating",
             "total_deliveries",
         ]
+
+
+class DeviceRegistrationSerializer(serializers.ModelSerializer):
+    """PermissionsScreen: register device + permissions"""
+
+    class Meta:
+        model = RiderDevice
+        fields = [
+            "device_id",
+            "fcm_token",
+            "platform",
+            "model_name",
+            "os_version",
+            "app_version",
+            "location_permission",
+            "camera_permission",
+            "notification_permission",
+            "battery_optimization",
+        ]
+
+
+class UpdatePermissionsSerializer(serializers.Serializer):
+    location_permission = serializers.CharField(required=False)
+    camera_permission = serializers.CharField(required=False)
+    notification_permission = serializers.CharField(required=False)
+    battery_optimization = serializers.CharField(required=False)
 
 
 class RiderLoginSerializer(serializers.Serializer):
