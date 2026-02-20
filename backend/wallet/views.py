@@ -307,8 +307,9 @@ def get_virtual_account(request):
 def corebanking_webhook(request):
     """
     Handle CoreBanking (LibertyPay) webhook for incoming transfer notifications.
-    Credits the merchant's wallet when a CREDIT settlement is received.
+    Credits the merchant's wallet when a CREDIT transaction is received.
 
+    Note: settlement_status field is ignored as it's not reliable for all account types.
     All webhook calls are logged to WebhookLog BEFORE processing for audit trail.
     """
     webhook_log = None
@@ -367,10 +368,10 @@ def corebanking_webhook(request):
                     'errors': {'detail': 'Invalid signature'},
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        # Only process settled credit transactions
-        if data.get('transaction_type') != 'CREDIT' or not data.get('settlement_status'):
-            logger.info(f"CoreBanking webhook skipped - not a settled credit transaction - Log ID: {webhook_log.id}")
-            webhook_log.mark_skipped("Not a settled credit transaction")
+        # Only process CREDIT transactions (settlement_status is not reliable for all account types)
+        if data.get('transaction_type') != 'CREDIT':
+            logger.info(f"CoreBanking webhook skipped - not a credit transaction - Log ID: {webhook_log.id}")
+            webhook_log.mark_skipped("Not a credit transaction")
             return Response({'success': True})
 
         payer_name = data.get('payer_account_name', 'Bank Transfer')
