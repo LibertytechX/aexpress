@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     "authentication",
     "orders",
     "wallet",
+    "bot",
     "dispatcher",
     "riders",
 ]
@@ -290,3 +291,13 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
     X_FRAME_OPTIONS = "DENY"
+
+# WhatsApp Bot Configuration
+BOT_API_KEY = os.getenv('BOT_API_KEY', '')
+
+# respond.io Integration
+RESPOND_IO_API_KEY = os.getenv('RESPOND_IO_API_KEY', '')
+RESPOND_IO_BASE_URL = os.getenv('RESPOND_IO_BASE_URL', 'https://api.respond.io/v2')
+
+# Google Maps API Configuration
+GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', '')

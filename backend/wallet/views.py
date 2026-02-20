@@ -9,9 +9,10 @@ from django.views.decorators.csrf import csrf_exempt
 import requests
 import hashlib
 import hmac
+import logging
 from decimal import Decimal
 
-from .models import Wallet, Transaction, VirtualAccount
+from .models import Wallet, Transaction, VirtualAccount, WebhookLog
 from .serializers import (
     WalletSerializer,
     TransactionSerializer,
@@ -19,6 +20,9 @@ from .serializers import (
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
 )
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 class TransactionPagination(PageNumberPagination):
@@ -303,11 +307,48 @@ def get_virtual_account(request):
 def corebanking_webhook(request):
     """
     Handle CoreBanking (LibertyPay) webhook for incoming transfer notifications.
-    Credits the merchant's wallet when a CREDIT settlement is received.
+    Credits the merchant's wallet when a CREDIT transaction is received.
+
+    Note: settlement_status field is ignored as it's not reliable for all account types.
+    All webhook calls are logged to WebhookLog BEFORE processing for audit trail.
     """
+    webhook_log = None
+
     try:
-        # Optional signature verification
+        data = request.data
+
+        # Extract headers for logging
+        headers_dict = {
+            'X-Webhook-Signature': request.headers.get('X-Webhook-Signature', ''),
+            'Content-Type': request.headers.get('Content-Type', ''),
+            'User-Agent': request.headers.get('User-Agent', ''),
+        }
+
+        # Extract key fields for indexing
+        transaction_reference = data.get('transaction_reference', '').strip()
+        recipient_account_number = data.get('recipient_account_number', '').strip()
+        amount = data.get('amount', 0)
+
+        # Create webhook log FIRST - before any processing
+        webhook_log = WebhookLog.objects.create(
+            source='corebanking',
+            payload=data,
+            headers=headers_dict,
+            transaction_reference=transaction_reference if transaction_reference else None,
+            recipient_account_number=recipient_account_number if recipient_account_number else None,
+            amount=Decimal(str(amount)) if amount else None,
+            signature_received=request.headers.get('X-Webhook-Signature', ''),
+        )
+
+        logger.info(f"CoreBanking webhook received - Log ID: {webhook_log.id}")
+
+        # Mark as processing
+        webhook_log.mark_processing()
+
+        # Signature verification
         webhook_secret = settings.COREBANKING_WEBHOOK_SECRET
+        signature_valid = None
+
         if webhook_secret:
             signature = request.headers.get('X-Webhook-Signature', '')
             expected = hmac.new(
@@ -315,24 +356,30 @@ def corebanking_webhook(request):
                 request.body,
                 hashlib.sha256,
             ).hexdigest()
-            if signature != expected:
+            signature_valid = (signature == expected)
+            webhook_log.signature_valid = signature_valid
+            webhook_log.save(update_fields=['signature_valid', 'updated_at'])
+
+            if not signature_valid:
+                logger.warning(f"CoreBanking webhook signature mismatch - Log ID: {webhook_log.id}")
+                webhook_log.mark_failed("Invalid webhook signature")
                 return Response({
                     'success': False,
                     'errors': {'detail': 'Invalid signature'},
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-        data = request.data
-
-        # Only process settled credit transactions
-        if data.get('transaction_type') != 'CREDIT' or not data.get('settlement_status'):
+        # Only process CREDIT transactions (settlement_status is not reliable for all account types)
+        if data.get('transaction_type') != 'CREDIT':
+            logger.info(f"CoreBanking webhook skipped - not a credit transaction - Log ID: {webhook_log.id}")
+            webhook_log.mark_skipped("Not a credit transaction")
             return Response({'success': True})
 
-        recipient_account_number = data.get('recipient_account_number', '').strip()
-        amount = data.get('amount', 0)
-        transaction_reference = data.get('transaction_reference', '').strip()
         payer_name = data.get('payer_account_name', 'Bank Transfer')
 
+        # Validate required fields
         if not recipient_account_number or not transaction_reference:
+            logger.error(f"CoreBanking webhook missing required fields - Log ID: {webhook_log.id}")
+            webhook_log.mark_failed("Missing required fields: recipient_account_number or transaction_reference")
             return Response({
                 'success': False,
                 'errors': {'detail': 'Missing required fields'},
@@ -340,6 +387,8 @@ def corebanking_webhook(request):
 
         # Idempotency: skip if already processed
         if Transaction.objects.filter(reference=transaction_reference).exists():
+            logger.info(f"CoreBanking webhook skipped - transaction {transaction_reference} already processed - Log ID: {webhook_log.id}")
+            webhook_log.mark_skipped(f"Transaction {transaction_reference} already processed")
             return Response({'success': True})
 
         # Find the merchant via virtual account
@@ -348,6 +397,8 @@ def corebanking_webhook(request):
                 account_number=recipient_account_number
             )
         except VirtualAccount.DoesNotExist:
+            logger.error(f"CoreBanking webhook - virtual account {recipient_account_number} not found - Log ID: {webhook_log.id}")
+            webhook_log.mark_failed(f"Virtual account {recipient_account_number} not found")
             return Response({
                 'success': False,
                 'errors': {'detail': 'Virtual account not found'},
@@ -355,16 +406,47 @@ def corebanking_webhook(request):
 
         wallet, _ = Wallet.objects.get_or_create(user=virtual_account.user)
 
+        # Prepare metadata with full webhook payload
+        webhook_metadata = {
+            'source': 'corebanking_webhook',
+            'webhook_log_id': str(webhook_log.id),
+            'webhook_payload': data,
+            'transaction_type': data.get('transaction_type'),
+            'settlement_status': data.get('settlement_status'),
+            'payer_account_name': payer_name,
+            'payer_account_number': data.get('payer_account_number'),
+            'recipient_account_number': recipient_account_number,
+            'transaction_date': data.get('transaction_date'),
+            'settlement_date': data.get('settlement_date'),
+        }
+
+        # Create transaction
         with db_transaction.atomic():
             wallet.credit(
                 amount=Decimal(str(amount)),
                 description=f'Bank transfer from {payer_name}',
                 reference=transaction_reference,
+                metadata=webhook_metadata
             )
 
+            # Get the created transaction
+            transaction = Transaction.objects.get(reference=transaction_reference)
+
+            # Mark webhook as processed
+            webhook_log.mark_processed(transaction=transaction)
+
+        logger.info(f"CoreBanking webhook processed successfully - ₦{amount} credited to {virtual_account.user.business_name} - Log ID: {webhook_log.id}")
         return Response({'success': True})
 
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
+
+        logger.exception(f"CoreBanking webhook error - Log ID: {webhook_log.id if webhook_log else 'N/A'}: {str(e)}")
+
+        if webhook_log:
+            webhook_log.mark_failed(str(e), error_traceback)
+
         return Response({
             'success': False,
             'errors': {'detail': str(e)},

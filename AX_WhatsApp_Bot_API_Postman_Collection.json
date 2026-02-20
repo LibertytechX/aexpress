@@ -1,0 +1,281 @@
+{
+	"info": {
+		"_postman_id": "ax-whatsapp-bot-api",
+		"name": "AX WhatsApp Bot API",
+		"description": "Complete API documentation for the Assured Express WhatsApp Bot Backend.\n\n**Base URL:** https://www.orders.axpress.net/api/bot/\n\n**Authentication:** API Key via `X-API-Key` header\n\n**Merchant Identification:** Phone number via `X-Merchant-Phone` header (for merchant-specific endpoints)\n\n**Production API Key:** sk_bot_1wK0I_09ZFhvTtqnb-3SG5Z3GT09rYN8lwX1s_72jr0",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{
+				"key": "value",
+				"value": "sk_bot_1wK0I_09ZFhvTtqnb-3SG5Z3GT09rYN8lwX1s_72jr0",
+				"type": "string"
+			},
+			{
+				"key": "key",
+				"value": "X-API-Key",
+				"type": "string"
+			},
+			{
+				"key": "in",
+				"value": "header",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Merchant Lookup",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/lookup/?phone=2348012345678",
+							"host": ["{{base_url}}"],
+							"path": ["lookup", ""],
+							"query": [
+								{
+									"key": "phone",
+									"value": "2348012345678",
+									"description": "Merchant phone number (format: 2348012345678)"
+								}
+							]
+						},
+						"description": "Lookup a merchant by phone number. Returns merchant profile if found, or a signup prompt if not found.\n\n**Authentication:** API Key only (no merchant phone required)\n\n**Response:** Merchant profile with wallet balance or \"not found\" message"
+					},
+					"response": []
+				},
+				{
+					"name": "Quick Signup",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone\": \"2348098765432\",\n  \"business_name\": \"Test Logistics Ltd\",\n  \"contact_name\": \"Chidi Okafor\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/signup/",
+							"host": ["{{base_url}}"],
+							"path": ["signup", ""]
+						},
+						"description": "Passwordless signup for WhatsApp bot users. Creates a new merchant account.\n\n**Authentication:** API Key only (no merchant phone required)\n\n**Request Body:**\n- `phone` (required): Merchant phone number\n- `business_name` (required): Business name\n- `contact_name` (required): Contact person name\n\n**Response:** Merchant profile with auto-generated email and wallet"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for merchant lookup and signup"
+		},
+		{
+			"name": "Dashboard",
+			"item": [
+				{
+					"name": "Dashboard Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/summary/",
+							"host": ["{{base_url}}"],
+							"path": ["summary", ""]
+						},
+						"description": "Get merchant dashboard summary in one call.\n\n**Authentication:** API Key + Merchant Phone\n\n**Response:**\n- Wallet balance\n- Active orders count\n- Completed orders today\n- Amount spent today\n- Recent orders (last 5)\n- Last transaction"
+					},
+					"response": []
+				}
+			],
+			"description": "Dashboard and summary endpoints"
+		},
+		{
+			"name": "Orders",
+			"item": [
+				{
+					"name": "Get Price Quote",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"Victoria Island, Lagos\",\n  \"dropoff_address\": \"Ikeja City Mall, Lagos\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/get-price/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "get-price", ""]
+						},
+						"description": "Calculate delivery price for a route.\n\n**Authentication:** API Key + Merchant Phone\n\n**Request Body:**\n- `pickup_address` (required): Pickup location\n- `dropoff_address` (required): Dropoff location\n\n**Response:**\n- Prices for all vehicle types (Bike, Car, Van)\n- Distance in kilometers\n- Duration in minutes\n- Bot-friendly response text"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"Victoria Island, Lagos\",\n  \"dropoff_address\": \"Ikeja City Mall, Lagos\",\n  \"vehicle_type\": \"Bike\",\n  \"pickup_contact_name\": \"Chidi\",\n  \"pickup_contact_phone\": \"2348098765432\",\n  \"dropoff_contact_name\": \"Emeka\",\n  \"dropoff_contact_phone\": \"2348087654321\",\n  \"payment_method\": \"wallet\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/create/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "create", ""]
+						},
+						"description": "Create a new delivery order.\n\n**Authentication:** API Key + Merchant Phone\n\n**Request Body:**\n- `pickup_address` (required): Pickup location\n- `dropoff_address` (required): Dropoff location\n- `vehicle_type` (required): Bike, Car, or Van\n- `pickup_contact_name` (required): Sender name\n- `pickup_contact_phone` (required): Sender phone\n- `dropoff_contact_name` (required): Receiver name\n- `dropoff_contact_phone` (required): Receiver phone\n- `payment_method` (required): wallet\n- `package_type` (optional): Box, Envelope, Fragile, Food, Document, Other\n- `notes` (optional): Delivery notes\n\n**Response:**\n- Order number\n- Order details\n- Wallet deduction confirmation"
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", ""]
+						},
+						"description": "Get list of merchant's orders.\n\n**Authentication:** API Key + Merchant Phone\n\n**Response:**\n- Array of orders (most recent first)\n- Each order includes summary field with bot-friendly text"
+					},
+					"response": []
+				},
+				{
+					"name": "Order Detail",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/6158010/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "6158010", ""]
+						},
+						"description": "Get details of a specific order.\n\n**Authentication:** API Key + Merchant Phone\n\n**URL Parameter:**\n- `order_number`: The order number to retrieve\n\n**Response:**\n- Complete order details\n- Bot-friendly summary"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/6158010/cancel/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "6158010", "cancel", ""]
+						},
+						"description": "Cancel an order and refund to wallet.\n\n**Authentication:** API Key + Merchant Phone\n\n**URL Parameter:**\n- `order_number`: The order number to cancel\n\n**Response:**\n- Order number\n- Refund amount\n- New wallet balance\n- Bot-friendly confirmation message"
+					},
+					"response": []
+				}
+			],
+			"description": "Order management endpoints"
+		},
+		{
+			"name": "Wallet",
+			"item": [
+				{
+					"name": "Wallet Balance",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/balance/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "balance", ""]
+						},
+						"description": "Get merchant's wallet balance.\n\n**Authentication:** API Key + Merchant Phone\n\n**Response:**\n- Balance (numeric)\n- Formatted balance (with ₦ symbol)\n- Bot-friendly response"
+					},
+					"response": []
+				},
+				{
+					"name": "Transaction History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "X-Merchant-Phone",
+								"value": "2348098765432",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/transactions/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "transactions", ""]
+						},
+						"description": "Get merchant's transaction history.\n\n**Authentication:** API Key + Merchant Phone\n\n**Response:**\n- Array of transactions (most recent first)\n- Each transaction includes:\n  - Reference\n  - Type (credit/debit)\n  - Amount\n  - Description\n  - Status\n  - Created date"
+					},
+					"response": []
+				}
+			],
+			"description": "Wallet and transaction endpoints"
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://www.orders.axpress.net/api/bot",
+			"type": "string"
+		}
+	]
+}
