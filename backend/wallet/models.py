@@ -21,7 +21,7 @@ class Wallet(models.Model):
     def __str__(self):
         return f"{self.user.business_name} - ₦{self.balance}"
 
-    def credit(self, amount, description="", reference=""):
+    def credit(self, amount, description="", reference="", metadata=None):
         """Credit wallet and create transaction record"""
         self.balance += amount
         self.save()
@@ -33,12 +33,13 @@ class Wallet(models.Model):
             description=description,
             reference=reference,
             balance_after=self.balance,
-            status='completed'
+            status='completed',
+            metadata=metadata
         )
 
         return self.balance
 
-    def debit(self, amount, description="", reference=""):
+    def debit(self, amount, description="", reference="", metadata=None):
         """Debit wallet and create transaction record"""
         if self.balance < amount:
             raise ValueError("Insufficient wallet balance")
@@ -53,7 +54,8 @@ class Wallet(models.Model):
             description=description,
             reference=reference,
             balance_after=self.balance,
-            status='completed'
+            status='completed',
+            metadata=metadata
         )
 
         return self.balance
