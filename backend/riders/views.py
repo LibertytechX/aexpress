@@ -1,3 +1,93 @@
-from django.shortcuts import render
+from datetime import timedelta
+from django.utils import timezone
+from rest_framework import status, permissions
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 
-# Create your views here.
+from .serializers import RiderLoginSerializer, RiderMeSerializer
+from .models import RiderSession, RiderDevice
+
+
+class RiderLoginView(APIView):
+    """
+    API endpoint for rider login.
+    Follows the pattern of authentication.views.LoginView but adds rider-specific logic.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RiderLoginSerializer(data=request.data)
+
+        if serializer.is_valid():
+            user = serializer.validated_data["user"]
+            rider = serializer.validated_data["rider"]
+            data = serializer.validated_data
+
+            # 1. Standard user last login update
+            user.last_login = timezone.now()
+            user.save(update_fields=["last_login"])
+
+            # 2. Check RiderAuth specific flags (if they exist)
+            try:
+                auth = rider.auth
+                if auth.is_locked:
+                    return Response(
+                        {"error": "Account locked. Try again in 30 minutes."},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS,
+                    )
+                if not auth.is_active:
+                    return Response(
+                        {"error": "Account is deactivated"},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                auth.reset_failed_attempts()
+            except Exception:
+                # If auth record doesn't exist, we skip these checks
+                pass
+
+            # 3. Generate JWT tokens (SimpleJWT)
+            refresh = RefreshToken.for_user(user)
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
+
+            # 4. Create RiderSession
+            RiderSession.objects.create(
+                rider=rider,
+                refresh_token=refresh_token,
+                device_id=data.get("device_id", ""),
+                device_name=data.get("device_name", ""),
+                device_os=data.get("device_os", "android"),
+                fcm_token=data.get("fcm_token", ""),
+                ip_address=request.META.get("REMOTE_ADDR"),
+                expires_at=timezone.now() + timedelta(days=30),
+            )
+
+            # 5. Update/Register Device
+            if data.get("device_id"):
+                RiderDevice.objects.update_or_create(
+                    device_id=data["device_id"],
+                    defaults={
+                        "rider": rider,
+                        "fcm_token": data.get("fcm_token", ""),
+                        "platform": data.get("device_os", "android"),
+                        "is_active": True,
+                    },
+                )
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Login successful!",
+                    "tokens": {"access": access_token, "refresh": refresh_token},
+                    "rider": RiderMeSerializer(rider).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
