@@ -1,6 +1,6 @@
 import type { Order } from "../types";
 
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/dispatch`;
+const API_BASE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || '')}/dispatch`;
 
 export const OrderService = {
     async getOrders(): Promise<Order[]> {
@@ -69,7 +69,7 @@ export const OrderService = {
     async calculateFare(vehicle: string, distanceKm: number, durationMinutes: number): Promise<number | null> {
         try {
             const token = localStorage.getItem("access_token");
-            const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/orders/calculate-fare/`, {
+            const response = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || '')}/orders/calculate-fare/`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -115,7 +115,7 @@ export const OrderService = {
     async getVehicles(): Promise<any[]> {
         try {
             const token = localStorage.getItem("access_token");
-            const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/orders/vehicles/`, {
+            const response = await fetch(`${(process.env.NEXT_PUBLIC_API_BASE_URL || '')}/orders/vehicles/`, {
                 headers: {
                     "Authorization": `Bearer ${token}`
                 }

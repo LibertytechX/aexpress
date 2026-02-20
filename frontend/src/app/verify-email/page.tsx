@@ -16,6 +16,7 @@ function VerifyEmailContent() {
 
     useEffect(() => {
         if (token) {
+            // eslint-disable-next-line react-hooks/immutability
             verifyEmail(token);
         } else {
             setStatus("error");

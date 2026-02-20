@@ -13,7 +13,7 @@ export interface Vehicle {
     is_active: boolean;
 }
 
-const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/orders`;
+const API_BASE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || '')}/orders`;
 
 export const VehicleService = {
     getVehicles: async (): Promise<Vehicle[]> => {

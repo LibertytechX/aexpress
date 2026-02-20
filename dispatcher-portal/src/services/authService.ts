@@ -1,6 +1,6 @@
 import type { User } from "../types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || '');
 
 export const AuthService = {
     async login(phone: string, password: string): Promise<User | null> {

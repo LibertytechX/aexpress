@@ -365,7 +365,7 @@ export default function SignupPage() {
                                     <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-green-600">
                                         <Check size={40} strokeWidth={3} />
                                     </div>
-                                    <h2 className="text-2xl font-bold text-[#2F3758] mb-2">You're all set! 🎉</h2>
+                                    <h2 className="text-2xl font-bold text-[#2F3758] mb-2">You&apos;re all set! 🎉</h2>
                                     <p className="text-slate-500 mb-8 max-w-xs mx-auto">Your merchant account has been created successfully. Redirecting you to dashboard...</p>
                                     <button onClick={() => router.push('/dashboard')} className="w-full bg-[#E8A838] text-[#2F3758] font-bold py-4 rounded-xl hover:bg-[#e0981e] transition-colors relative overflow-hidden">
                                         <span className="relative z-10">Go to Dashboard</span>

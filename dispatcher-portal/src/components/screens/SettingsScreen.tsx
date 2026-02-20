@@ -251,7 +251,7 @@ export function SettingsScreen() {
     ];
 
     return (
-        <div style={{ maxWidth: 900 }}>
+        <div className="w-full pb-10">
             <div style={{ display: "flex", gap: 4, marginBottom: 20, background: S.card, borderRadius: 12, padding: 4, border: `1px solid ${S.border}`, overflowX: "auto" }}>
                 {tabs.map(t => (
                     <button key={t.id} onClick={() => setSettingsTab(t.id)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, transition: "all 0.2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 5, whiteSpace: "nowrap", background: settingsTab === t.id ? S.navy : "transparent", color: settingsTab === t.id ? "#fff" : S.textDim }}>{t.icon} {t.label}</button>
