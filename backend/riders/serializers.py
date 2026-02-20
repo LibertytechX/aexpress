@@ -1,8 +1,11 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from django.utils import timezone
+from django.db.models import Sum
 from dispatcher.models import Rider
 from authentication.models import User
-from .models import RiderAuth, RiderDevice
+from wallet.models import Wallet
+from .models import RiderAuth, RiderDevice, RiderCodRecord, OrderOffer
 
 
 class RiderMeSerializer(serializers.ModelSerializer):
@@ -15,6 +18,11 @@ class RiderMeSerializer(serializers.ModelSerializer):
     lastName = serializers.CharField(source="user.last_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
     email = serializers.CharField(source="user.email", read_only=True)
+    wallet_balance = serializers.SerializerMethodField()
+    pending_cod = serializers.SerializerMethodField()
+    acceptance_rate = serializers.SerializerMethodField()
+    on_time_rate = serializers.SerializerMethodField()
+    documents_status = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -30,7 +38,48 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "vehicle_plate_number",
             "rating",
             "total_deliveries",
+            "wallet_balance",
+            "pending_cod",
+            "acceptance_rate",
+            "on_time_rate",
+            "documents_status",
         ]
+
+    def get_wallet_balance(self, obj):
+        try:
+            return obj.user.wallet.balance
+        except (AttributeError, Wallet.DoesNotExist):
+            return 0.00
+
+    def get_pending_cod(self, obj):
+        # Sum of pending COD records
+        total = obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
+            "amount__sum"
+        ]
+        return total or 0.00
+
+    def get_acceptance_rate(self, obj):
+        total_offers = obj.order_offers.count()
+        if total_offers == 0:
+            return 100.0
+        accepted_offers = obj.order_offers.filter(status="accepted").count()
+        return round((accepted_offers / total_offers) * 100, 1)
+
+    def get_on_time_rate(self, obj):
+        # Placeholder for now as we don't have explicit historical on-time data
+        return 100.0
+
+    def get_documents_status(self, obj):
+        docs = obj.documents.all()
+        return {
+            "total": docs.count(),
+            "approved": docs.filter(status="approved").count(),
+            "pending": docs.filter(status="pending").count(),
+            "expiring_soon": docs.filter(
+                status="approved",
+                expires_at__lte=timezone.now().date() + timezone.timedelta(days=30),
+            ).count(),
+        }
 
 
 class DeviceRegistrationSerializer(serializers.ModelSerializer):

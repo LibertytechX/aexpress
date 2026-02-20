@@ -243,3 +243,24 @@ class RiderUpdatePermissionsView(APIView):
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class RiderMeView(APIView):
+    """
+    API endpoint for getting the authenticated rider's profile.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            rider = request.user.rider_profile
+            serializer = RiderMeSerializer(rider)
+            return Response(
+                {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+            )
+        except Rider.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )

@@ -86,49 +86,33 @@ class RiderSession(models.Model):
         ordering = ["-last_used_at"]
 
 
-
-
-class RiderTransaction(models.Model):
+class RiderCodRecord(models.Model):
     """
-    Audit trail for rider wallet movements.
+    Tracks Cash On Delivery collections and remissions per rider.
     """
 
-    class TxType(models.TextChoices):
-        TRIP_EARNING = "trip_earning", "Trip Earning"
-        BONUS = "bonus", "Bonus"
-        COD_COLLECTED = "cod_collected", "COD Collected"
-        COD_REMITTED = "cod_remitted", "COD Remitted"
-        WITHDRAWAL = "withdrawal", "Withdrawal"
-        DEDUCTION = "deduction", "Deduction"
-        AMORTIZATION = "amortization", "Amortization"
-        ADJUSTMENT = "adjustment", "Adjustment"
-
-    class Direction(models.TextChoices):
-        CREDIT = "credit", "Credit"
-        DEBIT = "debit", "Debit"
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Remission"
+        REMITTED = "remitted", "Remitted"
+        VERIFIED = "verified", "Verified"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    wallet = models.ForeignKey(
-        "wallet.Wallet", on_delete=models.CASCADE, related_name="rider_transactions"
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="cod_records"
     )
     order = models.ForeignKey(
-        "orders.Order",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="rider_transactions",
+        "orders.Order", on_delete=models.CASCADE, related_name="cod_records"
     )
-    type = models.CharField(max_length=20, choices=TxType.choices)
-    direction = models.CharField(max_length=10, choices=Direction.choices)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    balance_after = models.DecimalField(max_digits=12, decimal_places=2)
-    description = models.CharField(max_length=500)
-    reference = models.CharField(max_length=200, unique=True, db_index=True)
-    status = models.CharField(max_length=20, default="pending")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    remitted_at = models.DateTimeField(null=True, blank=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        db_table = "rider_transactions"
+        db_table = "rider_cod_records"
         ordering = ["-created_at"]
 
 
