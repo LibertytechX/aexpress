@@ -88,6 +88,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   // Calculate early route
   useEffect(() => {
     if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCalculatingRoute(false);
       setEarlyRouteDistance(null);
       setEarlyRouteDuration(null);
@@ -177,6 +178,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   // Reset route data when going back to step 1
   useEffect(() => {
     if (step === 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRouteDistance(null);
       setRouteDuration(null);
     }
