@@ -31,9 +31,10 @@ SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,.ngrok-free.app").split(
-    ","
-)
+ALLOWED_HOSTS = os.getenv(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app",
+).split(",")
 
 
 # Application definition

@@ -86,29 +86,195 @@ class RiderSession(models.Model):
         ordering = ["-last_used_at"]
 
 
+
+
+class RiderTransaction(models.Model):
+    """
+    Audit trail for rider wallet movements.
+    """
+
+    class TxType(models.TextChoices):
+        TRIP_EARNING = "trip_earning", "Trip Earning"
+        BONUS = "bonus", "Bonus"
+        COD_COLLECTED = "cod_collected", "COD Collected"
+        COD_REMITTED = "cod_remitted", "COD Remitted"
+        WITHDRAWAL = "withdrawal", "Withdrawal"
+        DEDUCTION = "deduction", "Deduction"
+        AMORTIZATION = "amortization", "Amortization"
+        ADJUSTMENT = "adjustment", "Adjustment"
+
+    class Direction(models.TextChoices):
+        CREDIT = "credit", "Credit"
+        DEBIT = "debit", "Debit"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    wallet = models.ForeignKey(
+        "wallet.Wallet", on_delete=models.CASCADE, related_name="rider_transactions"
+    )
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rider_transactions",
+    )
+    type = models.CharField(max_length=20, choices=TxType.choices)
+    direction = models.CharField(max_length=10, choices=Direction.choices)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.CharField(max_length=500)
+    reference = models.CharField(max_length=200, unique=True, db_index=True)
+    status = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "rider_transactions"
+        ordering = ["-created_at"]
+
+
+class RiderEarning(models.Model):
+    """
+    Per-trip earnings breakdown.
+    """
+
+    from decimal import Decimal
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="earnings"
+    )
+    order = models.OneToOneField(
+        "orders.Order", on_delete=models.CASCADE, related_name="rider_earning"
+    )
+    base_fare = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    distance_fare = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    surge_bonus = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    tip = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0.00"))
+    commission_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("20.00")
+    )
+    commission_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    net_earning = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    cod_amount = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "rider_earnings"
+        ordering = ["-created_at"]
+
+
+class RiderDocument(models.Model):
+    """
+    KYC documents for riders.
+    """
+
+    class DocType(models.TextChoices):
+        DRIVERS_LICENSE = "drivers_license", "Driver's License"
+        VEHICLE_INSURANCE = "vehicle_insurance", "Vehicle Insurance"
+        VEHICLE_REGISTRATION = "vehicle_registration", "Vehicle Registration"
+        NATIONAL_ID = "national_id", "National ID"
+        PROFILE_PHOTO = "profile_photo", "Profile Photo"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="documents"
+    )
+    doc_type = models.CharField(max_length=30, choices=DocType.choices)
+    file_url = models.URLField(max_length=500)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    expires_at = models.DateField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_documents"
+        ordering = ["-created_at"]
+
+
+class OrderOffer(models.Model):
+    """
+    An order offered to a rider.
+    """
+
+    from decimal import Decimal
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        DECLINED = "declined", "Declined"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(
+        "orders.Order", on_delete=models.CASCADE, related_name="rider_offers"
+    )
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="order_offers"
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    estimated_earnings = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal("0.00")
+    )
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "order_offers"
+        ordering = ["-created_at"]
+
+
 class RiderDevice(models.Model):
     """
-    Device registration for push notifications.
+    Rider device tracking and permissions.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     rider = models.ForeignKey(
         "dispatcher.Rider", on_delete=models.CASCADE, related_name="devices"
     )
-    device_id = models.CharField(max_length=255, unique=True)
+    device_id = models.CharField(max_length=255, unique=True, db_index=True)
     fcm_token = models.CharField(max_length=500, blank=True, default="")
-    platform = models.CharField(max_length=20, default="android")
-    model_name = models.CharField(max_length=200, blank=True, default="")
+    platform = models.CharField(max_length=50, blank=True, default="")
+    model_name = models.CharField(max_length=255, blank=True, default="")
     os_version = models.CharField(max_length=50, blank=True, default="")
-    app_version = models.CharField(max_length=20, blank=True, default="")
+    app_version = models.CharField(max_length=50, blank=True, default="")
 
-    # Permission states (tracked for support/debugging)
+    # Permissions tracking
     location_permission = models.CharField(
-        max_length=30, default="not_asked"
-    )  # granted/denied/not_asked
-    camera_permission = models.CharField(max_length=30, default="not_asked")
-    notification_permission = models.CharField(max_length=30, default="not_asked")
-    battery_optimization = models.CharField(max_length=30, default="not_asked")
+        max_length=50, blank=True, default="undetermined"
+    )
+    camera_permission = models.CharField(
+        max_length=50, blank=True, default="undetermined"
+    )
+    notification_permission = models.CharField(
+        max_length=50, blank=True, default="undetermined"
+    )
+    battery_optimization = models.CharField(
+        max_length=50, blank=True, default="undetermined"
+    )
 
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -116,3 +282,7 @@ class RiderDevice(models.Model):
 
     class Meta:
         db_table = "rider_devices"
+        ordering = ["-updated_at"]
+
+    def __str__(self):
+        return f"Device {self.device_id} ({self.rider.rider_id})"

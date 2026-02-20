@@ -5,8 +5,14 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import RiderLoginSerializer, RiderMeSerializer
+from .serializers import (
+    RiderLoginSerializer,
+    RiderMeSerializer,
+    DeviceRegistrationSerializer,
+    UpdatePermissionsSerializer,
+)
 from .models import RiderSession, RiderDevice
+from dispatcher.models import Rider
 
 
 class RiderLoginView(APIView):
@@ -150,3 +156,90 @@ class RiderTokenRefreshView(APIView):
                 {"success": False, "message": str(e)},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+
+
+class RiderDeviceRegistrationView(APIView):
+    """
+    API endpoint for registering/updating rider device.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = DeviceRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                # Assuming the user has a rider_profile
+                rider = request.user.rider_profile
+            except Exception:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "No rider profile associated with this account.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device, created = RiderDevice.objects.update_or_create(
+                device_id=serializer.validated_data["device_id"],
+                defaults={
+                    **serializer.validated_data,
+                    "rider": rider,
+                    "is_active": True,
+                },
+            )
+            return Response(
+                {
+                    "success": True,
+                    "message": "Device registered successfully",
+                    "device_id": str(device.id),
+                },
+                status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+            )
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class RiderUpdatePermissionsView(APIView):
+    """
+    API endpoint for updating device permissions.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request):
+        serializer = UpdatePermissionsSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                rider = request.user.rider_profile
+            except Exception:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "No rider profile associated with this account.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            device = RiderDevice.objects.filter(rider=rider, is_active=True).first()
+            if not device:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "No active device found for this rider.",
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            for field, value in serializer.validated_data.items():
+                setattr(device, field, value)
+            device.save()
+            return Response(
+                {"success": True, "message": "Permissions updated successfully"}
+            )
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
