@@ -108,6 +108,20 @@ class UpdatePermissionsSerializer(serializers.Serializer):
     battery_optimization = serializers.CharField(required=False)
 
 
+class DutyToggleSerializer(serializers.Serializer):
+    """
+    Serializer for toggling rider duty status.
+    """
+
+    status = serializers.ChoiceField(choices=["online", "offline"])
+    latitude = serializers.DecimalField(
+        max_digits=9, decimal_places=6, required=False, allow_null=True
+    )
+    longitude = serializers.DecimalField(
+        max_digits=9, decimal_places=6, required=False, allow_null=True
+    )
+
+
 class RiderLoginSerializer(serializers.Serializer):
     """
     Serializer for rider login.

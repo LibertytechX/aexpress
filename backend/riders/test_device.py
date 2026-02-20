@@ -61,3 +61,28 @@ class RiderDeviceTests(TestCase):
         device.refresh_from_db()
         self.assertEqual(device.camera_permission, "granted")
         self.assertEqual(device.notification_permission, "denied")
+
+    def test_toggle_duty(self):
+        url = reverse("riders:rider-duty-toggle")
+
+        # 1. Switch to online with location
+        data = {"status": "online", "latitude": "6.456789", "longitude": "3.123456"}
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["success"])
+        self.assertEqual(response.data["status"], "online")
+
+        self.rider.refresh_from_db()
+        self.assertEqual(self.rider.status, "online")
+        self.assertEqual(float(self.rider.current_latitude), 6.456789)
+        self.assertEqual(float(self.rider.current_longitude), 3.123456)
+
+        # 2. Switch to offline
+        data = {"status": "offline"}
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["success"])
+        self.assertEqual(response.data["status"], "offline")
+
+        self.rider.refresh_from_db()
+        self.assertEqual(self.rider.status, "offline")

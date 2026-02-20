@@ -10,6 +10,7 @@ from .serializers import (
     RiderMeSerializer,
     DeviceRegistrationSerializer,
     UpdatePermissionsSerializer,
+    DutyToggleSerializer,
 )
 from .models import RiderSession, RiderDevice
 from dispatcher.models import Rider
@@ -264,3 +265,55 @@ class RiderMeView(APIView):
                 {"success": False, "message": "Rider profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class RiderToggleDutyView(APIView):
+    """
+    API endpoint for toggling rider duty status and updating location.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = DutyToggleSerializer(data=request.data)
+        if serializer.is_valid():
+            try:
+                rider = request.user.rider_profile
+            except Exception:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "No rider profile associated with this account.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Update status
+            new_status = serializer.validated_data["status"]
+            rider.status = new_status
+
+            # Update location if provided
+            lat = serializer.validated_data.get("latitude")
+            lng = serializer.validated_data.get("longitude")
+
+            if lat is not None and lng is not None:
+                rider.current_latitude = lat
+                rider.current_longitude = lng
+                rider.last_location_update = timezone.now()
+
+            rider.last_seen_at = timezone.now()
+            rider.save()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": f"Rider is now {new_status}",
+                    "status": new_status,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
