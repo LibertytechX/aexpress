@@ -52,6 +52,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     usertype = models.CharField(
         max_length=20, choices=USER_TYPE_CHOICES, default="Merchant"
     )
+    first_name = models.CharField(max_length=150, null=True, blank=True)
+    last_name = models.CharField(max_length=150, null=True, blank=True)
     business_name = models.CharField(max_length=255, null=True, blank=True)
     contact_name = models.CharField(max_length=255, null=True, blank=True)
     phone = models.CharField(max_length=20, unique=True, db_index=True)
@@ -65,11 +67,15 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone_verified = models.BooleanField(default=False)
 
     # Email verification
-    email_verification_token = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    email_verification_token = models.CharField(
+        max_length=100, null=True, blank=True, unique=True
+    )
     email_verification_token_created = models.DateTimeField(null=True, blank=True)
 
     # Password reset
-    password_reset_token = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    password_reset_token = models.CharField(
+        max_length=100, null=True, blank=True, unique=True
+    )
     password_reset_token_created = models.DateTimeField(null=True, blank=True)
 
     # Timestamps
@@ -92,7 +98,9 @@ class User(AbstractBaseUser, PermissionsMixin):
         return f"{self.business_name} ({self.phone})"
 
     def get_full_name(self):
-        return self.contact_name
+        if self.first_name and self.last_name:
+            return f"{self.first_name} {self.last_name}"
+        return self.contact_name or self.phone
 
     def get_short_name(self):
         return self.business_name

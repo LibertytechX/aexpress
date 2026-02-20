@@ -4,6 +4,7 @@ import { S } from "../common/theme";
 import { I } from "../icons";
 import { StatCard } from "../common/StatCard";
 import { Badge } from "../common/Badge";
+import { RiderOnboardingModal } from "../modals/RiderOnboardingModal";
 
 interface RidersScreenProps {
     riders: Rider[];
@@ -17,6 +18,7 @@ interface RidersScreenProps {
 export function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder }: RidersScreenProps) {
     const [filter, setFilter] = useState("All");
     const [search, setSearch] = useState("");
+    const [showOnboardModal, setShowOnboardModal] = useState(false);
 
 
     if (selectedId) {
@@ -82,11 +84,15 @@ export function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onV
 
     return (
         <div>
-            <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
-                <StatCard label="Total Riders" value={riders.length} />
-                <StatCard label="Online" value={riders.filter(r => r.status === "online").length} color={S.green} />
-                <StatCard label="On Delivery" value={riders.filter(r => r.status === "on_delivery").length} color={S.purple} />
-                <StatCard label="Deliveries Today" value={riders.reduce((s, r) => s + r.todayOrders, 0)} color={S.gold} />
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 12 }}>
+                    <StatCard label="Total Riders" value={riders.length} />
+                    <StatCard label="Online" value={riders.filter(r => r.status === "online").length} color={S.green} />
+                    <StatCard label="Deliveries Today" value={riders.reduce((s, r) => s + r.todayOrders, 0)} color={S.gold} />
+                </div>
+                <button onClick={() => setShowOnboardModal(true)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 20px", background: S.navy, color: "#fff", border: "none", borderRadius: 12, fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(15,23,42,0.15)" }}>
+                    {I.plus} New Rider
+                </button>
             </div>
             <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -119,6 +125,15 @@ export function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onV
                     ))}
                 </div>
             </div>
+            {showOnboardModal && (
+                <RiderOnboardingModal
+                    onClose={() => setShowOnboardModal(false)}
+                    onSuccess={() => {
+                        setShowOnboardModal(false);
+                        window.location.reload();
+                    }}
+                />
+            )}
         </div>
     );
 }

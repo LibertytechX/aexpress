@@ -194,16 +194,16 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:9000",
     "http://127.0.0.1:9000",
     "http://localhost:5173",
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    'http://localhost',
-    'http://127.0.0.1',
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost",
+    "http://127.0.0.1",
 ]
 
 # Add production frontend URL if set
@@ -243,14 +243,35 @@ SESSION_CACHE_ALIAS = "default"
 AUTH_USER_MODEL = "authentication.User"
 
 # Paystack Configuration
-PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY', '')
-PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY', '')
+PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY", "")
 
 # CoreBanking (LibertyPay) Configuration
-COREBANKING_EMAIL = os.getenv('COREBANKING_EMAIL', '')
-COREBANKING_PASSWORD = os.getenv('COREBANKING_PASSWORD', '')
-COREBANKING_BASE_URL = os.getenv('COREBANKING_BASE_URL', 'https://banking.libertypayng.com')
-COREBANKING_WEBHOOK_SECRET = os.getenv('COREBANKING_WEBHOOK_SECRET', '')
+COREBANKING_EMAIL = os.getenv("COREBANKING_EMAIL", "")
+COREBANKING_PASSWORD = os.getenv("COREBANKING_PASSWORD", "")
+COREBANKING_BASE_URL = os.getenv(
+    "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
+)
+COREBANKING_WEBHOOK_SECRET = os.getenv("COREBANKING_WEBHOOK_SECRET", "")
+
+# Mailgun Configuration
+MAILGUN_APIKEY = os.getenv("MAILGUN_APIKEY", "")
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "")
+MAILGUN_FROM_EMAIL = os.getenv("MAILGUN_FROM_EMAIL", f"mailgun@{MAILGUN_DOMAIN}")
+
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
+
+# Celery Configuration
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
 
 # Production Security Settings
 if not DEBUG:

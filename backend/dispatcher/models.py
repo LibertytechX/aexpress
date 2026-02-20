@@ -20,7 +20,27 @@ class Rider(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rider_profile"
     )
 
-    # Vehicle Details (consolidated)
+    # Banking
+    bank_name = models.CharField(max_length=100, null=True, blank=True)
+    bank_account_number = models.CharField(max_length=20, null=True, blank=True)
+    bank_routing_code = models.CharField(max_length=20, null=True, blank=True)
+
+    # Status & Settings
+    WORKING_TYPE_CHOICES = (
+        ("freelancer", "Freelancer"),
+        ("full_time", "Full Time"),
+    )
+    working_type = models.CharField(
+        max_length=20, choices=WORKING_TYPE_CHOICES, default="freelancer"
+    )
+    team = models.CharField(max_length=100, default="Main Team")
+    is_authorized = models.BooleanField(
+        default=False, help_text="Controls whether driver can receive jobs"
+    )
+    is_registration_verified = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True, help_text="Soft disable driver")
+
+    # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
         "orders.Vehicle",
         on_delete=models.SET_NULL,
@@ -28,11 +48,61 @@ class Rider(models.Model):
         blank=True,
         related_name="riders",
     )
+    vehicle_model = models.CharField(max_length=100, default="Unknown")
+    vehicle_plate_number = models.CharField(max_length=20, default="TEMP_PLATE")
+    vehicle_color = models.CharField(max_length=50, null=True, blank=True)
+    vehicle_photo = models.CharField(
+        max_length=500, null=True, blank=True, help_text="S3 URL for vehicle photo"
+    )
+
     # Status & Metrics
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="offline")
-    rating = models.DecimalField(max_digits=3, decimal_places=2, default=5.00)
+    rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
     total_deliveries = models.IntegerField(default=0)
     current_order = models.CharField(max_length=100, null=True, blank=True)
+
+    # Contact & Location
+    emergency_phone = models.CharField(max_length=20, null=True, blank=True)
+    city = models.CharField(max_length=100, null=True, blank=True)
+    address = models.TextField(null=True, blank=True)
+    avatar = models.CharField(
+        max_length=500, null=True, blank=True, help_text="S3 URL for avatar"
+    )
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+
+    # Onro Fields
+    onro_driver_id = models.CharField(
+        max_length=100, null=True, blank=True, help_text="Driver ID from Onro"
+    )
+    onro_name = models.CharField(
+        max_length=255, null=True, blank=True, help_text="Full name from Onro"
+    )
+    onro_language = models.CharField(
+        max_length=10, default="en", help_text="Language preference"
+    )
+    onro_receive_email = models.BooleanField(
+        default=True, help_text="Email notification preference"
+    )
+    onro_location_lat = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
+    onro_location_lng = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
+
+    # GPS Tracking
+    gpswox_device_id = models.CharField(max_length=100, null=True, blank=True)
+    current_latitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    current_longitude = models.DecimalField(
+        max_digits=9, decimal_places=6, null=True, blank=True
+    )
+    current_speed = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    is_moving = models.BooleanField(default=False)
+    last_location_update = models.DateTimeField(null=True, blank=True)
+
+    # Documents
+    driving_license_number = models.CharField(max_length=50, default="TEMP_LICENSE")
+    national_id = models.CharField(max_length=50, default="TEMP_ID")
+    driving_license_photo = models.CharField(max_length=500, null=True, blank=True, help_text="S3 URL for driving license")
+    identity_card_photo = models.CharField(max_length=500, null=True, blank=True, help_text="S3 URL for ID card")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -48,5 +48,27 @@ export const RiderService = {
             console.error("Failed to fetch riders:", error);
             return [];
         }
+    },
+
+    async onboardRider(formData: FormData): Promise<any> {
+        try {
+            const token = localStorage.getItem("access_token");
+            const response = await fetch(`${API_BASE_URL}/riders/onboarding/`, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                },
+                body: formData
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw errorData;
+            }
+            return await response.json();
+        } catch (error) {
+            console.error("Rider Onboarding Error:", error);
+            throw error;
+        }
     }
 };

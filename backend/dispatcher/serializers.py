@@ -386,3 +386,148 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
 
         model = SystemSettings
         fields = "__all__"
+
+
+class RiderOnboardingSerializer(serializers.Serializer):
+    # User fields
+    email = serializers.EmailField()
+    phone = serializers.CharField()
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+
+    # Rider Profile fields
+    bank_name = serializers.CharField(required=False, max_length=100)
+    bank_account_number = serializers.CharField(required=False, max_length=20)
+    bank_routing_code = serializers.CharField(required=False, max_length=20)
+    vehicle_type = serializers.PrimaryKeyRelatedField(
+        queryset=serializers.SerializerMethodField(), required=False
+    )
+    vehicle_model = serializers.CharField(required=False, max_length=100)
+    vehicle_plate_number = serializers.CharField(required=False, max_length=20)
+    vehicle_color = serializers.CharField(required=False, max_length=50)
+    working_type = serializers.ChoiceField(
+        choices=[("freelancer", "Freelancer"), ("full_time", "Full Time")],
+        default="freelancer",
+    )
+    team = serializers.CharField(required=False, max_length=100, default="Main Team")
+    emergency_phone = serializers.CharField(required=False, max_length=20)
+    city = serializers.CharField(required=False, max_length=100)
+    address = serializers.CharField(required=False)
+    driving_license_number = serializers.CharField(required=False, max_length=50)
+    national_id = serializers.CharField(required=False, max_length=50)
+
+    # Image fields (accepted as files from the frontend)
+    avatar = serializers.ImageField(required=False)
+    vehicle_photo = serializers.ImageField(required=False)
+    driving_license_photo = serializers.ImageField(required=False)
+    identity_card_photo = serializers.ImageField(required=False)
+
+    def validate_email(self, value):
+        from authentication.models import User
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_phone(self, value):
+        from authentication.models import User
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError("A user with this phone number already exists.")
+        return value
+
+    def __init__(self, *args, **kwargs):
+        from orders.models import Vehicle
+
+        super().__init__(*args, **kwargs)
+        self.fields["vehicle_type"].queryset = Vehicle.objects.all()
+
+    def create(self, validated_data):
+        import string
+        import random
+        from .tasks import send_onboarding_email_task
+        from authentication.models import User
+
+        # Extract user data
+        email = validated_data.pop("email")
+        phone = validated_data.pop("phone")
+        first_name = validated_data.pop("first_name")
+        last_name = validated_data.pop("last_name")
+
+        # Generate random password
+        password = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+
+        from django.db import IntegrityError
+
+        try:
+            # Create User
+            user = User.objects.create_user(
+                phone=phone,
+                email=email,
+                password=password,
+                first_name=first_name,
+                last_name=last_name,
+                contact_name=f"{first_name} {last_name}",
+                usertype="Rider",
+            )
+        except IntegrityError as e:
+            if "phone" in str(e).lower():
+                raise serializers.ValidationError({"phone": "A user with this phone number already exists."})
+            if "email" in str(e).lower():
+                raise serializers.ValidationError({"email": "A user with this email already exists."})
+            raise serializers.ValidationError("An error occurred while creating the user.")
+
+        # Create Rider Profile
+        rider = Rider.objects.create(user=user, **validated_data)
+
+        # Trigger Background Task for Email
+        send_onboarding_email_task.delay(
+            email=email, first_name=first_name, password=password, rider_id=rider.id
+        )
+
+        # Handle Document Uploads (Base64 for Celery)
+        import base64
+
+        avatar_data = None
+        avatar_name = None
+        if "avatar" in validated_data:
+            avatar_file = validated_data.pop("avatar")
+            avatar_data = base64.b64encode(avatar_file.read()).decode("utf-8")
+            avatar_name = avatar_file.name
+
+        vehicle_photo_data = None
+        vehicle_photo_name = None
+        if "vehicle_photo" in validated_data:
+            vehicle_photo_file = validated_data.pop("vehicle_photo")
+            vehicle_photo_data = base64.b64encode(vehicle_photo_file.read()).decode(
+                "utf-8"
+            )
+            vehicle_photo_name = vehicle_photo_file.name
+
+        license_data = None
+        license_name = None
+        if "driving_license_photo" in validated_data:
+            license_file = validated_data.pop("driving_license_photo")
+            license_data = base64.b64encode(license_file.read()).decode("utf-8")
+            license_name = license_file.name
+
+        id_data = None
+        id_name = None
+        if "identity_card_photo" in validated_data:
+            id_file = validated_data.pop("identity_card_photo")
+            id_data = base64.b64encode(id_file.read()).decode("utf-8")
+            id_name = id_file.name
+
+        from .tasks import upload_rider_documents_to_s3
+
+        upload_rider_documents_to_s3.delay(
+            rider_id=rider.id,
+            avatar_data=avatar_data,
+            avatar_name=avatar_name,
+            vehicle_photo_data=vehicle_photo_data,
+            vehicle_photo_name=vehicle_photo_name,
+            driving_license_photo_data=license_data,
+            driving_license_photo_name=license_name,
+            identity_card_photo_data=id_data,
+            identity_card_photo_name=id_name,
+        )
+
+        return rider

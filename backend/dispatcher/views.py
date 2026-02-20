@@ -1,4 +1,4 @@
-from rest_framework import viewsets, permissions, status, views
+from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Rider
@@ -103,3 +103,59 @@ class SystemSettingsView(views.APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RiderOnboardingView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def post(self, request):
+        from .serializers import RiderOnboardingSerializer
+
+        serializer = RiderOnboardingSerializer(
+            data=request.data, context={"request": request}
+        )
+        if serializer.is_valid():
+            rider = serializer.save()
+            return Response(
+                {
+                    "message": "Driver onboarded successfully.",
+                    "rider_id": rider.rider_id,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class S3PresignedUrlView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        import uuid
+        import os
+        from .s3_utils import generate_presigned_url
+
+        filename = request.query_params.get("filename")
+        folder = request.query_params.get("folder", "uploads")
+
+        if not filename:
+            return Response(
+                {"error": "filename is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Generate unique object name
+        file_ext = filename.split(".")[-1]
+        object_name = f"{folder}/{uuid.uuid4()}.{file_ext}"
+
+        url = generate_presigned_url(object_name)
+        if url:
+            bucket = os.getenv("AWS_STORAGE_BUCKET_NAME", "secourhub")
+            region = os.getenv("AWS_S3_REGION_NAME", "eu-north-1")
+            public_url = f"https://{bucket}.s3.{region}.amazonaws.com/{object_name}"
+            return Response(
+                {"url": url, "object_name": object_name, "public_url": public_url}
+            )
+        return Response(
+            {"error": "Failed to generate presigned URL"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
