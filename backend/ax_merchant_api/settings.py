@@ -26,12 +26,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-fallback-key')
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-fallback-key")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = os.getenv("DEBUG", "True") == "True"
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.getenv(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+).split(",")
 
 
 # Application definition
@@ -54,6 +57,8 @@ INSTALLED_APPS = [
     "orders",
     "wallet",
     "bot",
+    "dispatcher",
+    "riders",
 ]
 
 MIDDLEWARE = [
@@ -99,9 +104,13 @@ DATABASES = {
         "PASSWORD": os.getenv("DB_PASSWORD", ""),
         "HOST": os.getenv("DB_HOST", "localhost"),
         "PORT": os.getenv("DB_PORT", "5433"),
-        "OPTIONS": {
-            "sslmode": "require",
-        } if os.getenv("DB_HOST", "localhost") != "localhost" else {},
+        "OPTIONS": (
+            {
+                "sslmode": "require",
+            }
+            if os.getenv("DB_HOST", "localhost") != "localhost"
+            else {}
+        ),
     }
 }
 
@@ -141,9 +150,9 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = "static/"
-STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 MEDIA_URL = "media/"
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
@@ -156,69 +165,80 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django REST Framework
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    "DEFAULT_AUTHENTICATION_CLASSES": (
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
-    'DEFAULT_PERMISSION_CLASSES': (
-        'rest_framework.permissions.IsAuthenticated',
-    ),
-    'DEFAULT_RENDERER_CLASSES': (
-        'rest_framework.renderers.JSONRenderer',
-    ),
-    'DEFAULT_PARSER_CLASSES': (
-        'rest_framework.parsers.JSONParser',
-    ),
+    "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
+    "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
+    "DEFAULT_PARSER_CLASSES": ("rest_framework.parsers.JSONParser",),
 }
 
 # Simple JWT Settings
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(hours=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME', 24))),
-    'REFRESH_TOKEN_LIFETIME': timedelta(hours=int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME', 168))),
-    'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
-    'ALGORITHM': 'HS256',
-    'SIGNING_KEY': SECRET_KEY,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-    'TOKEN_TYPE_CLAIM': 'token_type',
+    "ACCESS_TOKEN_LIFETIME": timedelta(
+        hours=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME", 24))
+    ),
+    "REFRESH_TOKEN_LIFETIME": timedelta(
+        hours=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME", 168))
+    ),
+    "ROTATE_REFRESH_TOKENS": True,
+    "BLACKLIST_AFTER_ROTATION": True,
+    "UPDATE_LAST_LOGIN": True,
+    "ALGORITHM": "HS256",
+    "SIGNING_KEY": SECRET_KEY,
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
+    "USER_ID_FIELD": "id",
+    "USER_ID_CLAIM": "user_id",
+    "AUTH_TOKEN_CLASSES": ("rest_framework_simplejwt.tokens.AccessToken",),
+    "TOKEN_TYPE_CLAIM": "token_type",
 }
 
 # CORS Settings
 CORS_ALLOWED_ORIGINS = [
-    'http://localhost:9000',
-    'http://127.0.0.1:9000',
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500',
-    'http://localhost:8000',
-    'http://127.0.0.1:8000',
-    'http://localhost:8080',
-    'http://127.0.0.1:8080',
-    'http://localhost',
-    'http://127.0.0.1',
+    "http://localhost:9000",
+    "http://127.0.0.1:9000",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+    "http://localhost",
+    "http://127.0.0.1",
+    "http://localhost:8000",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:5176",
+    "http://localhost:5177",
+    "http://localhost:5180",
 ]
 
 # Add production frontend URL if set
-FRONTEND_URL = os.getenv('FRONTEND_URL', '')
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
+CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev")
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+]
+
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
-    'accept',
-    'accept-encoding',
-    'authorization',
-    'content-type',
-    'dnt',
-    'origin',
-    'user-agent',
-    'x-csrftoken',
-    'x-requested-with',
+    "accept",
+    "accept-encoding",
+    "authorization",
+    "content-type",
+    "dnt",
+    "origin",
+    "user-agent",
+    "x-csrftoken",
+    "x-requested-with",
 ]
 
 # Redis Cache Configuration
@@ -228,7 +248,7 @@ CACHES = {
         "LOCATION": f"redis://{os.getenv('REDIS_HOST', 'localhost')}:{os.getenv('REDIS_PORT', '6379')}/1",
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
-        }
+        },
     }
 }
 
@@ -237,29 +257,55 @@ SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_CACHE_ALIAS = "default"
 
 # Custom User Model (we'll create this)
-AUTH_USER_MODEL = 'authentication.User'
+AUTH_USER_MODEL = "authentication.User"
 
 # Paystack Configuration
-PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY', '')
-PAYSTACK_PUBLIC_KEY = os.getenv('PAYSTACK_PUBLIC_KEY', '')
+PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY", "")
+PAYSTACK_PUBLIC_KEY = os.getenv("PAYSTACK_PUBLIC_KEY", "")
 
 # CoreBanking (LibertyPay) Configuration
-COREBANKING_EMAIL = os.getenv('COREBANKING_EMAIL', '')
-COREBANKING_PASSWORD = os.getenv('COREBANKING_PASSWORD', '')
-COREBANKING_BASE_URL = os.getenv('COREBANKING_BASE_URL', 'https://banking.libertypayng.com')
-COREBANKING_WEBHOOK_SECRET = os.getenv('COREBANKING_WEBHOOK_SECRET', '')
+COREBANKING_EMAIL = os.getenv("COREBANKING_EMAIL", "")
+COREBANKING_PASSWORD = os.getenv("COREBANKING_PASSWORD", "")
+COREBANKING_BASE_URL = os.getenv(
+    "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
+)
+COREBANKING_WEBHOOK_SECRET = os.getenv("COREBANKING_WEBHOOK_SECRET", "")
+
+# Mailgun Configuration
+MAILGUN_APIKEY = os.getenv("MAILGUN_APIKEY", "")
+MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "")
+MAILGUN_FROM_EMAIL = os.getenv("MAILGUN_FROM_EMAIL", f"mailgun@{MAILGUN_DOMAIN}")
+
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
+
+# Ably Configuration
+ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
+
+# Celery Configuration
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
 
 # Production Security Settings
 if not DEBUG:
-    SECURE_SSL_REDIRECT = os.getenv('SECURE_SSL_REDIRECT', 'True') == 'True'
-    SESSION_COOKIE_SECURE = os.getenv('SESSION_COOKIE_SECURE', 'True') == 'True'
-    CSRF_COOKIE_SECURE = os.getenv('CSRF_COOKIE_SECURE', 'True') == 'True'
-    SECURE_BROWSER_XSS_FILTER = os.getenv('SECURE_BROWSER_XSS_FILTER', 'True') == 'True'
-    SECURE_CONTENT_TYPE_NOSNIFF = os.getenv('SECURE_CONTENT_TYPE_NOSNIFF', 'True') == 'True'
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True") == "True"
+    SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "True") == "True"
+    CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", "True") == "True"
+    SECURE_BROWSER_XSS_FILTER = os.getenv("SECURE_BROWSER_XSS_FILTER", "True") == "True"
+    SECURE_CONTENT_TYPE_NOSNIFF = (
+        os.getenv("SECURE_CONTENT_TYPE_NOSNIFF", "True") == "True"
+    )
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    X_FRAME_OPTIONS = 'DENY'
+    X_FRAME_OPTIONS = "DENY"
 
 # WhatsApp Bot Configuration
 BOT_API_KEY = os.getenv('BOT_API_KEY', '')

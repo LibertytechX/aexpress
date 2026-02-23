@@ -10,8 +10,10 @@ from .serializers import (
     VehicleSerializer,
     QuickSendSerializer,
     MultiDropSerializer,
-    BulkImportSerializer
+    BulkImportSerializer,
+    AssignedOrderSerializer,
 )
+from .permissions import IsDriver
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 
@@ -26,10 +28,35 @@ class VehicleListView(APIView):
         vehicles = Vehicle.objects.filter(is_active=True)
         serializer = VehicleSerializer(vehicles, many=True)
 
-        return Response({
-            'success': True,
-            'vehicles': serializer.data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {"success": True, "vehicles": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class VehicleUpdateView(generics.UpdateAPIView):
+    """API endpoint to update vehicle pricing."""
+    
+    queryset = Vehicle.objects.all()
+    serializer_class = VehicleSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'id'
+
+    def update(self, request, *args, **kwargs):
+        """Update vehicle details."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        return Response(
+            {
+                "success": True,
+                "message": f"Vehicle {instance.name} updated successfully",
+                "vehicle": serializer.data
+            },
+            status=status.HTTP_200_OK
+        )
 
 
 class QuickSendView(APIView):
@@ -43,50 +70,50 @@ class QuickSendView(APIView):
         serializer = QuickSendSerializer(data=request.data)
 
         if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         data = serializer.validated_data
 
         # Get vehicle
-        vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
+        vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
         # Calculate total amount using new fare structure
-        distance_km = data.get('distance_km', 0)
-        duration_minutes = data.get('duration_minutes', 0)
+        distance_km = data.get("distance_km", 0)
+        duration_minutes = data.get("duration_minutes", 0)
         total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode='quick',
+            mode="quick",
             vehicle=vehicle,
-            pickup_address=data['pickup_address'],
-            sender_name=data['sender_name'],
-            sender_phone=data['sender_phone'],
-            payment_method=data['payment_method'],
+            pickup_address=data["pickup_address"],
+            sender_name=data["sender_name"],
+            sender_phone=data["sender_phone"],
+            payment_method=data["payment_method"],
             total_amount=total_amount,
             distance_km=distance_km,
             duration_minutes=duration_minutes,
-            notes=data.get('notes', ''),
-            scheduled_pickup_time=data.get('scheduled_pickup_time')
+            notes=data.get("notes", ""),
+            scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
         # Create single delivery
         Delivery.objects.create(
             order=order,
-            dropoff_address=data['dropoff_address'],
-            receiver_name=data['receiver_name'],
-            receiver_phone=data['receiver_phone'],
-            package_type=data.get('package_type', 'Box'),
-            notes=data.get('notes', ''),
-            sequence=1
+            dropoff_address=data["dropoff_address"],
+            receiver_name=data["receiver_name"],
+            receiver_phone=data["receiver_phone"],
+            package_type=data.get("package_type", "Box"),
+            notes=data.get("notes", ""),
+            sequence=1,
         )
 
         # Hold funds in escrow if payment method is wallet
-        if data['payment_method'] == 'wallet':
+        if data["payment_method"] == "wallet":
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
@@ -96,7 +123,7 @@ class QuickSendView(APIView):
                         wallet=wallet,
                         amount=total_amount,
                         order_number=order.order_number,
-                        description=f'Escrow hold for Quick Send order #{order.order_number}'
+                        description=f"Escrow hold for Quick Send order #{order.order_number}",
                     )
 
                     # Mark order as having escrow held
@@ -106,28 +133,38 @@ class QuickSendView(APIView):
                 except ValueError as e:
                     # Insufficient balance - rollback order
                     order.delete()
-                    return Response({
-                        'success': False,
-                        'errors': {'wallet': [str(e)]}
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"success": False, "errors": {"wallet": [str(e)]}},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
                 order.delete()
-                return Response({
-                    'success': False,
-                    'errors': {'wallet': ['Insufficient wallet balance. Please fund your wallet first.']}
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "wallet": [
+                                "Insufficient wallet balance. Please fund your wallet first."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Return created order
         order_serializer = OrderSerializer(order)
 
-        return Response({
-            'success': True,
-            'message': 'Quick Send order created successfully!',
-            'order': order_serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "success": True,
+                "message": "Quick Send order created successfully!",
+                "order": order_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class MultiDropView(APIView):
@@ -141,52 +178,53 @@ class MultiDropView(APIView):
         serializer = MultiDropSerializer(data=request.data)
 
         if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         data = serializer.validated_data
 
         # Get vehicle
-        vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
+        vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
         # Calculate total amount using new fare structure
-        num_deliveries = len(data['deliveries'])
-        distance_km = data.get('distance_km', 0)
-        duration_minutes = data.get('duration_minutes', 0)
+        num_deliveries = len(data["deliveries"])
+        distance_km = data.get("distance_km", 0)
+        duration_minutes = data.get("duration_minutes", 0)
         total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode='multi',
+            mode="multi",
             vehicle=vehicle,
-            pickup_address=data['pickup_address'],
-            sender_name=data['sender_name'],
-            sender_phone=data['sender_phone'],
-            payment_method=data['payment_method'],
+            pickup_address=data["pickup_address"],
+            sender_name=data["sender_name"],
+            sender_phone=data["sender_phone"],
+            payment_method=data["payment_method"],
             total_amount=total_amount,
             distance_km=distance_km,
             duration_minutes=duration_minutes,
-            notes=data.get('notes', ''),
-            scheduled_pickup_time=data.get('scheduled_pickup_time')
+            notes=data.get("notes", ""),
+            scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
         # Create multiple deliveries
-        for idx, delivery_data in enumerate(data['deliveries'], start=1):
+        for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
-                dropoff_address=delivery_data['dropoff_address'],
-                receiver_name=delivery_data['receiver_name'],
-                receiver_phone=delivery_data['receiver_phone'],
-                package_type=delivery_data.get('package_type', 'Box'),
-                notes=delivery_data.get('notes', ''),
-                sequence=idx
+                dropoff_address=delivery_data["dropoff_address"],
+                receiver_name=delivery_data["receiver_name"],
+                receiver_phone=delivery_data["receiver_phone"],
+                package_type=delivery_data.get("package_type", "Box"),
+                notes=delivery_data.get("notes", ""),
+                cod_amount=delivery_data.get("cod_amount", 0),
+                sequence=idx,
             )
 
         # Hold funds in escrow if payment method is wallet
-        if data['payment_method'] == 'wallet':
+        if data["payment_method"] == "wallet":
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
@@ -196,7 +234,7 @@ class MultiDropView(APIView):
                         wallet=wallet,
                         amount=total_amount,
                         order_number=order.order_number,
-                        description=f'Escrow hold for Multi-Drop order #{order.order_number} ({num_deliveries} deliveries)'
+                        description=f"Escrow hold for Multi-Drop order #{order.order_number} ({num_deliveries} deliveries)",
                     )
 
                     # Mark order as having escrow held
@@ -206,28 +244,38 @@ class MultiDropView(APIView):
                 except ValueError as e:
                     # Insufficient balance - rollback order
                     order.delete()
-                    return Response({
-                        'success': False,
-                        'errors': {'wallet': [str(e)]}
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"success": False, "errors": {"wallet": [str(e)]}},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
                 order.delete()
-                return Response({
-                    'success': False,
-                    'errors': {'wallet': ['Insufficient wallet balance. Please fund your wallet first.']}
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "wallet": [
+                                "Insufficient wallet balance. Please fund your wallet first."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Return created order
         order_serializer = OrderSerializer(order)
 
-        return Response({
-            'success': True,
-            'message': f'Multi-Drop order created with {num_deliveries} deliveries!',
-            'order': order_serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "success": True,
+                "message": f"Multi-Drop order created with {num_deliveries} deliveries!",
+                "order": order_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class BulkImportView(APIView):
@@ -241,52 +289,53 @@ class BulkImportView(APIView):
         serializer = BulkImportSerializer(data=request.data)
 
         if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         data = serializer.validated_data
 
         # Get vehicle
-        vehicle = Vehicle.objects.get(name=data['vehicle'], is_active=True)
+        vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
         # Calculate total amount using new fare structure
-        num_deliveries = len(data['deliveries'])
-        distance_km = data.get('distance_km', 0)
-        duration_minutes = data.get('duration_minutes', 0)
+        num_deliveries = len(data["deliveries"])
+        distance_km = data.get("distance_km", 0)
+        duration_minutes = data.get("duration_minutes", 0)
         total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
 
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode='bulk',
+            mode="bulk",
             vehicle=vehicle,
-            pickup_address=data['pickup_address'],
-            sender_name=data['sender_name'],
-            sender_phone=data['sender_phone'],
-            payment_method=data['payment_method'],
+            pickup_address=data["pickup_address"],
+            sender_name=data["sender_name"],
+            sender_phone=data["sender_phone"],
+            payment_method=data["payment_method"],
             total_amount=total_amount,
             distance_km=distance_km,
             duration_minutes=duration_minutes,
-            notes=data.get('notes', ''),
-            scheduled_pickup_time=data.get('scheduled_pickup_time')
+            notes=data.get("notes", ""),
+            scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
         # Create multiple deliveries
-        for idx, delivery_data in enumerate(data['deliveries'], start=1):
+        for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
-                dropoff_address=delivery_data['dropoff_address'],
-                receiver_name=delivery_data['receiver_name'],
-                receiver_phone=delivery_data['receiver_phone'],
-                package_type=delivery_data.get('package_type', 'Box'),
-                notes=delivery_data.get('notes', ''),
-                sequence=idx
+                dropoff_address=delivery_data["dropoff_address"],
+                receiver_name=delivery_data["receiver_name"],
+                receiver_phone=delivery_data["receiver_phone"],
+                package_type=delivery_data.get("package_type", "Box"),
+                notes=delivery_data.get("notes", ""),
+                cod_amount=delivery_data.get("cod_amount", 0),
+                sequence=idx,
             )
 
         # Hold funds in escrow if payment method is wallet
-        if data['payment_method'] == 'wallet':
+        if data["payment_method"] == "wallet":
             try:
                 wallet = Wallet.objects.get(user=request.user)
 
@@ -296,7 +345,7 @@ class BulkImportView(APIView):
                         wallet=wallet,
                         amount=total_amount,
                         order_number=order.order_number,
-                        description=f'Escrow hold for Bulk Import order #{order.order_number} ({num_deliveries} deliveries)'
+                        description=f"Escrow hold for Bulk Import order #{order.order_number} ({num_deliveries} deliveries)",
                     )
 
                     # Mark order as having escrow held
@@ -306,28 +355,38 @@ class BulkImportView(APIView):
                 except ValueError as e:
                     # Insufficient balance - rollback order
                     order.delete()
-                    return Response({
-                        'success': False,
-                        'errors': {'wallet': [str(e)]}
-                    }, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"success": False, "errors": {"wallet": [str(e)]}},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
             except Wallet.DoesNotExist:
                 # Create wallet if it doesn't exist
                 wallet = Wallet.objects.create(user=request.user)
                 order.delete()
-                return Response({
-                    'success': False,
-                    'errors': {'wallet': ['Insufficient wallet balance. Please fund your wallet first.']}
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "wallet": [
+                                "Insufficient wallet balance. Please fund your wallet first."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Return created order
         order_serializer = OrderSerializer(order)
 
-        return Response({
-            'success': True,
-            'message': f'Bulk Import order created with {num_deliveries} deliveries!',
-            'order': order_serializer.data
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "success": True,
+                "message": f"Bulk Import order created with {num_deliveries} deliveries!",
+                "order": order_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class OrderListView(APIView):
@@ -338,12 +397,16 @@ class OrderListView(APIView):
     def get(self, request):
         """Get all orders for the current user with optional filtering."""
         # Get query parameters
-        status_filter = request.query_params.get('status', None)
-        mode_filter = request.query_params.get('mode', None)
-        limit = request.query_params.get('limit', None)
+        status_filter = request.query_params.get("status", None)
+        mode_filter = request.query_params.get("mode", None)
+        limit = request.query_params.get("limit", None)
 
         # Base queryset
-        orders = Order.objects.filter(user=request.user).select_related('vehicle').prefetch_related('deliveries')
+        orders = (
+            Order.objects.filter(user=request.user)
+            .select_related("vehicle")
+            .prefetch_related("deliveries")
+        )
 
         # Apply filters
         if status_filter:
@@ -355,18 +418,17 @@ class OrderListView(APIView):
         # Apply limit
         if limit:
             try:
-                orders = orders[:int(limit)]
+                orders = orders[: int(limit)]
             except ValueError:
                 pass
 
         # Serialize
         serializer = OrderSerializer(orders, many=True)
 
-        return Response({
-            'success': True,
-            'count': len(serializer.data),
-            'orders': serializer.data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {"success": True, "count": len(serializer.data), "orders": serializer.data},
+            status=status.HTTP_200_OK,
+        )
 
 
 class OrderDetailView(APIView):
@@ -377,22 +439,22 @@ class OrderDetailView(APIView):
     def get(self, request, order_number):
         """Get order details by order number."""
         try:
-            order = Order.objects.select_related('vehicle').prefetch_related('deliveries').get(
-                order_number=order_number,
-                user=request.user
+            order = (
+                Order.objects.select_related("vehicle")
+                .prefetch_related("deliveries")
+                .get(order_number=order_number, user=request.user)
             )
         except Order.DoesNotExist:
-            return Response({
-                'success': False,
-                'message': 'Order not found.'
-            }, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"success": False, "message": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         serializer = OrderSerializer(order)
 
-        return Response({
-            'success': True,
-            'order': serializer.data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {"success": True, "order": serializer.data}, status=status.HTTP_200_OK
+        )
 
 
 class OrderStatsView(APIView):
@@ -406,30 +468,101 @@ class OrderStatsView(APIView):
 
         # Calculate stats
         total_orders = orders.count()
-        pending_orders = orders.filter(status__in=['Pending', 'Assigned', 'Started']).count()
-        completed_orders = orders.filter(status='Done').count()
-        canceled_orders = orders.filter(status__in=['CustomerCanceled', 'RiderCanceled']).count()
+        pending_orders = orders.filter(
+            status__in=["Pending", "Assigned", "Started"]
+        ).count()
+        completed_orders = orders.filter(status="Done").count()
+        canceled_orders = orders.filter(
+            status__in=["CustomerCanceled", "RiderCanceled"]
+        ).count()
 
         # Calculate total spent (only completed orders)
         total_spent = sum(
-            float(order.total_amount)
-            for order in orders.filter(status='Done')
+            float(order.total_amount) for order in orders.filter(status="Done")
         )
 
         # Average delivery cost
         avg_cost = total_spent / completed_orders if completed_orders > 0 else 0
 
-        return Response({
-            'success': True,
-            'stats': {
-                'total_orders': total_orders,
-                'pending_orders': pending_orders,
-                'completed_orders': completed_orders,
-                'canceled_orders': canceled_orders,
-                'total_spent': round(total_spent, 2),
-                'average_cost': round(avg_cost, 2)
-            }
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {
+                "success": True,
+                "stats": {
+                    "total_orders": total_orders,
+                    "pending_orders": pending_orders,
+                    "completed_orders": completed_orders,
+                    "canceled_orders": canceled_orders,
+                    "total_spent": round(total_spent, 2),
+                    "average_cost": round(avg_cost, 2),
+                },
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class CalculateFareView(APIView):
+    """
+    API endpoint to calculate fare based on vehicle, distance and duration.
+
+    POST /api/orders/calculate-fare/
+    {
+        "vehicle": "Bike",
+        "distance_km": 5.2,
+        "duration_minutes": 15
+    }
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        vehicle_name = request.data.get("vehicle")
+        distance_km = request.data.get("distance_km")
+        duration_minutes = request.data.get("duration_minutes")
+
+        if not all(
+            [vehicle_name, distance_km is not None, duration_minutes is not None]
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "error": "Missing required fields: vehicle, distance_km, duration_minutes",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            vehicle = Vehicle.objects.get(name__iexact=vehicle_name, is_active=True)
+        except Vehicle.DoesNotExist:
+            return Response(
+                {"success": False, "error": f"Vehicle {vehicle_name} not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            total_amount = vehicle.calculate_fare(
+                float(distance_km), int(duration_minutes)
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "price": total_amount,
+                    "breakdown": {
+                        "base_fare": vehicle.base_fare,
+                        "distance_cost": float(distance_km)
+                        * float(vehicle.rate_per_km),
+                        "time_cost": int(duration_minutes)
+                        * float(vehicle.rate_per_minute),
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"success": False, "error": f"Invalid data format: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class CancelOrderView(APIView):
@@ -441,6 +574,7 @@ class CancelOrderView(APIView):
         "reason": "Customer requested cancellation"
     }
     """
+
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -448,50 +582,54 @@ class CancelOrderView(APIView):
         """Cancel an order and process refund if needed"""
 
         # Get cancellation reason
-        reason = request.data.get('reason', 'Order canceled by merchant')
+        reason = request.data.get("reason", "Order canceled by merchant")
 
         # Get the order
         try:
             order = Order.objects.select_for_update().get(
-                order_number=order_number,
-                user=request.user
+                order_number=order_number, user=request.user
             )
         except Order.DoesNotExist:
             return Response(
-                {'error': f'Order {order_number} not found'},
-                status=status.HTTP_404_NOT_FOUND
+                {"error": f"Order {order_number} not found"},
+                status=status.HTTP_404_NOT_FOUND,
             )
 
         # Check if order can be canceled
-        if order.status == 'Canceled':
+        if order.status == "Canceled":
             return Response(
-                {'error': 'Order is already canceled'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Order is already canceled"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if order.status == 'Delivered':
+        if order.status == "Delivered":
             return Response(
-                {'error': 'Cannot cancel a delivered order'},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "Cannot cancel a delivered order"},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Check if escrow was released (delivery completed)
         if order.escrow_held and order.escrow_released:
             return Response(
-                {'error': 'Cannot cancel order - delivery already completed and funds released'},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "error": "Cannot cancel order - delivery already completed and funds released"
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         # Process escrow refund if applicable
         refund_processed = False
         refund_amount = 0
 
-        if order.payment_method == 'wallet' and order.escrow_held and not order.escrow_released:
+        if (
+            order.payment_method == "wallet"
+            and order.escrow_held
+            and not order.escrow_released
+        ):
             try:
                 # Refund the escrowed funds
                 escrow_transaction, refund_transaction = EscrowManager.refund_funds(
-                    order_number=order.order_number,
-                    reason=reason
+                    order_number=order.order_number, reason=reason
                 )
 
                 refund_processed = True
@@ -499,33 +637,33 @@ class CancelOrderView(APIView):
 
             except ValueError as e:
                 return Response(
-                    {'error': f'Failed to process refund: {str(e)}'},
-                    status=status.HTTP_400_BAD_REQUEST
+                    {"error": f"Failed to process refund: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
 
         # Update order status
         old_status = order.status
-        order.status = 'Canceled'
+        order.status = "Canceled"
         order.updated_at = timezone.now()
         order.save()
 
         # Prepare response
         response_data = {
-            'success': True,
-            'message': f'Order {order_number} has been canceled',
-            'order': {
-                'order_number': order.order_number,
-                'old_status': old_status,
-                'new_status': order.status,
-                'payment_method': order.payment_method,
-                'total_amount': float(order.total_amount),
-                'canceled_at': order.updated_at.isoformat()
+            "success": True,
+            "message": f"Order {order_number} has been canceled",
+            "order": {
+                "order_number": order.order_number,
+                "old_status": old_status,
+                "new_status": order.status,
+                "payment_method": order.payment_method,
+                "total_amount": float(order.total_amount),
+                "canceled_at": order.updated_at.isoformat(),
             },
-            'refund': {
-                'processed': refund_processed,
-                'amount': refund_amount,
-                'reason': reason if refund_processed else None
-            }
+            "refund": {
+                "processed": refund_processed,
+                "amount": refund_amount,
+                "reason": reason if refund_processed else None,
+            },
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
@@ -537,32 +675,70 @@ class CancelableOrdersView(APIView):
 
     GET /api/orders/cancelable/
     """
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         """Get all cancelable orders for the current user"""
 
         # Orders that can be canceled: not Delivered and not already Canceled
-        cancelable_orders = Order.objects.filter(
-            user=request.user
-        ).exclude(
-            status__in=['Delivered', 'Canceled']
-        ).order_by('-created_at')
+        cancelable_orders = (
+            Order.objects.filter(user=request.user)
+            .exclude(status__in=["Delivered", "Canceled"])
+            .order_by("-created_at")
+        )
 
         orders_data = []
         for order in cancelable_orders:
-            orders_data.append({
-                'order_number': order.order_number,
-                'status': order.status,
-                'payment_method': order.payment_method,
-                'total_amount': float(order.total_amount),
-                'created_at': order.created_at.isoformat(),
-                'can_refund': order.escrow_held and not order.escrow_released,
-                'escrow_held': order.escrow_held,
-                'escrow_released': order.escrow_released
-            })
+            orders_data.append(
+                {
+                    "order_number": order.order_number,
+                    "status": order.status,
+                    "payment_method": order.payment_method,
+                    "total_amount": float(order.total_amount),
+                    "created_at": order.created_at.isoformat(),
+                    "can_refund": order.escrow_held and not order.escrow_released,
+                    "escrow_held": order.escrow_held,
+                    "escrow_released": order.escrow_released,
+                }
+            )
 
-        return Response({
-            'count': len(orders_data),
-            'orders': orders_data
-        }, status=status.HTTP_200_OK)
+        return Response(
+            {"count": len(orders_data), "orders": orders_data},
+            status=status.HTTP_200_OK,
+        )
+
+class AssignedOrdersView(APIView):
+    """
+    Get list of orders assigned to the authenticated rider.
+    Excludes certain terminal/canceled statuses.
+    """
+    
+    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    
+    def get(self, request):
+        excluded_statuses = [
+            "Done",
+            "CustomerCanceled",
+            "RiderCanceled",
+            "Failed"
+        ]
+        
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        orders = (
+            Order.objects.filter(rider=rider_profile)
+            .exclude(status__in=excluded_statuses)
+            .select_related("vehicle", "user")
+            .prefetch_related("deliveries", "rider_offers")
+            .order_by("-created_at")
+        )
+        
+        serializer = AssignedOrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

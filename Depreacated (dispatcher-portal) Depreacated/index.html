@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>dispatcher-portal</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.googleMapsLoaded = false;
+      function initMap() {
+        window.googleMapsLoaded = true;
+        window.dispatchEvent(new Event('google-maps-loaded'));
+      }
+    </script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=%VITE_GOOGLE_MAPS_API_KEY%&libraries=places&callback=initMap" async defer></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

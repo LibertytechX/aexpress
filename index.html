@@ -9,6 +9,11 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <!-- Paystack Inline JS -->
   <script src="https://js.paystack.co/v1/inline.js"></script>
+  <script>
+    // Configuration for API Base URL
+    // In a production environment, this could be injected by the deployment server
+    window.VITE_API_BASE_URL = 'http://127.0.0.1:8000/api';
+  </script>
   <!-- Google Maps JavaScript API with Places Library -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCZiuiOnAC157Uf5fkfNkSlydmFaOV7Y3U&libraries=places&callback=initMap" async defer></script>
   <script>

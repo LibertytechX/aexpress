@@ -11,17 +11,42 @@ class Vehicle(models.Model):
     max_weight_kg = models.IntegerField()
 
     # Pricing structure
-    base_price = models.DecimalField(max_digits=10, decimal_places=2, help_text="Legacy flat rate (deprecated)")
-    base_fare = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Base fare for any delivery")
-    rate_per_km = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per kilometer")
-    rate_per_minute = models.DecimalField(max_digits=10, decimal_places=2, default=0, help_text="Rate charged per minute")
-
+    base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, help_text="Legacy flat rate (deprecated)"
+    )
+    base_fare = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Base fare for any delivery",
+    )
+    rate_per_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Rate charged per kilometer",
+    )
+    rate_per_minute = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, help_text="Rate charged per minute"
+    )
+    min_distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Minimum distance covered by base fare/min fee",
+    )
+    min_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Minimum fee charged for any trip",
+    )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        db_table = 'vehicles'
-        ordering = ['base_fare']
+        db_table = "vehicles"
+        ordering = ["base_fare"]
 
     def __str__(self):
         return f"{self.name} - Base: ₦{self.base_fare} + ₦{self.rate_per_km}/km + ₦{self.rate_per_minute}/min"
@@ -29,75 +54,118 @@ class Vehicle(models.Model):
     def calculate_fare(self, distance_km, duration_minutes):
         """
         Calculate total fare based on distance and duration.
-
-        Args:
-            distance_km (float): Distance in kilometers
-            duration_minutes (int): Duration in minutes
-
-        Returns:
-            Decimal: Total calculated fare
+        Logic: Use Min Fee as floor for the first 'min_distance_km'.
+        Any distance beyond 'min_distance_km' is added on top of the higher of (MinFee) or (Calculated Price at MinDist).
         """
         from decimal import Decimal
 
-        distance_cost = Decimal(str(distance_km)) * self.rate_per_km
-        time_cost = Decimal(str(duration_minutes)) * self.rate_per_minute
-        total = self.base_fare + distance_cost + time_cost
+        dist = Decimal(str(distance_km))
+        min_dist = self.min_distance_km
+        duration = Decimal(str(duration_minutes))
 
-        return total.quantize(Decimal('0.01'))
+        # 1. Calculate the price for the minimum distance (keeping duration constant as it's the trip duration)
+        # Note: We use the actual duration for the base calculation, assuming the min fee covers "up to X km" of the trip.
+        base_calc_at_min = (
+            self.base_fare
+            + (min_dist * self.rate_per_km)
+            + (duration * self.rate_per_minute)
+        )
+        effective_base = max(base_calc_at_min, self.min_fee)
+
+        # 2. Add cost for excess distance
+        if dist > min_dist:
+            excess_dist = dist - min_dist
+            total = effective_base + (excess_dist * self.rate_per_km)
+        else:
+            total = max(
+                self.base_fare
+                + (dist * self.rate_per_km)
+                + (duration * self.rate_per_minute),
+                self.min_fee,
+            )
+
+        return total.quantize(Decimal("0.01"))
 
 
 class Order(models.Model):
     """Main order model for delivery requests."""
 
     MODE_CHOICES = [
-        ('quick', 'Quick Send'),
-        ('multi', 'Multi-Drop'),
-        ('bulk', 'Bulk Import'),
+        ("quick", "Quick Send"),
+        ("multi", "Multi-Drop"),
+        ("bulk", "Bulk Import"),
     ]
 
     STATUS_CHOICES = [
-        ('Pending', 'Pending'),
-        ('Assigned', 'Assigned'),
-        ('Started', 'Started'),
-        ('Done', 'Done'),
-        ('CustomerCanceled', 'Customer Canceled'),
-        ('RiderCanceled', 'Rider Canceled'),
-        ('Failed', 'Failed'),
+        ("Pending", "Pending"),
+        ("Assigned", "Assigned"),
+        ("Started", "Started"),
+        ("Done", "Done"),
+        ("CustomerCanceled", "Customer Canceled"),
+        ("RiderCanceled", "Rider Canceled"),
+        ("Failed", "Failed"),
     ]
 
     PAYMENT_METHOD_CHOICES = [
-        ('wallet', 'Wallet'),
-        ('cash_on_pickup', 'Cash on Pickup'),
-        ('receiver_pays', 'Receiver Pays'),
+        ("wallet", "Wallet"),
+        ("cash_on_pickup", "Cash on Pickup"),
+        ("receiver_pays", "Receiver Pays"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order_number = models.CharField(max_length=20, unique=True, db_index=True)
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="orders")
+    rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rider_orders",
+    )
 
     # Order details
-    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default='quick')
-    vehicle = models.ForeignKey(Vehicle, on_delete=models.PROTECT, related_name='orders')
+    mode = models.CharField(max_length=10, choices=MODE_CHOICES, default="quick")
+    vehicle = models.ForeignKey(
+        Vehicle, on_delete=models.PROTECT, related_name="orders"
+    )
 
     # Pickup information
     pickup_address = models.TextField()
+    pickup_latitude = models.FloatField(null=True, blank=True)
+    pickup_longitude = models.FloatField(null=True, blank=True)
     sender_name = models.CharField(max_length=255)
     sender_phone = models.CharField(max_length=20)
 
     # Payment
-    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES, default='wallet')
+    payment_method = models.CharField(
+        max_length=20, choices=PAYMENT_METHOD_CHOICES, default="wallet"
+    )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     # Route information for pricing
-    distance_km = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Total distance in kilometers")
-    duration_minutes = models.IntegerField(null=True, blank=True, help_text="Total duration in minutes")
+    distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Total distance in kilometers",
+    )
+    duration_minutes = models.IntegerField(
+        null=True, blank=True, help_text="Total duration in minutes"
+    )
 
     # Escrow tracking
-    escrow_held = models.BooleanField(default=False, help_text="Whether funds are held in escrow")
-    escrow_released = models.BooleanField(default=False, help_text="Whether escrow funds have been released")
+    escrow_held = models.BooleanField(
+        default=False, help_text="Whether funds are held in escrow"
+    )
+    escrow_released = models.BooleanField(
+        default=False, help_text="Whether escrow funds have been released"
+    )
 
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending', db_index=True)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="Pending", db_index=True
+    )
 
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
@@ -108,11 +176,11 @@ class Order(models.Model):
     notes = models.TextField(blank=True)
 
     class Meta:
-        db_table = 'orders'
-        ordering = ['-created_at']
+        db_table = "orders"
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['-created_at', 'status']),
-            models.Index(fields=['user', '-created_at']),
+            models.Index(fields=["-created_at", "status"]),
+            models.Index(fields=["user", "-created_at"]),
         ]
 
     def __str__(self):
@@ -122,7 +190,7 @@ class Order(models.Model):
         """Generate order number if not exists."""
         if not self.order_number:
             # Generate order number: 6XXXXXX format
-            last_order = Order.objects.order_by('-created_at').first()
+            last_order = Order.objects.order_by("-created_at").first()
             if last_order and last_order.order_number:
                 try:
                     last_num = int(last_order.order_number)
@@ -139,36 +207,52 @@ class Delivery(models.Model):
     """Individual delivery/dropoff for an order (supports multi-drop)."""
 
     STATUS_CHOICES = [
-        ('Pending', 'Pending'),
-        ('InTransit', 'In Transit'),
-        ('Delivered', 'Delivered'),
-        ('Failed', 'Failed'),
-        ('Canceled', 'Canceled'),
+        ("Pending", "Pending"),
+        ("InTransit", "In Transit"),
+        ("Delivered", "Delivered"),
+        ("Failed", "Failed"),
+        ("Canceled", "Canceled"),
     ]
 
     PACKAGE_TYPE_CHOICES = [
-        ('Box', 'Box'),
-        ('Envelope', 'Envelope'),
-        ('Fragile', 'Fragile'),
-        ('Food', 'Food'),
-        ('Document', 'Document'),
-        ('Other', 'Other'),
+        ("Box", "Box"),
+        ("Envelope", "Envelope"),
+        ("Fragile", "Fragile"),
+        ("Food", "Food"),
+        ("Document", "Document"),
+        ("Other", "Other"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='deliveries')
+    order = models.ForeignKey(
+        Order, on_delete=models.CASCADE, related_name="deliveries"
+    )
 
     # Dropoff information
     dropoff_address = models.TextField()
+    dropoff_latitude = models.FloatField(null=True, blank=True)
+    dropoff_longitude = models.FloatField(null=True, blank=True)
     receiver_name = models.CharField(max_length=255)
     receiver_phone = models.CharField(max_length=20)
 
     # Package details
-    package_type = models.CharField(max_length=20, choices=PACKAGE_TYPE_CHOICES, default='Box')
+    package_type = models.CharField(
+        max_length=20, choices=PACKAGE_TYPE_CHOICES, default="Box"
+    )
     notes = models.TextField(blank=True)
 
+    # Cash on delivery
+    COD_FROM_CHOICES = [
+        ("sender", "Sender"),
+        ("customer", "Customer / Receiver"),
+    ]
+    cod_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cod_from = models.CharField(
+        max_length=20, choices=COD_FROM_CHOICES, default="customer"
+    )
+
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")
 
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now)
@@ -178,10 +262,10 @@ class Delivery(models.Model):
     sequence = models.IntegerField(default=1)
 
     class Meta:
-        db_table = 'deliveries'
-        ordering = ['order', 'sequence']
+        db_table = "deliveries"
+        ordering = ["order", "sequence"]
         indexes = [
-            models.Index(fields=['order', 'sequence']),
+            models.Index(fields=["order", "sequence"]),
         ]
 
     def __str__(self):
