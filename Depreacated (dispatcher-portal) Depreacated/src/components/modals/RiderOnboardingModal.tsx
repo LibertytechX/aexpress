@@ -81,12 +81,18 @@ export function RiderOnboardingModal({ onClose, onSuccess }: RiderOnboardingModa
             });
 
             const result = await RiderService.onboardRider(formDataToSend);
-            if (result.success) {
+            // Backend returns {message: "...", rider_id: "..."} on success (201)
+            // If we get here without throwing, it means success
+            if (result.rider_id || result.message?.includes("successfully")) {
                 setLoading(false);
                 onSuccess();
-            } else {
-                setError(result.message);
+            } else if (result.success === false) {
+                setError(result.message || "Onboarding failed");
                 setLoading(false);
+            } else {
+                // Fallback: treat as success if we got a response
+                setLoading(false);
+                onSuccess();
             }
         } catch (err: any) {
             console.error(err);

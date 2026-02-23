@@ -107,6 +107,9 @@ class Rider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        db_table = "riders"
+
     def save(self, *args, **kwargs):
         if not self.rider_id:
             # Generate unique 6-digit ID
@@ -122,6 +125,7 @@ class Rider(models.Model):
 
 
 class DispatcherProfile(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -129,6 +133,9 @@ class DispatcherProfile(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dispatcher_profiles"
 
     def __str__(self):
         return f"Dispatcher: {self.user.contact_name or self.user.phone}"
@@ -144,6 +151,9 @@ class Merchant(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchants"
 
     def save(self, *args, **kwargs):
         if not self.merchant_id:
@@ -218,6 +228,7 @@ class SystemSettings(models.Model):
     notif_cod_settled = models.BooleanField(default=True)
 
     class Meta:
+        db_table = "system_settings"
         verbose_name = "System Settings"
         verbose_name_plural = "System Settings"
 

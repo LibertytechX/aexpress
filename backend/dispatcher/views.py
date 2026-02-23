@@ -1,9 +1,11 @@
 from rest_framework import viewsets, permissions, status, views, parsers
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Rider
 from .serializers import RiderSerializer
 from django.contrib.auth import authenticate, get_user_model
+from django.utils import timezone
 
 User = get_user_model()
 
@@ -14,9 +16,39 @@ class RiderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Optionally filter by status or checks
-        return super().get_queryset()
-        return super().get_queryset()
+        return Rider.objects.all().select_related("user", "vehicle_type")
+
+    @action(detail=True, methods=["patch"], url_path="update_location")
+    def update_location(self, request, pk=None):
+        """Update a rider's current GPS coordinates."""
+        rider = self.get_object()
+        lat = request.data.get("lat")
+        lng = request.data.get("lng")
+
+        if lat is None or lng is None:
+            return Response(
+                {"error": "Both 'lat' and 'lng' are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            rider.current_latitude = float(lat)
+            rider.current_longitude = float(lng)
+            rider.last_location_update = timezone.now()
+            rider.save(update_fields=["current_latitude", "current_longitude", "last_location_update"])
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid lat/lng values."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            "id": str(rider.id),
+            "rider_id": rider.rider_id,
+            "current_latitude": float(rider.current_latitude),
+            "current_longitude": float(rider.current_longitude),
+            "last_location_update": rider.last_location_update.isoformat(),
+        })
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -42,6 +74,23 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+    def create(self, request, *args, **kwargs):
+        """Override create to return full OrderSerializer data after creation."""
+        from rest_framework.response import Response as DRFResponse
+        from rest_framework import status as drf_status
+
+        serializer = self.OrderCreateSerializer(
+            data=request.data, context={"request": request}
+        )
+        serializer.is_valid(raise_exception=True)
+        order = serializer.save()
+        response_serializer = self.OrderSerializer(
+            order, context={"request": request}
+        )
+        return DRFResponse(
+            response_serializer.data, status=drf_status.HTTP_201_CREATED
+        )
 
     from rest_framework.decorators import action
 

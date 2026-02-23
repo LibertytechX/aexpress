@@ -12,8 +12,21 @@ export const AuthService = {
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || "Login failed");
+                const errorData = await response.json();
+                // Handle various error formats: {error: "..."}, {errors: {...}}, or {field: [...]}
+                if (errorData.error) {
+                    throw new Error(errorData.error);
+                }
+                const errors = errorData.errors || errorData;
+                const errorMessages: string[] = [];
+                for (const [field, messages] of Object.entries(errors)) {
+                    if (Array.isArray(messages)) {
+                        errorMessages.push(...messages.map((msg: string) => `${field}: ${msg}`));
+                    } else if (typeof messages === 'string') {
+                        errorMessages.push(`${field}: ${messages}`);
+                    }
+                }
+                throw new Error(errorMessages.length > 0 ? errorMessages.join('. ') : "Login failed");
             }
 
             const data = await response.json();
@@ -48,9 +61,21 @@ export const AuthService = {
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                // Extract first error message if it's a dict
-                const msg = Object.values(error).flat()[0] as string || "Signup failed";
+                const errorData = await response.json();
+                // Handle nested errors object: {errors: {phone: [...], email: [...]}} or {phone: [...], email: [...]}
+                const errors = errorData.errors || errorData;
+
+                // Build a readable error message from all field errors
+                const errorMessages: string[] = [];
+                for (const [field, messages] of Object.entries(errors)) {
+                    if (Array.isArray(messages)) {
+                        errorMessages.push(...messages.map((msg: string) => `${field}: ${msg}`));
+                    } else if (typeof messages === 'string') {
+                        errorMessages.push(`${field}: ${messages}`);
+                    }
+                }
+
+                const msg = errorMessages.length > 0 ? errorMessages.join('. ') : "Signup failed";
                 throw new Error(msg);
             }
 

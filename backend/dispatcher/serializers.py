@@ -60,6 +60,9 @@ class RiderSerializer(serializers.ModelSerializer):
             "completionRate",
             "avgTime",
             "joined",
+            "current_latitude",
+            "current_longitude",
+            "last_location_update",
         ]
 
     def get_vehicle(self, obj):
@@ -160,16 +163,33 @@ class OrderSerializer(serializers.ModelSerializer):
         return 0
 
     def get_status(self, obj):
-        mapping = {
+        order_map = {
             "Pending": "Pending",
             "Assigned": "Assigned",
-            "Started": "In Transit",  # Or Picked Up
+            "Started": "In Transit",
             "Done": "Delivered",
             "CustomerCanceled": "Cancelled",
             "RiderCanceled": "Cancelled",
             "Failed": "Failed",
         }
-        return mapping.get(obj.status, "Pending")
+        order_status = order_map.get(obj.status, "Pending")
+
+        # If the Order-level status hasn't advanced past Assigned, check the
+        # Delivery's own status so changes made there are reflected here too.
+        if order_status in ("Pending", "Assigned"):
+            first = obj.deliveries.first()
+            if first:
+                delivery_map = {
+                    "InTransit": "In Transit",
+                    "Delivered": "Delivered",
+                    "Failed": "Failed",
+                    "Canceled": "Cancelled",
+                }
+                delivery_status = delivery_map.get(first.status)
+                if delivery_status:
+                    return delivery_status
+
+        return order_status
 
     def get_items(self, obj):
         return [d.package_type for d in obj.deliveries.all()]

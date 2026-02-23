@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI } from "./src/api.js";
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
@@ -232,6 +233,150 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
 }
 const STS = { Pending:{bg:S.yellowBg,text:S.yellow}, Assigned:{bg:S.blueBg,text:S.blue}, "Picked Up":{bg:S.purpleBg,text:S.purple}, "In Transit":{bg:"rgba(232,168,56,0.1)",text:S.gold}, Delivered:{bg:S.greenBg,text:S.green}, Cancelled:{bg:S.redBg,text:S.red}, Failed:{bg:S.redBg,text:"#F87171"} };
 
+// ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
+function DeliveryRouteMap({ order, rider }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const directionsRendererRef = useRef(null);
+  const [mapStatus, setMapStatus] = useState('loading');
+  const [mapReady, setMapReady] = useState(false);
+
+  // Effect 1: Initialize the Google Map (once)
+  useEffect(() => {
+    const initializeMap = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 },
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+        map: map,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#E8A838',
+          strokeWeight: 4,
+          strokeOpacity: 0.7,
+          icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
+        }
+      });
+      setMapReady(true);
+    };
+
+    let unsubscribe = null;
+    if (window.google && window.google.maps) {
+      initializeMap();
+    } else {
+      window.addEventListener('google-maps-loaded', initializeMap);
+      unsubscribe = () => window.removeEventListener('google-maps-loaded', initializeMap);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      markersRef.current.forEach(m => m.setMap(null));
+      markersRef.current = [];
+      if (directionsRendererRef.current) { directionsRendererRef.current.setMap(null); directionsRendererRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: Update markers + route whenever order/rider changes
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    const geocoder = new window.google.maps.Geocoder();
+
+    const geocodeAddr = (address) => new Promise((resolve) => {
+      geocoder.geocode({ address: address + ', Lagos, Nigeria' }, (results, status) => {
+        resolve((status === 'OK' && results[0]) ? results[0].geometry.location : null);
+      });
+    });
+
+    (async () => {
+      // Clear previous markers and route
+      markersRef.current.forEach(m => m.setMap(null));
+      markersRef.current = [];
+      if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] });
+
+      const [pickupLoc, dropoffLoc] = await Promise.all([
+        geocodeAddr(order.pickup),
+        geocodeAddr(order.dropoff),
+      ]);
+      if (!pickupLoc || !dropoffLoc) { setMapStatus('error'); return; }
+
+      // Pickup marker — navy dot
+      markersRef.current.push(new window.google.maps.Marker({
+        position: pickupLoc, map,
+        title: 'Pickup: ' + order.pickup,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#1B2A4A', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '📦', fontSize: '16px' }
+      }));
+
+      // Dropoff marker — green dot
+      markersRef.current.push(new window.google.maps.Marker({
+        position: dropoffLoc, map,
+        title: 'Dropoff: ' + order.dropoff,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '🏠', fontSize: '16px' }
+      }));
+
+      // Rider marker — gold dot (only if GPS available)
+      if (rider && rider.lat && rider.lng) {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: { lat: rider.lat, lng: rider.lng }, map,
+          title: 'Rider: ' + (rider.name || 'Rider'),
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { text: '🏍️', fontSize: '16px' }
+        }));
+      }
+
+      // Draw route
+      new window.google.maps.DirectionsService().route({
+        origin: pickupLoc,
+        destination: dropoffLoc,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      }, (result, status) => {
+        if (status === 'OK') {
+          directionsRendererRef.current.setDirections(result);
+        } else {
+          // Route failed — just fit bounds to markers
+          const bounds = new window.google.maps.LatLngBounds();
+          bounds.extend(pickupLoc);
+          bounds.extend(dropoffLoc);
+          if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
+          map.fitBounds(bounds, { padding: 40 });
+        }
+        setMapStatus('ready');
+      });
+    })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
+  }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
+
+  return (
+    <div style={{ position:'relative', borderRadius:10, overflow:'hidden', border:`1px solid ${S.border}` }}>
+      <div ref={mapRef} style={{ height:230, width:'100%' }} />
+      {mapStatus === 'loading' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:8 }}>
+          <div style={{ fontSize:24 }}>🗺️</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Loading map…</div>
+        </div>
+      )}
+      {mapStatus === 'error' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:6 }}>
+          <div style={{ fontSize:24 }}>📍</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Could not load map</div>
+          <div style={{ fontSize:10, color:S.textMuted }}>Check addresses or connection</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const INIT_RIDERS = [
   { id:"R001",name:"Musa Kabiru",phone:"08034561234",vehicle:"Bike",status:"online",currentOrder:"AX-6158260",todayOrders:8,todayEarnings:14400,rating:4.8,totalDeliveries:1234,completionRate:96,avgTime:"28 min",joined:"Sep 2024" },
   { id:"R002",name:"Ahmed Bello",phone:"09012349876",vehicle:"Bike",status:"online",currentOrder:"AX-6158258",todayOrders:6,todayEarnings:10800,rating:4.6,totalDeliveries:876,completionRate:94,avgTime:"32 min",joined:"Nov 2024" },
@@ -288,17 +433,70 @@ const Badge = ({status}) => { const s=STS[status]||{bg:"#f1f5f9",text:"#94A3B8"}
 const StatCard = ({label,value,sub,color}) => (<div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,padding:"16px 18px",flex:1}}><div style={{fontSize:11,color:S.textMuted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:6}}>{label}</div><div style={{fontSize:24,fontWeight:800,color:color||S.text,fontFamily:"'Space Mono', monospace",lineHeight:1}}>{value}</div>{sub&&<div style={{fontSize:11,color:S.textMuted,marginTop:4}}>{sub}</div>}</div>);
 const now = () => new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
 
+// ─── LOGIN SCREEN ───────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      await AuthAPI.login(phone, password);
+      onLogin();
+    } catch (err) {
+      setError(err.errors?.non_field_errors?.[0] || err.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:S.bg,fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif"}}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+      <div style={{width:380,padding:40,background:S.card,borderRadius:16,boxShadow:"0 4px 24px rgba(0,0,0,0.08)"}}>
+        <div style={{textAlign:"center",marginBottom:32}}>
+          <div style={{width:56,height:56,borderRadius:12,display:"inline-flex",alignItems:"center",justifyContent:"center",background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,fontWeight:800,fontSize:22,color:S.navy,fontFamily:"'Space Mono',monospace",marginBottom:16}}>AX</div>
+          <h1 style={{fontSize:24,fontWeight:700,color:S.text,margin:0}}>Dispatch Portal</h1>
+          <p style={{color:S.muted,fontSize:14,marginTop:4}}>Sign in to continue</p>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div style={{marginBottom:16}}>
+            <label style={{display:"block",fontSize:13,fontWeight:500,color:S.text,marginBottom:6}}>Phone Number</label>
+            <input type="text" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+234..." style={{width:"100%",padding:"12px 14px",border:`1px solid ${S.border}`,borderRadius:8,fontSize:14,background:S.bg}} required/>
+          </div>
+          <div style={{marginBottom:24}}>
+            <label style={{display:"block",fontSize:13,fontWeight:500,color:S.text,marginBottom:6}}>Password</label>
+            <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" style={{width:"100%",padding:"12px 14px",border:`1px solid ${S.border}`,borderRadius:8,fontSize:14,background:S.bg}} required/>
+          </div>
+          {error && <div style={{padding:"10px 14px",background:S.redBg,color:S.red,borderRadius:8,fontSize:13,marginBottom:16}}>{error}</div>}
+          <button type="submit" disabled={loading} style={{width:"100%",padding:"14px",background:S.gold,color:"#fff",border:"none",borderRadius:10,fontSize:15,fontWeight:600,cursor:loading?"wait":"pointer",opacity:loading?0.7:1}}>{loading?"Signing in...":"Sign In"}</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function AXDispatchPortal() {
+  const [isAuthenticated, setIsAuthenticated] = useState(AuthAPI.isAuthenticated());
+  const [loading, setLoading] = useState(true);
   const [screen,setScreen] = useState("dashboard");
   const [selectedOrderId,setSelectedOrderId] = useState(null);
   const [selectedRiderId,setSelectedRiderId] = useState(null);
   const [showCreateOrder,setShowCreateOrder] = useState(false);
-  const [orders,setOrders] = useState(INIT_ORDERS);
-  const [riders,setRiders] = useState(INIT_RIDERS);
-  const [eventLogs,setEventLogs] = useState(() => {
+  const [orders,setOrders] = useState([]);
+  const [riders,setRiders] = useState([]);
+  const [merchants,setMerchants] = useState([]);
+  const [eventLogs,setEventLogs] = useState({});
+
+  // Initialize event logs when orders change
+  const initEventLogs = (ordersList) => {
     const logs = {};
-    INIT_ORDERS.forEach(o => {
-      const b = [{time:o.created.split(", ")[1]||o.created,event:"Order created",by:`Merchant Portal (${o.merchant})`,type:"create"}];
+    ordersList.forEach(o => {
+      const b = [{time:o.created?.split(", ")[1]||o.created||"N/A",event:"Order created",by:`Merchant Portal (${o.merchant})`,type:"create"}];
       if(o.riderId) b.push({time:"auto",event:`Assigned to ${o.rider}`,by:"Auto-Dispatch",type:"assign"});
       if(["Picked Up","In Transit","Delivered"].includes(o.status)) b.push({time:"auto",event:"Package picked up",by:o.rider,type:"pickup"});
       if(["In Transit","Delivered"].includes(o.status)) b.push({time:"auto",event:"In transit to dropoff",by:"GPS",type:"transit"});
@@ -308,17 +506,70 @@ export default function AXDispatchPortal() {
       logs[o.id]=b;
     });
     return logs;
-  });
+  };
+
+  // Fetch data whenever authenticated becomes true
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [ridersData, ordersData, merchantsData] = await Promise.all([
+          RidersAPI.getAll().catch(() => []),
+          OrdersAPI.getAll().catch(() => []),
+          MerchantsAPI.getAll().catch(() => [])
+        ]);
+        setRiders(ridersData);
+        setOrders(ordersData);
+        setMerchants(merchantsData);
+        setEventLogs(initEventLogs(ordersData));
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+        AuthAPI.logout();
+        setIsAuthenticated(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [isAuthenticated]); // re-run when user logs in
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={() => { setIsAuthenticated(true); setLoading(true); }} />;
+  }
+
+  // Show loading screen
+  if (loading) {
+    return (
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",background:S.bg,fontFamily:"'DM Sans',sans-serif"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{width:48,height:48,border:`3px solid ${S.border}`,borderTopColor:S.gold,borderRadius:"50%",animation:"spin 1s linear infinite",margin:"0 auto 16px"}}></div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          <div style={{color:S.muted,fontSize:14}}>Loading dispatch data...</div>
+        </div>
+      </div>
+    );
+  }
 
   const addLog = (oid,event,by,type) => setEventLogs(p=>({...p,[oid]:[...(p[oid]||[]),{time:now(),event,by,type}]}));
   const updateOrder = (oid,u) => setOrders(p=>p.map(o=>o.id===oid?{...o,...u}:o));
 
-  const assignRider = (oid,rid) => {
+  const assignRider = async (oid,rid) => {
     const r = riders.find(x=>x.id===rid); if(!r) return;
-    updateOrder(oid,{rider:r.name,riderId:rid,status:"Assigned"});
-    setRiders(p=>p.map(x=>x.id===rid?{...x,currentOrder:oid,status:"on_delivery"}:x));
-    addLog(oid,`Assigned to ${r.name}`,"Dispatch","assign");
-    addLog(oid,"Status → Assigned","System","status");
+    try {
+      await OrdersAPI.assignRider(oid, rid);
+      updateOrder(oid,{rider:r.name,riderId:rid,status:"Assigned"});
+      setRiders(p=>p.map(x=>x.id===rid?{...x,currentOrder:oid,status:"on_delivery"}:x));
+      addLog(oid,`Assigned to ${r.name}`,"Dispatch","assign");
+      addLog(oid,"Status → Assigned","System","status");
+    } catch (error) {
+      console.error('Failed to assign rider:', error);
+      alert('Failed to assign rider. Please try again.');
+    }
   };
 
   const changeStatus = (oid,ns) => {
@@ -359,7 +610,16 @@ export default function AXDispatchPortal() {
         <nav style={{flex:1,padding:"10px 8px",display:"flex",flexDirection:"column",gap:2}}>
           {navItems.map(item=>{const a=screen===item.id;return (<button key={item.id} onClick={()=>{setScreen(item.id);setSelectedOrderId(null);setSelectedRiderId(null);}} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 14px",borderRadius:10,border:"none",cursor:"pointer",fontSize:13,fontWeight:a?600:400,fontFamily:"inherit",width:"100%",textAlign:"left",background:a?"rgba(232,168,56,0.12)":"transparent",color:a?S.gold:"rgba(255,255,255,0.6)",transition:"all 0.2s"}}><span style={{opacity:a?1:0.6}}>{item.icon}</span><span style={{flex:1}}>{item.label}</span>{item.count>0&&<span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:8,minWidth:18,textAlign:"center",background:a?S.gold:"rgba(255,255,255,0.1)",color:a?"#fff":"rgba(255,255,255,0.5)"}}>{item.count}</span>}</button>);})}
         </nav>
-        <div style={{padding:"12px 14px",borderTop:"1px solid rgba(255,255,255,0.08)"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:32,height:32,borderRadius:"50%",background:"rgba(232,168,56,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:S.gold}}>OI</div><div><div style={{fontSize:12,fontWeight:600,color:"#fff"}}>Otimeyin I.</div><div style={{fontSize:10,color:"rgba(255,255,255,0.4)"}}>Admin</div></div></div></div>
+        <div style={{padding:"12px 14px",borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:"rgba(232,168,56,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:S.gold}}>OI</div>
+            <div><div style={{fontSize:12,fontWeight:600,color:"#fff"}}>Otimeyin I.</div><div style={{fontSize:10,color:"rgba(255,255,255,0.4)"}}>Admin</div></div>
+          </div>
+          <button onClick={()=>{AuthAPI.logout();window.location.reload();}} style={{width:"100%",padding:"8px 12px",background:"rgba(239,68,68,0.15)",color:"#EF4444",border:"none",borderRadius:6,fontSize:12,fontWeight:500,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Logout
+          </button>
+        </div>
       </aside>
 
       <main style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -371,24 +631,50 @@ export default function AXDispatchPortal() {
           {screen==="dashboard"&&<DashboardScreen orders={orders} riders={riders} onViewOrder={id=>navTo("orders",id)} onViewRider={id=>navTo("riders",id)}/>}
           {screen==="orders"&&<OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={()=>setSelectedOrderId(null)} onViewRider={id=>navTo("riders",id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs}/>}
           {screen==="riders"&&<RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={()=>setSelectedRiderId(null)} onViewOrder={id=>navTo("orders",id)}/>}
-          {screen==="merchants"&&<MerchantsScreen data={MERCHANTS_DATA}/>}
+          {screen==="merchants"&&<MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA}/>}
           {screen==="customers"&&<CustomersScreen data={CUSTOMERS_DATA}/>}
           {screen==="messaging"&&<MessagingScreen/>}
           {screen==="settings"&&<SettingsScreen/>}
         </div>
       </main>
-      {showCreateOrder&&<CreateOrderModal riders={riders} onClose={()=>setShowCreateOrder(false)}/>}
+      {showCreateOrder&&<CreateOrderModal riders={riders} merchants={merchants} onClose={()=>setShowCreateOrder(false)} onOrderCreated={(created)=>{
+        const newOrder={
+          id: created.id || "N/A",
+          customer: created.customer || "Unknown",
+          customerPhone: created.customerPhone || "",
+          merchant: created.merchant || "Unknown",
+          pickup: created.pickup || "",
+          dropoff: created.dropoff || "",
+          rider: created.rider || null,
+          riderId: created.riderId || null,
+          status: created.status || "Pending",
+          amount: parseFloat(created.amount) || 0,
+          cod: parseFloat(created.cod) || 0,
+          codFee: parseFloat(created.codFee) || 0,
+          vehicle: created.vehicle || "Bike",
+          created: created.created || new Date().toLocaleString(),
+          pkg: created.pkg || "Box"
+        };
+        setOrders(p=>[newOrder,...p]);
+      }}/>}
     </div>
   );
 }
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
 function DashboardScreen({ orders, riders, onViewOrder, onViewRider }) {
-  const today = orders.filter(o => o.created.includes("Feb 14"));
+  const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+  const today = orders.filter(o => {
+    if (!o.created) return false;
+    // Handle ISO datetime ("2026-02-22T15:42:00Z") or any string containing today's date
+    return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+  });
+  // Fall back to all orders if today filter returns nothing (e.g. older data)
+  const displayOrders = today.length > 0 ? today : orders;
   const active = orders.filter(o => ["In Transit","Picked Up","Assigned"].includes(o.status));
-  const delivered = today.filter(o => o.status === "Delivered");
-  const revenue = today.reduce((s,o) => s+o.amount+o.codFee, 0);
-  const codTotal = today.reduce((s,o) => s+o.cod, 0);
+  const delivered = displayOrders.filter(o => o.status === "Delivered");
+  const revenue = displayOrders.reduce((s,o) => s+o.amount+o.codFee, 0);
+  const codTotal = displayOrders.reduce((s,o) => s+o.cod, 0);
 
   const events = [
     { time:"4:05 PM", text:"AX-6158260 in transit — Musa heading to VI", color:S.gold, oid:"AX-6158260" },
@@ -406,7 +692,7 @@ function DashboardScreen({ orders, riders, onViewOrder, onViewRider }) {
   return (
     <div>
       <div style={{display:"flex",gap:12,marginBottom:20}}>
-        <StatCard label="Today's Orders" value={today.length} sub={`${delivered.length} delivered`}/>
+        <StatCard label="Today's Orders" value={displayOrders.length} sub={`${delivered.length} delivered`}/>
         <StatCard label="Active Now" value={active.length} sub={`${orders.filter(o=>o.status==="Pending").length} pending`} color={S.gold}/>
         <StatCard label="Online Riders" value={riders.filter(r=>r.status==="online").length} sub={`${riders.filter(r=>r.status==="on_delivery").length} on delivery`} color={S.green}/>
         <StatCard label="Revenue Today" value={`₦${(revenue/1000).toFixed(0)}K`} sub={`₦${(codTotal/1000).toFixed(0)}K COD collected`} color={S.gold}/>
@@ -769,14 +1055,30 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
         {/* RIGHT — Map + Event Log */}
         <div style={{display:"flex",flexDirection:"column",gap:14,alignSelf:"start"}}>
-          {/* Mini Map */}
+          {/* Delivery Route — real Leaflet map */}
           <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,padding:12}}>
-            <div style={{fontSize:12,fontWeight:700,marginBottom:8}}>Delivery Route</div>
-            <LagosMap orders={[order]} riders={[]} highlightOrder={order.id} small/>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
-              <div><div style={{fontSize:9,color:S.textMuted,fontWeight:600}}>PICKUP</div><div style={{fontSize:11,fontWeight:600,color:S.navy}}>{order.pickup.split(",")[0]}</div></div>
-              <div style={{fontSize:14,color:S.textMuted}}>→</div>
-              <div style={{textAlign:"right"}}><div style={{fontSize:9,color:S.textMuted,fontWeight:600}}>DROPOFF</div><div style={{fontSize:11,fontWeight:600,color:S.navy}}>{order.dropoff.split(",")[0]}</div></div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:700}}>Delivery Route</div>
+              {rider && rider.lat && rider.lng ? (
+                <div style={{display:"flex",alignItems:"center",gap:4,fontSize:9,fontWeight:600,color:S.green}}>
+                  <span style={{width:6,height:6,borderRadius:"50%",background:S.green,display:"inline-block"}}/>
+                  Rider location live
+                </div>
+              ) : rider ? (
+                <div style={{fontSize:9,color:S.textMuted,fontWeight:600}}>GPS unavailable</div>
+              ) : null}
+            </div>
+            <DeliveryRouteMap order={order} rider={rider} />
+            <div style={{display:"flex",justifyContent:"space-between",marginTop:10}}>
+              <div>
+                <div style={{fontSize:9,color:S.textMuted,fontWeight:600}}>📦 PICKUP</div>
+                <div style={{fontSize:11,fontWeight:600,color:S.navy}}>{order.pickup.split(",")[0]}</div>
+              </div>
+              <div style={{fontSize:16,color:S.textMuted,alignSelf:"center"}}>→</div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:9,color:S.textMuted,fontWeight:600}}>🏠 DROPOFF</div>
+                <div style={{fontSize:11,fontWeight:600,color:S.navy}}>{order.dropoff.split(",")[0]}</div>
+              </div>
             </div>
           </div>
         <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
@@ -1353,48 +1655,328 @@ function SettingsScreen() {
     </div>
   );
 }
+// ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
+function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const debounceTimer = useRef(null);
+  const autocompleteService = useRef(null);
+  const dropdownRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    const init = () => {
+      if (window.google && window.google.maps && window.google.maps.places) {
+        autocompleteService.current = new window.google.maps.places.AutocompleteService();
+      }
+    };
+    if (window.googleMapsLoaded) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); return () => window.removeEventListener('google-maps-loaded', init); }
+  }, []);
+
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target) && inputRef.current && !inputRef.current.contains(e.target)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const fetchSuggestions = (input) => {
+    if (!input || input.length < 3) { setSuggestions([]); setShowDropdown(false); return; }
+    if (!autocompleteService.current) return;
+    setLoading(true);
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      autocompleteService.current.getPlacePredictions({
+        input,
+        componentRestrictions: { country: 'ng' },
+        types: ['address'],
+        location: new window.google.maps.LatLng(6.5244, 3.3792),
+        radius: 50000,
+      }, (predictions, status) => {
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
+          const lagos = predictions.filter(p => p.description.toLowerCase().includes('lagos'));
+          setSuggestions(lagos.length ? lagos : predictions.slice(0, 5));
+          setShowDropdown(true);
+        } else { setSuggestions([]); setShowDropdown(false); }
+      });
+    }, 500);
+  };
+
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }}
+        placeholder={placeholder} style={style} />
+      {loading && <div style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', fontSize:11, color:'#94a3b8' }}>⏳</div>}
+      {showDropdown && suggestions.length > 0 && (
+        <div ref={dropdownRef} style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:`1px solid ${S.border}`, borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:9999, maxHeight:220, overflowY:'auto', marginTop:4 }}>
+          {suggestions.map((s, idx) => (
+            <div key={s.place_id} onClick={() => { onChange(s.description); setSuggestions([]); setShowDropdown(false); }}
+              style={{ padding:'10px 14px', cursor:'pointer', borderBottom: idx < suggestions.length-1 ? `1px solid ${S.border}` : 'none', fontSize:13, color:S.navy }}
+              onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
+              onMouseLeave={e => e.currentTarget.style.background='#fff'}>
+              <span style={{ color:S.gold, marginRight:8 }}>📍</span>
+              {s.structured_formatting?.main_text || s.description}
+              {s.structured_formatting?.secondary_text && (
+                <div style={{ fontSize:11, color:S.textMuted, marginTop:2 }}>{s.structured_formatting.secondary_text}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── CREATE ORDER MODAL ─────────────────────────────────────────
-function CreateOrderModal({ riders, onClose }) {
-  const [vehicle,setVehicle]=useState("Bike");
-  const [codOn,setCodOn]=useState(false);
+function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const iSt={width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 14px",height:42,fontSize:13,fontFamily:"inherit",color:S.navy,background:"#fff"};
   const lSt={display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:5,textTransform:"uppercase",letterSpacing:"0.5px"};
+
+  // Form state
+  const [merchantId, setMerchantId] = useState("");
+  const [senderName, setSenderName] = useState("");
+  const [senderPhone, setSenderPhone] = useState("");
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [pickup, setPickup] = useState("");
+  const [dropoff, setDropoff] = useState("");
+  const [vehicle, setVehicle] = useState("Bike");
+  const [pkg, setPkg] = useState("Box");
+  const [riderId, setRiderId] = useState("");
+  const [priceOverride, setPriceOverride] = useState("");
+  const [codOn, setCodOn] = useState(false);
+  const [codAmount, setCodAmount] = useState("");
+
+  // Pricing & route state
+  const [vehiclePricing, setVehiclePricing] = useState({
+    Bike:{ base_fare:1200, rate_per_km:80, rate_per_minute:5 },
+    Car:{ base_fare:4500, rate_per_km:150, rate_per_minute:8 },
+    Van:{ base_fare:12000, rate_per_km:250, rate_per_minute:12 }
+  });
+  const [routeDistance, setRouteDistance] = useState(null);
+  const [routeDuration, setRouteDuration] = useState(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
+
+  // UI state
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Load vehicle pricing from backend
+  useEffect(() => {
+    VehiclesAPI.getAll().then(res => {
+      if (res.success && res.vehicles) {
+        const p = {};
+        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute) }; });
+        setVehiclePricing(p);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Calculate route when both addresses change
+  useEffect(() => {
+    if (!pickup || !dropoff) { setRouteDistance(null); setRouteDuration(null); return; }
+    setCalculatingRoute(true);
+    const tid = setTimeout(() => {
+      if (typeof google === 'undefined' || !google.maps) { setCalculatingRoute(false); return; }
+      new google.maps.DirectionsService().route({
+        origin: pickup, destination: dropoff,
+        travelMode: google.maps.TravelMode.DRIVING,
+      }, (result, status) => {
+        setCalculatingRoute(false);
+        if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+          let dist = 0, dur = 0;
+          result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
+          setRouteDistance(parseFloat((dist / 1000).toFixed(1)));
+          setRouteDuration(Math.ceil(dur / 60));
+        }
+      });
+    }, 800);
+    return () => clearTimeout(tid);
+  }, [pickup, dropoff]);
+
+  // Calculate price for a given vehicle
+  const calcPrice = (vName) => {
+    const p = vehiclePricing[vName];
+    if (!p) return null;
+    if (routeDistance && routeDuration) {
+      return Math.round(p.base_fare + routeDistance * p.rate_per_km + routeDuration * p.rate_per_minute);
+    }
+    return Math.round(p.base_fare);
+  };
+
+  const displayPrice = priceOverride ? parseInt(priceOverride) : (calcPrice(vehicle) || 0);
+
+  const handleSubmit = async () => {
+    setError(null);
+    if (!pickup) { setError("Pickup address is required"); return; }
+    if (!dropoff) { setError("Dropoff address is required"); return; }
+    if (!senderName) { setError("Sender name is required"); return; }
+    if (!receiverName) { setError("Receiver name is required"); return; }
+    setSubmitting(true);
+    try {
+      const payload = {
+        pickup, dropoff,
+        senderName, senderPhone: senderPhone || "N/A",
+        receiverName, receiverPhone: receiverPhone || "N/A",
+        vehicle, packageType: pkg,
+        price: priceOverride || displayPrice,
+        cod: codOn ? (parseFloat(codAmount) || 0) : 0,
+        riderId: riderId || "",
+        merchantId: merchantId || "",
+        distance_km: routeDistance || 0,
+        duration_minutes: routeDuration || 0,
+      };
+      const created = await OrdersAPI.create(payload);
+      if (onOrderCreated) onOrderCreated(created);
+      onClose();
+    } catch (err) {
+      const msg = err?.detail || err?.non_field_errors?.[0] || (typeof err === 'string' ? err : "Failed to create order. Check all fields.");
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const vehicleOptions = [
+    { id:"Bike", icon:"🏍️" }, { id:"Car", icon:"🚗" }, { id:"Van", icon:"🚐" }
+  ];
+
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:S.card,borderRadius:16,border:`1px solid ${S.border}`,width:520,maxHeight:"85vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.15)"}}>
-        <div style={{padding:"18px 24px",borderBottom:`1px solid ${S.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:S.card,borderRadius:16,border:`1px solid ${S.border}`,width:540,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 24px 64px rgba(0,0,0,0.15)"}}>
+        <div style={{padding:"18px 24px",borderBottom:`1px solid ${S.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,background:S.card,zIndex:1}}>
           <div><h2 style={{fontSize:18,fontWeight:800,margin:0}}>Create Order</h2><p style={{fontSize:12,color:S.textMuted,margin:"2px 0 0"}}>Manual dispatch order</p></div>
           <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:S.textMuted}}>{I.x}</button>
         </div>
         <div style={{padding:"20px 24px"}}>
-          <div style={{marginBottom:16}}><label style={lSt}>Merchant</label><select style={{...iSt,cursor:"pointer"}}><option value="">Select merchant...</option>{MERCHANTS_DATA.map(m=><option key={m.id} value={m.id}>{m.name} — {m.contact}</option>)}</select></div>
-          <div style={{marginBottom:16}}><label style={lSt}>Customer</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><input placeholder="Customer name" style={iSt}/><input placeholder="Phone number" style={iSt}/></div></div>
-          <div style={{marginBottom:16}}><label style={lSt}>Pickup Address</label><input placeholder="Enter pickup address..." style={iSt}/></div>
-          <div style={{marginBottom:16}}><label style={lSt}>Dropoff Address</label><input placeholder="Enter delivery address..." style={iSt}/></div>
-          <div style={{marginBottom:16}}><label style={lSt}>Vehicle Type</label>
-            <div style={{display:"flex",gap:8}}>
-              {[{id:"Bike",icon:"🏍️",p:"₦1,210"},{id:"Car",icon:"🚗",p:"₦4,500"},{id:"Van",icon:"🚐",p:"₦8,500"}].map(v=>(<button key={v.id} onClick={()=>setVehicle(v.id)} style={{flex:1,padding:10,borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:vehicle===v.id?`2px solid ${S.gold}`:`1px solid ${S.border}`,background:vehicle===v.id?S.goldPale:S.borderLight,textAlign:"center"}}><div style={{fontSize:20}}>{v.icon}</div><div style={{fontSize:12,fontWeight:600,color:vehicle===v.id?S.gold:S.text,marginTop:2}}>{v.id}</div><div style={{fontSize:10,color:S.textMuted,fontFamily:"'Space Mono',monospace"}}>{v.p}</div></button>))}
-            </div>
-          </div>
-          <div style={{marginBottom:16}}><label style={lSt}>Package Type</label><select style={{...iSt,cursor:"pointer"}}>{["Box","Envelope","Document","Food","Fragile"].map(p=><option key={p}>{p}</option>)}</select></div>
-          <div style={{marginBottom:16,padding:"14px 16px",borderRadius:10,border:codOn?`2px solid ${S.green}`:`1px solid ${S.border}`,background:codOn?S.greenBg:"transparent"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-              <div><div style={{fontSize:13,fontWeight:600}}>💵 Cash on Delivery</div><div style={{fontSize:11,color:S.textMuted}}>₦500 flat fee</div></div>
-              <div onClick={()=>setCodOn(!codOn)} style={{width:40,height:22,borderRadius:11,cursor:"pointer",background:codOn?S.green:S.border,position:"relative"}}><div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:codOn?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/></div>
-            </div>
-            {codOn&&<div style={{marginTop:10}}><input placeholder="COD amount (₦)" style={{...iSt,fontFamily:"'Space Mono',monospace",fontSize:16,fontWeight:700}}/></div>}
-          </div>
-          <div style={{marginBottom:16}}><label style={lSt}>Assign Rider (Optional)</label>
-            <select style={{...iSt,cursor:"pointer"}}>
-              <option value="">Auto-assign nearest rider</option>
-              {riders.filter(r=>r.status==="online"&&!r.currentOrder).map(r=>(<option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating} • Available</option>))}
-              {riders.filter(r=>r.status==="on_delivery").map(r=>(<option key={r.id} value={r.id} disabled>{r.name} — {r.vehicle} • 📦 Busy ({r.currentOrder})</option>))}
+          {/* Merchant */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Merchant</label>
+            <select value={merchantId} onChange={e=>setMerchantId(e.target.value)} style={{...iSt,cursor:"pointer"}}>
+              <option value="">Select merchant...</option>
+              {merchants.map(m=><option key={m.id} value={m.id}>{m.name} — {m.contact}</option>)}
             </select>
           </div>
-          <div style={{marginBottom:20}}><label style={lSt}>Price Override</label><input placeholder="Leave blank for standard" style={{...iSt,fontFamily:"'Space Mono',monospace"}}/></div>
+
+          {/* Sender */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Sender</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <input value={senderName} onChange={e=>setSenderName(e.target.value)} placeholder="Sender name" style={iSt}/>
+              <input value={senderPhone} onChange={e=>setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt}/>
+            </div>
+          </div>
+
+          {/* Pickup */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Pickup Address</label>
+            <AddressAutocompleteInput value={pickup} onChange={setPickup} placeholder="Enter pickup address..." style={iSt}/>
+          </div>
+
+          {/* Dropoff */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Dropoff Address</label>
+            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} placeholder="Enter delivery address..." style={iSt}/>
+          </div>
+
+          {/* Receiver */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Receiver</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <input value={receiverName} onChange={e=>setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt}/>
+              <input value={receiverPhone} onChange={e=>setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt}/>
+            </div>
+          </div>
+
+          {/* Route info */}
+          {(calculatingRoute || routeDistance) && (
+            <div style={{marginBottom:16,padding:"10px 14px",borderRadius:10,background:"#fef3c7",border:"1px solid #fbbf24",display:"flex",alignItems:"center",gap:10}}>
+              {calculatingRoute ? (
+                <><div style={{width:16,height:16,border:"2px solid #f59e0b",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><span style={{fontSize:12,color:"#92400e",fontWeight:600}}>Calculating route...</span></>
+              ) : (
+                <span style={{fontSize:12,color:"#92400e",fontWeight:600}}>📏 {routeDistance} km &nbsp;•&nbsp; 🕐 {routeDuration} min</span>
+              )}
+            </div>
+          )}
+
+          {/* Vehicle */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Vehicle Type</label>
+            <div style={{display:"flex",gap:8}}>
+              {vehicleOptions.map(v => {
+                const price = calcPrice(v.id);
+                const isSelected = vehicle === v.id;
+                return (
+                  <button key={v.id} onClick={()=>setVehicle(v.id)} style={{flex:1,padding:"10px 8px",borderRadius:10,cursor:"pointer",fontFamily:"inherit",border:isSelected?`2px solid ${S.gold}`:`1px solid ${S.border}`,background:isSelected?S.goldPale:S.borderLight,textAlign:"center",transition:"all 0.2s"}}>
+                    <div style={{fontSize:20}}>{v.icon}</div>
+                    <div style={{fontSize:12,fontWeight:600,color:isSelected?S.gold:S.text,marginTop:2}}>{v.id}</div>
+                    <div style={{fontSize:11,fontWeight:700,color:S.gold,fontFamily:"'Space Mono',monospace",marginTop:3}}>
+                      {calculatingRoute ? "…" : price != null ? `₦${price.toLocaleString()}` : "—"}
+                    </div>
+                    <div style={{fontSize:9,color:S.textMuted}}>{routeDistance ? "Est." : "Base"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Package type */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Package Type</label>
+            <select value={pkg} onChange={e=>setPkg(e.target.value)} style={{...iSt,cursor:"pointer"}}>
+              {["Box","Envelope","Document","Food","Fragile"].map(p=><option key={p}>{p}</option>)}
+            </select>
+          </div>
+
+          {/* COD */}
+          <div style={{marginBottom:16,padding:"14px 16px",borderRadius:10,border:codOn?`2px solid ${S.green}`:`1px solid ${S.border}`,background:codOn?S.greenBg:"transparent"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div><div style={{fontSize:13,fontWeight:600}}>💵 Cash on Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Collected at delivery</div></div>
+              <div onClick={()=>setCodOn(!codOn)} style={{width:40,height:22,borderRadius:11,cursor:"pointer",background:codOn?S.green:S.border,position:"relative",flexShrink:0}}>
+                <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:codOn?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+              </div>
+            </div>
+            {codOn&&<div style={{marginTop:10}}><input value={codAmount} onChange={e=>setCodAmount(e.target.value)} placeholder="COD amount (₦)" style={{...iSt,fontFamily:"'Space Mono',monospace",fontWeight:700}}/></div>}
+          </div>
+
+          {/* Rider */}
+          <div style={{marginBottom:16}}>
+            <label style={lSt}>Assign Rider (Optional)</label>
+            <select value={riderId} onChange={e=>setRiderId(e.target.value)} style={{...iSt,cursor:"pointer"}}>
+              <option value="">Auto-assign nearest rider</option>
+              {riders.filter(r=>r.status==="online"&&!r.currentOrder).map(r=>(<option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>))}
+              {riders.filter(r=>r.status==="on_delivery").map(r=>(<option key={r.id} value={r.id} disabled>{r.name} — 📦 Busy</option>))}
+            </select>
+          </div>
+
+          {/* Price summary */}
+          <div style={{marginBottom:16,padding:"14px 16px",borderRadius:10,background:S.goldPale,border:`1px solid ${S.gold}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px"}}>Estimated Price</div>
+              <div style={{fontSize:22,fontWeight:800,color:S.navy,fontFamily:"'Space Mono',monospace"}}>₦{displayPrice.toLocaleString()}</div>
+              {routeDistance && <div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{routeDistance}km • {routeDuration}min</div>}
+            </div>
+            <div style={{textAlign:"right"}}>
+              <label style={{...lSt,marginBottom:4}}>Override</label>
+              <input value={priceOverride} onChange={e=>setPriceOverride(e.target.value)} placeholder="Custom ₦" style={{...iSt,width:110,fontFamily:"'Space Mono',monospace",fontSize:13}}/>
+            </div>
+          </div>
+
+          {/* Error */}
+          {error && <div style={{marginBottom:14,padding:"10px 14px",borderRadius:8,background:"#fef2f2",border:"1px solid #fecaca",fontSize:13,color:"#dc2626"}}>{error}</div>}
+
+          {/* Buttons */}
           <div style={{display:"flex",gap:10}}>
             <button onClick={onClose} style={{flex:1,padding:"12px 0",borderRadius:10,border:`1px solid ${S.border}`,background:"transparent",color:S.textDim,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>Cancel</button>
-            <button style={{flex:2,padding:"12px 0",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,fontWeight:800,fontSize:14}}>Create Order</button>
+            <button onClick={handleSubmit} disabled={submitting} style={{flex:2,padding:"12px 0",borderRadius:10,border:"none",cursor:submitting?"not-allowed":"pointer",fontFamily:"inherit",background:submitting?"#e2e8f0":`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:submitting?S.textMuted:S.navy,fontWeight:800,fontSize:14}}>
+              {submitting ? "Creating..." : "Create Order"}
+            </button>
           </div>
         </div>
       </div>
