@@ -12,6 +12,7 @@ from .serializers import (
     MultiDropSerializer,
     BulkImportSerializer,
     AssignedOrderSerializer,
+    AssignedRouteSerializer,
 )
 from .permissions import IsDriver
 from wallet.models import Wallet
@@ -35,15 +36,15 @@ class VehicleListView(APIView):
 
 class VehicleUpdateView(generics.UpdateAPIView):
     """API endpoint to update vehicle pricing."""
-    
+
     queryset = Vehicle.objects.all()
     serializer_class = VehicleSerializer
     permission_classes = [permissions.IsAuthenticated]
-    lookup_field = 'id'
+    lookup_field = "id"
 
     def update(self, request, *args, **kwargs):
         """Update vehicle details."""
-        partial = kwargs.pop('partial', False)
+        partial = kwargs.pop("partial", False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -53,9 +54,9 @@ class VehicleUpdateView(generics.UpdateAPIView):
             {
                 "success": True,
                 "message": f"Vehicle {instance.name} updated successfully",
-                "vehicle": serializer.data
+                "vehicle": serializer.data,
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
 
 
@@ -708,30 +709,26 @@ class CancelableOrdersView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 class AssignedOrdersView(APIView):
     """
     Get list of orders assigned to the authenticated rider.
     Excludes certain terminal/canceled statuses.
     """
-    
+
     permission_classes = [permissions.IsAuthenticated, IsDriver]
-    
+
     def get(self, request):
-        excluded_statuses = [
-            "Done",
-            "CustomerCanceled",
-            "RiderCanceled",
-            "Failed"
-        ]
-        
+        excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+
         # Get rider profile
         rider_profile = getattr(request.user, "rider_profile", None)
         if not rider_profile:
             return Response(
                 {"success": False, "message": "Authenticated user is not a driver."},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
-            
+
         orders = (
             Order.objects.filter(rider=rider_profile)
             .exclude(status__in=excluded_statuses)
@@ -739,6 +736,37 @@ class AssignedOrdersView(APIView):
             .prefetch_related("deliveries", "rider_offers")
             .order_by("-created_at")
         )
-        
+
         serializer = AssignedOrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AssignedRoutesView(APIView):
+    """
+    Get list of orders assigned to the authenticated rider,
+    formatted as routes and stops.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDriver]
+
+    def get(self, request):
+        excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orders = (
+            Order.objects.filter(rider=rider_profile)
+            .exclude(status__in=excluded_statuses)
+            .select_related("vehicle", "user")
+            .prefetch_related("deliveries", "rider_offers")
+            .order_by("-created_at")
+        )
+
+        serializer = AssignedRouteSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
