@@ -240,3 +240,38 @@ class SystemSettings(models.Model):
 
     def __str__(self):
         return "Global Settings"
+
+
+class ActivityFeed(models.Model):
+    EVENT_TYPES = [
+        ("new_order", "New Order"),
+        ("assigned", "Assigned"),
+        ("unassigned", "Unassigned"),
+        ("in_transit", "In Transit"),
+        ("delivered", "Delivered"),
+        ("cancelled", "Cancelled"),
+        ("failed", "Failed"),
+    ]
+    COLOR_CHOICES = [
+        ("gold", "Gold"),
+        ("green", "Green"),
+        ("red", "Red"),
+        ("blue", "Blue"),
+        ("purple", "Purple"),
+        ("yellow", "Yellow"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event_type = models.CharField(max_length=30, choices=EVENT_TYPES)
+    order_id = models.CharField(max_length=50, db_index=True)
+    text = models.CharField(max_length=255)
+    color = models.CharField(max_length=20, choices=COLOR_CHOICES, default="gold")
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "activity_feed"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{self.event_type}] {self.order_id} — {self.text[:50]}"

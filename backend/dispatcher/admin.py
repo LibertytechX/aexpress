@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Rider, DispatcherProfile, Merchant, SystemSettings
+from .models import Rider, DispatcherProfile, Merchant, SystemSettings, ActivityFeed
 
 
 @admin.register(Rider)
@@ -40,3 +40,12 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         if self.model.objects.exists():
             return False
         return super().has_add_permission(request)
+
+
+@admin.register(ActivityFeed)
+class ActivityFeedAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "event_type", "order_id", "text", "color")
+    list_filter = ("event_type", "color")
+    search_fields = ("order_id", "text")
+    readonly_fields = ("id", "created_at")
+    ordering = ("-created_at",)

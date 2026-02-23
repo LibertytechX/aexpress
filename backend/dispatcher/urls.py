@@ -7,6 +7,8 @@ from .views import (
     SystemSettingsView,
     RiderOnboardingView,
     S3PresignedUrlView,
+    ActivityFeedView,
+    AblyTokenView,
 )
 
 router = DefaultRouter()
@@ -18,5 +20,7 @@ urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),
     path("riders/onboarding/", RiderOnboardingView.as_view(), name="rider-onboarding"),
     path("s3/presigned-url/", S3PresignedUrlView.as_view(), name="s3-presigned-url"),
+    path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
+    path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
     path("", include(router.urls)),
 ]

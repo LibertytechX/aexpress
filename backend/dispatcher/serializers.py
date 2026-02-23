@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile
+from .models import Rider, DispatcherProfile, ActivityFeed
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -551,3 +551,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
         )
 
         return rider
+
+
+class ActivityFeedSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActivityFeed
+        fields = ["id", "event_type", "order_id", "text", "color", "metadata", "created_at"]

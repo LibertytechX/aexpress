@@ -137,6 +137,16 @@ export const OrdersAPI = {
         });
         if (!res.ok) throw new Error('Failed to assign rider');
         return await res.json();
+    },
+
+    async updateStatus(orderNumber, newStatus) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/update_status/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (!res.ok) throw new Error('Failed to update status');
+        return await res.json();
     }
 };
 
@@ -170,6 +180,25 @@ export const VehiclesAPI = {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch vehicles');
+        return await res.json();
+    }
+};
+
+// ─── ACTIVITY FEED ──────────────────────────────────────────────
+export const ActivityFeedAPI = {
+    async getRecent(limit = 50) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/activity/?limit=${limit}`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch activity feed');
+        return await res.json();
+    },
+
+    async getAblyToken() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/ably-token/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to get Ably token');
         return await res.json();
     }
 };

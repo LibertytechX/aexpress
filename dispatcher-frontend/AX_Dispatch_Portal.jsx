@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI } from "./src/api.js";
+import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
@@ -491,6 +492,8 @@ export default function AXDispatchPortal() {
   const [riders,setRiders] = useState([]);
   const [merchants,setMerchants] = useState([]);
   const [eventLogs,setEventLogs] = useState({});
+  const [activityFeed, setActivityFeed] = useState([]);
+  const ablyRef = useRef(null);
 
   // Initialize event logs when orders change
   const initEventLogs = (ordersList) => {
@@ -512,6 +515,8 @@ export default function AXDispatchPortal() {
   useEffect(() => {
     if (!isAuthenticated) {
       setLoading(false);
+      // Clean up Ably if user logs out
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
       return;
     }
     const fetchData = async () => {
@@ -535,6 +540,33 @@ export default function AXDispatchPortal() {
       }
     };
     fetchData();
+
+    // Load initial activity feed + subscribe to live updates
+    const setupAbly = async () => {
+      try {
+        const feedData = await ActivityFeedAPI.getRecent(50).catch(() => []);
+        setActivityFeed(feedData);
+      } catch (_) { /* ignore */ }
+
+      try {
+        const tokenRequest = await ActivityFeedAPI.getAblyToken();
+        const ably = new Realtime({
+          authCallback: (_, callback) => { callback(null, tokenRequest); }
+        });
+        ablyRef.current = ably;
+        const ch = ably.channels.get("dispatch-feed");
+        ch.subscribe("activity", (msg) => {
+          setActivityFeed(prev => [msg.data, ...prev.slice(0, 99)]);
+        });
+      } catch (err) {
+        console.warn("Ably subscription failed:", err);
+      }
+    };
+    setupAbly();
+
+    return () => {
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+    };
   }, [isAuthenticated]); // re-run when user logs in
 
   // Show login screen if not authenticated
@@ -572,12 +604,18 @@ export default function AXDispatchPortal() {
     }
   };
 
-  const changeStatus = (oid,ns) => {
+  const changeStatus = async (oid,ns) => {
     const o = orders.find(x=>x.id===oid); if(!o) return;
-    updateOrder(oid,{status:ns});
-    addLog(oid,`Status → ${ns}`,"Dispatch",ns==="Delivered"?"delivered":ns==="Cancelled"?"cancel":"status");
-    if(ns==="Delivered"&&o.cod>0) addLog(oid,`COD settled: ₦${(o.cod-o.codFee).toLocaleString()} to merchant`,"System","settlement");
-    if(["Delivered","Cancelled","Failed"].includes(ns)&&o.riderId) setRiders(p=>p.map(r=>r.id===o.riderId?{...r,currentOrder:null,status:"online"}:r));
+    try {
+      await OrdersAPI.updateStatus(oid, ns);
+      updateOrder(oid,{status:ns});
+      addLog(oid,`Status → ${ns}`,"Dispatch",ns==="Delivered"?"delivered":ns==="Cancelled"?"cancel":"status");
+      if(ns==="Delivered"&&o.cod>0) addLog(oid,`COD settled: ₦${(o.cod-o.codFee).toLocaleString()} to merchant`,"System","settlement");
+      if(["Delivered","Cancelled","Failed"].includes(ns)&&o.riderId) setRiders(p=>p.map(r=>r.id===o.riderId?{...r,currentOrder:null,status:"online"}:r));
+    } catch (err) {
+      console.error("Failed to update status:", err);
+      alert("Failed to update status. Please try again.");
+    }
   };
 
   const navTo = (s,id) => { if(s==="orders"){setSelectedOrderId(id);setScreen("orders");}else{setSelectedRiderId(id);setScreen("riders");} };
@@ -628,7 +666,7 @@ export default function AXDispatchPortal() {
           <button onClick={()=>setShowCreateOrder(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"8px 18px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:13,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{I.plus} New Order</button>
         </header>
         <div style={{flex:1,overflow:"auto",padding:24,animation:"fadeIn 0.3s ease"}}>
-          {screen==="dashboard"&&<DashboardScreen orders={orders} riders={riders} onViewOrder={id=>navTo("orders",id)} onViewRider={id=>navTo("riders",id)}/>}
+          {screen==="dashboard"&&<DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id=>navTo("orders",id)} onViewRider={id=>navTo("riders",id)}/>}
           {screen==="orders"&&<OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={()=>setSelectedOrderId(null)} onViewRider={id=>navTo("riders",id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs}/>}
           {screen==="riders"&&<RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={()=>setSelectedRiderId(null)} onViewOrder={id=>navTo("orders",id)}/>}
           {screen==="merchants"&&<MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA}/>}
@@ -662,7 +700,7 @@ export default function AXDispatchPortal() {
 }
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ orders, riders, onViewOrder, onViewRider }) {
+function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRider }) {
   const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
   const today = orders.filter(o => {
     if (!o.created) return false;
@@ -676,18 +714,16 @@ function DashboardScreen({ orders, riders, onViewOrder, onViewRider }) {
   const revenue = displayOrders.reduce((s,o) => s+o.amount+o.codFee, 0);
   const codTotal = displayOrders.reduce((s,o) => s+o.cod, 0);
 
-  const events = [
-    { time:"4:05 PM", text:"AX-6158260 in transit — Musa heading to VI", color:S.gold, oid:"AX-6158260" },
-    { time:"3:58 PM", text:"AX-6158260 picked up at Sabo Yaba", color:S.purple, oid:"AX-6158260" },
-    { time:"3:44 PM", text:"AX-6158260 assigned to Musa Kabiru", color:S.blue, oid:"AX-6158260" },
-    { time:"3:42 PM", text:"New order AX-6158260 from Vivid Print", color:S.gold, oid:"AX-6158260" },
-    { time:"3:35 PM", text:"AX-6158261 picked up — Chinedu heading to VI", color:S.purple, oid:"AX-6158261" },
-    { time:"3:28 PM", text:"New order AX-6158261 from Mama Nkechi", color:S.gold, oid:"AX-6158261" },
-    { time:"3:15 PM", text:"AX-6158262 pending — no rider assigned", color:S.yellow, oid:"AX-6158262" },
-    { time:"2:55 PM", text:"AX-6158263 in transit — Kola heading to Ikeja", color:S.gold, oid:"AX-6158263" },
-    { time:"1:51 PM", text:"AX-6158257 delivered ✓ COD ₦36,000 settled", color:S.green, oid:"AX-6158257" },
-    { time:"1:10 PM", text:"AX-6158256 delivered ✓ COD ₦125,000 settled", color:S.green, oid:"AX-6158256" },
-  ];
+  // Color name → S value mapping
+  const colorMap = { gold:S.gold, green:S.green, red:S.red, blue:S.blue, purple:S.purple, yellow:S.yellow };
+
+  // Map activity feed to events format (fall back to empty if no data yet)
+  const events = (activityFeed || []).map(item => ({
+    time: new Date(item.created_at).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }),
+    text: item.text,
+    color: colorMap[item.color] || S.gold,
+    oid: item.order_id,
+  }));
 
   return (
     <div>

@@ -33,7 +33,7 @@ DEBUG = os.getenv("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.getenv(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app",
+    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
 ).split(",")
 
 
@@ -222,6 +222,12 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
+CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev")
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+]
+
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -275,6 +281,9 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
+
+# Ably Configuration
+ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
