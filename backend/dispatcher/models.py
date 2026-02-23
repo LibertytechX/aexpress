@@ -101,8 +101,12 @@ class Rider(models.Model):
     # Documents
     driving_license_number = models.CharField(max_length=50, default="TEMP_LICENSE")
     national_id = models.CharField(max_length=50, default="TEMP_ID")
-    driving_license_photo = models.CharField(max_length=500, null=True, blank=True, help_text="S3 URL for driving license")
-    identity_card_photo = models.CharField(max_length=500, null=True, blank=True, help_text="S3 URL for ID card")
+    driving_license_photo = models.CharField(
+        max_length=500, null=True, blank=True, help_text="S3 URL for driving license"
+    )
+    identity_card_photo = models.CharField(
+        max_length=500, null=True, blank=True, help_text="S3 URL for ID card"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -119,6 +123,22 @@ class Rider(models.Model):
                     self.rider_id = new_id
                     break
         super().save(*args, **kwargs)
+
+    def go_online(self):
+        self.status = "online"
+        self.save()
+
+    def go_offline(self):
+        self.status = "offline"
+        self.save()
+
+    def start_delivery(self):
+        self.status = "on_delivery"
+        self.save()
+
+    def end_delivery(self):
+        self.status = "online"
+        self.save()
 
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"

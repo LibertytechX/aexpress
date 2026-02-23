@@ -113,7 +113,7 @@ class DutyToggleSerializer(serializers.Serializer):
     Serializer for toggling rider duty status.
     """
 
-    status = serializers.ChoiceField(choices=["online", "offline"])
+    status = serializers.ChoiceField(choices=["on_duty", "off_duty"])
     latitude = serializers.DecimalField(
         max_digits=9, decimal_places=6, required=False, allow_null=True
     )

@@ -78,6 +78,10 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     password_reset_token_created = models.DateTimeField(null=True, blank=True)
 
+    # OTP verification
+    otp = models.CharField(max_length=6, null=True, blank=True)
+    otp_created_at = models.DateTimeField(null=True, blank=True)
+
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)

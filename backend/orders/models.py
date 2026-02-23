@@ -131,6 +131,8 @@ class Order(models.Model):
 
     # Pickup information
     pickup_address = models.TextField()
+    pickup_latitude = models.FloatField(null=True, blank=True)
+    pickup_longitude = models.FloatField(null=True, blank=True)
     sender_name = models.CharField(max_length=255)
     sender_phone = models.CharField(max_length=20)
 
@@ -228,6 +230,8 @@ class Delivery(models.Model):
 
     # Dropoff information
     dropoff_address = models.TextField()
+    dropoff_latitude = models.FloatField(null=True, blank=True)
+    dropoff_longitude = models.FloatField(null=True, blank=True)
     receiver_name = models.CharField(max_length=255)
     receiver_phone = models.CharField(max_length=20)
 
@@ -236,6 +240,16 @@ class Delivery(models.Model):
         max_length=20, choices=PACKAGE_TYPE_CHOICES, default="Box"
     )
     notes = models.TextField(blank=True)
+
+    # Cash on delivery
+    COD_FROM_CHOICES = [
+        ("sender", "Sender"),
+        ("customer", "Customer / Receiver"),
+    ]
+    cod_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    cod_from = models.CharField(
+        max_length=20, choices=COD_FROM_CHOICES, default="customer"
+    )
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")

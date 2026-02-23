@@ -1228,6 +1228,11 @@ function SignupScreen({ onBack, onComplete }) {
   const [businessName, setBusinessName] = useState("");
   const [address, setAddress] = useState("");
 
+  // Step 3 (OTP) fields
+  const [otp, setOtp] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resendMessage, setResendMessage] = useState("");
+
   // Password match validation
   const passwordsMatch = password && confirmPassword && password === confirmPassword;
   const passwordsDontMatch = confirmPassword && password !== confirmPassword;
@@ -1249,15 +1254,52 @@ function SignupScreen({ onBack, onComplete }) {
 
       if (response.success) {
         setStep(3);
+        // OTP screen is now step 3
+      }
+    } catch (err) {
+      setError(err.message || "Signup failed. Please try again.");
+      setStep(1); // Go back to start on error if necessary, or just stay on 2
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    try {
+      setVerifying(true);
+      setError("");
+      setResendMessage("");
+
+      const response = await window.API.Auth.verifyOTP(phone, otp);
+
+      if (response.success) {
+        setStep(4); // Success screen is now step 4
         setTimeout(() => {
           onComplete(response.user);
         }, 1500);
       }
     } catch (err) {
-      setError(err.message || "Signup failed. Please try again.");
-      setStep(2); // Go back to step 2 to show error
+      setError(err.message || "Verification failed. Please check the code.");
     } finally {
-      setLoading(false);
+      setVerifying(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    try {
+      setVerifying(true);
+      setError("");
+      setResendMessage("");
+
+      const response = await window.API.Auth.resendOTP(phone);
+
+      if (response.success) {
+        setResendMessage("A new OTP has been sent!");
+      }
+    } catch (err) {
+      setError(err.message || "Failed to resend OTP.");
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -1418,19 +1460,71 @@ function SignupScreen({ onBack, onComplete }) {
         )}
         {step === 3 && (
           <>
+            <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>Verify your account</h2>
+            <p style={{ color: "#64748b", fontSize: 14, marginBottom: 24, lineHeight: 1.5 }}>
+              We've sent a 6-digit verification code to <strong style={{ color: "#1B2A4A" }}>+234 {phone}</strong> and your email.
+            </p>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 8 }}>One-Time Password (OTP)</label>
+              <input
+                value={otp}
+                onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="0 0 0 0 0 0"
+                style={{
+                  width: "100%",
+                  border: "1.5px solid #e2e8f0",
+                  borderRadius: 10,
+                  padding: "0 14px",
+                  height: 50,
+                  fontSize: 24,
+                  fontWeight: 700,
+                  letterSpacing: 8,
+                  textAlign: "center",
+                  fontFamily: "'Space Mono', monospace"
+                }}
+              />
+            </div>
+            <button
+              onClick={handleVerifyOTP}
+              disabled={otp.length !== 6 || verifying}
+              style={{
+                width: "100%",
+                height: 46,
+                border: "none",
+                borderRadius: 10,
+                fontSize: 15,
+                fontWeight: 700,
+                cursor: (otp.length !== 6 || verifying) ? "not-allowed" : "pointer",
+                background: (otp.length !== 6 || verifying) ? "#e2e8f0" : "linear-gradient(135deg, #E8A838, #F5C563)",
+                color: (otp.length !== 6 || verifying) ? "#94a3b8" : "#1B2A4A",
+                fontFamily: "inherit"
+              }}
+            >
+              {verifying ? "Verifying..." : "Verify & Complete"}
+            </button>
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <p style={{ fontSize: 13, color: "#64748b" }}>
+                Didn't get the code? <button onClick={handleResendOTP} disabled={verifying} style={{ background: "none", border: "none", color: verifying ? "#94a3b8" : "#E8A838", fontWeight: 700, cursor: verifying ? "not-allowed" : "pointer", fontSize: 13, fontFamily: "inherit" }}>Resend</button>
+              </p>
+              {resendMessage && <p style={{ color: "#10b981", fontSize: 13, marginTop: 12 }}>{resendMessage}</p>}
+            </div>
+          </>
+        )}
+        {step === 4 && (
+          <>
             <div style={{ textAlign: "center", marginBottom: 24 }}>
               <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
               </div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>You're all set!</h2>
-              <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>Your merchant account has been created. Fund your wallet to start sending deliveries.</p>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 8 }}>All Verified!</h2>
+              <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>Your account is now fully verified. Welcome to Assured Express!</p>
             </div>
             <button onClick={onComplete} style={{ width: "100%", height: 46, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", background: "linear-gradient(135deg, #E8A838, #F5C563)", color: "#1B2A4A", fontFamily: "inherit" }}>
               Go to Dashboard
             </button>
           </>
         )}
-        {step < 3 && (
+        {step < 4 && (
           <div style={{ textAlign: "center", marginTop: 20 }}>
             <span style={{ color: "#64748b", fontSize: 14 }}>Already have an account? </span>
             <button onClick={onBack} style={{ background: "none", border: "none", color: "#E8A838", fontWeight: 700, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>Sign In</button>
