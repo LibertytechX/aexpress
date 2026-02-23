@@ -28,8 +28,8 @@ def verify_command():
         contact_name="Verify Rider",
         usertype="Rider",
     )
-    # Rider profile created via signal, fetch it
-    rider = Rider.objects.get(user=user)
+    # Rider profile NOT created via signal, create it manually
+    rider = Rider.objects.create(user=user, status="online")
 
     # 3. Create Vehicle
     vehicle, _ = Vehicle.objects.get_or_create(
