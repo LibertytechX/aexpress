@@ -36,6 +36,7 @@ class DeliverySerializer(serializers.ModelSerializer):
             "receiver_phone",
             "package_type",
             "notes",
+            "cod_amount",
             "status",
             "sequence",
             "created_at",
@@ -156,6 +157,9 @@ class MultiDropDeliverySerializer(serializers.Serializer):
         default="Box",
     )
     notes = serializers.CharField(required=False, allow_blank=True)
+    cod_amount = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, default=0
+    )
 
 
 class MultiDropSerializer(serializers.Serializer):
@@ -240,3 +244,122 @@ class BulkImportSerializer(serializers.Serializer):
         if not value or len(value) == 0:
             raise serializers.ValidationError("At least one delivery is required.")
         return value
+
+
+class AssignedOrderSerializer(serializers.ModelSerializer):
+    """Serializer for orders assigned to a rider, flattened for mobile app consumption."""
+
+    pickup_latitude = serializers.FloatField(read_only=True)
+    pickup_longitude = serializers.FloatField(read_only=True)
+    pickup_contact_name = serializers.CharField(source="sender_name", read_only=True)
+    pickup_contact_phone = serializers.CharField(source="sender_phone", read_only=True)
+    pickup_notes = serializers.CharField(source="notes", read_only=True)
+
+    dropoff_address = serializers.SerializerMethodField()
+    dropoff_latitude = serializers.SerializerMethodField()
+    dropoff_longitude = serializers.SerializerMethodField()
+    dropoff_contact_name = serializers.SerializerMethodField()
+    dropoff_contact_phone = serializers.SerializerMethodField()
+    dropoff_notes = serializers.SerializerMethodField()
+
+    vehicle_type = serializers.CharField(source="vehicle.name", read_only=True)
+    merchant_name = serializers.CharField(source="user.business_name", read_only=True)
+
+    estimated_earnings = serializers.SerializerMethodField()
+    eta_mins = serializers.IntegerField(source="duration_minutes", read_only=True)
+    cod_amount = serializers.SerializerMethodField()
+    cod_from = serializers.SerializerMethodField()
+
+    delivered_at = serializers.SerializerMethodField()
+    delivery_proofs = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "status",
+            "pickup_address",
+            "pickup_latitude",
+            "pickup_longitude",
+            "pickup_contact_name",
+            "pickup_contact_phone",
+            "pickup_notes",
+            "dropoff_address",
+            "dropoff_latitude",
+            "dropoff_longitude",
+            "dropoff_contact_name",
+            "dropoff_contact_phone",
+            "dropoff_notes",
+            "vehicle_type",
+            "payment_method",
+            "merchant_name",
+            "estimated_earnings",
+            "distance_km",
+            "eta_mins",
+            "cod_amount",
+            "cod_from",
+            "created_at",
+            "delivered_at",
+            "delivery_proofs",
+        ]
+
+    def _get_first_delivery(self, obj):
+        # Cache the first delivery on the object to avoid multiple queries
+        if not hasattr(obj, "_first_delivery"):
+            obj._first_delivery = obj.deliveries.first()
+        return obj._first_delivery
+
+    def get_dropoff_address(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.dropoff_address if delivery else ""
+
+    def get_dropoff_latitude(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.dropoff_latitude if delivery else None
+
+    def get_dropoff_longitude(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.dropoff_longitude if delivery else None
+
+    def get_dropoff_contact_name(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.receiver_name if delivery else ""
+
+    def get_dropoff_contact_phone(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.receiver_phone if delivery else ""
+
+    def get_dropoff_notes(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.notes if delivery else ""
+
+    def get_estimated_earnings(self, obj):
+        offer = getattr(obj, "rider_offers", None)
+        if offer and offer.exists():
+            # Get the accepted offer, or the latest offer if none accepted
+            acc = offer.filter(status="accepted").first()
+            if acc:
+                return float(acc.estimated_earnings)
+            return float(offer.first().estimated_earnings)
+        # Fallback if no specific offer earnings found
+        return 0.0
+
+    def get_cod_amount(self, obj):
+        delivery = self._get_first_delivery(obj)
+        if delivery and delivery.cod_amount:
+            return float(delivery.cod_amount)
+        return 0.0
+
+    def get_cod_from(self, obj):
+        delivery = self._get_first_delivery(obj)
+        if delivery and delivery.cod_from:
+            return delivery.cod_from
+        return ""
+
+    def get_delivered_at(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.delivered_at if delivery else None
+
+    def get_delivery_proofs(self, obj):
+        # We don't have a DeliveryProof model yet, returning empty list as fallback.
+        return []

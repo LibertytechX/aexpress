@@ -22,5 +22,5 @@ urlpatterns = [
         name="rider-device-permissions",
     ),
     path("auth/me/", RiderMeView.as_view(), name="rider-me"),
-    path("auth/duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
+    path("duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
 ]

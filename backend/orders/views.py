@@ -11,7 +11,9 @@ from .serializers import (
     QuickSendSerializer,
     MultiDropSerializer,
     BulkImportSerializer,
+    AssignedOrderSerializer,
 )
+from .permissions import IsDriver
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 
@@ -217,6 +219,7 @@ class MultiDropView(APIView):
                 receiver_phone=delivery_data["receiver_phone"],
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
+                cod_amount=delivery_data.get("cod_amount", 0),
                 sequence=idx,
             )
 
@@ -327,6 +330,7 @@ class BulkImportView(APIView):
                 receiver_phone=delivery_data["receiver_phone"],
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
+                cod_amount=delivery_data.get("cod_amount", 0),
                 sequence=idx,
             )
 
@@ -703,3 +707,38 @@ class CancelableOrdersView(APIView):
             {"count": len(orders_data), "orders": orders_data},
             status=status.HTTP_200_OK,
         )
+
+class AssignedOrdersView(APIView):
+    """
+    Get list of orders assigned to the authenticated rider.
+    Excludes certain terminal/canceled statuses.
+    """
+    
+    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    
+    def get(self, request):
+        excluded_statuses = [
+            "Done",
+            "CustomerCanceled",
+            "RiderCanceled",
+            "Failed"
+        ]
+        
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+            
+        orders = (
+            Order.objects.filter(rider=rider_profile)
+            .exclude(status__in=excluded_statuses)
+            .select_related("vehicle", "user")
+            .prefetch_related("deliveries", "rider_offers")
+            .order_by("-created_at")
+        )
+        
+        serializer = AssignedOrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)

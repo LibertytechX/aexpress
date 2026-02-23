@@ -214,6 +214,22 @@ const AuthAPI = {
     });
   },
 
+  resendOTP: async (phone) => {
+    return await apiRequest("/auth/resend-otp/", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+      skipAuth: true,
+    });
+  },
+
+  verifyOTP: async (phone, otp) => {
+    return await apiRequest("/auth/verify-otp/", {
+      method: "POST",
+      body: JSON.stringify({ phone, otp }),
+      skipAuth: true,
+    });
+  },
+
   verifyEmail: async (token) => {
     return await apiRequest(`/auth/verify-email/?token=${token}`, {
       method: 'GET',

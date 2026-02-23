@@ -289,7 +289,8 @@ class RiderToggleDutyView(APIView):
                 )
 
             # Update status
-            new_status = serializer.validated_data["status"]
+            request_status = serializer.validated_data["status"]
+            new_status = "online" if request_status == "on_duty" else "offline"
             rider.status = new_status
 
             # Update location if provided
@@ -306,9 +307,8 @@ class RiderToggleDutyView(APIView):
 
             return Response(
                 {
-                    "success": True,
-                    "message": f"Rider is now {new_status}",
-                    "status": new_status,
+                    "status": request_status,
+                    "timestamp": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
                 status=status.HTTP_200_OK,
             )

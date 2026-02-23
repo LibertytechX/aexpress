@@ -11,6 +11,7 @@ from .views import (
     CancelableOrdersView,
     CalculateFareView,
     VehicleUpdateView,
+    AssignedOrdersView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -32,6 +33,7 @@ urlpatterns = [
     path("calculate-fare/", CalculateFareView.as_view(), name="calculate_fare"),
     # Order management endpoints
     path("", OrderListView.as_view(), name="order_list"),
+    path("assigned/", AssignedOrdersView.as_view(), name="assigned_orders"),
     path("stats/", OrderStatsView.as_view(), name="order_stats"),
     # Escrow management endpoints
     path("escrow-history/", EscrowHistoryView.as_view(), name="escrow_history"),
