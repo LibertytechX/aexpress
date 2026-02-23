@@ -23,14 +23,11 @@ def test_endpoint():
             defaults={
                 "first_name": "Test",
                 "last_name": "Rider",
-                "role": "rider",
                 "business_name": "Test Rider",
             },
         )
         # Get or create rider profile
-        rider, _ = Rider.objects.get_or_create(
-            user=user, defaults={"phone_number": "08012345678", "status": "online"}
-        )
+        rider, _ = Rider.objects.get_or_create(user=user, defaults={"status": "online"})
 
         # Get or create a merchant user
         merchant, _ = User.objects.get_or_create(
@@ -38,7 +35,6 @@ def test_endpoint():
             defaults={
                 "first_name": "QuickMart",
                 "last_name": "Supermarket",
-                "role": "merchant",
                 "business_name": "QuickMart",
             },
         )
