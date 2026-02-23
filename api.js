@@ -3,7 +3,7 @@
  * Handles all backend API communication
  */
 
-const API_BASE_URL = 'http://127.0.0.1:8000/api';
+const API_BASE_URL = window.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
 
 // Token management
 const TokenManager = {
@@ -189,6 +189,35 @@ const AuthAPI = {
   setDefaultAddress: async (addressId) => {
     return await apiRequest(`/auth/addresses/${addressId}/set-default/`, {
       method: 'POST',
+    });
+  },
+
+  resendVerification: async () => {
+    return await apiRequest('/auth/resend-verification/', {
+      method: 'POST',
+    });
+  },
+
+  requestPasswordReset: async (email) => {
+    return await apiRequest('/auth/request-password-reset/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+      skipAuth: true,
+    });
+  },
+
+  resetPassword: async (token, newPassword) => {
+    return await apiRequest('/auth/reset-password/', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword }),
+      skipAuth: true,
+    });
+  },
+
+  verifyEmail: async (token) => {
+    return await apiRequest(`/auth/verify-email/?token=${token}`, {
+      method: 'GET',
+      skipAuth: true,
     });
   },
 };

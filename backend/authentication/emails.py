@@ -1,6 +1,7 @@
 """
 Email utilities for sending verification and notification emails via Mailgun.
 """
+
 import os
 import requests
 import secrets
@@ -28,11 +29,11 @@ def send_verification_email(user):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv('MAILGUN_API_KEY')
-        domain = os.getenv('MAILGUN_DOMAIN')
-        from_email = os.getenv('MAILGUN_FROM_EMAIL', 'noreply@mg.axpress.net')
-        from_name = os.getenv('MAILGUN_FROM_NAME', 'Assured Express')
-        frontend_url = os.getenv('FRONTEND_URL', 'https://aexpress.vercel.app')
+        api_key = os.getenv("MAILGUN_APIKEY")
+        domain = os.getenv("MAILGUN_DOMAIN")
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+        frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
 
         if not api_key or not domain:
             logger.error("Mailgun credentials not configured")
@@ -44,7 +45,12 @@ def send_verification_email(user):
         # Save token to user
         user.email_verification_token = token
         user.email_verification_token_created = timezone.now()
-        user.save(update_fields=['email_verification_token', 'email_verification_token_created'])
+        user.save(
+            update_fields=[
+                "email_verification_token",
+                "email_verification_token_created",
+            ]
+        )
 
         # Create verification link
         verification_link = f"{frontend_url}/verify-email?token={token}"
@@ -53,7 +59,7 @@ def send_verification_email(user):
         html_content = get_verification_email_template(
             business_name=user.business_name,
             contact_name=user.contact_name,
-            verification_link=verification_link
+            verification_link=verification_link,
         )
 
         # Send email via Mailgun
@@ -65,8 +71,8 @@ def send_verification_email(user):
                 "to": [user.email],
                 "subject": "Welcome to Assured Express - Verify Your Email",
                 "html": html_content,
-                "text": f"Welcome to Assured Express! Please verify your email by visiting: {verification_link}"
-            }
+                "text": f"Welcome to Assured Express! Please verify your email by visiting: {verification_link}",
+            },
         )
 
         if response.status_code == 200:
@@ -237,6 +243,7 @@ def get_verification_email_template(business_name, contact_name, verification_li
 </html>
     """
 
+
 def send_password_reset_email(user):
     """
     Send password reset email to user via Mailgun.
@@ -249,11 +256,11 @@ def send_password_reset_email(user):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv('MAILGUN_API_KEY')
-        domain = os.getenv('MAILGUN_DOMAIN')
-        from_email = os.getenv('MAILGUN_FROM_EMAIL', 'noreply@mg.axpress.net')
-        from_name = os.getenv('MAILGUN_FROM_NAME', 'Assured Express')
-        frontend_url = os.getenv('FRONTEND_URL', 'https://aexpress.vercel.app')
+        api_key = os.getenv("MAILGUN_APIKEY")
+        domain = os.getenv("MAILGUN_DOMAIN")
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+        frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
 
         if not api_key or not domain:
             logger.error("Mailgun credentials not configured")
@@ -265,7 +272,9 @@ def send_password_reset_email(user):
         # Save token to user
         user.password_reset_token = token
         user.password_reset_token_created = timezone.now()
-        user.save(update_fields=['password_reset_token', 'password_reset_token_created'])
+        user.save(
+            update_fields=["password_reset_token", "password_reset_token_created"]
+        )
 
         # Create reset link with reset parameter to differentiate from email verification
         reset_link = f"{frontend_url}/?token={token}&reset=true"
@@ -274,7 +283,7 @@ def send_password_reset_email(user):
         html_content = get_password_reset_email_template(
             business_name=user.business_name,
             contact_name=user.contact_name,
-            reset_link=reset_link
+            reset_link=reset_link,
         )
 
         # Send email via Mailgun
@@ -286,15 +295,17 @@ def send_password_reset_email(user):
                 "to": [user.email],
                 "subject": "Reset Your Password - Assured Express",
                 "html": html_content,
-                "text": f"Reset your password by visiting: {reset_link}\n\nThis link will expire in 1 hour."
-            }
+                "text": f"Reset your password by visiting: {reset_link}\n\nThis link will expire in 1 hour.",
+            },
         )
 
         if response.status_code == 200:
             logger.info(f"Password reset email sent successfully to {user.email}")
             return True
         else:
-            logger.error(f"Failed to send password reset email: {response.status_code} - {response.text}")
+            logger.error(
+                f"Failed to send password reset email: {response.status_code} - {response.text}"
+            )
             return False
 
     except Exception as e:
