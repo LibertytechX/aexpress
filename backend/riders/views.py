@@ -59,6 +59,7 @@ class RiderLoginView(APIView):
             refresh = RefreshToken.for_user(user)
             access_token = str(refresh.access_token)
             refresh_token = str(refresh)
+            rider.go_offline()
 
             # 4. Create RiderSession
             RiderSession.objects.create(
