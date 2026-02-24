@@ -6,6 +6,8 @@ from dispatcher.models import Rider
 from authentication.models import User
 from wallet.models import Wallet
 from .models import RiderAuth, RiderDevice, RiderCodRecord, OrderOffer, AreaDemand
+from orders.models import Order
+from orders.serializers import AssignedOrderSerializer
 
 
 class AreaDemandSerializer(serializers.ModelSerializer):
@@ -185,6 +187,71 @@ class RiderLoginSerializer(serializers.Serializer):
                 "No rider profile associated with this account."
             )
 
-        data["user"] = user
         data["rider"] = rider
         return data
+
+
+class RiderOrderSerializer(AssignedOrderSerializer):
+    """
+    Serializer for rider order history and details.
+    Matches the specific format requested by the user.
+    """
+
+    id = serializers.CharField(source="order_number", read_only=True)
+    status = serializers.SerializerMethodField()
+    payment_method = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "status",
+            "pickup_address",
+            "pickup_latitude",
+            "pickup_longitude",
+            "pickup_contact_name",
+            "pickup_contact_phone",
+            "pickup_notes",
+            "dropoff_address",
+            "dropoff_latitude",
+            "dropoff_longitude",
+            "dropoff_contact_name",
+            "dropoff_contact_phone",
+            "dropoff_notes",
+            "vehicle_type",
+            "payment_method",
+            "merchant_name",
+            "estimated_earnings",
+            "distance_km",
+            "eta_mins",
+            "cod_amount",
+            "cod_from",
+            "created_at",
+            "delivered_at",
+            "delivery_proofs",
+        ]
+
+    def get_status(self, obj):
+        status_map = {
+            "Pending": "pending",
+            "Assigned": "assigned",
+            "PickedUp": "picked_up",
+            "Started": "started",
+            "Done": "delivered",
+            "CustomerCanceled": "customer_canceled",
+            "RiderCanceled": "rider_canceled",
+            "Failed": "failed",
+        }
+        return status_map.get(obj.status, obj.status.lower())
+
+    def get_payment_method(self, obj):
+        # Map our internal choices to mobile expectations
+        if obj.payment_method in ["cash_on_pickup", "receiver_pays"]:
+            return "cod"
+        return obj.payment_method.lower()
+
+    def get_delivered_at(self, obj):
+        val = super().get_delivered_at(obj)
+        if val and hasattr(val, "strftime"):
+            return val.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        return val

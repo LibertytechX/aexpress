@@ -294,3 +294,24 @@ class AreaDemand(models.Model):
     class Meta:
         db_table = "area_demand"
         ordering = ["area_name"]
+class RiderNotification(models.Model):
+    """
+    Persisted notifications sent to riders.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(default=dict, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "rider_notifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.rider.rider_id}: {self.title}"

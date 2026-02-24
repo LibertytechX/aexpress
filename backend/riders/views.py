@@ -12,9 +12,12 @@ from .serializers import (
     UpdatePermissionsSerializer,
     DutyToggleSerializer,
     AreaDemandSerializer,
+    RiderOrderSerializer,
 )
 from .models import RiderSession, RiderDevice, AreaDemand
 from dispatcher.models import Rider
+from orders.models import Order
+from django.db.models import Q
 
 
 class AreaDemandListView(APIView):
@@ -334,3 +337,68 @@ class RiderToggleDutyView(APIView):
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class RiderOrderHistoryView(APIView):
+    """
+    API endpoint for rider order history.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            rider = request.user.rider_profile
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # History typically includes completed (Done), Failed, or Canceled orders.
+        history_statuses = ["Done", "Failed", "CustomerCanceled", "RiderCanceled"]
+        orders = Order.objects.filter(
+            rider=rider, status__in=history_statuses
+        ).order_by("-created_at")
+
+        serializer = RiderOrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class RiderOrderDetailView(APIView):
+    """
+    API endpoint for rider order detail.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, order_id):
+        try:
+            rider = request.user.rider_profile
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Try to get by UUID (id) or order_number
+        try:
+            # We allow both UUID and human-readable order number
+            from uuid import UUID
+
+            lookup_filter = Q(order_number=order_id)
+            try:
+                UUID(order_id)
+                lookup_filter |= Q(id=order_id)
+            except ValueError:
+                pass
+
+            order = Order.objects.get(lookup_filter, rider=rider)
+        except (Order.DoesNotExist, ValueError):
+            return Response(
+                {"success": False, "message": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderOrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)

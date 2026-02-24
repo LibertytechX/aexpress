@@ -850,7 +850,11 @@ class AssignedRoutesView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
     def get(self, request):
-        excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+        # excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+        statuses = ["Pending", "Assigned", "PickedUp", "Started"]
+        order_status = request.query_params.get("status", "active")
+        if order_status == "done":
+            statuses = ["Done"]
 
         # Get rider profile
         rider_profile = getattr(request.user, "rider_profile", None)
@@ -862,7 +866,7 @@ class AssignedRoutesView(APIView):
 
         orders = (
             Order.objects.filter(rider=rider_profile)
-            .exclude(status__in=excluded_statuses)
+            .filter(status__in=statuses)
             .select_related("vehicle", "user")
             .prefetch_related("deliveries", "rider_offers")
             .order_by("-created_at")
