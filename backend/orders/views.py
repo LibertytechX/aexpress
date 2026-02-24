@@ -15,6 +15,7 @@ from .serializers import (
     AssignedOrderSerializer,
     AssignedRouteSerializer,
     OrderCancelSerializer,
+    OrderStatusUpdateSerializer,
 )
 from .permissions import IsRider
 from dispatcher.models import Rider
@@ -742,6 +743,69 @@ class AssignedOrdersView(APIView):
 
         serializer = AssignedOrderSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+def _advance_order(request, order_number, new_status, event_desc):
+    """Helper to advance order status with validation."""
+    try:
+        order = Order.objects.get(order_number=order_number)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    ser = OrderStatusUpdateSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    old_status = order.status
+    order.status = new_status
+    if new_status == "PickedUp" and not order.picked_up_at:
+        order.picked_up_at = timezone.now()
+    order.save(update_fields=["status", "picked_up_at", "updated_at"])
+
+    # Update rider location if provided
+    rider_profile = getattr(request.user, "rider_profile", None)
+    if rider_profile and ser.validated_data.get("latitude"):
+        rider_profile.current_latitude = ser.validated_data["latitude"]
+        rider_profile.current_longitude = ser.validated_data["longitude"]
+        rider_profile.last_location_update = timezone.now()
+        rider_profile.save(
+            update_fields=[
+                "current_latitude",
+                "current_longitude",
+                "last_location_update",
+            ]
+        )
+
+    OrderEvent.objects.create(
+        order=order,
+        event=event_desc,
+        description=f"By rider {request.user.contact_name or request.user.phone}",
+    )
+
+    return Response({"status": new_status, "previous": old_status})
+
+
+class OrderPickupView(APIView):
+    """
+    Endpoint for riders to mark an order as picked up.
+    POST /api/orders/pickup/
+    {
+        "order_number": "6158001",
+        "latitude": 6.45,
+        "longitude": 3.39
+    }
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return _advance_order(request, order_number, "PickedUp", "Order Picked Up")
 
 
 class AssignedOrderDetailView(APIView):

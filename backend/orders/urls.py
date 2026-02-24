@@ -14,6 +14,7 @@ from .views import (
     AssignedOrdersView,
     AssignedOrderDetailView,
     AssignedRoutesView,
+    OrderPickupView,
     cancel_order,
 )
 from .escrow_views import (
@@ -43,6 +44,7 @@ urlpatterns = [
         name="assigned_order_detail",
     ),
     path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
+    path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
     path("stats/", OrderStatsView.as_view(), name="order_stats"),
     # Escrow management endpoints
     path("escrow-history/", EscrowHistoryView.as_view(), name="escrow_history"),
