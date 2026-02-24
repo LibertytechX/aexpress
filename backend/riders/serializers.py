@@ -188,6 +188,7 @@ class RiderLoginSerializer(serializers.Serializer):
             )
 
         data["rider"] = rider
+        data["user"] = user
         return data
 
 
