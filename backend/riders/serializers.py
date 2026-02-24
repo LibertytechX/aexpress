@@ -5,7 +5,26 @@ from django.db.models import Sum
 from dispatcher.models import Rider
 from authentication.models import User
 from wallet.models import Wallet
-from .models import RiderAuth, RiderDevice, RiderCodRecord, OrderOffer
+from .models import RiderAuth, RiderDevice, RiderCodRecord, OrderOffer, AreaDemand
+
+
+class AreaDemandSerializer(serializers.ModelSerializer):
+    """
+    Serializer for AreaDemand model.
+    """
+
+    class Meta:
+        model = AreaDemand
+        fields = [
+            "id",
+            "area_name",
+            "level",
+            "pending_orders",
+            "active_riders",
+            "latitude",
+            "longitude",
+            "updated_at",
+        ]
 
 
 class RiderMeSerializer(serializers.ModelSerializer):

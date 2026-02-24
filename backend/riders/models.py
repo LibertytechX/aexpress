@@ -270,3 +270,27 @@ class RiderDevice(models.Model):
 
     def __str__(self):
         return f"Device {self.device_id} ({self.rider.rider_id})"
+
+
+class AreaDemand(models.Model):
+    """
+    Real-time demand levels per area. Updated by Celery task.
+    Shown on the Off-Duty screen.
+    """
+    class Level(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    area_name = models.CharField(max_length=100)
+    level = models.CharField(max_length=10, choices=Level.choices, default=Level.LOW)
+    pending_orders = models.IntegerField(default=0)
+    active_riders = models.IntegerField(default=0)
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "area_demand"
+        ordering = ["area_name"]
