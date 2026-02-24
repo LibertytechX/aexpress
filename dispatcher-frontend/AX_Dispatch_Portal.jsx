@@ -542,12 +542,15 @@ export default function AXDispatchPortal() {
     fetchData();
 
     // Load initial activity feed + subscribe to live updates
+    let pollInterval = null;
     const setupAbly = async () => {
       try {
         const feedData = await ActivityFeedAPI.getRecent(50).catch(() => []);
         setActivityFeed(feedData);
       } catch (_) { /* ignore */ }
 
+      // Try Ably real-time; fall back to polling if unavailable
+      let ablyActive = false;
       try {
         const tokenRequest = await ActivityFeedAPI.getAblyToken();
         const ably = new Realtime({
@@ -558,14 +561,26 @@ export default function AXDispatchPortal() {
         ch.subscribe("activity", (msg) => {
           setActivityFeed(prev => [msg.data, ...prev.slice(0, 99)]);
         });
+        ablyActive = true;
       } catch (err) {
-        console.warn("Ably subscription failed:", err);
+        console.warn("Ably subscription failed, falling back to polling:", err);
+      }
+
+      // Polling fallback: refresh feed from DB every 10 s when Ably is down
+      if (!ablyActive) {
+        pollInterval = setInterval(async () => {
+          try {
+            const feedData = await ActivityFeedAPI.getRecent(50).catch(() => null);
+            if (feedData) setActivityFeed(feedData);
+          } catch (_) { /* ignore */ }
+        }, 10000);
       }
     };
     setupAbly();
 
     return () => {
       if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      if (pollInterval) clearInterval(pollInterval);
     };
   }, [isAuthenticated]); // re-run when user logs in
 
@@ -718,11 +733,15 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   const colorMap = { gold:S.gold, green:S.green, red:S.red, blue:S.blue, purple:S.purple, yellow:S.yellow };
 
   // Map activity feed to events format (fall back to empty if no data yet)
+  const truncate = (str, n) => str && str.length > n ? str.slice(0, n - 1) + "…" : (str || "");
   const events = (activityFeed || []).map(item => ({
     time: new Date(item.created_at).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }),
     text: item.text,
     color: colorMap[item.color] || S.gold,
     oid: item.order_id,
+    event_type: item.event_type,
+    pickup: truncate(item.metadata?.pickup || "", 30),
+    dropoff: truncate(item.metadata?.dropoff || "", 30),
   }));
 
   return (
@@ -744,8 +763,18 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
             {events.map((ev,i) => (
               <div key={i} onClick={()=>onViewOrder(ev.oid)} style={{padding:"11px 18px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{width:8,height:8,borderRadius:"50%",background:ev.color,marginTop:5,flexShrink:0}}/>
-                <div style={{flex:1,fontSize:12,color:S.text,lineHeight:1.4}}>{ev.text}</div>
-                <span style={{fontSize:10,color:S.textMuted,fontFamily:"'Space Mono',monospace",flexShrink:0}}>{ev.time}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,color:S.text,lineHeight:1.4}}>{ev.text}</div>
+                  {ev.event_type === "new_order" && ev.pickup && ev.dropoff && (
+                    <div style={{fontSize:11,color:S.textMuted,marginTop:2,display:"flex",alignItems:"center",gap:4,overflow:"hidden"}}>
+                      <span style={{flexShrink:0}}>📍</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.pickup}</span>
+                      <span style={{flexShrink:0,color:S.gold}}>→</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.dropoff}</span>
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:10,color:S.textMuted,fontFamily:"'Space Mono',monospace",flexShrink:0,paddingTop:2}}>{ev.time}</span>
               </div>
             ))}
           </div>

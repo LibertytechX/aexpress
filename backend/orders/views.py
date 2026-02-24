@@ -19,6 +19,7 @@ from .serializers import (
 )
 from .permissions import IsRider
 from dispatcher.models import Rider
+from dispatcher.utils import emit_activity
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 
@@ -115,6 +116,25 @@ class QuickSendView(APIView):
             package_type=data.get("package_type", "Box"),
             notes=data.get("notes", ""),
             sequence=1,
+        )
+
+        # Emit activity event for live feed
+        merchant_name = (
+            getattr(request.user, "business_name", None)
+            or getattr(request.user, "contact_name", None)
+            or "Unknown"
+        )
+        emit_activity(
+            event_type="new_order",
+            order_id=order.order_number,
+            text=f"New order {order.order_number} from {merchant_name}",
+            color="gold",
+            metadata={
+                "merchant": merchant_name,
+                "amount": str(total_amount),
+                "pickup": data["pickup_address"],
+                "dropoff": data["dropoff_address"],
+            },
         )
 
         # Hold funds in escrow if payment method is wallet

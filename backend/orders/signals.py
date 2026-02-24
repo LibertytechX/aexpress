@@ -12,7 +12,7 @@ from decimal import Decimal
 def create_order_offer(sender, instance, created, **kwargs):
     if created:
         # Get system settings for timeout
-        settings, _ = SystemSettings.objects.get_or_create(id=1)
+        settings = SystemSettings.objects.first() or SystemSettings.objects.create()
         timeout = settings.accept_timeout_sec or 120
 
         # Calculate expiration time

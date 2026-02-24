@@ -92,12 +92,20 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Emit activity event
         merchant_name = getattr(order.user, "business_name", None) or getattr(order.user, "contact_name", None) or "Unknown"
+        pickup = order.pickup_address or ""
+        first_delivery = order.deliveries.first()
+        dropoff = (first_delivery.dropoff_address if first_delivery else "") or ""
         emit_activity(
             event_type="new_order",
             order_id=order.order_number,
             text=f"New order {order.order_number} from {merchant_name}",
             color="gold",
-            metadata={"merchant": merchant_name, "amount": str(order.total_amount or 0)},
+            metadata={
+                "merchant": merchant_name,
+                "amount": str(order.total_amount or 0),
+                "pickup": pickup,
+                "dropoff": dropoff,
+            },
         )
 
         return DRFResponse(
@@ -269,7 +277,7 @@ class SystemSettingsView(views.APIView):
         from .models import SystemSettings
         from .serializers import SystemSettingsSerializer
 
-        settings, created = SystemSettings.objects.get_or_create(id=1)
+        settings = SystemSettings.objects.first() or SystemSettings.objects.create()
         serializer = SystemSettingsSerializer(settings)
         return Response(serializer.data)
 
@@ -277,7 +285,7 @@ class SystemSettingsView(views.APIView):
         from .models import SystemSettings
         from .serializers import SystemSettingsSerializer
 
-        settings, created = SystemSettings.objects.get_or_create(id=1)
+        settings = SystemSettings.objects.first() or SystemSettings.objects.create()
         serializer = SystemSettingsSerializer(settings, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()

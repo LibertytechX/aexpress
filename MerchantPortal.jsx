@@ -386,10 +386,10 @@ function MerchantPortal() {
     try {
       const response = await window.API.Auth.resendVerification();
 
-      if (data.success) {
-        showNotif(data.message || "Verification email sent! Please check your inbox.", "success");
+      if (response.success) {
+        showNotif(response.message || "Verification email sent! Please check your inbox.", "success");
       } else {
-        showNotif(data.error || "Failed to send verification email", "error");
+        showNotif(response.error || "Failed to send verification email", "error");
       }
     } catch (error) {
       showNotif("Network error. Please try again.", "error");
