@@ -11,6 +11,8 @@ from .views import (
     RiderOrderDetailView,
     OrderOfferListView,
     OrderOfferAcceptView,
+    RiderEarningsView,
+    RiderTodayTripsView,
 )
 
 app_name = "riders"
@@ -43,4 +45,6 @@ urlpatterns = [
         RiderOrderDetailView.as_view(),
         name="rider-order-detail",
     ),
+    path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
+    path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
 ]
