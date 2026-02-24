@@ -13,6 +13,7 @@ from .views import (
     OrderOfferAcceptView,
     RiderEarningsView,
     RiderTodayTripsView,
+    RiderWalletInfoView,
 )
 
 app_name = "riders"
@@ -46,5 +47,6 @@ urlpatterns = [
         name="rider-order-detail",
     ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
+    path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
 ]
