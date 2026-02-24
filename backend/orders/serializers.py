@@ -451,4 +451,4 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
 class OrderCancelSerializer(serializers.Serializer):
     """Serializer for order cancellation."""
 
-    reason = serializers.CharField(required=True, max_length=500)
+    reason = serializers.CharField(required=True, max_length=5000)
