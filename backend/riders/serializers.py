@@ -256,3 +256,105 @@ class RiderOrderSerializer(AssignedOrderSerializer):
         if val and hasattr(val, "strftime"):
             return val.strftime("%Y-%m-%dT%H:%M:%S.000Z")
         return val
+
+
+class OrderOfferListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for unassigned order offers shown to riders.
+    Matches the specific format requested for the mobile app.
+    """
+
+    order_id = serializers.CharField(source="order.id", read_only=True)
+    order_ref = serializers.CharField(source="order.order_number", read_only=True)
+    estimated_distance_km = serializers.DecimalField(
+        source="order.distance_km", max_digits=10, decimal_places=2, read_only=True
+    )
+    estimated_eta_mins = serializers.IntegerField(
+        source="order.duration_minutes", read_only=True
+    )
+    pickup_address = serializers.CharField(
+        source="order.pickup_address", read_only=True
+    )
+    pickup_latitude = serializers.FloatField(
+        source="order.pickup_latitude", read_only=True
+    )
+    pickup_longitude = serializers.FloatField(
+        source="order.pickup_longitude", read_only=True
+    )
+    vehicle_type = serializers.CharField(source="order.vehicle.name", read_only=True)
+    payment_method = serializers.SerializerMethodField()
+    merchant_name = serializers.CharField(
+        source="order.user.business_name", read_only=True
+    )
+    pickup_contact_name = serializers.CharField(
+        source="order.sender_name", read_only=True
+    )
+
+    dropoff_address = serializers.SerializerMethodField()
+    dropoff_latitude = serializers.SerializerMethodField()
+    dropoff_longitude = serializers.SerializerMethodField()
+    dropoff_contact_name = serializers.SerializerMethodField()
+    cod_amount = serializers.SerializerMethodField()
+    seconds_remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrderOffer
+        fields = [
+            "id",
+            "order_id",
+            "order_ref",
+            "status",
+            "estimated_earnings",
+            "estimated_distance_km",
+            "estimated_eta_mins",
+            "pickup_address",
+            "dropoff_address",
+            "pickup_latitude",
+            "pickup_longitude",
+            "dropoff_latitude",
+            "dropoff_longitude",
+            "vehicle_type",
+            "payment_method",
+            "merchant_name",
+            "pickup_contact_name",
+            "dropoff_contact_name",
+            "cod_amount",
+            "seconds_remaining",
+            "expires_at",
+        ]
+
+    def _get_first_delivery(self, obj):
+        if not hasattr(obj, "_first_delivery"):
+            obj._first_delivery = obj.order.deliveries.first()
+        return obj._first_delivery
+
+    def get_payment_method(self, obj):
+        if obj.order.payment_method in ["cash_on_pickup", "receiver_pays"]:
+            return "cod"
+        return obj.order.payment_method.lower()
+
+    def get_dropoff_address(self, obj):
+        d = self._get_first_delivery(obj)
+        return d.dropoff_address if d else ""
+
+    def get_dropoff_latitude(self, obj):
+        d = self._get_first_delivery(obj)
+        return d.dropoff_latitude if d else None
+
+    def get_dropoff_longitude(self, obj):
+        d = self._get_first_delivery(obj)
+        return d.dropoff_longitude if d else None
+
+    def get_dropoff_contact_name(self, obj):
+        d = self._get_first_delivery(obj)
+        return d.receiver_name if d else ""
+
+    def get_cod_amount(self, obj):
+        d = self._get_first_delivery(obj)
+        return float(d.cod_amount) if d else 0.0
+
+    def get_seconds_remaining(self, obj):
+        now = timezone.now()
+        if obj.expires_at > now:
+            return int((obj.expires_at - now).total_seconds())
+        return 0

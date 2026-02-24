@@ -907,3 +907,116 @@ def cancel_order(request, order_id):
     )
 
     return Response({"status": "canceled"})
+
+
+class DeliveryStartView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as In Transit.
+    POST /api/orders/delivery/<delivery_id>/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "InTransit"
+        delivery.save(update_fields=["status"])
+
+        # Update order status if it's currently PickedUp
+        if order.status == "PickedUp":
+            order.status = "Started"
+            order.save(update_fields=["status", "updated_at"])
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Started",
+            description=f"Delivery to {delivery.receiver_name} started by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "InTransit", "previous": old_status})
+
+
+class DeliveryCompleteView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as Delivered.
+    POST /api/orders/delivery/<delivery_id>/deliver/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.select_for_update().get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "Delivered"
+        delivery.delivered_at = timezone.now()
+        delivery.save(update_fields=["status", "delivered_at"])
+
+        # Check if all deliveries for this order are completed
+        all_delivered = not order.deliveries.exclude(status="Delivered").exists()
+        if all_delivered:
+            order.status = "Done"
+            order.save(update_fields=["status", "updated_at"])
+
+            OrderEvent.objects.create(
+                order=order,
+                event="Order Completed",
+                description="All deliveries completed.",
+            )
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Completed",
+            description=f"Delivery to {delivery.receiver_name} completed by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "Delivered", "previous": old_status})
