@@ -1,0 +1,757 @@
+{
+	"info": {
+		"_postman_id": "ax-merchant-dashboard-api-2026",
+		"name": "AX Merchant Dashboard API",
+		"description": "Complete API documentation for the Assured Express Merchant Dashboard (MerchantPortal.jsx).\n\n**Base URL:** `{{base_url}}` (e.g., https://www.orders.axpress.net/api or http://127.0.0.1:8000/api)\n\n**Authentication:** JWT Bearer Token — obtained via Login or Signup endpoints, stored client-side in `localStorage`. All protected endpoints require the header:\n```\nAuthorization: Bearer {{auth_token}}\n```\n\n**Token Lifetimes:**\n- Access Token: 24 hours\n- Refresh Token: 7 days\n\n**API Modules:**\n1. **Authentication** — Signup, Login, Logout, OTP verification, email verification, password reset\n2. **Profile & Addresses** — View/update profile, manage saved pickup addresses\n3. **Orders** — Vehicle pricing, Quick Send, Multi-Drop, Bulk Import, list, details, stats, cancel\n4. **Wallet** — Balance, transactions, Paystack funding (initialize + verify), virtual bank account\n\n**Error Format (DRF standard):**\n```json\n{ \"success\": false, \"errors\": { \"field\": [\"message\"] } }\n```",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{auth_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://www.orders.axpress.net/api",
+			"type": "string",
+			"description": "Base URL for all API requests. Change to http://127.0.0.1:8000/api for local development."
+		},
+		{
+			"key": "auth_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT access token. Automatically populated after Login or Signup. Valid for 24 hours."
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string",
+			"description": "JWT refresh token. Used to obtain a new access token. Valid for 7 days."
+		},
+		{
+			"key": "order_number",
+			"value": "6158000",
+			"type": "string",
+			"description": "Order number in 6XXXXXX format. Used in order detail and cancel endpoints."
+		},
+		{
+			"key": "address_id",
+			"value": "",
+			"type": "string",
+			"description": "UUID of a saved address. Used in address update, delete, and set-default endpoints."
+		},
+		{
+			"key": "paystack_reference",
+			"value": "",
+			"type": "string",
+			"description": "Paystack payment reference returned by the initialize endpoint. Used in the verify endpoint."
+		}
+	],
+	"item": [
+		{
+			"name": "Authentication",
+			"description": "Endpoints for merchant registration, login, logout, phone OTP verification, email verification, and password reset. Most endpoints in this folder do NOT require a Bearer token.",
+			"item": [
+				{
+					"name": "Signup (Register Merchant)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.success && res.tokens) {",
+									"  pm.collectionVariables.set('auth_token', res.tokens.access);",
+									"  pm.collectionVariables.set('refresh_token', res.tokens.refresh);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"business_name\": \"Vivid Print Ltd\",\n  \"contact_name\": \"Yetunde Igbene\",\n  \"phone\": \"08099999999\",\n  \"email\": \"yetunde@vividprint.com\",\n  \"password\": \"securepass123\",\n  \"confirm_password\": \"securepass123\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/signup/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "signup", ""]
+						},
+						"description": "Register a new merchant account. No authentication required.\n\nAfter successful signup, an OTP is sent to the provided phone number. The merchant must verify their phone via **Verify OTP** before they can use the dashboard.\n\n**Request Fields:**\n- `business_name` (required): The merchant's business name\n- `contact_name` (required): Full name of the contact person\n- `phone` (required): Nigerian phone number (e.g., 08099999999)\n- `email` (required): Business email address\n- `password` (required): Min 8 characters\n- `confirm_password` (required): Must match `password`\n- `address` (optional): Primary business address\n\n**Success Response (201 Created):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Account created successfully!\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"business_name\": \"Vivid Print Ltd\",\n    \"contact_name\": \"Yetunde Igbene\",\n    \"phone\": \"08099999999\",\n    \"email\": \"yetunde@vividprint.com\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_active\": true,\n    \"email_verified\": false,\n    \"phone_verified\": false,\n    \"created_at\": \"2026-02-14T21:49:00Z\"\n  },\n  \"tokens\": {\n    \"access\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"refresh\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n  }\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"errors\": {\n    \"phone\": [\"This phone number is already registered.\"],\n    \"email\": [\"This email is already registered.\"],\n    \"confirm_password\": [\"Passwords do not match.\"]\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.success && res.tokens) {",
+									"  pm.collectionVariables.set('auth_token', res.tokens.access);",
+									"  pm.collectionVariables.set('refresh_token', res.tokens.refresh);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone\": \"08099999999\",\n  \"password\": \"securepass123\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login", ""]
+						},
+						"description": "Authenticate a merchant with phone number and password. No authentication required.\n\nStores the returned JWT tokens in collection variables `auth_token` and `refresh_token` (via test script).\n\n**Request Fields:**\n- `phone` (required): Registered phone number\n- `password` (required): Account password\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Login successful!\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"business_name\": \"Vivid Print Ltd\",\n    \"contact_name\": \"Yetunde Igbene\",\n    \"phone\": \"08099999999\",\n    \"email\": \"yetunde@vividprint.com\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_active\": true,\n    \"email_verified\": false,\n    \"phone_verified\": true,\n    \"created_at\": \"2026-02-14T21:49:00Z\",\n    \"last_login\": \"2026-02-14T22:00:00Z\"\n  },\n  \"tokens\": {\n    \"access\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"refresh\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n  }\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"errors\": {\n    \"non_field_errors\": [\"Invalid phone number or password.\"]\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/logout/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "logout", ""]
+						},
+						"description": "Logout the current user by blacklisting the provided refresh token. The access token is invalidated server-side.\n\n**Request Fields:**\n- `refresh` (required): The current refresh token to invalidate\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Logout successful!\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify OTP (Phone Verification)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.success && res.tokens) {",
+									"  pm.collectionVariables.set('auth_token', res.tokens.access);",
+									"  pm.collectionVariables.set('refresh_token', res.tokens.refresh);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone\": \"08099999999\",\n  \"otp\": \"123456\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/verify-otp/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "verify-otp", ""]
+						},
+						"description": "Verify the OTP sent to the merchant's phone number after signup. Called in step 3 of the signup flow.\n\n**Request Fields:**\n- `phone` (required): The phone number that received the OTP\n- `otp` (required): 6-digit OTP code\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Phone verified successfully!\",\n  \"user\": { ... },\n  \"tokens\": {\n    \"access\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n    \"refresh\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n  }\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"errors\": { \"non_field_errors\": [\"Invalid or expired OTP.\"] }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Resend OTP",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"phone\": \"08099999999\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/resend-otp/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "resend-otp", ""]
+						},
+						"description": "Resend the OTP to the merchant's phone number during the signup flow. No authentication required.\n\n**Request Fields:**\n- `phone` (required): The phone number to resend the OTP to\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"A new OTP has been sent to your phone.\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Email",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/auth/verify-email/?token=EMAIL_VERIFICATION_TOKEN_HERE",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "verify-email", ""],
+							"query": [
+								{
+									"key": "token",
+									"value": "EMAIL_VERIFICATION_TOKEN_HERE",
+									"description": "Email verification token sent to the merchant's email address. Extracted from the link in the verification email."
+								}
+							]
+						},
+						"description": "Verify a merchant's email address using the token from the verification email link. No authentication required. The portal automatically calls this endpoint when the merchant clicks the verification link, which includes `?token=<token>` in the URL.\n\n**Query Parameters:**\n- `token` (required): Email verification token from the link\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Email verified successfully!\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Invalid or expired verification token.\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Resend Email Verification",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/resend-verification/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "resend-verification", ""]
+						},
+						"description": "Resend the email verification link to the currently authenticated merchant's email address. Requires authentication.\n\nTriggered from the dashboard when the merchant sees the \"Please verify your email\" banner.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Verification email sent! Please check your inbox.\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Email is already verified.\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Request Password Reset",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"yetunde@vividprint.com\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/request-password-reset/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "request-password-reset", ""]
+						},
+						"description": "Request a password reset link sent to the merchant's email. No authentication required.\n\nThe email will contain a link with `?token=<token>&reset=true` that the portal detects on load to show the Reset Password screen.\n\n**Request Fields:**\n- `email` (required): The registered email address\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"If an account exists with this email, a password reset link has been sent.\"\n}\n```\n\n> **Note:** Always returns success for security — does not reveal whether the email is registered."
+					},
+					"response": []
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"auth": { "type": "noauth" },
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"PASSWORD_RESET_TOKEN_FROM_EMAIL\",\n  \"new_password\": \"newSecurePass456\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/reset-password/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "reset-password", ""]
+						},
+						"description": "Reset the merchant's password using the token from the password reset email. No authentication required.\n\nCalled by the Reset Password screen in the portal when the merchant submits their new password.\n\n**Request Fields:**\n- `token` (required): Password reset token extracted from the email link\n- `new_password` (required): The new password (min 6 characters)\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Password has been reset successfully.\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Invalid or expired reset token.\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Profile & Addresses",
+			"description": "Endpoints for viewing and updating the merchant's business profile, and managing saved pickup addresses. All endpoints require Bearer token authentication.",
+			"item": [
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/me/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "me", ""]
+						},
+						"description": "Retrieve the currently authenticated merchant's profile information.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"user\": {\n    \"id\": \"uuid\",\n    \"business_name\": \"Vivid Print Ltd\",\n    \"contact_name\": \"Yetunde Igbene\",\n    \"phone\": \"08099999999\",\n    \"email\": \"yetunde@vividprint.com\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_active\": true,\n    \"email_verified\": false,\n    \"phone_verified\": true,\n    \"created_at\": \"2026-02-14T21:49:00Z\",\n    \"last_login\": \"2026-02-14T22:00:00Z\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"business_name\": \"Vivid Print Ltd\",\n  \"contact_name\": \"Yetunde Igbene\",\n  \"email\": \"yetunde@vividprint.com\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/profile/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "profile", ""]
+						},
+						"description": "Update the currently authenticated merchant's business profile. Called from the Settings screen.\n\nAll fields are optional — only include fields you want to update.\n\n**Request Fields:**\n- `business_name` (optional): Business name\n- `contact_name` (optional): Contact person full name\n- `email` (optional): Business email address\n- `address` (optional): Primary business address\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Profile updated successfully!\",\n  \"user\": {\n    \"id\": \"uuid\",\n    \"business_name\": \"Vivid Print Ltd\",\n    \"contact_name\": \"Yetunde Igbene\",\n    \"phone\": \"08099999999\",\n    \"email\": \"yetunde@vividprint.com\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_active\": true,\n    \"email_verified\": false,\n    \"phone_verified\": true\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Saved Addresses",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/addresses/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "addresses", ""]
+						},
+						"description": "Retrieve all saved pickup addresses for the authenticated merchant. Used in the Settings screen to display the address book.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"addresses\": [\n    {\n      \"id\": \"uuid\",\n      \"label\": \"Warehouse\",\n      \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n      \"is_default\": true,\n      \"created_at\": \"2026-02-14T21:49:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"label\": \"Showroom\",\n      \"address\": \"15 Admiralty Way, Lekki Phase 1, Lagos\",\n      \"is_default\": false,\n      \"created_at\": \"2026-02-15T10:00:00Z\"\n    }\n  ]\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Saved Address",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"label\": \"Warehouse\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"is_default\": false\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/addresses/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "addresses", ""]
+						},
+						"description": "Add a new saved pickup address for the authenticated merchant.\n\nThe first address created is automatically set as the default (`is_default: true`).\n\n**Request Fields:**\n- `label` (required): Short name for the address (e.g., 'Warehouse', 'Showroom')\n- `address` (required): Full street address\n- `is_default` (optional): Set as default pickup address (boolean)\n\n**Success Response (201 Created):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Address saved!\",\n  \"address\": {\n    \"id\": \"uuid\",\n    \"label\": \"Warehouse\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_default\": true,\n    \"created_at\": \"2026-02-14T21:49:00Z\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Saved Address",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"label\": \"Main Warehouse\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"is_default\": true\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/addresses/{{address_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "addresses", "{{address_id}}", ""]
+						},
+						"description": "Update an existing saved address by its UUID.\n\n**URL Parameter:**\n- `address_id` (required): UUID of the address to update (set via `{{address_id}}` variable)\n\n**Request Fields:**\n- `label` (optional): Updated label\n- `address` (optional): Updated street address\n- `is_default` (optional): Set as default\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Address updated!\",\n  \"address\": { \"id\": \"uuid\", \"label\": \"Main Warehouse\", \"address\": \"...\", \"is_default\": true }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Saved Address",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/addresses/{{address_id}}/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "addresses", "{{address_id}}", ""]
+						},
+						"description": "Delete a saved address by its UUID.\n\n**URL Parameter:**\n- `address_id` (required): UUID of the address to delete\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Address deleted!\"\n}\n```\n\n**Error Response (404 Not Found):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Address not found.\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Set Default Address",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/auth/addresses/{{address_id}}/set-default/",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "addresses", "{{address_id}}", "set-default", ""]
+						},
+						"description": "Set a saved address as the default pickup address. Any previously set default will be unset.\n\n**URL Parameter:**\n- `address_id` (required): UUID of the address to make default\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Default address updated!\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Orders",
+			"description": "Endpoints for vehicle pricing, creating orders (Quick Send, Multi-Drop, Bulk Import), listing orders, retrieving order details and statistics, and cancelling orders. All endpoints require Bearer token authentication.",
+			"item": [
+				{
+					"name": "Get Available Vehicles",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/vehicles/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "vehicles", ""]
+						},
+						"description": "Get all available vehicle types with pricing information. Called when the merchant opens the New Order screen to populate the vehicle selector.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"vehicles\": [\n    {\n      \"id\": 1,\n      \"name\": \"Bike\",\n      \"max_weight_kg\": 10,\n      \"base_price\": \"1200.00\",\n      \"description\": \"Motorcycle delivery for small packages up to 10kg\",\n      \"is_active\": true\n    },\n    {\n      \"id\": 2,\n      \"name\": \"Car\",\n      \"max_weight_kg\": 70,\n      \"base_price\": \"4500.00\",\n      \"description\": \"Car delivery for medium packages up to 70kg\",\n      \"is_active\": true\n    },\n    {\n      \"id\": 3,\n      \"name\": \"Van\",\n      \"max_weight_kg\": 600,\n      \"base_price\": \"12000.00\",\n      \"description\": \"Van delivery for large packages up to 600kg\",\n      \"is_active\": true\n    }\n  ]\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Quick Send Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"sender_name\": \"Yetunde Igbene\",\n  \"sender_phone\": \"08051832508\",\n  \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n  \"receiver_name\": \"Adebayo Johnson\",\n  \"receiver_phone\": \"08034567890\",\n  \"vehicle\": \"Bike\",\n  \"payment_method\": \"wallet\",\n  \"package_type\": \"Box\",\n  \"notes\": \"Handle with care\",\n  \"scheduled_pickup_time\": null\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/quick-send/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "quick-send", ""]
+						},
+						"description": "Create a Quick Send order with a single pickup and single delivery. This is the most common order mode.\n\n**Request Fields:**\n- `pickup_address` (required): Pickup location address\n- `sender_name` (required): Name of sender\n- `sender_phone` (required): Phone number of sender\n- `dropoff_address` (required): Delivery destination address\n- `receiver_name` (required): Name of receiver\n- `receiver_phone` (required): Phone number of receiver\n- `vehicle` (required): Vehicle type — \"Bike\", \"Car\", or \"Van\"\n- `payment_method` (optional): \"wallet\" (default), \"cash_on_pickup\", or \"receiver_pays\"\n- `package_type` (optional): \"Box\" (default), \"Envelope\", \"Fragile\", \"Food\", \"Document\", or \"Other\"\n- `notes` (optional): Additional delivery instructions\n- `scheduled_pickup_time` (optional): ISO 8601 datetime for scheduled pickup\n\n**Success Response (201 Created):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Quick Send order created successfully!\",\n  \"order\": {\n    \"id\": \"uuid\",\n    \"order_number\": \"6158000\",\n    \"mode\": \"quick\",\n    \"vehicle_name\": \"Bike\",\n    \"vehicle_price\": \"1200.00\",\n    \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"sender_name\": \"Yetunde Igbene\",\n    \"sender_phone\": \"08051832508\",\n    \"payment_method\": \"wallet\",\n    \"total_amount\": \"1200.00\",\n    \"status\": \"Pending\",\n    \"created_at\": \"2026-02-14T12:00:00Z\",\n    \"delivery_count\": 1,\n    \"deliveries\": [\n      {\n        \"id\": \"uuid\",\n        \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n        \"receiver_name\": \"Adebayo Johnson\",\n        \"receiver_phone\": \"08034567890\",\n        \"package_type\": \"Box\",\n        \"status\": \"Pending\",\n        \"sequence\": 1\n      }\n    ]\n  }\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"errors\": { \"vehicle\": [\"Vehicle 'InvalidVehicle' not found or inactive.\"] }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Multi-Drop Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"15 Admiralty Way, Lekki Phase 1, Lagos\",\n  \"sender_name\": \"Yetunde Igbene\",\n  \"sender_phone\": \"08051832508\",\n  \"vehicle\": \"Car\",\n  \"payment_method\": \"wallet\",\n  \"deliveries\": [\n    {\n      \"dropoff_address\": \"42 Allen Avenue, Ikeja, Lagos\",\n      \"receiver_name\": \"Funke Adeyemi\",\n      \"receiver_phone\": \"09012345678\",\n      \"package_type\": \"Box\",\n      \"notes\": \"First delivery\"\n    },\n    {\n      \"dropoff_address\": \"10 Broad St, Lagos Island\",\n      \"receiver_name\": \"Chidi Obi\",\n      \"receiver_phone\": \"07011223344\",\n      \"package_type\": \"Envelope\",\n      \"notes\": \"Second delivery\"\n    }\n  ],\n  \"notes\": \"Multi-drop delivery\",\n  \"scheduled_pickup_time\": null\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/multi-drop/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "multi-drop", ""]
+						},
+						"description": "Create a Multi-Drop order with a single pickup location and multiple deliveries. Pricing is per delivery stop.\n\n**Request Fields:**\n- `pickup_address` (required): Single pickup location\n- `sender_name` (required): Name of sender\n- `sender_phone` (required): Phone number of sender\n- `vehicle` (required): Vehicle type — \"Bike\", \"Car\", or \"Van\"\n- `payment_method` (optional): \"wallet\" (default), \"cash_on_pickup\", or \"receiver_pays\"\n- `deliveries` (required): Array of delivery objects, each with:\n  - `dropoff_address` (required): Delivery address\n  - `receiver_name` (required): Receiver name\n  - `receiver_phone` (required): Receiver phone\n  - `package_type` (optional): Package type\n  - `notes` (optional): Delivery notes\n- `notes` (optional): Order-level notes\n- `scheduled_pickup_time` (optional): ISO 8601 datetime\n\n**Success Response (201 Created):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Multi-Drop order created successfully!\",\n  \"order\": {\n    \"id\": \"uuid\",\n    \"order_number\": \"6158001\",\n    \"mode\": \"multi\",\n    \"delivery_count\": 2,\n    \"total_amount\": \"9000.00\",\n    \"status\": \"Pending\",\n    \"deliveries\": [ ... ]\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Create Bulk Import Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"sender_name\": \"Yetunde Igbene\",\n  \"sender_phone\": \"08051832508\",\n  \"vehicle\": \"Car\",\n  \"payment_method\": \"wallet\",\n  \"deliveries\": [\n    {\n      \"dropoff_address\": \"42 Allen Avenue, Ikeja, Lagos\",\n      \"receiver_name\": \"Funke Adeyemi\",\n      \"receiver_phone\": \"09012345678\",\n      \"package_type\": \"Box\",\n      \"notes\": \"\"\n    },\n    {\n      \"dropoff_address\": \"10 Broad St, Lagos Island\",\n      \"receiver_name\": \"Chidi Obi\",\n      \"receiver_phone\": \"07011223344\",\n      \"package_type\": \"Box\",\n      \"notes\": \"\"\n    }\n  ]\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/bulk-import/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "bulk-import", ""]
+						},
+						"description": "Create a Bulk Import order by importing multiple deliveries at once. The frontend sends the parsed CSV/text/OCR data as a structured JSON array of deliveries.\n\nThe merchant pastes or uploads a CSV in the portal, which is parsed client-side into the `deliveries` array before being sent to this endpoint.\n\n**Request Fields:** Same structure as Multi-Drop Order.\n\n**CSV Format (parsed client-side):**\n```\nAddress, Receiver Name, Receiver Phone, Notes\n42 Allen Avenue Ikeja Lagos, Funke Adeyemi, 09012345678, Handle with care\n10 Broad St Lagos Island, Chidi Obi, 07011223344,\n```\n\n**Success Response (201 Created):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Bulk Import order created successfully!\",\n  \"order\": {\n    \"id\": \"uuid\",\n    \"order_number\": \"6158002\",\n    \"mode\": \"bulk\",\n    \"delivery_count\": 2,\n    \"total_amount\": \"9000.00\",\n    \"status\": \"Pending\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "List Orders",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/?status=Pending&mode=quick&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["orders", ""],
+							"query": [
+								{
+									"key": "status",
+									"value": "Pending",
+									"description": "Filter by order status. Options: Pending, Assigned, PickedUp, InTransit, Delivered, Cancelled. Leave empty for all statuses."
+								},
+								{
+									"key": "mode",
+									"value": "quick",
+									"description": "Filter by order mode. Options: quick, multi, bulk. Leave empty for all modes."
+								},
+								{
+									"key": "limit",
+									"value": "20",
+									"description": "Maximum number of orders to return. Default: 50."
+								}
+							]
+						},
+						"description": "Retrieve a list of orders for the authenticated merchant with optional filters. Called when loading the Orders screen.\n\n**Query Parameters:**\n- `status` (optional): Filter by status — \"Pending\", \"Assigned\", \"PickedUp\", \"InTransit\", \"Delivered\", \"Cancelled\"\n- `mode` (optional): Filter by mode — \"quick\", \"multi\", \"bulk\"\n- `limit` (optional): Max results (default: 50)\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"orders\": [\n    {\n      \"id\": \"uuid\",\n      \"order_number\": \"6158000\",\n      \"mode\": \"quick\",\n      \"vehicle_name\": \"Bike\",\n      \"total_amount\": \"1200.00\",\n      \"status\": \"Pending\",\n      \"payment_method\": \"wallet\",\n      \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n      \"delivery_count\": 1,\n      \"created_at\": \"2026-02-14T12:00:00Z\"\n    }\n  ],\n  \"total\": 1\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Order Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/{{order_number}}/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "{{order_number}}", ""]
+						},
+						"description": "Retrieve full details for a specific order including all deliveries. Called when the merchant clicks on an order in the Orders list.\n\n**URL Parameter:**\n- `order_number` (required): The order number (6XXXXXX format)\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"order\": {\n    \"id\": \"uuid\",\n    \"order_number\": \"6158000\",\n    \"mode\": \"quick\",\n    \"vehicle_name\": \"Bike\",\n    \"vehicle_price\": \"1200.00\",\n    \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"sender_name\": \"Yetunde Igbene\",\n    \"sender_phone\": \"08051832508\",\n    \"payment_method\": \"wallet\",\n    \"total_amount\": \"1200.00\",\n    \"status\": \"Pending\",\n    \"notes\": \"Handle with care\",\n    \"scheduled_pickup_time\": null,\n    \"created_at\": \"2026-02-14T12:00:00Z\",\n    \"updated_at\": \"2026-02-14T12:00:00Z\",\n    \"delivery_count\": 1,\n    \"deliveries\": [\n      {\n        \"id\": \"uuid\",\n        \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n        \"receiver_name\": \"Adebayo Johnson\",\n        \"receiver_phone\": \"08034567890\",\n        \"package_type\": \"Box\",\n        \"status\": \"Pending\",\n        \"sequence\": 1,\n        \"delivered_at\": null\n      }\n    ]\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Order Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/orders/stats/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "stats", ""]
+						},
+						"description": "Retrieve aggregated order statistics for the authenticated merchant. Displayed on the Dashboard home screen.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"stats\": {\n    \"total_orders\": 45,\n    \"pending_orders\": 5,\n    \"active_orders\": 8,\n    \"delivered_orders\": 30,\n    \"cancelled_orders\": 2,\n    \"total_spent\": \"54000.00\",\n    \"this_month_orders\": 12,\n    \"this_month_spent\": \"14400.00\"\n  }\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Order",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Customer changed delivery address\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/orders/cancel/{{order_number}}/",
+							"host": ["{{base_url}}"],
+							"path": ["orders", "cancel", "{{order_number}}", ""]
+						},
+						"description": "Cancel a Pending order. Only orders with status \"Pending\" can be cancelled by the merchant.\n\n**URL Parameter:**\n- `order_number` (required): The order number to cancel (6XXXXXX format)\n\n**Request Fields:**\n- `reason` (optional): Cancellation reason\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Order 6158000 has been cancelled.\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Order cannot be cancelled at this stage.\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Wallet",
+			"description": "Endpoints for wallet balance, transaction history, funding via Paystack (card payment), and virtual bank account details for bank transfer funding. All endpoints require Bearer token authentication.",
+			"item": [
+				{
+					"name": "Get Paystack Public Key",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/paystack-key/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "paystack-key", ""]
+						},
+						"description": "Retrieve the Paystack public key for initializing the Paystack popup on the frontend. Called once when the Wallet screen loads.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"public_key\": \"pk_live_xxxxxxxxxxxxxxxxxxxx\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Wallet Balance",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/balance/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "balance", ""]
+						},
+						"description": "Retrieve the current wallet balance for the authenticated merchant. Displayed in the Wallet screen header and Dashboard summary.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"balance\": \"15750.00\",\n  \"currency\": \"NGN\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Transaction History",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/transactions/?type=credit&status=success&page=1",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "transactions", ""],
+							"query": [
+								{
+									"key": "type",
+									"value": "credit",
+									"description": "Filter by transaction type. Options: credit, debit. Leave empty for all types."
+								},
+								{
+									"key": "status",
+									"value": "success",
+									"description": "Filter by transaction status. Options: success, pending, failed. Leave empty for all statuses."
+								},
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number for pagination. Default: 1."
+								}
+							]
+						},
+						"description": "Retrieve the wallet transaction history for the authenticated merchant with optional filters. Displayed in the Wallet screen transactions tab.\n\n**Query Parameters:**\n- `type` (optional): Filter by type — \"credit\" (top-ups) or \"debit\" (order payments)\n- `status` (optional): Filter by status — \"success\", \"pending\", \"failed\"\n- `page` (optional): Page number for pagination (default: 1)\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"transactions\": [\n    {\n      \"id\": \"uuid\",\n      \"type\": \"credit\",\n      \"amount\": \"5000.00\",\n      \"status\": \"success\",\n      \"description\": \"Wallet top-up via Paystack\",\n      \"reference\": \"ps_ref_xxxxxxxxxxxx\",\n      \"created_at\": \"2026-02-14T12:00:00Z\"\n    },\n    {\n      \"id\": \"uuid\",\n      \"type\": \"debit\",\n      \"amount\": \"1200.00\",\n      \"status\": \"success\",\n      \"description\": \"Payment for order #6158000\",\n      \"reference\": \"ORD-6158000\",\n      \"created_at\": \"2026-02-14T13:00:00Z\"\n    }\n  ],\n  \"total\": 2,\n  \"page\": 1,\n  \"pages\": 1\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Initialize Paystack Payment",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"const res = pm.response.json();",
+									"if (res.success && res.reference) {",
+									"  pm.collectionVariables.set('paystack_reference', res.reference);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"amount\": 5000\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/wallet/fund/initialize/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "fund", "initialize", ""]
+						},
+						"description": "Initialize a Paystack payment to fund the merchant's wallet. Returns a payment reference and authorization URL.\n\nThe frontend uses the returned `reference` to open the Paystack popup. After the merchant completes payment in the popup, the frontend calls **Verify Paystack Payment** with this reference.\n\n**Request Fields:**\n- `amount` (required): Amount to fund in Naira (NGN). Minimum: 100. Example: 5000 = ₦5,000\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"reference\": \"ps_ref_xxxxxxxxxxxx\",\n  \"authorization_url\": \"https://checkout.paystack.com/xxxxxxxxxxxx\",\n  \"access_code\": \"xxxxxxxxxxxx\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Amount must be at least ₦100.\"\n}\n```\n\n> **Note:** The test script automatically saves the returned `reference` to the `{{paystack_reference}}` collection variable."
+					},
+					"response": []
+				},
+				{
+					"name": "Verify Paystack Payment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" },
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reference\": \"{{paystack_reference}}\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": {
+							"raw": "{{base_url}}/wallet/fund/verify/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "fund", "verify", ""]
+						},
+						"description": "Verify a Paystack payment after the merchant completes the payment in the Paystack popup. If successful, the merchant's wallet is credited.\n\nCalled automatically by the frontend's Paystack callback after a successful payment.\n\n**Request Fields:**\n- `reference` (required): The payment reference returned by the Initialize endpoint (stored in `{{paystack_reference}}`)\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"message\": \"Wallet funded successfully!\",\n  \"amount\": \"5000.00\",\n  \"new_balance\": \"20750.00\"\n}\n```\n\n**Error Response (400 Bad Request):**\n```json\n{\n  \"success\": false,\n  \"error\": \"Payment verification failed. Transaction not successful.\"\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Virtual Bank Account",
+					"request": {
+						"method": "GET",
+						"header": [
+							{ "key": "Authorization", "value": "Bearer {{auth_token}}" }
+						],
+						"url": {
+							"raw": "{{base_url}}/wallet/virtual-account/",
+							"host": ["{{base_url}}"],
+							"path": ["wallet", "virtual-account", ""]
+						},
+						"description": "Retrieve the merchant's dedicated virtual bank account details for bank transfer funding. Displayed in the Wallet screen's 'Bank Transfer' tab.\n\nThe merchant can transfer any amount to this account number, and their wallet will be automatically credited via the bank's webhook.\n\n**Success Response (200 OK):**\n```json\n{\n  \"success\": true,\n  \"virtual_account\": {\n    \"bank_name\": \"Wema Bank\",\n    \"account_number\": \"9876543210\",\n    \"account_name\": \"AX Express / Vivid Print Ltd\",\n    \"reference\": \"AXVBA-uuid\"\n  }\n}\n```\n\n**Error Response (404 Not Found):**\n```json\n{\n  \"success\": false,\n  \"error\": \"No virtual account found. Please contact support.\"\n}\n```"
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
