@@ -18,6 +18,9 @@ from .views import (
     cancel_order,
     DeliveryStartView,
     DeliveryCompleteView,
+    OrderStartView,
+    OrderArrivedView,
+    OrderCompleteView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -47,6 +50,9 @@ urlpatterns = [
     ),
     path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
     path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
+    path("start/", OrderStartView.as_view(), name="order_start"),
+    path("arrived/", OrderArrivedView.as_view(), name="order_arrived"),
+    path("complete/", OrderCompleteView.as_view(), name="order_complete"),
     path(
         "delivery/<uuid:delivery_id>/start/",
         DeliveryStartView.as_view(),

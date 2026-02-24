@@ -759,7 +759,20 @@ def _advance_order(request, order_number, new_status, event_desc):
     order.status = new_status
     if new_status == "PickedUp" and not order.picked_up_at:
         order.picked_up_at = timezone.now()
-    order.save(update_fields=["status", "picked_up_at", "updated_at"])
+    elif new_status == "Arrived" and not order.arrived_at:
+        order.arrived_at = timezone.now()
+    elif new_status == "Done" and not order.completed_at:
+        order.completed_at = timezone.now()
+
+    update_fields = ["status", "updated_at"]
+    if order.picked_up_at:
+        update_fields.append("picked_up_at")
+    if order.arrived_at:
+        update_fields.append("arrived_at")
+    if order.completed_at:
+        update_fields.append("completed_at")
+
+    order.save(update_fields=update_fields)
 
     # Update rider location if provided
     rider_profile = getattr(request.user, "rider_profile", None)
@@ -806,6 +819,83 @@ class OrderPickupView(APIView):
             )
 
         return _advance_order(request, order_number, "PickedUp", "Order Picked Up")
+
+
+class OrderStartView(APIView):
+    """
+    Endpoint for riders to mark an order as started (trip to pickup).
+    POST /api/orders/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # TODO: check if the rider is assigned to this order
+
+        return _advance_order(request, order_number, "Started", "Order Started")
+
+
+class OrderArrivedView(APIView):
+    """
+    Endpoint for riders to mark themselves as arrived at pickup.
+    POST /api/orders/arrived/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return _advance_order(
+            request, order_number, "Arrived", "Rider Arrived at Pickup"
+        )
+
+
+class OrderCompleteView(APIView):
+    """
+    Endpoint for riders to mark an entire order as completed.
+    POST /api/orders/complete/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            order = Order.objects.select_for_update().get(order_number=order_number)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Mark all deliveries as completed if not already
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
+
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
 
 
 class AssignedOrderDetailView(APIView):

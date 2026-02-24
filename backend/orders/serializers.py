@@ -87,6 +87,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "sender_name",
             "sender_phone",
             "payment_method",
+            "payment_status",
             "total_amount",
             "distance_km",
             "duration_minutes",
@@ -121,7 +122,7 @@ class QuickSendSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     package_type = serializers.ChoiceField(
@@ -177,7 +178,7 @@ class MultiDropSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
@@ -219,7 +220,7 @@ class BulkImportSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
@@ -295,6 +296,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "dropoff_notes",
             "vehicle_type",
             "payment_method",
+            "payment_status",
             "merchant_name",
             "estimated_earnings",
             "distance_km",
