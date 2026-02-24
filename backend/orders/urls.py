@@ -64,7 +64,7 @@ urlpatterns = [
         name="escrow_status",
     ),
     path(
-        "rider/orders/<uuid:order_id>/cancel/",
+        "<uuid:order_id>/rider-cancel/",
         cancel_order,
         name="rider_cancel_order",
     ),

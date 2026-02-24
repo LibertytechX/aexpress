@@ -811,7 +811,7 @@ class AssignedRoutesView(APIView):
 @api_view(["POST"])
 @permission_classes([IsRider])
 def cancel_order(request, order_id):
-    """POST /api/rider/orders/<id>/cancel/"""
+    """POST /api/orders/<id>/rider-cancel/"""
     try:
         order = Order.objects.get(id=order_id)
     except Order.DoesNotExist:
@@ -824,7 +824,8 @@ def cancel_order(request, order_id):
     rider = request.user.rider_profile
     order.status = "Pending"
     order.canceled_at = timezone.now()
-    order.cancellation_reason = ser.validated_data["reason"]
+    order.cancellation_reason = ser.validated_data.get("reason")
+    order.rider = None
     order.save()
 
     rider.current_order = None
