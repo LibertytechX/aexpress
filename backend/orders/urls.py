@@ -12,6 +12,7 @@ from .views import (
     CalculateFareView,
     VehicleUpdateView,
     AssignedOrdersView,
+    AssignedOrderDetailView,
     AssignedRoutesView,
 )
 from .escrow_views import (
@@ -35,6 +36,11 @@ urlpatterns = [
     # Order management endpoints
     path("", OrderListView.as_view(), name="order_list"),
     path("assigned/", AssignedOrdersView.as_view(), name="assigned_orders"),
+    path(
+        "assigned/<str:order_number>/",
+        AssignedOrderDetailView.as_view(),
+        name="assigned_order_detail",
+    ),
     path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
     path("stats/", OrderStatsView.as_view(), name="order_stats"),
     # Escrow management endpoints

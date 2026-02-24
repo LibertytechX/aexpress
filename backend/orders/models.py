@@ -99,6 +99,7 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
+        ("Picked_Up", "Picked Up"),
         ("Started", "Started"),
         ("Done", "Done"),
         ("CustomerCanceled", "Customer Canceled"),

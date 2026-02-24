@@ -741,6 +741,39 @@ class AssignedOrdersView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class AssignedOrderDetailView(APIView):
+    """
+    Get details of a specific assigned order.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDriver]
+
+    def get(self, request, order_number):
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            order = (
+                Order.objects.filter(rider=rider_profile, order_number=order_number)
+                .select_related("vehicle", "user")
+                .prefetch_related("deliveries", "rider_offers")
+                .get()
+            )
+        except Order.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Assigned order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = AssignedOrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
 class AssignedRoutesView(APIView):
     """
     Get list of orders assigned to the authenticated rider,
