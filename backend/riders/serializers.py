@@ -4,8 +4,15 @@ from django.utils import timezone
 from django.db.models import Sum
 from dispatcher.models import Rider
 from authentication.models import User
-from wallet.models import Wallet
-from .models import RiderAuth, RiderDevice, RiderCodRecord, OrderOffer, AreaDemand
+from wallet.models import Wallet, Transaction
+from .models import (
+    RiderAuth,
+    RiderDevice,
+    RiderCodRecord,
+    OrderOffer,
+    AreaDemand,
+    RiderEarning,
+)
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
 
@@ -447,3 +454,22 @@ class RiderWalletInfoSerializer(serializers.Serializer):
             "amount__sum"
         ]
         return float(total or 0.00)
+
+
+class RiderTransactionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for wallet transactions shown to riders.
+    """
+
+    title = serializers.CharField(source="description", read_only=True)
+    time = serializers.SerializerMethodField()
+    type = serializers.CharField(read_only=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = Transaction
+        fields = ["id", "type", "amount", "title", "time", "status"]
+
+    def get_time(self, obj):
+        # Format: "2:15 PM"
+        return obj.created_at.strftime("%-I:%M %p")

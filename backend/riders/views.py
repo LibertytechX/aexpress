@@ -20,8 +20,16 @@ from .serializers import (
     RiderEarningsStatsSerializer,
     RiderTodayTripSerializer,
     RiderWalletInfoSerializer,
+    RiderTransactionSerializer,
 )
-from .models import RiderSession, RiderDevice, AreaDemand, OrderOffer, RiderCodRecord
+from .models import (
+    RiderSession,
+    RiderDevice,
+    AreaDemand,
+    OrderOffer,
+    RiderCodRecord,
+)
+from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
 from orders.models import Order
 from orders.permissions import IsRider
@@ -679,3 +687,45 @@ class RiderWalletInfoView(APIView):
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
         )
+
+
+class RiderTransactionListView(APIView):
+    """
+    API endpoint for riders to view their wallet transaction history.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return Response(
+                    {"success": False, "message": "Rider profile not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Ensure user has a wallet
+            wallet, _ = Wallet.objects.get_or_create(user=request.user)
+
+            # Get transactions for this wallet
+            transactions = Transaction.objects.filter(wallet=wallet).order_by(
+                "-created_at"
+            )
+
+            # Paginate
+            from wallet.views import TransactionPagination
+
+            paginator = TransactionPagination()
+            paginated_txns = paginator.paginate_queryset(transactions, request)
+
+            serializer = RiderTransactionSerializer(paginated_txns, many=True)
+            return paginator.get_paginated_response(
+                {"success": True, "data": serializer.data}
+            )
+
+        except Exception as e:
+            return Response(
+                {"success": False, "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

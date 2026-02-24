@@ -14,6 +14,7 @@ from .views import (
     RiderEarningsView,
     RiderTodayTripsView,
     RiderWalletInfoView,
+    RiderTransactionListView,
 )
 
 app_name = "riders"
@@ -48,5 +49,10 @@ urlpatterns = [
     ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
     path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),
+    path(
+        "wallet/transactions/",
+        RiderTransactionListView.as_view(),
+        name="rider-wallet-transactions",
+    ),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
 ]
