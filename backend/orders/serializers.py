@@ -273,11 +273,13 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
 
     delivered_at = serializers.SerializerMethodField()
     delivery_proofs = serializers.SerializerMethodField()
+    package_type = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             "id",
+            "order_number",
             "status",
             "pickup_address",
             "pickup_latitude",
@@ -302,6 +304,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "delivered_at",
             "delivery_proofs",
+            "package_type",
         ]
 
     def _get_first_delivery(self, obj):
@@ -309,6 +312,10 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
         if not hasattr(obj, "_first_delivery"):
             obj._first_delivery = obj.deliveries.first()
         return obj._first_delivery
+
+    def get_package_type(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.package_type if delivery else ""
 
     def get_dropoff_address(self, obj):
         delivery = self._get_first_delivery(obj)
@@ -439,3 +446,9 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
 
     def get_completed_stops(self, obj):
         return obj.deliveries.filter(status="Delivered").count()
+
+
+class OrderCancelSerializer(serializers.Serializer):
+    """Serializer for order cancellation."""
+
+    reason = serializers.CharField(required=True, max_length=500)

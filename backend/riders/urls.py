@@ -6,6 +6,7 @@ from .views import (
     RiderUpdatePermissionsView,
     RiderMeView,
     RiderToggleDutyView,
+    AreaDemandListView,
 )
 
 app_name = "riders"
@@ -23,4 +24,5 @@ urlpatterns = [
     ),
     path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path("duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
+    path("area-demand/", AreaDemandListView.as_view(), name="area-demand-list"),
 ]

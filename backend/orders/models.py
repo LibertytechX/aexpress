@@ -99,6 +99,7 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
+        ("PickedUp", "Picked Up"),
         ("Started", "Started"),
         ("Done", "Done"),
         ("CustomerCanceled", "Customer Canceled"),
@@ -174,6 +175,8 @@ class Order(models.Model):
 
     # Additional info
     notes = models.TextField(blank=True)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
 
     class Meta:
         db_table = "orders"
@@ -270,3 +273,19 @@ class Delivery(models.Model):
 
     def __str__(self):
         return f"Delivery to {self.receiver_name} - Order {self.order.order_number}"
+
+
+class OrderEvent(models.Model):
+    """Event log for orders."""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    event = models.CharField(max_length=100)
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "order_events"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.event} for {self.order.order_number}"

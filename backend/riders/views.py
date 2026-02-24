@@ -11,9 +11,25 @@ from .serializers import (
     DeviceRegistrationSerializer,
     UpdatePermissionsSerializer,
     DutyToggleSerializer,
+    AreaDemandSerializer,
 )
-from .models import RiderSession, RiderDevice
+from .models import RiderSession, RiderDevice, AreaDemand
 from dispatcher.models import Rider
+
+
+class AreaDemandListView(APIView):
+    """
+    API endpoint for listing area demand data.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        areas = AreaDemand.objects.all()
+        serializer = AreaDemandSerializer(areas, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
 
 
 class RiderLoginView(APIView):

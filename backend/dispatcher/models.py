@@ -6,11 +6,12 @@ import string
 
 
 class Rider(models.Model):
-    STATUS_CHOICES = (
-        ("online", "Online"),
-        ("on_delivery", "On Delivery"),
-        ("offline", "Offline"),
-    )
+    class Status(models.TextChoices):
+        ONLINE = "online", "Online"
+        ON_DELIVERY = "on_delivery", "On Delivery"
+        OFFLINE = "offline", "Offline"
+
+    STATUS_CHOICES = Status.choices
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Auto-generated short ID
@@ -56,7 +57,9 @@ class Rider(models.Model):
     )
 
     # Status & Metrics
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="offline")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.OFFLINE
+    )
     rating = models.DecimalField(max_digits=3, decimal_places=2, default=0.00)
     total_deliveries = models.IntegerField(default=0)
     current_order = models.CharField(max_length=100, null=True, blank=True)
@@ -125,19 +128,19 @@ class Rider(models.Model):
         super().save(*args, **kwargs)
 
     def go_online(self):
-        self.status = "online"
+        self.status = self.Status.ONLINE
         self.save()
 
     def go_offline(self):
-        self.status = "offline"
+        self.status = self.Status.OFFLINE
         self.save()
 
     def start_delivery(self):
-        self.status = "on_delivery"
+        self.status = self.Status.ON_DELIVERY
         self.save()
 
     def end_delivery(self):
-        self.status = "online"
+        self.status = self.Status.ONLINE
         self.save()
 
     def __str__(self):

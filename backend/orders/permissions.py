@@ -13,3 +13,6 @@ class IsDriver(BasePermission):
             and request.user.is_authenticated
             and hasattr(request.user, "rider_profile")
         )
+
+
+IsRider = IsDriver
