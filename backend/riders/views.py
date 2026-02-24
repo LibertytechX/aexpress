@@ -356,7 +356,7 @@ class RiderOrderHistoryView(APIView):
             )
 
         # History typically includes completed (Done), Failed, or Canceled orders.
-        history_statuses = ["Done", "Failed", "CustomerCanceled", "RiderCanceled"]
+        history_statuses = ["Done", "Failed", "CustomerCanceled", "RiderCanceled", "Assigned", "PickedUp", "Started"]
         orders = Order.objects.filter(
             rider=rider, status__in=history_statuses
         ).order_by("-created_at")
