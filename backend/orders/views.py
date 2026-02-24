@@ -1,3 +1,4 @@
+import logging
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -21,7 +22,9 @@ from .permissions import IsRider
 from dispatcher.models import Rider
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
+from riders.notifications import notify_rider
 
+logger = logging.getLogger(__name__)
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
@@ -159,6 +162,21 @@ class QuickSendView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Quick Send pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "quick"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
+
         # Return created order
         order_serializer = OrderSerializer(order)
 
@@ -270,6 +288,21 @@ class MultiDropView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Multi-Drop ({num_deliveries} stops) pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "multi"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
+
         # Return created order
         order_serializer = OrderSerializer(order)
 
@@ -380,6 +413,21 @@ class BulkImportView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Bulk Import ({num_deliveries} stops) pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "bulk"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
 
         # Return created order
         order_serializer = OrderSerializer(order)
