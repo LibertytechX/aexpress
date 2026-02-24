@@ -349,3 +349,68 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     def get_cod_amount(self, obj):
         d = self._get_first_delivery(obj)
         return float(d.cod_amount) if d else 0.0
+
+
+class RiderEarningsStatsSerializer(serializers.Serializer):
+    """
+    Serializer for the rider earnings summary screen.
+    """
+
+    total_earnings = serializers.DecimalField(max_digits=12, decimal_places=2)
+    trips_completed = serializers.IntegerField()
+    cod_collected = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class RiderTodayTripSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the 'Today's Trips' list.
+    Matches the specific flat format for the UI.
+    """
+
+    id = serializers.CharField(source="order_number", read_only=True)
+    route = serializers.SerializerMethodField()
+    time = serializers.SerializerMethodField()
+    distance = serializers.SerializerMethodField()
+    earned = serializers.SerializerMethodField()
+    cod = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = ["id", "route", "time", "distance", "earned", "cod"]
+
+    def get_route(self, obj):
+        # Format: "PickupArea -> DropoffArea"
+        # Since we don't have explicit 'area' names in Order, we'll use a simplified address part or fallback
+        pickup = obj.pickup_address.split(",")[0].strip()
+        first_delivery = obj.deliveries.first()
+        dropoff = (
+            first_delivery.dropoff_address.split(",")[0].strip()
+            if first_delivery
+            else "Unknown"
+        )
+        return f"{pickup} -> {dropoff}"
+
+    def get_time(self, obj):
+        # Format: "2:15 PM"
+        if obj.completed_at:
+            return obj.completed_at.strftime("%-I:%M %p")
+        return ""
+
+    def get_distance(self, obj):
+        # Format: "12.4km"
+        val = obj.distance_km or 0
+        return f"{val}km"
+
+    def get_earned(self, obj):
+        # Try to find the associated earnings
+        from .models import RiderEarning
+
+        earning = RiderEarning.objects.filter(order=obj).first()
+        if earning:
+            return float(earning.net_earning)
+        return 0.0
+
+    def get_cod(self, obj):
+        # Total COD for the order
+        total = obj.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"] or 0
+        return float(total)

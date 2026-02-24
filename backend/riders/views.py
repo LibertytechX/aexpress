@@ -17,6 +17,8 @@ from .serializers import (
     AreaDemandSerializer,
     RiderOrderSerializer,
     OrderOfferListSerializer,
+    RiderEarningsStatsSerializer,
+    RiderTodayTripSerializer,
 )
 from .models import RiderSession, RiderDevice, AreaDemand, OrderOffer, RiderCodRecord
 from dispatcher.models import Rider
@@ -36,9 +38,7 @@ class OrderOfferListView(APIView):
     def get(self, request):
         # now = timezone.now()
         offers = (
-            OrderOffer.objects.filter(
-                status="pending", rider__isnull=True
-            )
+            OrderOffer.objects.filter(status="pending", rider__isnull=True)
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
             .order_by("-created_at")
@@ -538,3 +538,115 @@ class RiderOrderDetailView(APIView):
 
         serializer = RiderOrderSerializer(order)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class RiderEarningsView(APIView):
+    """
+    API endpoint for rider earnings stats.
+    Supports period filtering: today, week, month.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return Response(
+                    {"success": False, "message": "Rider profile not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        period = request.query_params.get("period", "today").lower()
+        now = timezone.now()
+
+        if period == "today":
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            start_date = now - timedelta(days=7)
+        elif period == "month":
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 1. Total earnings (from trips)
+        from .models import RiderEarning, RiderCodRecord
+        from django.db.models import Sum
+
+        total_earnings = (
+            RiderEarning.objects.filter(
+                rider=rider, created_at__gte=start_date
+            ).aggregate(Sum("net_earning"))["net_earning__sum"]
+            or 0.00
+        )
+
+        # 2. Trips completed
+        trips_completed = Order.objects.filter(
+            rider=rider, status="Done", completed_at__gte=start_date
+        ).count()
+
+        # 3. Verified COD collected
+        # Use verified recorded cod for the cod collected
+        cod_collected = (
+            RiderCodRecord.objects.filter(
+                rider=rider,
+                status=RiderCodRecord.Status.VERIFIED,
+                created_at__gte=start_date,
+            ).aggregate(Sum("amount"))["amount__sum"]
+            or 0.00
+        )
+
+        data = {
+            "total_earnings": total_earnings,
+            "trips_completed": trips_completed,
+            "cod_collected": cod_collected,
+        }
+
+        serializer = RiderEarningsStatsSerializer(data)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderTodayTripsView(APIView):
+    """
+    API endpoint for the 'Today's Trips' list.
+    Returns completed orders for today.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return Response(
+                    {"success": False, "message": "Rider profile not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        now = timezone.now()
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        orders = (
+            Order.objects.filter(
+                rider=rider, status="Done", completed_at__gte=start_date
+            )
+            .prefetch_related("deliveries")
+            .order_by("-completed_at")
+        )
+
+        serializer = RiderTodayTripSerializer(orders, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
