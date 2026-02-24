@@ -207,7 +207,6 @@ class OrderOffer(models.Model):
         PENDING = "pending", "Pending"
         ACCEPTED = "accepted", "Accepted"
         DECLINED = "declined", "Declined"
-        EXPIRED = "expired", "Expired"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.ForeignKey(
@@ -226,7 +225,6 @@ class OrderOffer(models.Model):
     estimated_earnings = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
-    expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

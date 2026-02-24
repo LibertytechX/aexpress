@@ -85,16 +85,11 @@ class OrderOfferAcceptView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            if offer.expires_at < timezone.now():
-                offer.status = "expired"
-                offer.save(update_fields=["status"])
-                return Response(
-                    {"success": False, "message": "Offer has expired."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
             order = offer.order
             if order.status != "Pending":
+                OrderOffer.objects.filter(order=order, status="pending").exclude(
+                    id=offer_id
+                ).update(status="accepted")
                 return Response(
                     {"success": False, "message": "Order is no longer available."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -122,7 +117,7 @@ class OrderOfferAcceptView(APIView):
             # 5. Cleanup: Decline/Expire other broadcast offers for this order
             OrderOffer.objects.filter(order=order, status="pending").exclude(
                 id=offer_id
-            ).update(status="declined")
+            ).update(status="accepted")
 
             # 6. Logging/Activity
             emit_activity(

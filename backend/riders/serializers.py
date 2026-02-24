@@ -295,7 +295,6 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     dropoff_longitude = serializers.SerializerMethodField()
     dropoff_contact_name = serializers.SerializerMethodField()
     cod_amount = serializers.SerializerMethodField()
-    seconds_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderOffer
@@ -319,8 +318,6 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
             "pickup_contact_name",
             "dropoff_contact_name",
             "cod_amount",
-            "seconds_remaining",
-            "expires_at",
         ]
 
     def _get_first_delivery(self, obj):
@@ -352,9 +349,3 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     def get_cod_amount(self, obj):
         d = self._get_first_delivery(obj)
         return float(d.cod_amount) if d else 0.0
-
-    def get_seconds_remaining(self, obj):
-        now = timezone.now()
-        if obj.expires_at > now:
-            return int((obj.expires_at - now).total_seconds())
-        return 0

@@ -1,0 +1,910 @@
+{
+  "info": {
+    "name": "AX Merchant Portal API",
+    "description": "Complete API documentation for the Assured Express Merchant Dashboard. Covers authentication, order management, and wallet operations.\n\n**Base URL:** `{{base_url}}`\n\n**Auth:** All protected endpoints require a Bearer token in the Authorization header. Obtain tokens via the Login or Signup endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "ax-merchant-portal-v1"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://www.orders.axpress.net/api",
+      "type": "string",
+      "description": "API base URL. Change to http://127.0.0.1:8000/api for local development."
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "JWT access token. Automatically set after login/signup."
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "JWT refresh token. Automatically set after login/signup."
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "description": "Endpoints for user registration, login, OTP verification, email verification, password management, and profile/address management.",
+      "item": [
+        {
+          "name": "Sign Up",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/signup/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "signup", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348012345678\",\n  \"password\": \"securepassword123\",\n  \"business_name\": \"Vivid Print\",\n  \"contact_name\": \"John Doe\",\n  \"email\": \"john@vividprint.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Register a new merchant account. On success, returns JWT access and refresh tokens plus the created user object. A verification OTP is sent to the provided phone number."
+          },
+          "response": [
+            {
+              "name": "201 Created – Success",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Account created successfully. Please verify your phone number.\",\n  \"tokens\": {\n    \"access\": \"eyJ...\",\n    \"refresh\": \"eyJ...\"\n  },\n  \"user\": {\n    \"id\": 1,\n    \"phone\": \"+2348012345678\",\n    \"business_name\": \"Vivid Print\",\n    \"contact_name\": \"John Doe\",\n    \"email\": \"john@vividprint.com\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request – Validation Error",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"errors\": {\n    \"phone\": [\"A user with this phone number already exists.\"]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.success && json.tokens) {",
+                  "  pm.collectionVariables.set('access_token', json.tokens.access);",
+                  "  pm.collectionVariables.set('refresh_token', json.tokens.refresh);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/login/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348012345678\",\n  \"password\": \"securepassword123\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Authenticate an existing merchant. Returns JWT access and refresh tokens. The test script automatically saves the tokens to collection variables."
+          },
+          "response": [
+            {
+              "name": "200 OK – Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"tokens\": {\n    \"access\": \"eyJ...\",\n    \"refresh\": \"eyJ...\"\n  },\n  \"user\": {\n    \"id\": 1,\n    \"phone\": \"+2348012345678\",\n    \"business_name\": \"Vivid Print\",\n    \"contact_name\": \"John Doe\",\n    \"email\": \"john@vividprint.com\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request – Invalid Credentials",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"errors\": {\n    \"non_field_errors\": [\"Invalid phone or password.\"]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/logout/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "logout", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh\": \"{{refresh_token}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Invalidate the current refresh token and log the merchant out. Clears all stored tokens on the client side."
+          },
+          "response": [
+            {
+              "name": "200 OK – Success",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Logged out successfully.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/verify-otp/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-otp", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348012345678\",\n  \"otp\": \"123456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Verify the OTP sent to the merchant's phone number after signup."
+          },
+          "response": [
+            {
+              "name": "200 OK – Verified",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Phone number verified successfully.\"\n}"
+            },
+            {
+              "name": "400 Bad Request – Invalid OTP",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"errors\": {\n    \"non_field_errors\": [\"Invalid or expired OTP.\"]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/resend-otp/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "resend-otp", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"+2348012345678\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Resend the OTP to the merchant's phone number."
+          },
+          "response": [
+            {
+              "name": "200 OK – OTP Sent",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"OTP sent successfully.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify Email",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/verify-email/?token={{email_verification_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-email", ""],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{email_verification_token}}",
+                  "description": "Email verification token from the verification link sent to the user's email."
+                }
+              ]
+            },
+            "description": "Verify a merchant's email address using the token from the verification link. No authentication required."
+          },
+          "response": [
+            {
+              "name": "200 OK – Email Verified",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Email verified successfully.\",\n  \"user\": {\n    \"id\": 1,\n    \"email\": \"john@vividprint.com\",\n    \"email_verified\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Resend Verification Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/resend-verification/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "resend-verification", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Resend the email verification link to the currently authenticated merchant's email address."
+          },
+          "response": [
+            {
+              "name": "200 OK – Email Sent",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Verification email sent! Please check your inbox.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Request Password Reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/request-password-reset/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "request-password-reset", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"john@vividprint.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Send a password reset link to the merchant's email address. No authentication required."
+          },
+          "response": [
+            {
+              "name": "200 OK – Reset Email Sent",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Password reset link sent to your email.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/reset-password/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "reset-password", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"<reset-token-from-email-link>\",\n  \"new_password\": \"newSecurePassword456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Set a new password using the reset token from the email link. No authentication required."
+          },
+          "response": [
+            {
+              "name": "200 OK – Password Reset",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Password reset successfully. Please log in.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/me/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "me", ""]
+            },
+            "description": "Retrieve the authenticated merchant's profile information."
+          },
+          "response": [
+            {
+              "name": "200 OK – Profile Data",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"user\": {\n    \"id\": 1,\n    \"phone\": \"+2348012345678\",\n    \"business_name\": \"Vivid Print\",\n    \"contact_name\": \"John Doe\",\n    \"email\": \"john@vividprint.com\",\n    \"email_verified\": true\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/profile/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "profile", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"business_name\": \"Vivid Print Ltd\",\n  \"contact_name\": \"Jane Doe\",\n  \"email\": \"jane@vividprint.com\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update the authenticated merchant's profile information."
+          },
+          "response": [
+            {
+              "name": "200 OK – Profile Updated",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"user\": {\n    \"id\": 1,\n    \"phone\": \"+2348012345678\",\n    \"business_name\": \"Vivid Print Ltd\",\n    \"contact_name\": \"Jane Doe\",\n    \"email\": \"jane@vividprint.com\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Addresses",
+          "item": [
+            {
+              "name": "List Addresses",
+              "request": {
+                "method": "GET",
+                "header": [
+                  { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/auth/addresses/",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "addresses", ""]
+                },
+                "description": "Retrieve all saved addresses for the authenticated merchant."
+              },
+              "response": [
+                {
+                  "name": "200 OK – Address List",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\n  \"success\": true,\n  \"addresses\": [\n    {\n      \"id\": 1,\n      \"label\": \"Office\",\n      \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n      \"is_default\": true\n    }\n  ]\n}"
+                }
+              ]
+            },
+            {
+              "name": "Create Address",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/auth/addresses/",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "addresses", ""]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"label\": \"Office\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"is_default\": false\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Save a new address for the authenticated merchant."
+              },
+              "response": [
+                {
+                  "name": "201 Created – Address Saved",
+                  "status": "Created",
+                  "code": 201,
+                  "body": "{\n  \"success\": true,\n  \"address\": {\n    \"id\": 2,\n    \"label\": \"Office\",\n    \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"is_default\": false\n  }\n}"
+                }
+              ]
+            },
+            {
+              "name": "Update Address",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  { "key": "Content-Type", "value": "application/json" },
+                  { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/auth/addresses/:addressId/",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "addresses", ":addressId", ""],
+                  "variable": [
+                    { "key": "addressId", "value": "1", "description": "ID of the address to update." }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"label\": \"Head Office\",\n  \"address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"is_default\": true\n}",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Update an existing saved address by its ID."
+              },
+              "response": []
+            },
+            {
+              "name": "Delete Address",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/auth/addresses/:addressId/",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "addresses", ":addressId", ""],
+                  "variable": [
+                    { "key": "addressId", "value": "1", "description": "ID of the address to delete." }
+                  ]
+                },
+                "description": "Permanently delete a saved address by its ID."
+              },
+              "response": []
+            },
+            {
+              "name": "Set Default Address",
+              "request": {
+                "method": "POST",
+                "header": [
+                  { "key": "Authorization", "value": "Bearer {{access_token}}" }
+                ],
+                "url": {
+                  "raw": "{{base_url}}/auth/addresses/:addressId/set-default/",
+                  "host": ["{{base_url}}"],
+                  "path": ["auth", "addresses", ":addressId", "set-default", ""],
+                  "variable": [
+                    { "key": "addressId", "value": "1", "description": "ID of the address to mark as default." }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "",
+                  "options": { "raw": { "language": "json" } }
+                },
+                "description": "Mark a saved address as the merchant's default pickup address."
+              },
+              "response": [
+                {
+                  "name": "200 OK – Default Set",
+                  "status": "OK",
+                  "code": 200,
+                  "body": "{\n  \"success\": true,\n  \"message\": \"Default address updated.\"\n}"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "description": "Endpoints for creating deliveries (Quick Send, Multi-Drop, Bulk Import), listing and viewing orders, cancellations, and fetching available vehicles.",
+      "item": [
+        {
+          "name": "List Vehicles",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/vehicles/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "vehicles", ""]
+            },
+            "description": "Retrieve all available vehicle types (e.g., Bike, Car, Van) with their pricing details. Used to populate the vehicle selector in the New Order form."
+          },
+          "response": [
+            {
+              "name": "200 OK – Vehicle List",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"vehicles\": [\n    {\n      \"id\": 1,\n      \"name\": \"Bike\",\n      \"base_fare\": 500,\n      \"per_km_rate\": 80,\n      \"icon\": \"bike\"\n    },\n    {\n      \"id\": 2,\n      \"name\": \"Car\",\n      \"base_fare\": 1000,\n      \"per_km_rate\": 120,\n      \"icon\": \"car\"\n    },\n    {\n      \"id\": 3,\n      \"name\": \"Van\",\n      \"base_fare\": 1500,\n      \"per_km_rate\": 150,\n      \"icon\": \"van\"\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Quick Send Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/quick-send/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "quick-send", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"sender_name\": \"John Doe\",\n  \"sender_phone\": \"+2348012345678\",\n  \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n  \"receiver_name\": \"Jane Smith\",\n  \"receiver_phone\": \"+2348087654321\",\n  \"vehicle\": \"Bike\",\n  \"payment_method\": \"wallet\",\n  \"package_type\": \"Box\",\n  \"notes\": \"Please handle with care.\",\n  \"distance_km\": 8.5,\n  \"duration_minutes\": 35\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a single-pickup, single-dropoff delivery order. `payment_method` can be `wallet` or `cash`. `package_type` can be `Box`, `Envelope`, `Bag`, etc."
+          },
+          "response": [
+            {
+              "name": "201 Created – Order Placed",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Order #6158254 created successfully!\",\n  \"order\": {\n    \"order_number\": \"6158254\",\n    \"status\": \"Pending\",\n    \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n    \"total_amount\": \"1210.00\",\n    \"vehicle_name\": \"Bike\",\n    \"payment_method\": \"wallet\",\n    \"created_at\": \"2025-02-14T13:00:00Z\",\n    \"deliveries\": [\n      {\n        \"id\": 1,\n        \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n        \"receiver_name\": \"Jane Smith\",\n        \"receiver_phone\": \"+2348087654321\",\n        \"status\": \"Pending\"\n      }\n    ]\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request – Insufficient Balance",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"errors\": {\n    \"non_field_errors\": [\"Insufficient wallet balance.\"]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Multi-Drop Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/multi-drop/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "multi-drop", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"sender_name\": \"John Doe\",\n  \"sender_phone\": \"+2348012345678\",\n  \"vehicle\": \"Bike\",\n  \"payment_method\": \"wallet\",\n  \"notes\": \"\",\n  \"distance_km\": 15.0,\n  \"duration_minutes\": 60,\n  \"deliveries\": [\n    {\n      \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n      \"receiver_name\": \"Jane Smith\",\n      \"receiver_phone\": \"+2348087654321\",\n      \"package_type\": \"Box\",\n      \"notes\": \"\"\n    },\n    {\n      \"dropoff_address\": \"42 Allen Avenue, Ikeja, Lagos\",\n      \"receiver_name\": \"Mike Johnson\",\n      \"receiver_phone\": \"+2348011111111\",\n      \"package_type\": \"Envelope\",\n      \"notes\": \"Fragile\"\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create an order with a single pickup point and multiple dropoff destinations. Each delivery object represents one dropoff stop."
+          },
+          "response": [
+            {
+              "name": "201 Created – Multi-Drop Order Placed",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Order #6158255 created successfully!\",\n  \"order\": {\n    \"order_number\": \"6158255\",\n    \"status\": \"Pending\",\n    \"mode\": \"multi\",\n    \"total_amount\": \"2800.00\",\n    \"deliveries\": [\n      { \"id\": 2, \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\", \"status\": \"Pending\" },\n      { \"id\": 3, \"dropoff_address\": \"42 Allen Avenue, Ikeja, Lagos\", \"status\": \"Pending\" }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Create Bulk Import Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/bulk-import/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "bulk-import", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_address\": \"27A Idowu Martins St, Victoria Island, Lagos\",\n  \"sender_name\": \"John Doe\",\n  \"sender_phone\": \"+2348012345678\",\n  \"vehicle\": \"Van\",\n  \"payment_method\": \"wallet\",\n  \"notes\": \"Bulk delivery batch\",\n  \"distance_km\": 50.0,\n  \"duration_minutes\": 180,\n  \"deliveries\": [\n    {\n      \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba, Lagos\",\n      \"receiver_name\": \"Jane Smith\",\n      \"receiver_phone\": \"+2348087654321\",\n      \"package_type\": \"Box\",\n      \"notes\": \"\"\n    },\n    {\n      \"dropoff_address\": \"42 Allen Avenue, Ikeja, Lagos\",\n      \"receiver_name\": \"Mike Johnson\",\n      \"receiver_phone\": \"+2348011111111\",\n      \"package_type\": \"Box\",\n      \"notes\": \"\"\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a bulk order with many deliveries, typically imported from a spreadsheet. Uses the same structure as Multi-Drop but is intended for large batches."
+          },
+          "response": [
+            {
+              "name": "201 Created – Bulk Import Order Placed",
+              "status": "Created",
+              "code": 201,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Bulk order #6158256 created with 2 deliveries.\",\n  \"order\": {\n    \"order_number\": \"6158256\",\n    \"status\": \"Pending\",\n    \"mode\": \"bulk\",\n    \"total_amount\": \"5500.00\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "List Orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", ""],
+              "query": [
+                { "key": "status", "value": "Pending", "disabled": true, "description": "Filter by order status. Options: Pending, Assigned, Started, PickedUp, Done, CustomerCanceled, DriverCanceled, SupportCanceled, Unassigned" },
+                { "key": "mode", "value": "quick", "disabled": true, "description": "Filter by order mode. Options: quick, multi, bulk" },
+                { "key": "limit", "value": "20", "disabled": true, "description": "Maximum number of orders to return." }
+              ]
+            },
+            "description": "Retrieve the merchant's order history. Supports optional query filters for status, mode, and pagination limit."
+          },
+          "response": [
+            {
+              "name": "200 OK – Orders List",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"orders\": [\n    {\n      \"order_number\": \"6158254\",\n      \"status\": \"Pending\",\n      \"pickup_address\": \"27A Idowu Martins St, Victoria Island\",\n      \"total_amount\": \"1210.00\",\n      \"vehicle_name\": \"Bike\",\n      \"payment_method\": \"wallet\",\n      \"mode\": \"quick\",\n      \"user_business_name\": \"Vivid Print\",\n      \"created_at\": \"2025-02-14T13:00:00Z\",\n      \"deliveries\": [\n        {\n          \"id\": 1,\n          \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba\",\n          \"status\": \"Pending\"\n        }\n      ]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Order Details",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/:orderNumber/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", ":orderNumber", ""],
+              "variable": [
+                { "key": "orderNumber", "value": "6158254", "description": "The unique order number." }
+              ]
+            },
+            "description": "Retrieve full details for a specific order by its order number."
+          },
+          "response": [
+            {
+              "name": "200 OK – Order Details",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"order\": {\n    \"order_number\": \"6158254\",\n    \"status\": \"Done\",\n    \"pickup_address\": \"27A Idowu Martins St, Victoria Island\",\n    \"total_amount\": \"1210.00\",\n    \"vehicle_name\": \"Bike\",\n    \"payment_method\": \"wallet\",\n    \"mode\": \"quick\",\n    \"created_at\": \"2025-02-14T13:00:00Z\",\n    \"deliveries\": [\n      {\n        \"id\": 1,\n        \"dropoff_address\": \"24 Harvey Rd, Sabo Yaba\",\n        \"receiver_name\": \"Jane Smith\",\n        \"receiver_phone\": \"+2348087654321\",\n        \"package_type\": \"Box\",\n        \"status\": \"Delivered\"\n      }\n    ],\n    \"rider\": {\n      \"name\": \"Emeka Chukwu\",\n      \"phone\": \"+2348099999999\"\n    }\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Order Stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/stats/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "stats", ""]
+            },
+            "description": "Retrieve aggregated order statistics for the authenticated merchant. Used to populate the dashboard summary cards."
+          },
+          "response": [
+            {
+              "name": "200 OK – Stats",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"stats\": {\n    \"total_orders\": 150,\n    \"pending_orders\": 3,\n    \"completed_orders\": 140,\n    \"cancelled_orders\": 7,\n    \"total_spent\": \"185000.00\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Cancel Order",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/orders/cancel/:orderNumber/",
+              "host": ["{{base_url}}"],
+              "path": ["orders", "cancel", ":orderNumber", ""],
+              "variable": [
+                { "key": "orderNumber", "value": "6158254", "description": "The order number to cancel." }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Canceled by merchant\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Cancel a pending or unassigned order. If the order was paid via wallet, a refund is automatically issued to the merchant's wallet."
+          },
+          "response": [
+            {
+              "name": "200 OK – Order Cancelled",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Order cancelled successfully.\",\n  \"refund\": {\n    \"processed\": true,\n    \"amount\": 1210.00\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request – Cannot Cancel",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"Order is already in transit and cannot be cancelled.\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Wallet",
+      "description": "Endpoints for wallet balance, transaction history, Paystack card payment (initialize + verify), virtual bank account for bank transfers, and Paystack key retrieval.",
+      "item": [
+        {
+          "name": "Get Wallet Balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/balance/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "balance", ""]
+            },
+            "description": "Retrieve the current wallet balance for the authenticated merchant."
+          },
+          "response": [
+            {
+              "name": "200 OK – Balance",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"balance\": \"8790.00\",\n    \"currency\": \"NGN\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Transaction History",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/transactions/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "transactions", ""],
+              "query": [
+                { "key": "type", "value": "credit", "disabled": true, "description": "Filter by transaction type: credit or debit." },
+                { "key": "status", "value": "success", "disabled": true, "description": "Filter by transaction status." },
+                { "key": "page", "value": "1", "disabled": true, "description": "Pagination page number." }
+              ]
+            },
+            "description": "Retrieve the merchant's wallet transaction history. Supports optional query filters for type, status, and pagination."
+          },
+          "response": [
+            {
+              "name": "200 OK – Transaction List",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"results\": {\n    \"data\": [\n      {\n        \"id\": \"TXN-001\",\n        \"type\": \"credit\",\n        \"amount\": \"10000.00\",\n        \"description\": \"Wallet Funding (Card)\",\n        \"reference\": \"PSK_abc123\",\n        \"balance_after\": \"10000.00\",\n        \"status\": \"success\",\n        \"created_at\": \"2025-02-14T12:30:00Z\"\n      },\n      {\n        \"id\": \"TXN-002\",\n        \"type\": \"debit\",\n        \"amount\": \"1210.00\",\n        \"description\": \"Order #6158254 — VI to Yaba\",\n        \"reference\": \"ORD_6158254\",\n        \"balance_after\": \"8790.00\",\n        \"status\": \"success\",\n        \"created_at\": \"2025-02-14T13:00:00Z\"\n      }\n    ]\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Paystack Public Key",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/paystack-key/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "paystack-key", ""]
+            },
+            "description": "Retrieve the Paystack public key needed to initialize the Paystack Inline JS payment popup on the frontend."
+          },
+          "response": [
+            {
+              "name": "200 OK – Public Key",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"public_key\": \"pk_live_xxxxxxxxxxxxxxxxxxxtypehere\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Initialize Wallet Funding (Card)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/fund/initialize/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "fund", "initialize", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": \"5000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create a Paystack payment session to fund the merchant wallet via card. Returns a payment `reference` which is passed to the Paystack Inline popup. Amount is in Naira (the backend converts to kobo for Paystack)."
+          },
+          "response": [
+            {
+              "name": "200 OK – Payment Initialized",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"reference\": \"PSK_1707912600000\",\n    \"amount\": 5000,\n    \"currency\": \"NGN\"\n  }\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify Wallet Funding (Card)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/fund/verify/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "fund", "verify", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reference\": \"PSK_1707912600000\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Verify a Paystack card payment after the user completes the payment popup. The `reference` is obtained from the Paystack callback. On success, the wallet is credited."
+          },
+          "response": [
+            {
+              "name": "200 OK – Payment Verified & Wallet Credited",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Wallet funded successfully.\",\n  \"data\": {\n    \"amount_credited\": \"5000.00\",\n    \"new_balance\": \"13790.00\"\n  }\n}"
+            },
+            {
+              "name": "400 Bad Request – Verification Failed",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"Payment verification failed.\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get Virtual Account (Bank Transfer)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/wallet/virtual-account/",
+              "host": ["{{base_url}}"],
+              "path": ["wallet", "virtual-account", ""]
+            },
+            "description": "Retrieve (or create) the merchant's dedicated virtual bank account for wallet funding via bank transfer. The merchant transfers their desired amount to this account, and the wallet is credited upon confirmation."
+          },
+          "response": [
+            {
+              "name": "200 OK – Virtual Account Details",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"account_number\": \"0012345678\",\n    \"account_name\": \"ASSURED EXPRESS / VIVID PRINT\",\n    \"bank_name\": \"Wema Bank\",\n    \"bank_code\": \"035\"\n  }\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
