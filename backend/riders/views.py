@@ -13,11 +13,35 @@ from .serializers import (
     DutyToggleSerializer,
     AreaDemandSerializer,
     RiderOrderSerializer,
+    OrderOfferListSerializer,
 )
-from .models import RiderSession, RiderDevice, AreaDemand
+from .models import RiderSession, RiderDevice, AreaDemand, OrderOffer
 from dispatcher.models import Rider
 from orders.models import Order
 from django.db.models import Q
+
+
+class OrderOfferListView(APIView):
+    """
+    API endpoint for riders to see unassigned order offers.
+    Returns pending offers that haven't expired.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now()
+        offers = (
+            OrderOffer.objects.filter(
+                status="pending", expires_at__gt=now, rider__isnull=True
+            )
+            .select_related("order", "order__vehicle", "order__user")
+            .prefetch_related("order__deliveries")
+            .order_by("-created_at")
+        )
+
+        serializer = OrderOfferListSerializer(offers, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class AreaDemandListView(APIView):
@@ -356,7 +380,15 @@ class RiderOrderHistoryView(APIView):
             )
 
         # History typically includes completed (Done), Failed, or Canceled orders.
-        history_statuses = ["Done", "Failed", "CustomerCanceled", "RiderCanceled", "Assigned", "PickedUp", "Started"]
+        history_statuses = [
+            "Done",
+            "Failed",
+            "CustomerCanceled",
+            "RiderCanceled",
+            "Assigned",
+            "PickedUp",
+            "Started",
+        ]
         orders = Order.objects.filter(
             rider=rider, status__in=history_statuses
         ).order_by("-created_at")
