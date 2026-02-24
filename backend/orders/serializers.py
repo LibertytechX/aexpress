@@ -452,3 +452,11 @@ class OrderCancelSerializer(serializers.Serializer):
     """Serializer for order cancellation."""
 
     reason = serializers.CharField(required=True, max_length=5000)
+
+
+class OrderStatusUpdateSerializer(serializers.Serializer):
+    """Serializer for rider order status updates with location."""
+
+    latitude = serializers.FloatField(required=False)
+    longitude = serializers.FloatField(required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)

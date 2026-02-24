@@ -171,6 +171,7 @@ class Order(models.Model):
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+    picked_up_at = models.DateTimeField(null=True, blank=True)
     scheduled_pickup_time = models.DateTimeField(null=True, blank=True)
 
     # Additional info
