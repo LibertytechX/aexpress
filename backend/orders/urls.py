@@ -14,6 +14,7 @@ from .views import (
     AssignedOrdersView,
     AssignedOrderDetailView,
     AssignedRoutesView,
+    cancel_order,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -61,6 +62,11 @@ urlpatterns = [
         "escrow-status/<str:order_number>/",
         EscrowStatusView.as_view(),
         name="escrow_status",
+    ),
+    path(
+        "rider/orders/<uuid:order_id>/cancel/",
+        cancel_order,
+        name="rider_cancel_order",
     ),
     path("cancel/<str:order_number>/", CancelOrderView.as_view(), name="cancel_order"),
     # Generic order detail (must come last to avoid matching specific endpoints)

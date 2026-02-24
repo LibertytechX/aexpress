@@ -1,10 +1,11 @@
 from rest_framework import status, generics, permissions
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
-from .models import Order, Delivery, Vehicle
+from .models import Order, Delivery, Vehicle, OrderEvent
 from .serializers import (
     OrderSerializer,
     VehicleSerializer,
@@ -13,8 +14,10 @@ from .serializers import (
     BulkImportSerializer,
     AssignedOrderSerializer,
     AssignedRouteSerializer,
+    OrderCancelSerializer,
 )
-from .permissions import IsDriver
+from .permissions import IsRider
+from dispatcher.models import Rider
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 
@@ -716,7 +719,7 @@ class AssignedOrdersView(APIView):
     Excludes certain terminal/canceled statuses.
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    permission_classes = [permissions.IsAuthenticated, IsRider]
 
     def get(self, request):
         excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
@@ -746,7 +749,7 @@ class AssignedOrderDetailView(APIView):
     Get details of a specific assigned order.
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    permission_classes = [permissions.IsAuthenticated, IsRider]
 
     def get(self, request, order_number):
         # Get rider profile
@@ -780,7 +783,7 @@ class AssignedRoutesView(APIView):
     formatted as routes and stops.
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsDriver]
+    permission_classes = [permissions.IsAuthenticated, IsRider]
 
     def get(self, request):
         excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
@@ -803,3 +806,35 @@ class AssignedRoutesView(APIView):
 
         serializer = AssignedRouteSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsRider])
+def cancel_order(request, order_id):
+    """POST /api/rider/orders/<id>/cancel/"""
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    ser = OrderCancelSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    # Get rider profile
+    rider = request.user.rider_profile
+    order.status = "Pending"
+    order.canceled_at = timezone.now()
+    order.cancellation_reason = ser.validated_data["reason"]
+    order.save()
+
+    rider.current_order = None
+    rider.status = Rider.Status.ONLINE
+    rider.save(update_fields=["current_order", "status"])
+
+    OrderEvent.objects.create(
+        order=order,
+        event="Driver Canceled",
+        description=f"Canceled by {request.user.contact_name or request.user.phone}: {ser.validated_data['reason']}",
+    )
+
+    return Response({"status": "canceled"})

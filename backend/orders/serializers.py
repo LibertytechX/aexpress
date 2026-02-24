@@ -446,3 +446,9 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
 
     def get_completed_stops(self, obj):
         return obj.deliveries.filter(status="Delivered").count()
+
+
+class OrderCancelSerializer(serializers.Serializer):
+    """Serializer for order cancellation."""
+
+    reason = serializers.CharField(required=True, max_length=500)
