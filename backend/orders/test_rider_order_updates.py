@@ -19,9 +19,7 @@ class RiderOrderEndpointsTests(TestCase):
             usertype="Rider",
             contact_name="Rider One",
         )
-        self.rider_profile = Rider.objects.create(
-            user=self.rider_user, phone=self.rider_user.phone
-        )
+        self.rider_profile = Rider.objects.create(user=self.rider_user)
         self.client.force_authenticate(user=self.rider_user)
 
         # Create a merchant user
@@ -31,7 +29,7 @@ class RiderOrderEndpointsTests(TestCase):
             password="password123",
             usertype="Merchant",
             contact_name="Merchant One",
-            business_name="Merchant Biz"
+            business_name="Merchant Biz",
         )
 
         # Create vehicle
