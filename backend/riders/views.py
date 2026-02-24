@@ -19,6 +19,7 @@ from .serializers import (
     OrderOfferListSerializer,
     RiderEarningsStatsSerializer,
     RiderTodayTripSerializer,
+    RiderWalletInfoSerializer,
 )
 from .models import RiderSession, RiderDevice, AreaDemand, OrderOffer, RiderCodRecord
 from dispatcher.models import Rider
@@ -647,6 +648,34 @@ class RiderTodayTripsView(APIView):
         )
 
         serializer = RiderTodayTripSerializer(orders, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderWalletInfoView(APIView):
+    """
+    API endpoint for the rider wallet info screen.
+    Returns available balance and pending COD.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return Response(
+                    {"success": False, "message": "Rider profile not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderWalletInfoSerializer(rider)
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
         )

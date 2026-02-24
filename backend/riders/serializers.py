@@ -414,3 +414,36 @@ class RiderTodayTripSerializer(serializers.ModelSerializer):
         # Total COD for the order
         total = obj.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"] or 0
         return float(total)
+
+
+class RiderWalletInfoSerializer(serializers.Serializer):
+    """
+    Serializer for the rider wallet info screen.
+    Includes Available Balance and Pending COD.
+    """
+
+    available_balance = serializers.SerializerMethodField()
+    pending_cod = serializers.SerializerMethodField()
+
+    def get_available_balance(self, obj):
+        # Available Balance = Wallet Balance + Pending COD
+        try:
+            wallet_balance = obj.user.wallet.balance
+        except (AttributeError, Wallet.DoesNotExist):
+            wallet_balance = 0.00
+
+        # Sum of pending COD records
+        # pending_cod = (
+        #     obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
+        #         "amount__sum"
+        #     ]
+        #     or 0.00
+        # )
+        return float(wallet_balance)
+
+    def get_pending_cod(self, obj):
+        # Sum of pending COD records
+        total = obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
+            "amount__sum"
+        ]
+        return float(total or 0.00)
