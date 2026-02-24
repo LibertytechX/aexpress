@@ -10,6 +10,7 @@ from .views import (
     RiderOrderHistoryView,
     RiderOrderDetailView,
     OrderOfferListView,
+    OrderOfferAcceptView,
 )
 
 app_name = "riders"
@@ -32,6 +33,11 @@ urlpatterns = [
         "orders/history/", RiderOrderHistoryView.as_view(), name="rider-order-history"
     ),
     path("orders/offers/", OrderOfferListView.as_view(), name="rider-order-offers"),
+    path(
+        "orders/offers/<uuid:offer_id>/accept/",
+        OrderOfferAcceptView.as_view(),
+        name="rider-offer-accept",
+    ),
     path(
         "orders/<str:order_id>/",
         RiderOrderDetailView.as_view(),
