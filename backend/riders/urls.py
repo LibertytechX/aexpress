@@ -7,6 +7,10 @@ from .views import (
     RiderMeView,
     RiderToggleDutyView,
     AreaDemandListView,
+    RiderOrderHistoryView,
+    RiderOrderDetailView,
+    OrderOfferListView,
+    OrderOfferAcceptView,
 )
 
 app_name = "riders"
@@ -25,4 +29,18 @@ urlpatterns = [
     path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path("duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
     path("area-demand/", AreaDemandListView.as_view(), name="area-demand-list"),
+    path(
+        "orders/history/", RiderOrderHistoryView.as_view(), name="rider-order-history"
+    ),
+    path("orders/offers/", OrderOfferListView.as_view(), name="rider-order-offers"),
+    path(
+        "orders/offers/<uuid:offer_id>/accept/",
+        OrderOfferAcceptView.as_view(),
+        name="rider-offer-accept",
+    ),
+    path(
+        "orders/<str:order_id>/",
+        RiderOrderDetailView.as_view(),
+        name="rider-order-detail",
+    ),
 ]

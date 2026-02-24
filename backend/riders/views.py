@@ -5,6 +5,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
+from django.db.models import Q
+from django.db import transaction
+
 from .serializers import (
     RiderLoginSerializer,
     RiderMeSerializer,
@@ -12,9 +15,142 @@ from .serializers import (
     UpdatePermissionsSerializer,
     DutyToggleSerializer,
     AreaDemandSerializer,
+    RiderOrderSerializer,
+    OrderOfferListSerializer,
 )
-from .models import RiderSession, RiderDevice, AreaDemand
+from .models import RiderSession, RiderDevice, AreaDemand, OrderOffer, RiderCodRecord
 from dispatcher.models import Rider
+from orders.models import Order
+from orders.permissions import IsRider
+from dispatcher.utils import emit_activity
+
+
+class OrderOfferListView(APIView):
+    """
+    API endpoint for riders to see unassigned order offers.
+    Returns pending offers that haven't expired.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        # now = timezone.now()
+        offers = (
+            OrderOffer.objects.filter(
+                status="pending", rider__isnull=True
+            )
+            .select_related("order", "order__vehicle", "order__user")
+            .prefetch_related("order__deliveries")
+            .order_by("-created_at")
+        )
+
+        serializer = OrderOfferListSerializer(offers, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class OrderOfferAcceptView(APIView):
+    """
+    API endpoint for riders to accept an order offer.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request, offer_id):
+        try:
+            # Get rider profile
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Authenticated user is not a driver.",
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            # Get the offer and lock it for update
+            try:
+                offer = OrderOffer.objects.select_for_update().get(id=offer_id)
+            except (OrderOffer.DoesNotExist, ValueError):
+                return Response(
+                    {"success": False, "message": "Offer not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # 1. Validation
+            if offer.status != "pending":
+                return Response(
+                    {"success": False, "message": f"Offer is already {offer.status}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if offer.expires_at < timezone.now():
+                offer.status = "expired"
+                offer.save(update_fields=["status"])
+                return Response(
+                    {"success": False, "message": "Offer has expired."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order = offer.order
+            if order.status != "Pending":
+                return Response(
+                    {"success": False, "message": "Order is no longer available."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # 2. Acceptance Phase
+            offer.status = "accepted"
+            offer.rider = rider
+            offer.save(update_fields=["status", "rider"])
+
+            # 3. Order Assignment
+            order.rider = rider
+            order.status = "Assigned"
+            order.save(update_fields=["rider", "status", "updated_at"])
+
+            # 4. COD Logic
+            if order.payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
+                RiderCodRecord.objects.create(
+                    rider=rider,
+                    order=order,
+                    amount=order.total_amount,
+                    status=RiderCodRecord.Status.PENDING,
+                )
+
+            # 5. Cleanup: Decline/Expire other broadcast offers for this order
+            OrderOffer.objects.filter(order=order, status="pending").exclude(
+                id=offer_id
+            ).update(status="declined")
+
+            # 6. Logging/Activity
+            emit_activity(
+                event_type="assigned",
+                order_id=order.order_number,
+                text=f"Offer accepted by rider {rider.rider_id}. Order assigned.",
+                color="blue",
+                metadata={
+                    "rider_id": str(rider.id),
+                    "offer_id": str(offer.id),
+                    "order_number": order.order_number,
+                },
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Offer accepted and order assigned successfully.",
+                    "order_number": order.order_number,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            return Response(
+                {"success": False, "message": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class AreaDemandListView(APIView):
@@ -334,3 +470,76 @@ class RiderToggleDutyView(APIView):
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class RiderOrderHistoryView(APIView):
+    """
+    API endpoint for rider order history.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            rider = request.user.rider_profile
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # History typically includes completed (Done), Failed, or Canceled orders.
+        history_statuses = [
+            "Done",
+            "Failed",
+            "CustomerCanceled",
+            "RiderCanceled",
+            "Assigned",
+            "PickedUp",
+            "Started",
+        ]
+        orders = Order.objects.filter(
+            rider=rider, status__in=history_statuses
+        ).order_by("-created_at")
+
+        serializer = RiderOrderSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class RiderOrderDetailView(APIView):
+    """
+    API endpoint for rider order detail.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, order_id):
+        try:
+            rider = request.user.rider_profile
+        except Exception:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Try to get by UUID (id) or order_number
+        try:
+            # We allow both UUID and human-readable order number
+            from uuid import UUID
+
+            lookup_filter = Q(order_number=order_id)
+            try:
+                UUID(order_id)
+                lookup_filter |= Q(id=order_id)
+            except ValueError:
+                pass
+
+            order = Order.objects.get(lookup_filter, rider=rider)
+        except (Order.DoesNotExist, ValueError):
+            return Response(
+                {"success": False, "message": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderOrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)

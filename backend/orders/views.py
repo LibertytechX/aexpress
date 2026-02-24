@@ -759,7 +759,20 @@ def _advance_order(request, order_number, new_status, event_desc):
     order.status = new_status
     if new_status == "PickedUp" and not order.picked_up_at:
         order.picked_up_at = timezone.now()
-    order.save(update_fields=["status", "picked_up_at", "updated_at"])
+    elif new_status == "Arrived" and not order.arrived_at:
+        order.arrived_at = timezone.now()
+    elif new_status == "Done" and not order.completed_at:
+        order.completed_at = timezone.now()
+
+    update_fields = ["status", "updated_at"]
+    if order.picked_up_at:
+        update_fields.append("picked_up_at")
+    if order.arrived_at:
+        update_fields.append("arrived_at")
+    if order.completed_at:
+        update_fields.append("completed_at")
+
+    order.save(update_fields=update_fields)
 
     # Update rider location if provided
     rider_profile = getattr(request.user, "rider_profile", None)
@@ -808,6 +821,83 @@ class OrderPickupView(APIView):
         return _advance_order(request, order_number, "PickedUp", "Order Picked Up")
 
 
+class OrderStartView(APIView):
+    """
+    Endpoint for riders to mark an order as started (trip to pickup).
+    POST /api/orders/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # TODO: check if the rider is assigned to this order
+
+        return _advance_order(request, order_number, "Started", "Order Started")
+
+
+class OrderArrivedView(APIView):
+    """
+    Endpoint for riders to mark themselves as arrived at pickup.
+    POST /api/orders/arrived/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return _advance_order(
+            request, order_number, "Arrived", "Rider Arrived at Pickup"
+        )
+
+
+class OrderCompleteView(APIView):
+    """
+    Endpoint for riders to mark an entire order as completed.
+    POST /api/orders/complete/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            order = Order.objects.select_for_update().get(order_number=order_number)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Mark all deliveries as completed if not already
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
+
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
+
+
 class AssignedOrderDetailView(APIView):
     """
     Get details of a specific assigned order.
@@ -850,7 +940,11 @@ class AssignedRoutesView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
     def get(self, request):
-        excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+        # excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+        statuses = ["Pending", "Assigned", "PickedUp", "Started"]
+        order_status = request.query_params.get("status", "active")
+        if order_status == "done":
+            statuses = ["Done"]
 
         # Get rider profile
         rider_profile = getattr(request.user, "rider_profile", None)
@@ -862,7 +956,7 @@ class AssignedRoutesView(APIView):
 
         orders = (
             Order.objects.filter(rider=rider_profile)
-            .exclude(status__in=excluded_statuses)
+            .filter(status__in=statuses)
             .select_related("vehicle", "user")
             .prefetch_related("deliveries", "rider_offers")
             .order_by("-created_at")
@@ -903,3 +997,116 @@ def cancel_order(request, order_id):
     )
 
     return Response({"status": "canceled"})
+
+
+class DeliveryStartView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as In Transit.
+    POST /api/orders/delivery/<delivery_id>/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "InTransit"
+        delivery.save(update_fields=["status"])
+
+        # Update order status if it's currently PickedUp
+        if order.status == "PickedUp":
+            order.status = "Started"
+            order.save(update_fields=["status", "updated_at"])
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Started",
+            description=f"Delivery to {delivery.receiver_name} started by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "InTransit", "previous": old_status})
+
+
+class DeliveryCompleteView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as Delivered.
+    POST /api/orders/delivery/<delivery_id>/deliver/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.select_for_update().get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "Delivered"
+        delivery.delivered_at = timezone.now()
+        delivery.save(update_fields=["status", "delivered_at"])
+
+        # Check if all deliveries for this order are completed
+        all_delivered = not order.deliveries.exclude(status="Delivered").exists()
+        if all_delivered:
+            order.status = "Done"
+            order.save(update_fields=["status", "updated_at"])
+
+            OrderEvent.objects.create(
+                order=order,
+                event="Order Completed",
+                description="All deliveries completed.",
+            )
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Completed",
+            description=f"Delivery to {delivery.receiver_name} completed by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "Delivered", "previous": old_status})

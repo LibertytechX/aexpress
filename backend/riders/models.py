@@ -214,7 +214,11 @@ class OrderOffer(models.Model):
         "orders.Order", on_delete=models.CASCADE, related_name="rider_offers"
     )
     rider = models.ForeignKey(
-        "dispatcher.Rider", on_delete=models.CASCADE, related_name="order_offers"
+        "dispatcher.Rider",
+        on_delete=models.CASCADE,
+        related_name="order_offers",
+        null=True,
+        blank=True,
     )
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
@@ -277,6 +281,7 @@ class AreaDemand(models.Model):
     Real-time demand levels per area. Updated by Celery task.
     Shown on the Off-Duty screen.
     """
+
     class Level(models.TextChoices):
         LOW = "low", "Low"
         MEDIUM = "medium", "Medium"
@@ -287,10 +292,37 @@ class AreaDemand(models.Model):
     level = models.CharField(max_length=10, choices=Level.choices, default=Level.LOW)
     pending_orders = models.IntegerField(default=0)
     active_riders = models.IntegerField(default=0)
-    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
-    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    latitude = models.DecimalField(
+        max_digits=10, decimal_places=7, null=True, blank=True
+    )
+    longitude = models.DecimalField(
+        max_digits=10, decimal_places=7, null=True, blank=True
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "area_demand"
         ordering = ["area_name"]
+
+
+class RiderNotification(models.Model):
+    """
+    Persisted notifications sent to riders.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(default=dict, blank=True)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "rider_notifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Notification for {self.rider.rider_id}: {self.title}"
