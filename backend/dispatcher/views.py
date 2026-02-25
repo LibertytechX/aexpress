@@ -279,6 +279,7 @@ class AblyTokenView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        import json
         from django.conf import settings as django_settings
 
         api_key = getattr(django_settings, "ABLY_API_KEY", "")
@@ -287,6 +288,15 @@ class AblyTokenView(views.APIView):
                 {"error": "Ably not configured"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+
+        # Wildcard capability: covers "assigned-{any-rider-id}" and the broadcast feed.
+        # Dispatchers (no rider profile) only get dispatch-feed.
+        capability = {
+            "dispatch-feed": ["subscribe"],
+            "assigned-*": ["subscribe"],
+            "for-you": ["subscribe"],
+        }
+
         try:
             import asyncio
             from ably import AblyRest
@@ -294,7 +304,7 @@ class AblyTokenView(views.APIView):
             async def _create_token_req():
                 client = AblyRest(api_key)
                 return await client.auth.create_token_request(
-                    {"capability": {"dispatch-feed": ["subscribe"]}}
+                    {"capability": json.dumps(capability)}
                 )
 
             token_request = asyncio.run(_create_token_req())
