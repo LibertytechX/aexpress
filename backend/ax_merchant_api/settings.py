@@ -215,6 +215,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5176",
     "http://localhost:5177",
     "http://localhost:5180",
+    "https://aexpress-dispatcher-frontend.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -222,10 +223,8 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
-CORS_ALLOWED_ORIGINS.append(
-    "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
-    "https://aexpress-dispatcher-frontend.vercel.app",
-)
+CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev")
+
 
 CSRF_TRUSTED_ORIGINS = [
     "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
