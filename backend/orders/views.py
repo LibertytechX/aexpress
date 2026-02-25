@@ -887,7 +887,22 @@ class OrderStartView(APIView):
             )
         # TODO: check if the rider is assigned to this order
 
-        return _advance_order(request, order_number, "Started", "Order Started")
+        response = _advance_order(request, order_number, "Started", "Order Started")
+
+        # Push notification — fire-and-forget, don't block the response
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if rider:
+                notify_rider(
+                    rider=rider,
+                    title="Trip Started 🚀",
+                    body=f"You're on your way to pick up order #{order_number}.",
+                    data={"order_number": order_number, "status": "Started"},
+                )
+        except Exception as exc:
+            logger.warning(f"Start notification failed: {exc}")
+
+        return response
 
 
 class OrderArrivedView(APIView):

@@ -1,3 +1,5 @@
+import asyncio
+import logging
 from datetime import timedelta
 from django.utils import timezone
 from rest_framework import status, permissions
@@ -23,6 +25,7 @@ from .serializers import (
     RiderTransactionSerializer,
     RiderLocationSerializer,
 )
+from orders.serializers import AssignedOrderSerializer
 from .models import (
     RiderSession,
     RiderDevice,
@@ -36,6 +39,45 @@ from dispatcher.models import Rider
 from orders.models import Order
 from orders.permissions import IsRider
 from dispatcher.utils import emit_activity
+from .notifications import notify_rider
+
+logger = logging.getLogger(__name__)
+
+
+def publish_order_assigned_event(order, rider):
+    """
+    Publish an Ably event to channel 'assigned-{rider_id}' with the serialized
+    order payload when an order is assigned to a rider.
+    """
+    try:
+        from django.conf import settings
+        from ably import AblyRest
+
+        api_key = getattr(settings, "ABLY_API_KEY", "")
+        if not api_key:
+            logger.warning(
+                "publish_order_assigned_event: ABLY_API_KEY not configured, skipping publish"
+            )
+            return
+
+        payload = AssignedOrderSerializer(order).data
+        channel_name = f"assigned-{rider.rider_id}"
+
+        async def _publish():
+            client = AblyRest(api_key)
+            channel = client.channels.get(channel_name)
+            await channel.publish("order_assigned", payload)
+
+        asyncio.run(_publish())
+        logger.info(
+            f"publish_order_assigned_event: published order {order.order_number} "
+            f"to Ably channel '{channel_name}'."
+        )
+    except Exception as exc:
+        logger.error(
+            f"publish_order_assigned_event: Ably publish failed for order "
+            f"{order.order_number}: {exc}"
+        )
 
 
 class OrderOfferListView(APIView):
@@ -142,6 +184,20 @@ class OrderOfferAcceptView(APIView):
                     "order_number": order.order_number,
                 },
             )
+
+            # 7. Push notification to rider
+            try:
+                notify_rider(
+                    rider=rider,
+                    title="Order Assigned 📦",
+                    body=f"You've been assigned order #{order.order_number}. Head to the pickup location.",
+                    data={"order_number": order.order_number, "status": "Assigned"},
+                )
+            except Exception as exc:
+                logger.warning(f"Assignment notification failed: {exc}")
+
+            # 8. Publish Ably event to rider-specific channel
+            # publish_order_assigned_event(order, rider)
 
             return Response(
                 {

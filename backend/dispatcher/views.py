@@ -1,3 +1,4 @@
+import logging
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -7,6 +8,10 @@ from .serializers import RiderSerializer
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
+from riders.notifications import notify_rider
+from riders.views import publish_order_assigned_event
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -36,20 +41,28 @@ class RiderViewSet(viewsets.ModelViewSet):
             rider.current_latitude = float(lat)
             rider.current_longitude = float(lng)
             rider.last_location_update = timezone.now()
-            rider.save(update_fields=["current_latitude", "current_longitude", "last_location_update"])
+            rider.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
         except (ValueError, TypeError):
             return Response(
                 {"error": "Invalid lat/lng values."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response({
-            "id": str(rider.id),
-            "rider_id": rider.rider_id,
-            "current_latitude": float(rider.current_latitude),
-            "current_longitude": float(rider.current_longitude),
-            "last_location_update": rider.last_location_update.isoformat(),
-        })
+        return Response(
+            {
+                "id": str(rider.id),
+                "rider_id": rider.rider_id,
+                "current_latitude": float(rider.current_latitude),
+                "current_longitude": float(rider.current_longitude),
+                "last_location_update": rider.last_location_update.isoformat(),
+            }
+        )
 
 
 class OrderViewSet(viewsets.ModelViewSet):
@@ -86,23 +99,38 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
         serializer.is_valid(raise_exception=True)
         order = serializer.save()
-        response_serializer = self.OrderSerializer(
-            order, context={"request": request}
-        )
+        response_serializer = self.OrderSerializer(order, context={"request": request})
 
         # Emit activity event
-        merchant_name = getattr(order.user, "business_name", None) or getattr(order.user, "contact_name", None) or "Unknown"
+        merchant_name = (
+            getattr(order.user, "business_name", None)
+            or getattr(order.user, "contact_name", None)
+            or "Unknown"
+        )
         emit_activity(
             event_type="new_order",
             order_id=order.order_number,
             text=f"New order {order.order_number} from {merchant_name}",
             color="gold",
-            metadata={"merchant": merchant_name, "amount": str(order.total_amount or 0)},
+            metadata={
+                "merchant": merchant_name,
+                "amount": str(order.total_amount or 0),
+            },
         )
 
-        return DRFResponse(
-            response_serializer.data, status=drf_status.HTTP_201_CREATED
-        )
+        # If a rider is already assigned at creation time, notify them
+        if order.rider:
+            try:
+                notify_rider(
+                    rider=order.rider,
+                    title="New Order Assigned 📦",
+                    body=f"A new order #{order.order_number} from {merchant_name} has been assigned to you.",
+                    data={"order_number": order.order_number, "status": "Assigned"},
+                )
+            except Exception as exc:
+                logger.warning(f"New order notification failed: {exc}")
+
+        return DRFResponse(response_serializer.data, status=drf_status.HTTP_201_CREATED)
 
     from rest_framework.decorators import action
 
@@ -130,7 +158,9 @@ class OrderViewSet(viewsets.ModelViewSet):
             order.rider = rider
             order.status = "Assigned"
             order.save()
-            rider_name = getattr(rider.user, "contact_name", None) or getattr(rider.user, "phone", "Unknown")
+            rider_name = getattr(rider.user, "contact_name", None) or getattr(
+                rider.user, "phone", "Unknown"
+            )
             emit_activity(
                 event_type="assigned",
                 order_id=order.order_number,
@@ -138,6 +168,17 @@ class OrderViewSet(viewsets.ModelViewSet):
                 color="blue",
                 metadata={"rider": rider_name, "rider_id": rider.rider_id},
             )
+            # Push notification to the assigned rider
+            try:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Assigned 📦",
+                    body=f"Order #{order.order_number} has been assigned to you. Please head to the pickup location.",
+                    data={"order_number": order.order_number, "status": "Assigned"},
+                )
+                publish_order_assigned_event(order, rider)
+            except Exception as exc:
+                logger.warning(f"Dispatcher assignment notification failed: {exc}")
             return Response(self.get_serializer(order).data)
         except Rider.DoesNotExist:
             return Response(
@@ -160,7 +201,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             "In Transit": "Started",
             "Delivered": "Done",
             "Cancelled": "CustomerCanceled",
-            "Picked Up": "Started",   # "Picked Up" maps to Started (in transit)
+            "Picked Up": "Started",  # "Picked Up" maps to Started (in transit)
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
@@ -187,7 +228,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         event_type, color = STATUS_MAP[new_status]
         rider_name = None
         if order.rider:
-            rider_name = getattr(order.rider.user, "contact_name", None) or getattr(order.rider.user, "phone", None)
+            rider_name = getattr(order.rider.user, "contact_name", None) or getattr(
+                order.rider.user, "phone", None
+            )
 
         status_labels = {
             "Started": "in transit",
@@ -209,7 +252,11 @@ class OrderViewSet(viewsets.ModelViewSet):
             order_id=order.order_number,
             text=text,
             color=color,
-            metadata={"old_status": old_status, "new_status": new_status, "rider": rider_name},
+            metadata={
+                "old_status": old_status,
+                "new_status": new_status,
+                "rider": rider_name,
+            },
         )
 
         return Response(self.get_serializer(order).data)
@@ -220,6 +267,7 @@ class ActivityFeedView(views.APIView):
 
     def get(self, request):
         from .serializers import ActivityFeedSerializer
+
         limit = int(request.query_params.get("limit", 50))
         limit = min(limit, 200)  # cap at 200
         entries = ActivityFeed.objects.all()[:limit]
@@ -232,9 +280,13 @@ class AblyTokenView(views.APIView):
 
     def get(self, request):
         from django.conf import settings as django_settings
+
         api_key = getattr(django_settings, "ABLY_API_KEY", "")
         if not api_key:
-            return Response({"error": "Ably not configured"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {"error": "Ably not configured"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         try:
             import asyncio
             from ably import AblyRest
@@ -248,7 +300,9 @@ class AblyTokenView(views.APIView):
             token_request = asyncio.run(_create_token_req())
             return Response(token_request.to_dict())
         except Exception as exc:
-            return Response({"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class MerchantViewSet(viewsets.ModelViewSet):
