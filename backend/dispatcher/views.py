@@ -301,14 +301,18 @@ class AblyTokenView(views.APIView):
             import asyncio
             from ably import AblyRest
 
-            async def _create_token_req():
+            async def _create_both():
                 client = AblyRest(api_key)
-                return await client.auth.create_token_request(
-                    {"capability": json.dumps(capability)}
-                )
+                params = {"capability": json.dumps(capability)}
+                token_details = await client.auth.request_token(params)
+                token_request = await client.auth.create_token_request(params)
+                return token_details, token_request
 
-            token_request = asyncio.run(_create_token_req())
-            return Response(token_request.to_dict())
+            token_details, token_request = asyncio.run(_create_both())
+            return Response({
+                "token": token_details.token,
+                "token_request": token_request.to_dict(),
+            })
         except Exception as exc:
             return Response(
                 {"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
