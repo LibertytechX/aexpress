@@ -934,6 +934,13 @@ class OrderCompleteView(APIView):
                 {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
+        """
+        Process for rider order completion
+        1. Rider has sufficient wallet balance if cash on delivery,
+        that is must've received the money from the customer to their wallet.
+        2. Give Rider their earnings commission
+        3. 
+        """        
         # Mark all deliveries as completed if not already
         deliveries = order.deliveries.exclude(status="Delivered")
         for d in deliveries:
