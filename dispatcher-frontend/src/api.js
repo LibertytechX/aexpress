@@ -1,5 +1,5 @@
 // API Service for Dispatcher Frontend
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = window.VITE_API_BASE_URL;
 
 // Get stored auth token
 const getToken = () => localStorage.getItem('access_token');
