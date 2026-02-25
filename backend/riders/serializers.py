@@ -431,6 +431,14 @@ class RiderWalletInfoSerializer(serializers.Serializer):
 
     available_balance = serializers.SerializerMethodField()
     pending_cod = serializers.SerializerMethodField()
+    withdrawable_balance = serializers.SerializerMethodField()
+
+    def get_withdrawable_balance(self, obj):
+        # Withdrawable Balance = Available Balance - Pending COD
+        available_balance = self.get_available_balance(obj)
+        pending_cod = self.get_pending_cod(obj)
+        amount_can_withdraw = float(available_balance - pending_cod)
+        return max(amount_can_withdraw, 0)
 
     def get_available_balance(self, obj):
         # Available Balance = Wallet Balance + Pending COD
@@ -485,4 +493,3 @@ class RiderLocationSerializer(serializers.Serializer):
     accuracy = serializers.FloatField(required=False, allow_null=True)
     heading = serializers.FloatField(required=False, allow_null=True)
     speed = serializers.FloatField(required=False, allow_null=True)
-
