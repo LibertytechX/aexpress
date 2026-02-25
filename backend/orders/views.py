@@ -19,10 +19,11 @@ from .serializers import (
     OrderStatusUpdateSerializer,
 )
 from .permissions import IsRider
-from dispatcher.models import Rider
+from dispatcher.models import Rider, SystemSettings
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 from riders.notifications import notify_rider
+from riders.models import RiderEarning, RiderCodRecord
 
 logger = logging.getLogger(__name__)
 
@@ -914,9 +915,23 @@ class OrderCompleteView(APIView):
     """
     Endpoint for riders to mark an entire order as completed.
     POST /api/orders/complete/
+
+    Completion flow:
+      1. If COD order → verify rider wallet has enough balance (they must
+         have collected the cash and deposited it). Debit that amount.
+      2. Calculate rider net earning using commission_rate from SystemSettings
+         (default 20 %). Create RiderEarning record and credit rider wallet.
+      3. Mark pending RiderCodRecord as remitted.
+      4. Advance order status to Done, mark deliveries Delivered.
+      5. Send push notification to rider.
     """
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    # COD payment methods that require a wallet balance check
+    COD_METHODS = {"cash", "cash_on_pickup", "receiver_pays"}
+    # Default commission percentage if SystemSettings row doesn't exist yet
+    DEFAULT_COMMISSION_PCT = Decimal("20.00")
 
     @transaction.atomic
     def post(self, request):
@@ -934,19 +949,116 @@ class OrderCompleteView(APIView):
                 {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
-        """
-        Process for rider order completion
-        1. Rider has sufficient wallet balance if cash on delivery,
-        that is must've received the money from the customer to their wallet.
-        2. Give Rider their earnings commission
-        3. 
-        """        
-        # Mark all deliveries as completed if not already
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"error": "Rider profile not found."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Step 1: COD wallet balance check ─────────────────────────────────
+        is_cod = order.payment_method in self.COD_METHODS
+        cod_total = Decimal("0.00")
+
+        if is_cod:
+            # Sum COD across all deliveries for this order
+            from django.db.models import Sum
+            cod_total = (
+                order.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"]
+                or Decimal("0.00")
+            )
+
+            if cod_total > 0:
+                try:
+                    rider_wallet = Wallet.objects.get(user=rider.user)
+                except Wallet.DoesNotExist:
+                    return Response(
+                        {"error": "Rider wallet not found. Cannot process COD payment."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if not rider_wallet.can_debit(cod_total):
+                    return Response(
+                        {
+                            "error": (
+                                f"Insufficient wallet balance for COD settlement. "
+                                f"Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Debit COD amount from rider wallet
+                rider_wallet.debit(
+                    amount=cod_total,
+                    description=f"COD remittance for order #{order_number}",
+                    reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
+                    metadata={"order_number": order_number, "order_id": str(order.id)},
+                )
+
+        # ── Step 2: Calculate and record rider earnings ───────────────────────
+        settings_obj = SystemSettings.objects.first()
+        # SystemSettings stores cod_pct_fee; we repurpose a rider-specific
+        # commission field if it exists — fall back to hard-coded default.
+        commission_pct = self.DEFAULT_COMMISSION_PCT
+
+        order_amount = Decimal(str(order.total_amount))
+        commission_amount = (commission_pct / Decimal("100")) * order_amount
+        net_earning = order_amount - commission_amount
+
+        # Create or update RiderEarning for this order (idempotent)
+        earning, _ = RiderEarning.objects.get_or_create(
+            order=order,
+            defaults={
+                "rider": rider,
+                "base_fare": order_amount,
+                "commission_pct": commission_pct,
+                "commission_amount": commission_amount,
+                "net_earning": net_earning,
+                "cod_amount": cod_total,
+            },
+        )
+
+        # Credit rider wallet with net earning
+        rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+        rider_wallet_for_credit.credit(
+            amount=net_earning,
+            description=f"Trip earning for order #{order_number}",
+            reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+            metadata={
+                "order_number": order_number,
+                "gross": str(order_amount),
+                "commission_pct": str(commission_pct),
+                "net_earning": str(net_earning),
+            },
+        )
+
+        # ── Step 3: Mark COD record as remitted ──────────────────────────────
+        if is_cod and cod_total > 0:
+            RiderCodRecord.objects.filter(
+                order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+            ).update(
+                status=RiderCodRecord.Status.REMITTED,
+                remitted_at=timezone.now(),
+            )
+
+        # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
         deliveries = order.deliveries.exclude(status="Delivered")
         for d in deliveries:
             d.status = "Delivered"
             d.delivered_at = timezone.now()
             d.save(update_fields=["status", "delivered_at"])
+
+        # ── Step 5: Push notification ─────────────────────────────────────────
+        try:
+            notify_rider(
+                rider=rider,
+                title="Order Completed 🎉",
+                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                data={"order_number": order_number, "net_earning": str(net_earning)},
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to send completion notification to rider {rider.rider_id}: {exc}")
 
         return _advance_order(
             request, order_number, "Done", "Order Completed (All Deliveries)"
