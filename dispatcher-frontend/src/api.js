@@ -236,3 +236,83 @@ export const SettingsAPI = {
     }
 };
 
+// ─── ZONES ──────────────────────────────────────────────────────
+export const ZonesAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch zones');
+        const data = await res.json();
+        return Array.isArray(data) ? data : (data.results || []);
+    },
+
+    async create(zone) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(zone)
+        });
+        if (!res.ok) throw new Error('Failed to create zone');
+        return await res.json();
+    },
+
+    async update(id, zone) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(zone)
+        });
+        if (!res.ok) throw new Error('Failed to update zone');
+        return await res.json();
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete zone');
+    }
+};
+
+// ─── RELAY NODES ─────────────────────────────────────────────────
+export const RelayNodesAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch relay nodes');
+        const data = await res.json();
+        return Array.isArray(data) ? data : (data.results || []);
+    },
+
+    async create(node) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(node)
+        });
+        if (!res.ok) throw new Error('Failed to create relay node');
+        return await res.json();
+    },
+
+    async update(id, node) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(node)
+        });
+        if (!res.ok) throw new Error('Failed to update relay node');
+        return await res.json();
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete relay node');
+    }
+};
+

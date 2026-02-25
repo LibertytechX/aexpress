@@ -2,8 +2,8 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed
-from .serializers import RiderSerializer
+from .models import Rider, ActivityFeed, Zone, RelayNode
+from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
@@ -347,3 +347,26 @@ class S3PresignedUrlView(views.APIView):
             {"error": "Failed to generate presigned URL"},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
+
+
+class ZoneViewSet(viewsets.ModelViewSet):
+    """CRUD for delivery zones."""
+
+    queryset = Zone.objects.all().order_by("name")
+    serializer_class = ZoneSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+
+class RelayNodeViewSet(viewsets.ModelViewSet):
+    """CRUD for relay nodes (handoff points)."""
+
+    queryset = RelayNode.objects.all().select_related("zone").order_by("name")
+    serializer_class = RelayNodeSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        zone_id = self.request.query_params.get("zone")
+        if zone_id:
+            qs = qs.filter(zone__id=zone_id)
+        return qs

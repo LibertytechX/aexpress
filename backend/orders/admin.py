@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Vehicle, Order, Delivery
+from .models import Vehicle, Order, Delivery, OrderLeg
 
 
 class DeliveryInline(admin.TabularInline):
@@ -8,6 +8,18 @@ class DeliveryInline(admin.TabularInline):
     extra = 0
     fields = ['sequence', 'dropoff_address', 'receiver_name', 'receiver_phone', 'package_type', 'status']
     readonly_fields = ['sequence']
+
+
+class OrderLegInline(admin.TabularInline):
+    """Inline admin for relay legs within an order."""
+    model = OrderLeg
+    extra = 0
+    fields = [
+        'leg_number', 'status', 'rider',
+        'start_relay_node', 'end_relay_node',
+        'distance_km', 'rider_payout', 'hub_pin',
+    ]
+    readonly_fields = ['leg_number', 'hub_pin']
 
 
 @admin.register(Vehicle)
@@ -48,7 +60,7 @@ class OrderAdmin(admin.ModelAdmin):
         }),
     )
 
-    inlines = [DeliveryInline]
+    inlines = [DeliveryInline, OrderLegInline]
 
 
 @admin.register(Delivery)
@@ -75,3 +87,18 @@ class DeliveryAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'delivered_at')
         }),
     )
+
+
+@admin.register(OrderLeg)
+class OrderLegAdmin(admin.ModelAdmin):
+    """Standalone admin view for relay order legs."""
+
+    list_display = [
+        'order', 'leg_number', 'status', 'rider',
+        'start_relay_node', 'end_relay_node',
+        'distance_km', 'rider_payout', 'created_at',
+    ]
+    list_filter = ['status', 'created_at']
+    search_fields = ['order__order_number', 'rider__rider_id', 'hub_pin']
+    readonly_fields = ['id', 'hub_pin', 'created_at']
+    ordering = ['order', 'leg_number']

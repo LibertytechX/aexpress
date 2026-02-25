@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -35,13 +35,31 @@ const S = {
   yellow: "#F59E0B", yellowBg: "rgba(245,158,11,0.08)",
 };
 // ─── LAGOS MAP COMPONENT (Enhanced with zones & routes) ─────────
-function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
+function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes, zones, mode }) {
   const [hoverPin, setHoverPin] = useState(null);
   const [mapView, setMapView] = useState("live"); // live | zones | heatmap
   const h = small ? 140 : 320;
 
-  // Lagos zones with real approximate positions
-  const zones = [
+  const isRelayMode = mode === "relay";
+
+  // Lagos bounding box: lat 6.38–6.70, lng 3.10–3.75
+  const latMin=6.38,latMax=6.70,lngMin=3.10,lngMax=3.75;
+  const toPct = (lat,lng) => {
+    const xPct = ((lng - lngMin) / (lngMax - lngMin)) * 100;
+    const yPct = ((latMax - lat) / (latMax - latMin)) * 100;
+    return {xPct, yPct};
+  };
+  const kmToPctRadius = (km, atLat) => {
+    const latDeg = km / 111;
+    const cos = Math.cos((parseFloat(atLat) || 0) * Math.PI / 180) || 0.00001;
+    const lngDeg = km / (111 * cos);
+    const rx = (lngDeg / (lngMax - lngMin)) * 100;
+    const ry = (latDeg / (latMax - latMin)) * 100;
+    return {rx, ry};
+  };
+
+  // Mock zones (used in legacy/non-relay views)
+  const mockZones = [
     {id:"mainland-core",label:"Mainland Core",x:32,y:32,w:22,h:20,color:"rgba(59,130,246,0.08)",areas:"Ikeja · Maryland · Yaba · Surulere"},
     {id:"island",label:"Island",x:50,y:48,w:22,h:22,color:"rgba(232,168,56,0.08)",areas:"V.I. · Ikoyi · Lekki Phase 1"},
     {id:"lekki-ajah",label:"Lekki-Ajah",x:74,y:45,w:20,h:18,color:"rgba(139,92,246,0.08)",areas:"Lekki · Ajah · Sangotedo · VGC"},
@@ -49,8 +67,8 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"outer-north",label:"Outer Lagos",x:10,y:15,w:24,h:18,color:"rgba(16,185,129,0.06)",areas:"Ikorodu · Agbara · Ojo · Badagry"},
   ];
 
-  // Order pins with pickup→dropoff routes
-  const pins = [
+  // Mock order pins (used in legacy/non-relay views)
+  const mockPins = [
     {id:"AX-6158260",px:36,py:40,dx:55,dy:52,label:"Yaba→VI",color:S.gold,status:"In Transit",rider:"Musa K."},
     {id:"AX-6158261",px:38,py:48,dx:56,dy:56,label:"Surulere→VI",color:S.purple,status:"Picked Up",rider:"Chinedu O."},
     {id:"AX-6158262",px:30,py:28,dx:78,dy:50,label:"Ikeja→Lekki",color:S.yellow,status:"Pending",rider:null},
@@ -59,7 +77,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"AX-6158257",px:36,py:40,dx:54,dy:52,label:"Yaba→VI",color:S.green,status:"Delivered",rider:"Musa K."},
     {id:"AX-6158255",px:72,py:48,dx:76,dy:52,label:"Lekki→Lekki",color:S.green,status:"Delivered",rider:"Emeka N."},
   ];
-  const riderDots = [
+  const mockRiderDots = [
     {id:"R001",x:48,y:46,name:"Musa K.",status:"on_delivery",vehicle:"🏍️"},
     {id:"R002",x:58,y:50,name:"Ahmed B.",status:"on_delivery",vehicle:"🏍️"},
     {id:"R003",x:52,y:52,name:"Chinedu O.",status:"on_delivery",vehicle:"🚗"},
@@ -67,6 +85,11 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"R006",x:30,y:36,name:"Kola A.",status:"on_delivery",vehicle:"🚗"},
     {id:"R007",x:70,y:44,name:"Emeka N.",status:"online",vehicle:"🏍️"},
   ];
+
+  // In relay mode we do not show mock orders/riders at all.
+  const pins = isRelayMode ? [] : mockPins;
+  const riderDots = isRelayMode ? [] : mockRiderDots;
+  const zonesToRender = isRelayMode ? (Array.isArray(zones) ? zones : []) : mockZones;
 
   const activeOrders = pins.filter(p => !["Delivered","Cancelled","Failed"].includes(p.status));
   const displayPins = highlightOrder ? pins.filter(p=>p.id===highlightOrder) : (mapView==="live"?activeOrders:pins);
@@ -97,12 +120,33 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </svg>
 
       {/* Zone overlays */}
-      {(mapView==="zones"||showZones) && zones.map(z=>(
+      {(mapView==="zones"||showZones) && !isRelayMode && zonesToRender.map(z=>(
         <div key={z.id} style={{position:"absolute",left:`${z.x}%`,top:`${z.y}%`,width:`${z.w}%`,height:`${z.h}%`,background:z.color,border:"1px dashed rgba(0,0,0,0.12)",borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:1}}>
           <div style={{fontSize:7,fontWeight:800,color:S.navy,opacity:0.5,textTransform:"uppercase",letterSpacing:"0.5px"}}>{z.label}</div>
           <div style={{fontSize:6,color:S.textMuted,opacity:0.6,textAlign:"center"}}>{z.areas}</div>
         </div>
       ))}
+      {(mapView==="zones"||showZones) && isRelayMode && zonesToRender.length>0 && (
+        <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:2}} viewBox="0 0 100 100" preserveAspectRatio="none">
+          {zonesToRender.map((z, idx) => {
+            const lat = parseFloat(z.center_lat);
+            const lng = parseFloat(z.center_lng);
+            const rkm = parseFloat(z.radius_km);
+            if ([lat,lng,rkm].some(n => isNaN(n))) return null;
+            const {xPct,yPct} = toPct(lat,lng);
+            const {rx,ry} = kmToPctRadius(rkm, lat);
+            const fill = ["rgba(59,130,246,0.10)","rgba(232,168,56,0.10)","rgba(16,185,129,0.10)","rgba(139,92,246,0.10)","rgba(239,68,68,0.08)"][idx%5];
+            const stroke = ["rgba(59,130,246,0.40)","rgba(232,168,56,0.45)","rgba(16,185,129,0.40)","rgba(139,92,246,0.40)","rgba(239,68,68,0.35)"][idx%5];
+            return (
+              <g key={z.id || z.name || idx}>
+                <ellipse cx={xPct} cy={yPct} rx={rx} ry={ry} fill={fill} stroke={stroke} strokeWidth="0.6" strokeDasharray="2,2"/>
+                <circle cx={xPct} cy={yPct} r="0.8" fill={stroke} opacity="0.7"/>
+                {!small && <text x={xPct} y={yPct} textAnchor="middle" dominantBaseline="central" fontSize="2.6" fill={stroke} style={{fontWeight:800}}>{(z.name||"").slice(0,18)}</text>}
+              </g>
+            );
+          })}
+        </svg>
+      )}
 
       {/* Area labels (when no zones) */}
       {mapView!=="zones"&&!showZones&&!small && <>
@@ -119,20 +163,22 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </>}
 
       {/* Route lines (pickup → current position for active, or pickup → dropoff) */}
-      <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:4}} viewBox="0 0 100 100" preserveAspectRatio="none">
-        {displayPins.filter(p=>!["Delivered","Cancelled","Failed"].includes(p.status)).map(p=>(
-          <g key={p.id+"route"}>
-            <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={p.color} strokeWidth={highlightOrder===p.id?"0.8":"0.4"} strokeDasharray="2,2" opacity={highlightOrder===p.id?0.8:0.4}/>
-            {/* Pickup dot */}
-            <circle cx={p.px} cy={p.py} r={highlightOrder===p.id?1.5:1} fill="#fff" stroke={p.color} strokeWidth="0.5"/>
-            {/* Dropoff dot */}
-            <circle cx={p.dx} cy={p.dy} r={highlightOrder===p.id?1.5:1} fill={p.color} stroke="#fff" strokeWidth="0.4"/>
-          </g>
-        ))}
-      </svg>
+      {!isRelayMode && (
+        <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:4}} viewBox="0 0 100 100" preserveAspectRatio="none">
+          {displayPins.filter(p=>!["Delivered","Cancelled","Failed"].includes(p.status)).map(p=>(
+            <g key={p.id+"route"}>
+              <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={p.color} strokeWidth={highlightOrder===p.id?"0.8":"0.4"} strokeDasharray="2,2" opacity={highlightOrder===p.id?0.8:0.4}/>
+              {/* Pickup dot */}
+              <circle cx={p.px} cy={p.py} r={highlightOrder===p.id?1.5:1} fill="#fff" stroke={p.color} strokeWidth="0.5"/>
+              {/* Dropoff dot */}
+              <circle cx={p.dx} cy={p.dy} r={highlightOrder===p.id?1.5:1} fill={p.color} stroke="#fff" strokeWidth="0.4"/>
+            </g>
+          ))}
+        </svg>
+      )}
 
       {/* Order pins */}
-      {displayPins.map(p => {
+      {!isRelayMode && displayPins.map(p => {
         const isH = highlightOrder===p.id || hoverPin===p.id;
         const cx = p.status==="Delivered"?p.dx: p.status==="Pending"?p.px: (p.px+p.dx)/2;
         const cy = p.status==="Delivered"?p.dy: p.status==="Pending"?p.py: (p.py+p.dy)/2;
@@ -153,7 +199,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       })}
 
       {/* Rider dots */}
-      {!highlightOrder && riderDots.map(r => (
+      {!isRelayMode && !highlightOrder && riderDots.map(r => (
         <div key={r.id} style={{position:"absolute",left:`${r.x}%`,top:`${r.y+3}%`,zIndex:6}}>
           <div style={{position:"relative"}}>
             <div style={{width:10,height:10,borderRadius:"50%",background:r.status==="online"?S.green:S.gold,border:"2px solid #fff",boxShadow:"0 1px 6px rgba(0,0,0,0.2)"}}/>
@@ -163,6 +209,18 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
         </div>
       ))}
 
+      {/* Relay node pins */}
+      {relayNodes && relayNodes.map(nd => {
+        // Map real Lagos lat/lng to approximate SVG viewport coordinates.
+        const {xPct,yPct} = toPct(nd.latitude, nd.longitude);
+        return (
+          <div key={nd.id} style={{position:"absolute",left:`${xPct}%`,top:`${yPct}%`,transform:"translate(-50%,-50%)",zIndex:12}}>
+            <div title={`${nd.name}\n${nd.address||""}`} style={{width:14,height:14,borderRadius:"50%",background:"#8B5CF6",border:"2.5px solid #fff",boxShadow:"0 2px 6px rgba(139,92,246,0.6)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#fff",fontWeight:800}}>⬡</div>
+            {!small && <div style={{position:"absolute",top:15,left:"50%",transform:"translateX(-50%)",fontSize:6,fontWeight:700,color:"#8B5CF6",whiteSpace:"nowrap",background:"rgba(255,255,255,0.9)",padding:"1px 4px",borderRadius:3,maxWidth:60,overflow:"hidden",textOverflow:"ellipsis"}}>{nd.name}</div>}
+          </div>
+        );
+      })}
+
       {/* Bridge labels */}
       {!small && <>
         <div style={{position:"absolute",left:"40%",top:"45%",fontSize:6,color:"rgba(232,168,56,0.6)",fontWeight:700,transform:"rotate(-35deg)",whiteSpace:"nowrap"}}>3rd Mainland Bridge</div>
@@ -170,7 +228,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </>}
 
       {/* Map controls */}
-      {!small && (
+      {!isRelayMode && !small && (
         <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4,zIndex:20}}>
           {[{id:"live",label:"Live",icon:"📡"},{id:"zones",label:"Zones",icon:"🗺️"},{id:"heatmap",label:"Heat",icon:"🔥"}].map(v=>(
             <button key={v.id} onClick={()=>setMapView(v.id)} style={{
@@ -185,14 +243,18 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
 
       {/* Legend */}
       <div style={{position:"absolute",bottom:8,right:8,display:"flex",gap:8,background:"rgba(255,255,255,0.95)",padding:"5px 10px",borderRadius:8,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",zIndex:10}}>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.gold}}/> Active</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.green}}/> Rider</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.yellow}}/> Pending</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.purple}}/> In Progress</span>
+        {!isRelayMode && <>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.gold}}/> Active</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.green}}/> Rider</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.yellow}}/> Pending</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.purple}}/> In Progress</span>
+        </>}
+        {isRelayMode && zonesToRender.length>0 && <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:10,height:6,borderRadius:6,border:"1px dashed rgba(59,130,246,0.55)",background:"rgba(59,130,246,0.10)"}}/> Zone</span>}
+        {relayNodes && relayNodes.length > 0 && <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:"#8B5CF6"}}/> Relay Hub</span>}
       </div>
 
       {/* Live stats overlay */}
-      {!small && mapView==="live" && (
+      {!isRelayMode && !small && mapView==="live" && (
         <div style={{position:"absolute",bottom:8,left:8,background:"rgba(27,42,74,0.9)",padding:"6px 12px",borderRadius:8,zIndex:10}}>
           <div style={{display:"flex",gap:14}}>
             <div style={{textAlign:"center"}}>
@@ -212,7 +274,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       )}
 
       {/* Heatmap overlay */}
-      {mapView==="heatmap" && !small && (
+      {!isRelayMode && mapView==="heatmap" && !small && (
         <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:3}} viewBox="0 0 100 100" preserveAspectRatio="none">
           <defs>
             <radialGradient id="heat1"><stop offset="0%" stopColor="rgba(239,68,68,0.4)"/><stop offset="100%" stopColor="rgba(239,68,68,0)"/></radialGradient>
@@ -372,6 +434,205 @@ function DeliveryRouteMap({ order, rider }) {
           <div style={{ fontSize:24 }}>📍</div>
           <div style={{ fontSize:11, color:S.textMuted }}>Could not load map</div>
           <div style={{ fontSize:10, color:S.textMuted }}>Check addresses or connection</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RELAY NETWORK MAP (Google Maps: zones + relay nodes) ───────
+function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const circlesRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapStatus, setMapStatus] = useState('loading');
+  const [mapReady, setMapReady] = useState(false);
+
+  const num = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const clearOverlays = () => {
+    markersRef.current.forEach(m => m.setMap(null));
+    markersRef.current = [];
+    circlesRef.current.forEach(c => c.setMap(null));
+    circlesRef.current = [];
+  };
+
+  // Effect 1: Initialize the Google Map (once)
+  useEffect(() => {
+    const initializeMap = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) { setMapStatus('error'); return; }
+
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 },
+        zoom: 11,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+
+      mapInstanceRef.current = map;
+      setMapReady(true);
+      setMapStatus('ready');
+    };
+
+    let unsubscribe = null;
+    if (window.google && window.google.maps) {
+      initializeMap();
+    } else {
+      window.addEventListener('google-maps-loaded', initializeMap);
+      unsubscribe = () => window.removeEventListener('google-maps-loaded', initializeMap);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      clearOverlays();
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Effect 2: Render zones + nodes whenever data changes
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google || !window.google.maps) return;
+    const map = mapInstanceRef.current;
+
+    clearOverlays();
+    if (!infoWindowRef.current) infoWindowRef.current = new window.google.maps.InfoWindow();
+
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasAny = false;
+    const palette = [S.blue, S.gold, S.green, S.purple, S.red];
+
+    (Array.isArray(zones) ? zones : []).forEach((z, idx) => {
+      const lat = num(z.center_lat);
+      const lng = num(z.center_lng);
+      const rkm = num(z.radius_km);
+      if (lat == null || lng == null || rkm == null || rkm <= 0) return;
+
+      const color = palette[idx % palette.length];
+	      const zoneName = (z.name || 'Zone').toString();
+      const circle = new window.google.maps.Circle({
+        map,
+        center: { lat, lng },
+        radius: rkm * 1000,
+        strokeColor: color,
+        strokeOpacity: 0.75,
+        strokeWeight: 2,
+        fillColor: color,
+        fillOpacity: 0.10,
+        clickable: true,
+      });
+      circlesRef.current.push(circle);
+
+      const cb = circle.getBounds();
+      if (cb) bounds.union(cb);
+      else bounds.extend({ lat, lng });
+      hasAny = true;
+
+	      // Always-on zone label (Circle has no native label support)
+	      const zoneLabelMarker = new window.google.maps.Marker({
+	        map,
+	        position: { lat, lng },
+	        title: zoneName,
+	        icon: {
+	          path: window.google.maps.SymbolPath.CIRCLE,
+	          scale: 0, // invisible icon; label only
+	          fillOpacity: 0,
+	          strokeOpacity: 0,
+	        },
+	        label: {
+	          text: zoneName,
+	          color: S.navy,
+	          fontSize: '12px',
+	          fontWeight: '700',
+	        },
+	        zIndex: 999,
+	      });
+	      markersRef.current.push(zoneLabelMarker);
+
+      circle.addListener('click', () => {
+	        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${zoneName}</b><br/>Radius: ${rkm} km</div>`);
+        infoWindowRef.current.setPosition({ lat, lng });
+        infoWindowRef.current.open({ map });
+      });
+	      zoneLabelMarker.addListener('click', () => {
+	        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${zoneName}</b><br/>Radius: ${rkm} km</div>`);
+	        infoWindowRef.current.open({ map, anchor: zoneLabelMarker });
+	      });
+    });
+
+    (Array.isArray(relayNodes) ? relayNodes : []).forEach((n) => {
+      const lat = num(n.latitude);
+      const lng = num(n.longitude);
+      if (lat == null || lng == null) return;
+	      const nodeName = (n.name || 'Relay Node').toString();
+
+      const marker = new window.google.maps.Marker({
+        map,
+        position: { lat, lng },
+	        title: nodeName,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: S.purple,
+          fillOpacity: 1,
+          strokeColor: '#fff',
+          strokeWeight: 3,
+        },
+	        label: {
+	          text: nodeName,
+	          color: S.navy,
+	          fontSize: '11px',
+	          fontWeight: '700',
+	        },
+      });
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      hasAny = true;
+
+      marker.addListener('click', () => {
+        const title = n.name || 'Relay Node';
+        const addr = n.address ? `<div style="opacity:0.8;margin-top:4px">${n.address}</div>` : '';
+        const zone = n.zone_name ? `<div style="opacity:0.8;margin-top:4px">Zone: ${n.zone_name}</div>` : '';
+        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${title}</b>${addr}${zone}</div>`);
+        infoWindowRef.current.open({ map, anchor: marker });
+      });
+    });
+
+    if (hasAny) {
+      map.fitBounds(bounds, { padding: 50 });
+      const z = map.getZoom?.();
+      if (typeof z === 'number' && z > 16) map.setZoom(16);
+    } else {
+      map.setCenter({ lat: 6.5244, lng: 3.3792 });
+      map.setZoom(11);
+    }
+    setMapStatus('ready');
+  }, [mapReady, zones, relayNodes]);
+
+  return (
+    <div style={{ position:'relative', borderRadius:14, overflow:'hidden', border:`1px solid ${S.border}`, background:'#EEF2F7' }}>
+      <div ref={mapRef} style={{ height, width:'100%' }} />
+      {mapStatus === 'loading' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:8 }}>
+          <div style={{ fontSize:24 }}>🗺️</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Loading map…</div>
+        </div>
+      )}
+      {mapStatus === 'error' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:6 }}>
+          <div style={{ fontSize:24 }}>📍</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Google Maps not available</div>
+          <div style={{ fontSize:10, color:S.textMuted }}>Check API key / network</div>
         </div>
       )}
     </div>
@@ -1451,6 +1712,12 @@ function MessagingScreen() {
   );
 }
 
+// ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
+const inputStyle = {width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 12px",height:40,fontSize:14,fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy,outline:"none"};
+const labelStyle = {display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.3px"};
+const Toggle = ({on,setOn,size})=>{const w=size==="sm"?36:44;const d=size==="sm"?16:20;return (<div onClick={()=>setOn(!on)} style={{width:w,height:Math.round(w/1.83),borderRadius:w/2,cursor:"pointer",background:on?S.green:S.border,position:"relative",transition:"background 0.2s",flexShrink:0}}><div style={{width:d,height:d,borderRadius:"50%",background:"#fff",position:"absolute",top:Math.round((w/1.83-d)/2),left:on?w-d-Math.round((w/1.83-d)/2):Math.round((w/1.83-d)/2),transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/></div>)};
+const SC = ({children,title,icon,desc,right})=>(<div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}><div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>{icon}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{title}</div>{desc&&<div style={{fontSize:11,color:S.textMuted}}>{desc}</div>}</div></div>{right}</div><div style={{padding:20}}>{children}</div></div>);
+
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
   // ─── PRICING STATE (Research-based Lagos defaults) ───
@@ -1508,6 +1775,24 @@ function SettingsScreen() {
   const [simZone, setSimZone] = useState("same");
   const [simWeight, setSimWeight] = useState(3);
   const [simSurge, setSimSurge] = useState(false);
+
+  // ── Relay Network state ──────────────────────────────────────
+  const [rnZones, setRnZones] = useState([]);
+  const [rnNodes, setRnNodes] = useState([]);
+  const [rnLoading, setRnLoading] = useState(false);
+  const [rnError, setRnError] = useState(null);
+
+  // Zone form
+  const [zoneForm, setZoneForm] = useState({ name:"", center_lat:"", center_lng:"", radius_km:5, is_active:true });
+  const [zoneEditing, setZoneEditing] = useState(null); // null = create, string id = edit
+  const [zoneFormOpen, setZoneFormOpen] = useState(false);
+  const [zoneSaving, setZoneSaving] = useState(false);
+
+  // Relay node form
+  const [nodeForm, setNodeForm] = useState({ name:"", address:"", latitude:"", longitude:"", zone:"", catchment_radius_km:0.5, is_active:true });
+  const [nodeEditing, setNodeEditing] = useState(null);
+  const [nodeFormOpen, setNodeFormOpen] = useState(false);
+  const [nodeSaving, setNodeSaving] = useState(false);
 
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight) => {
     let price;
@@ -1614,6 +1899,26 @@ function SettingsScreen() {
     return () => { cancelled = true; };
   }, []);
 
+  // Load relay network data when the relay tab is opened
+  useEffect(() => {
+    if (settingsTab !== "relay") return;
+    let cancelled = false;
+    async function loadRelayNetwork() {
+      setRnLoading(true);
+      setRnError(null);
+      try {
+        const [zones, nodes] = await Promise.all([ZonesAPI.getAll(), RelayNodesAPI.getAll()]);
+        if (!cancelled) { setRnZones(zones); setRnNodes(nodes); }
+      } catch (err) {
+        if (!cancelled) setRnError("Failed to load relay network: " + err.message);
+      } finally {
+        if (!cancelled) setRnLoading(false);
+      }
+    }
+    loadRelayNetwork();
+    return () => { cancelled = true; };
+  }, [settingsTab]);
+
   const handleSave = async () => {
     setSaveError(null);
     setSaving(true);
@@ -1653,11 +1958,7 @@ function SettingsScreen() {
   };
   const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
 
-  const inputStyle = {width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 12px",height:40,fontSize:14,fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy,outline:"none"};
-  const labelStyle = {display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.3px"};
-  const Toggle = ({on,setOn,size})=>{const w=size==="sm"?36:44;const d=size==="sm"?16:20;return (<div onClick={()=>setOn(!on)} style={{width:w,height:Math.round(w/1.83),borderRadius:w/2,cursor:"pointer",background:on?S.green:S.border,position:"relative",transition:"background 0.2s",flexShrink:0}}><div style={{width:d,height:d,borderRadius:"50%",background:"#fff",position:"absolute",top:Math.round((w/1.83-d)/2),left:on?w-d-Math.round((w/1.83-d)/2):Math.round((w/1.83-d)/2),transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/></div>)};
-  const SC = ({children,title,icon,desc,right})=>(<div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}><div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>{icon}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{title}</div>{desc&&<div style={{fontSize:11,color:S.textMuted}}>{desc}</div>}</div></div>{right}</div><div style={{padding:20}}>{children}</div></div>);
-  const tabs = [{id:"pricing",label:"Pricing & Fees",icon:"💰"},{id:"zones",label:"Zones & Surcharges",icon:"🗺️"},{id:"simulator",label:"Price Calculator",icon:"🧮"},{id:"dispatch",label:"Dispatch Rules",icon:"⚙️"},{id:"notifications",label:"Notifications",icon:"🔔"},{id:"integrations",label:"API & Integrations",icon:"🔌"}];
+  const tabs = [{id:"pricing",label:"Pricing & Fees",icon:"💰"},{id:"zones",label:"Zones & Surcharges",icon:"🗺️"},{id:"simulator",label:"Price Calculator",icon:"🧮"},{id:"dispatch",label:"Dispatch Rules",icon:"⚙️"},{id:"relay",label:"Relay Network",icon:"🔗"},{id:"notifications",label:"Notifications",icon:"🔔"},{id:"integrations",label:"API & Integrations",icon:"🔌"}];
 
   return (
     <div style={{maxWidth:900}}>
@@ -1876,6 +2177,152 @@ function SettingsScreen() {
         </div>
         {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Settings"}</button></div>
+      </div>)}
+
+      {/* ═══ RELAY NETWORK TAB ═══ */}
+      {settingsTab==="relay" && (<div style={{animation:"fadeIn 0.3s ease"}}>
+        {rnError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginBottom:12}}>⚠️ {rnError}</div>}
+        {rnLoading && <div style={{textAlign:"center",padding:40,color:S.textMuted,fontSize:13}}>Loading relay network…</div>}
+
+        {!rnLoading && (<>
+          {/* ── Zone list + Zone form ── */}
+          <SC title="Delivery Zones" icon="🌐" desc="Zones group relay nodes. Each zone has a centre point and a radius." right={<button onClick={()=>{setZoneEditing(null);setZoneForm({name:"",center_lat:"",center_lng:"",radius_km:5,is_active:true});setZoneFormOpen(true);}} style={{padding:"6px 16px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:S.gold,color:S.navy}}>+ Add Zone</button>}>
+            {zoneFormOpen && (
+              <div style={{background:"#f8fafc",borderRadius:10,padding:16,border:`1px solid ${S.border}`,marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:S.navy,marginBottom:12}}>{zoneEditing?"Edit Zone":"New Zone"}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                  <div style={{gridColumn:"1/-1"}}><label style={labelStyle}>Zone Name</label><input value={zoneForm.name} onChange={e=>setZoneForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Lagos Island" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Centre Latitude</label><input value={zoneForm.center_lat} onChange={e=>setZoneForm(f=>({...f,center_lat:e.target.value}))} placeholder="6.4541" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Centre Longitude</label><input value={zoneForm.center_lng} onChange={e=>setZoneForm(f=>({...f,center_lng:e.target.value}))} placeholder="3.3947" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Radius (km)</label><input value={zoneForm.radius_km} onChange={e=>setZoneForm(f=>({...f,radius_km:e.target.value}))} type="number" step="0.5" style={inputStyle}/></div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:20}}><Toggle on={zoneForm.is_active} setOn={v=>setZoneForm(f=>({...f,is_active:v}))} size="sm"/><span style={{fontSize:12,color:S.textMuted}}>Active</span></div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>setZoneFormOpen(false)} style={{padding:"7px 18px",borderRadius:8,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,color:S.textDim}}>Cancel</button>
+                  <button disabled={zoneSaving} onClick={async()=>{
+                    if(!zoneForm.name||zoneForm.center_lat===""||zoneForm.center_lng===""){setRnError("Zone name, latitude and longitude are required.");return;}
+                    setZoneSaving(true);setRnError(null);
+                    try{
+                      const payload={name:zoneForm.name,center_lat:parseFloat(zoneForm.center_lat),center_lng:parseFloat(zoneForm.center_lng),radius_km:parseFloat(zoneForm.radius_km)||5,is_active:zoneForm.is_active};
+                      if(zoneEditing){const updated=await ZonesAPI.update(zoneEditing,payload);setRnZones(z=>z.map(x=>x.id===zoneEditing?updated:x));}
+                      else{const created=await ZonesAPI.create(payload);setRnZones(z=>[...z,created]);}
+                      setZoneFormOpen(false);
+                    }catch(e){setRnError(e.message);}finally{setZoneSaving(false);}
+                  }} style={{padding:"7px 22px",borderRadius:8,border:"none",cursor:zoneSaving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:zoneSaving?0.7:1}}>{zoneSaving?"Saving…":zoneEditing?"Update Zone":"Save Zone"}</button>
+                </div>
+              </div>
+            )}
+            {rnZones.length===0 ? (
+              <div style={{textAlign:"center",padding:"20px 0",color:S.textMuted,fontSize:12}}>No zones yet. Add your first zone above.</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Name","Centre","Radius","Nodes","Status",""].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
+                  <tbody>{rnZones.map(z=>(
+                    <tr key={z.id} style={{borderBottom:`1px solid ${S.borderLight}`}}>
+                      <td style={{padding:"9px 10px",fontWeight:700}}>{z.name}</td>
+                      <td style={{padding:"9px 10px",fontFamily:"'Space Mono',monospace",fontSize:11}}>{Number(z.center_lat).toFixed(4)}, {Number(z.center_lng).toFixed(4)}</td>
+                      <td style={{padding:"9px 10px"}}>{z.radius_km} km</td>
+                      <td style={{padding:"9px 10px"}}>{z.relay_nodes_count ?? "—"}</td>
+                      <td style={{padding:"9px 10px"}}><span style={{fontSize:10,padding:"3px 8px",borderRadius:5,fontWeight:700,background:z.is_active?S.greenBg:S.redBg,color:z.is_active?S.green:S.red}}>{z.is_active?"Active":"Inactive"}</span></td>
+                      <td style={{padding:"9px 10px",display:"flex",gap:6}}>
+                        <button onClick={()=>{setZoneEditing(z.id);setZoneForm({name:z.name,center_lat:z.center_lat,center_lng:z.center_lng,radius_km:z.radius_km,is_active:z.is_active});setZoneFormOpen(true);}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontSize:11,fontWeight:600,color:S.navy}}>Edit</button>
+                        <button onClick={async()=>{if(!window.confirm("Deactivate this zone?"))return;try{const u=await ZonesAPI.update(z.id,{is_active:false});setRnZones(prev=>prev.map(x=>x.id===z.id?u:x));}catch(e){setRnError(e.message);}}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid rgba(239,68,68,0.25)`,background:"rgba(239,68,68,0.06)",cursor:"pointer",fontSize:11,fontWeight:600,color:S.red}}>Deactivate</button>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SC>
+
+          {/* ── Relay Node list + Node form ── */}
+          <SC title="Relay Nodes" icon="📍" desc="Physical handoff points. Enter an address to geocode coordinates." right={<button onClick={()=>{setNodeEditing(null);setNodeForm({name:"",address:"",latitude:"",longitude:"",zone:"",catchment_radius_km:0.5,is_active:true});setNodeFormOpen(true);}} style={{padding:"6px 16px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:S.gold,color:S.navy}}>+ Add Node</button>}>
+            {nodeFormOpen && (
+              <div style={{background:"#f8fafc",borderRadius:10,padding:16,border:`1px solid ${S.border}`,marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:S.navy,marginBottom:12}}>{nodeEditing?"Edit Relay Node":"New Relay Node"}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                  <div style={{gridColumn:"1/-1"}}><label style={labelStyle}>Node Name</label><input value={nodeForm.name} onChange={e=>setNodeForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Yaba Market Hub" style={inputStyle}/></div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <label style={labelStyle}>Address (type to geocode)</label>
+                    <div style={{display:"flex",gap:8}}>
+                      <div style={{flex:1}}>
+                        <AddressAutocompleteInput value={nodeForm.address} onChange={v=>setNodeForm(f=>({...f,address:v}))} placeholder="Enter address…" style={inputStyle}/>
+                      </div>
+                      <button onClick={()=>{
+                        if(!nodeForm.address){setRnError("Enter an address first.");return;}
+                        if(!window.google||!window.google.maps){setRnError("Google Maps not loaded.");return;}
+                        const geocoder=new window.google.maps.Geocoder();
+                        geocoder.geocode({address:nodeForm.address,componentRestrictions:{country:"ng"}},(results,status)=>{
+                          if(status==="OK"&&results[0]){
+                            const loc=results[0].geometry.location;
+                            setNodeForm(f=>({...f,latitude:loc.lat().toFixed(6),longitude:loc.lng().toFixed(6)}));
+                            setRnError(null);
+                          } else { setRnError("Geocoding failed: "+status); }
+                        });
+                      }} style={{padding:"0 14px",borderRadius:8,border:`1px solid ${S.gold}`,background:S.goldPale,cursor:"pointer",fontSize:12,fontWeight:700,color:S.gold,whiteSpace:"nowrap"}}>📍 Geocode</button>
+                    </div>
+                  </div>
+                  <div><label style={labelStyle}>Latitude</label><input value={nodeForm.latitude} onChange={e=>setNodeForm(f=>({...f,latitude:e.target.value}))} placeholder="6.5166" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Longitude</label><input value={nodeForm.longitude} onChange={e=>setNodeForm(f=>({...f,longitude:e.target.value}))} placeholder="3.3705" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Zone</label>
+                    <select value={nodeForm.zone} onChange={e=>setNodeForm(f=>({...f,zone:e.target.value}))} style={{...inputStyle,background:"#fff"}}>
+                      <option value="">— No zone —</option>
+                      {rnZones.map(z=><option key={z.id} value={z.id}>{z.name}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={labelStyle}>Catchment Radius (km)</label><input value={nodeForm.catchment_radius_km} onChange={e=>setNodeForm(f=>({...f,catchment_radius_km:e.target.value}))} type="number" step="0.1" style={inputStyle}/></div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:20}}><Toggle on={nodeForm.is_active} setOn={v=>setNodeForm(f=>({...f,is_active:v}))} size="sm"/><span style={{fontSize:12,color:S.textMuted}}>Active</span></div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>setNodeFormOpen(false)} style={{padding:"7px 18px",borderRadius:8,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,color:S.textDim}}>Cancel</button>
+                  <button disabled={nodeSaving} onClick={async()=>{
+                    if(!nodeForm.name||nodeForm.latitude===""||nodeForm.longitude===""){setRnError("Node name, latitude and longitude are required.");return;}
+                    setNodeSaving(true);setRnError(null);
+                    try{
+                      const payload={name:nodeForm.name,address:nodeForm.address,latitude:parseFloat(nodeForm.latitude),longitude:parseFloat(nodeForm.longitude),zone:nodeForm.zone||null,catchment_radius_km:parseFloat(nodeForm.catchment_radius_km)||0.5,is_active:nodeForm.is_active};
+                      if(nodeEditing){const updated=await RelayNodesAPI.update(nodeEditing,payload);setRnNodes(n=>n.map(x=>x.id===nodeEditing?updated:x));}
+                      else{const created=await RelayNodesAPI.create(payload);setRnNodes(n=>[...n,created]);}
+                      setNodeFormOpen(false);
+                    }catch(e){setRnError(e.message);}finally{setNodeSaving(false);}
+                  }} style={{padding:"7px 22px",borderRadius:8,border:"none",cursor:nodeSaving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:nodeSaving?0.7:1}}>{nodeSaving?"Saving…":nodeEditing?"Update Node":"Save Node"}</button>
+                </div>
+              </div>
+            )}
+            {rnNodes.length===0 ? (
+              <div style={{textAlign:"center",padding:"20px 0",color:S.textMuted,fontSize:12}}>No relay nodes yet. Add your first node above.</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Name","Address","Coordinates","Zone","Catchment","Status",""].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
+                  <tbody>{rnNodes.map(nd=>(
+                    <tr key={nd.id} style={{borderBottom:`1px solid ${S.borderLight}`}}>
+                      <td style={{padding:"9px 10px",fontWeight:700}}>{nd.name}</td>
+                      <td style={{padding:"9px 10px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:S.textMuted,fontSize:11}} title={nd.address}>{nd.address||"—"}</td>
+                      <td style={{padding:"9px 10px",fontFamily:"'Space Mono',monospace",fontSize:10}}>{Number(nd.latitude).toFixed(4)},{Number(nd.longitude).toFixed(4)}</td>
+                      <td style={{padding:"9px 10px",fontSize:11}}>{nd.zone_name||<span style={{color:S.textMuted}}>—</span>}</td>
+                      <td style={{padding:"9px 10px"}}>{nd.catchment_radius_km} km</td>
+                      <td style={{padding:"9px 10px"}}><span style={{fontSize:10,padding:"3px 8px",borderRadius:5,fontWeight:700,background:nd.is_active?S.greenBg:S.redBg,color:nd.is_active?S.green:S.red}}>{nd.is_active?"Active":"Inactive"}</span></td>
+                      <td style={{padding:"9px 10px",display:"flex",gap:6}}>
+                        <button onClick={()=>{setNodeEditing(nd.id);setNodeForm({name:nd.name,address:nd.address||"",latitude:nd.latitude,longitude:nd.longitude,zone:nd.zone||"",catchment_radius_km:nd.catchment_radius_km,is_active:nd.is_active});setNodeFormOpen(true);}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontSize:11,fontWeight:600,color:S.navy}}>Edit</button>
+                        <button onClick={async()=>{if(!window.confirm("Deactivate this relay node?"))return;try{const u=await RelayNodesAPI.update(nd.id,{is_active:false});setRnNodes(prev=>prev.map(x=>x.id===nd.id?u:x));}catch(e){setRnError(e.message);}}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid rgba(239,68,68,0.25)`,background:"rgba(239,68,68,0.06)",cursor:"pointer",fontSize:11,fontWeight:600,color:S.red}}>Deactivate</button>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SC>
+
+          {/* ── Map view ── */}
+          <SC title="Relay Network Map" icon="🗺️" desc="Active relay nodes overlaid on the Lagos delivery map">
+	            <RelayNetworkMap
+	              height={380}
+	              zones={rnZones.filter(z => z.is_active)}
+	              relayNodes={rnNodes.filter(n => n.is_active)}
+	            />
+          </SC>
+        </>)}
       </div>)}
 
       {/* ═══ NOTIFICATIONS TAB ═══ */}

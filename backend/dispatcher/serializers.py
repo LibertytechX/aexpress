@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed
+from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -557,3 +557,30 @@ class ActivityFeedSerializer(serializers.ModelSerializer):
     class Meta:
         model = ActivityFeed
         fields = ["id", "event_type", "order_id", "text", "color", "metadata", "created_at"]
+
+
+class ZoneSerializer(serializers.ModelSerializer):
+    relay_nodes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Zone
+        fields = [
+            "id", "name", "center_lat", "center_lng", "radius_km",
+            "is_active", "relay_nodes_count", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def get_relay_nodes_count(self, obj):
+        return obj.relay_nodes.count()
+
+
+class RelayNodeSerializer(serializers.ModelSerializer):
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = RelayNode
+        fields = [
+            "id", "name", "address", "latitude", "longitude",
+            "zone", "zone_name", "catchment_radius_km", "is_active", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]

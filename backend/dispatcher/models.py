@@ -1,8 +1,89 @@
+import math
+
 from django.db import models
 from django.conf import settings
 import uuid
 import random
 import string
+
+
+# ---------------------------------------------------------------------------
+# Relay Delivery Infrastructure
+# ---------------------------------------------------------------------------
+
+class Zone(models.Model):
+    """
+    A delivery zone defined by a center point and radius.
+    Zones are used to assign riders to home areas and segment relay paths.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    center_lat = models.FloatField(help_text="Zone center latitude")
+    center_lng = models.FloatField(help_text="Zone center longitude")
+    radius_km = models.FloatField(default=5.0, help_text="Zone radius in kilometers")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "zones"
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.radius_km}km radius)"
+
+    @staticmethod
+    def haversine_distance(lat1, lng1, lat2, lng2):
+        """Return great-circle distance in km between two (lat, lng) points."""
+        R = 6371.0
+        phi1, phi2 = math.radians(lat1), math.radians(lat2)
+        dphi = math.radians(lat2 - lat1)
+        dlambda = math.radians(lng2 - lng1)
+        a = (
+            math.sin(dphi / 2) ** 2
+            + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+        )
+        return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+class RelayNode(models.Model):
+    """
+    A physical handoff point where packages are dropped and picked up
+    between relay legs. Hub-and-hold: package waits here until the next
+    rider becomes available.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    address = models.TextField(help_text="Human-readable address (geocoded)")
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    zone = models.ForeignKey(
+        Zone,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="relay_nodes",
+    )
+    # Catchment radius — riders within this distance can be offered this relay leg
+    catchment_radius_km = models.FloatField(
+        default=0.5,
+        help_text="Radius (km) within which riders are eligible to pick up at this node",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "relay_nodes"
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} — {self.address[:60]}"
+
+
+# ---------------------------------------------------------------------------
 
 
 class Rider(models.Model):
@@ -88,6 +169,15 @@ class Rider(models.Model):
     )
     onro_location_lat = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
     onro_location_lng = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
+
+    # Home Zone (used for relay dispatch — rider is assigned legs within this zone)
+    home_zone = models.ForeignKey(
+        Zone,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="riders",
+    )
 
     # GPS Tracking
     gpswox_device_id = models.CharField(max_length=100, null=True, blank=True)

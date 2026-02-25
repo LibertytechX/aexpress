@@ -1,3 +1,5 @@
+import random
+import string
 import uuid
 from django.db import models
 from django.utils import timezone
@@ -188,6 +190,16 @@ class Order(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     scheduled_pickup_time = models.DateTimeField(null=True, blank=True)
 
+    # Relay delivery
+    is_relay_order = models.BooleanField(
+        default=False,
+        help_text="True when this order is split into multiple relay legs",
+    )
+    relay_legs_count = models.IntegerField(
+        default=0,
+        help_text="Total number of relay legs (0 for standard single-rider orders)",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
@@ -304,3 +316,110 @@ class OrderEvent(models.Model):
 
     def __str__(self):
         return f"{self.event} for {self.order.order_number}"
+
+
+class OrderLeg(models.Model):
+    """
+    A single hop in a relay delivery order.
+    One Order (parent) has N OrderLegs, each assigned to a different rider.
+    Packages are transferred at RelayNodes using hub-and-hold: the package
+    waits at the relay hub until the next rider picks up.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "Pending", "Pending"
+        ASSIGNED = "Assigned", "Assigned"
+        PICKED_UP = "PickedUp", "Picked Up"
+        IN_TRANSIT = "InTransit", "In Transit"
+        AT_HUB = "AtHub", "At Hub"         # package dropped, waiting for next rider
+        COMPLETED = "Completed", "Completed"
+        FAILED = "Failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="legs")
+    leg_number = models.PositiveIntegerField(
+        help_text="Sequential leg number starting at 1"
+    )
+
+    # Rider assigned to this leg
+    rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="relay_legs",
+    )
+
+    # Relay handoff points
+    # Null start_relay_node  → first leg, picks up at order.pickup_address
+    # Null end_relay_node    → last leg, delivers to order delivery address
+    start_relay_node = models.ForeignKey(
+        "dispatcher.RelayNode",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="outgoing_legs",
+        help_text="Null for first leg (pickup from order origin)",
+    )
+    end_relay_node = models.ForeignKey(
+        "dispatcher.RelayNode",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="incoming_legs",
+        help_text="Null for last leg (delivers to order destination)",
+    )
+
+    # Route details (locked in at order creation time)
+    distance_km = models.FloatField(default=0.0, help_text="Road distance for this leg")
+    duration_minutes = models.IntegerField(default=0)
+
+    # Settlement — pre-calculated so rider knows earnings before accepting
+    # Formula: (leg_distance_km / sum_all_legs_distance_km) × total_rider_pool
+    rider_payout = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Pre-calculated payout amount for this leg",
+    )
+    zone_compliance_bonus = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Bonus applied when rider stays within their assigned zone path",
+    )
+
+    # 6-digit PIN used by hub agent to release package to the next rider
+    hub_pin = models.CharField(
+        max_length=6,
+        blank=True,
+        default="",
+        help_text="PIN generated at leg creation; hub agent confirms before handoff",
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+
+    # Timestamps
+    assigned_at = models.DateTimeField(null=True, blank=True)
+    picked_up_at = models.DateTimeField(null=True, blank=True)
+    dropped_at_hub_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "order_legs"
+        ordering = ["order", "leg_number"]
+        unique_together = [("order", "leg_number")]
+
+    def __str__(self):
+        return f"Order {self.order.order_number} — Leg {self.leg_number}"
+
+    def save(self, *args, **kwargs):
+        if not self.hub_pin:
+            self.hub_pin = "".join(random.choices(string.digits, k=6))
+        super().save(*args, **kwargs)
