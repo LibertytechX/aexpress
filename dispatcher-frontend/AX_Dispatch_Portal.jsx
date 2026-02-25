@@ -446,6 +446,8 @@ function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const circlesRef = useRef([]);
+  const labelOverlaysRef = useRef([]);
+  const LabelOverlayCtorRef = useRef(null);
   const infoWindowRef = useRef(null);
   const [mapStatus, setMapStatus] = useState('loading');
   const [mapReady, setMapReady] = useState(false);
@@ -460,6 +462,8 @@ function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
     markersRef.current = [];
     circlesRef.current.forEach(c => c.setMap(null));
     circlesRef.current = [];
+    labelOverlaysRef.current.forEach(o => o.setMap(null));
+    labelOverlaysRef.current = [];
   };
 
   // Effect 1: Initialize the Google Map (once)
@@ -508,73 +512,117 @@ function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
     clearOverlays();
     if (!infoWindowRef.current) infoWindowRef.current = new window.google.maps.InfoWindow();
 
+	    // Build (once) an OverlayView-based label that supports proper "pill/card" styling.
+	    if (!LabelOverlayCtorRef.current) {
+	      const g = window.google.maps;
+	      LabelOverlayCtorRef.current = class MapLabelOverlay extends g.OverlayView {
+	        constructor(position, text, opts = {}) {
+	          super();
+	          this.position = position;
+	          this.text = text;
+	          this.opts = opts;
+	          this.div = null;
+	        }
+	        onAdd() {
+	          const div = document.createElement('div');
+	          div.style.position = 'absolute';
+	          div.style.pointerEvents = 'none';
+	          div.style.userSelect = 'none';
+	          div.style.whiteSpace = 'nowrap';
+	          div.style.maxWidth = this.opts.maxWidth || '190px';
+	          div.style.overflow = 'hidden';
+	          div.style.textOverflow = 'ellipsis';
+
+	          // Professional label styling (Google/Uber-like)
+	          div.style.background = this.opts.background || 'rgba(255,255,255,0.90)';
+	          div.style.border = this.opts.border || '1px solid rgba(15,23,42,0.12)';
+	          div.style.borderRadius = this.opts.borderRadius || '999px';
+	          div.style.padding = this.opts.padding || '5px 8px';
+	          div.style.boxShadow = this.opts.boxShadow || '0 2px 6px rgba(0,0,0,0.18)';
+	          div.style.backdropFilter = this.opts.backdropFilter || 'blur(2px)';
+
+	          div.style.color = this.opts.color || '#1B2A4A';
+	          div.style.fontSize = this.opts.fontSize || '12px';
+	          div.style.fontWeight = this.opts.fontWeight || '700';
+	          div.style.lineHeight = '1.1';
+	          div.style.letterSpacing = '0.1px';
+
+	          if (typeof this.opts.zIndex === 'number') div.style.zIndex = String(this.opts.zIndex);
+
+	          div.textContent = this.text;
+	          this.div = div;
+
+	          const panes = this.getPanes();
+	          // floatPane keeps labels above circles/tiles; still non-interactive.
+	          (panes.floatPane || panes.overlayLayer).appendChild(div);
+	        }
+	        draw() {
+	          if (!this.div) return;
+	          const projection = this.getProjection();
+	          if (!projection) return;
+	          const pt = projection.fromLatLngToDivPixel(this.position);
+	          if (!pt) return;
+	          const ox = this.opts.offsetX || 0;
+	          const oy = this.opts.offsetY || 0;
+	          this.div.style.left = (pt.x + ox) + 'px';
+	          this.div.style.top = (pt.y + oy) + 'px';
+
+	          const anchor = this.opts.anchor || 'top';
+	          if (anchor === 'center') this.div.style.transform = 'translate(-50%, -50%)';
+	          else if (anchor === 'bottom') this.div.style.transform = 'translate(-50%, 0%)';
+	          else this.div.style.transform = 'translate(-50%, -115%)'; // top (above point)
+	        }
+	        onRemove() {
+	          if (this.div && this.div.parentNode) this.div.parentNode.removeChild(this.div);
+	          this.div = null;
+	        }
+	      };
+	    }
+	    const MapLabelOverlay = LabelOverlayCtorRef.current;
+
     const bounds = new window.google.maps.LatLngBounds();
     let hasAny = false;
     const palette = [S.blue, S.gold, S.green, S.purple, S.red];
+	    const zoneColorById = {};
 
-    (Array.isArray(zones) ? zones : []).forEach((z, idx) => {
-      const lat = num(z.center_lat);
-      const lng = num(z.center_lng);
-      const rkm = num(z.radius_km);
-      if (lat == null || lng == null || rkm == null || rkm <= 0) return;
-
-      const color = palette[idx % palette.length];
-	      const zoneName = (z.name || 'Zone').toString();
-      const circle = new window.google.maps.Circle({
-        map,
-        center: { lat, lng },
-        radius: rkm * 1000,
-        strokeColor: color,
-        strokeOpacity: 0.75,
-        strokeWeight: 2,
-        fillColor: color,
-        fillOpacity: 0.10,
-        clickable: true,
-      });
-      circlesRef.current.push(circle);
-
-      const cb = circle.getBounds();
-      if (cb) bounds.union(cb);
-      else bounds.extend({ lat, lng });
-      hasAny = true;
-
-	      // Always-on zone label (Circle has no native label support)
-	      const zoneLabelMarker = new window.google.maps.Marker({
-	        map,
-	        position: { lat, lng },
-	        title: zoneName,
-	        icon: {
-	          path: window.google.maps.SymbolPath.CIRCLE,
-	          scale: 0, // invisible icon; label only
-	          fillOpacity: 0,
-	          strokeOpacity: 0,
-	        },
-	        label: {
-	          text: zoneName,
-	          color: S.navy,
-	          fontSize: '12px',
-	          fontWeight: '700',
-	        },
-	        zIndex: 999,
-	      });
-	      markersRef.current.push(zoneLabelMarker);
-
-      circle.addListener('click', () => {
-	        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${zoneName}</b><br/>Radius: ${rkm} km</div>`);
-        infoWindowRef.current.setPosition({ lat, lng });
-        infoWindowRef.current.open({ map });
-      });
-	      zoneLabelMarker.addListener('click', () => {
-	        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${zoneName}</b><br/>Radius: ${rkm} km</div>`);
-	        infoWindowRef.current.open({ map, anchor: zoneLabelMarker });
-	      });
-    });
+	    // Zones are used for color-coding nodes. We intentionally do NOT render
+	    // zone labels or zone radius circles to keep the map clean.
+	    (Array.isArray(zones) ? zones : []).forEach((z, idx) => {
+	      if (z && z.id != null) zoneColorById[String(z.id)] = palette[idx % palette.length];
+	      // Still extend bounds to keep the map centered around configured zones.
+	      const lat = num(z.center_lat);
+	      const lng = num(z.center_lng);
+	      if (lat == null || lng == null) return;
+	      bounds.extend({ lat, lng });
+	      hasAny = true;
+	    });
 
     (Array.isArray(relayNodes) ? relayNodes : []).forEach((n) => {
       const lat = num(n.latitude);
       const lng = num(n.longitude);
       if (lat == null || lng == null) return;
 	      const nodeName = (n.name || 'Relay Node').toString();
+	      const zoneId = (n && n.zone != null) ? String(n.zone) : null;
+	      const color = (zoneId && zoneColorById[zoneId]) ? zoneColorById[zoneId] : S.purple;
+
+	      // Relay node catchment radius (visual)
+	      const crkm = num(n.catchment_radius_km);
+	      if (crkm != null && crkm > 0) {
+	        const nodeCircle = new window.google.maps.Circle({
+	          map,
+	          center: { lat, lng },
+	          radius: crkm * 1000,
+	          strokeColor: color,
+	          strokeOpacity: 0.55,
+	          strokeWeight: 1,
+	          fillColor: color,
+	          fillOpacity: 0.08,
+	          clickable: false,
+	        });
+	        circlesRef.current.push(nodeCircle);
+	        const nb = nodeCircle.getBounds();
+	        if (nb) bounds.union(nb);
+	      }
 
       const marker = new window.google.maps.Marker({
         map,
@@ -583,21 +631,32 @@ function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
         icon: {
           path: window.google.maps.SymbolPath.CIRCLE,
           scale: 8,
-          fillColor: S.purple,
+	          fillColor: color,
           fillOpacity: 1,
           strokeColor: '#fff',
           strokeWeight: 3,
         },
-	        label: {
-	          text: nodeName,
-	          color: S.navy,
-	          fontSize: '11px',
-	          fontWeight: '700',
-	        },
       });
       markersRef.current.push(marker);
       bounds.extend({ lat, lng });
       hasAny = true;
+
+	      // Always-on styled node label (OverlayView), positioned above the marker
+	      const nodeLabel = new MapLabelOverlay(
+	        new window.google.maps.LatLng(lat, lng),
+	        nodeName,
+	        {
+	          anchor: 'top',
+	          offsetY: -12,
+	          fontSize: '11px',
+	          fontWeight: '800',
+	          padding: '5px 8px',
+	          borderRadius: '999px',
+	          zIndex: 1001,
+	        }
+	      );
+	      nodeLabel.setMap(map);
+	      labelOverlaysRef.current.push(nodeLabel);
 
       marker.addListener('click', () => {
         const title = n.name || 'Relay Node';
