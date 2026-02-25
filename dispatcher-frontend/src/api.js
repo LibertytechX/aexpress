@@ -180,6 +180,18 @@ export const VehiclesAPI = {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch vehicles');
+        const data = await res.json();
+        // Response shape is { success: true, vehicles: [...] }
+        return Array.isArray(data) ? data : (data.vehicles || []);
+    },
+
+    async update(id, data) {
+        const res = await fetch(`${API_BASE_URL}/orders/vehicles/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to update vehicle');
         return await res.json();
     }
 };

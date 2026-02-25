@@ -621,7 +621,7 @@ class CancelOrderView(APIView):
             )
 
         # Check if order can be canceled
-        if order.status == "Canceled":
+        if order.status in ["Canceled", "CustomerCanceled"]:
             return Response(
                 {"error": "Order is already canceled"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -668,9 +668,27 @@ class CancelOrderView(APIView):
 
         # Update order status
         old_status = order.status
-        order.status = "Canceled"
+        order.status = "CustomerCanceled"
         order.updated_at = timezone.now()
         order.save()
+
+        # Emit live-feed activity event for the dispatcher
+        merchant_name = (
+            getattr(request.user, "business_name", None)
+            or getattr(request.user, "contact_name", None)
+            or "Unknown"
+        )
+        emit_activity(
+            event_type="cancelled",
+            order_id=order.order_number,
+            text=f"Order {order.order_number} cancelled by {merchant_name}",
+            color="red",
+            metadata={
+                "merchant": merchant_name,
+                "reason": reason,
+                "old_status": old_status,
+            },
+        )
 
         # Prepare response
         response_data = {

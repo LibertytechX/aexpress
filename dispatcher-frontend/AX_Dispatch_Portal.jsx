@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -513,6 +513,12 @@ export default function AXDispatchPortal() {
 
   // Fetch data whenever authenticated becomes true
   useEffect(() => {
+	    // In React 18 dev + StrictMode, effects can mount/unmount/mount rapidly.
+	    // Guard async work so we don't end up with multiple Ably subscriptions.
+	    let cancelled = false;
+	    let localAbly = null;
+	    let pollInterval = null;
+
     if (!isAuthenticated) {
       setLoading(false);
       // Clean up Ably if user logs out
@@ -527,6 +533,7 @@ export default function AXDispatchPortal() {
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => [])
         ]);
+	        if (cancelled) return;
         setRiders(ridersData);
         setOrders(ordersData);
         setMerchants(merchantsData);
@@ -536,30 +543,60 @@ export default function AXDispatchPortal() {
         AuthAPI.logout();
         setIsAuthenticated(false);
       } finally {
-        setLoading(false);
+	        if (!cancelled) setLoading(false);
       }
     };
     fetchData();
 
-    // Load initial activity feed + subscribe to live updates
-    let pollInterval = null;
+	    // Load initial activity feed + subscribe to live updates
     const setupAbly = async () => {
       try {
         const feedData = await ActivityFeedAPI.getRecent(50).catch(() => []);
-        setActivityFeed(feedData);
+	        if (!cancelled) setActivityFeed(feedData);
       } catch (_) { /* ignore */ }
 
       // Try Ably real-time; fall back to polling if unavailable
       let ablyActive = false;
       try {
         const tokenRequest = await ActivityFeedAPI.getAblyToken();
-        const ably = new Realtime({
+	        if (cancelled) return;
+	        const ably = new Realtime({
           authCallback: (_, callback) => { callback(null, tokenRequest); }
         });
-        ablyRef.current = ably;
+	        localAbly = ably;
+	        ablyRef.current = ably;
         const ch = ably.channels.get("dispatch-feed");
         ch.subscribe("activity", (msg) => {
-          setActivityFeed(prev => [msg.data, ...prev.slice(0, 99)]);
+	          const d = msg.data;
+	          setActivityFeed(prev => {
+	            if (!d) return prev;
+	            if (d.id && prev.some(x => x.id === d.id)) return prev;
+	            return [d, ...prev].slice(0, 100);
+	          });
+          // Sync order status from real-time events so the orders list stays fresh
+          if (d && d.order_id) {
+            const statusEventMap = {
+              cancelled: "Cancelled",
+              delivered: "Delivered",
+              in_transit: "In Transit",
+              assigned: "Assigned",
+              unassigned: "Pending",
+              failed: "Failed",
+            };
+            const newStatus = statusEventMap[d.event_type];
+            if (newStatus) {
+              setOrders(prev => prev.map(o => o.id === d.order_id ? { ...o, status: newStatus } : o));
+            }
+            // If a new_order event arrives for an order not yet in the list, refresh
+            if (d.event_type === "new_order") {
+              setOrders(prev => {
+                if (!prev.find(o => o.id === d.order_id)) {
+                  OrdersAPI.getAll().then(data => setOrders(data)).catch(() => {});
+                }
+                return prev;
+              });
+            }
+          }
         });
         ablyActive = true;
       } catch (err) {
@@ -578,9 +615,21 @@ export default function AXDispatchPortal() {
     };
     setupAbly();
 
+    // Periodic orders refresh (60 s) so orders from the merchant portal
+    // and external status changes stay in sync even when Ably is active
+    const ordersInterval = setInterval(async () => {
+      try {
+        const data = await OrdersAPI.getAll().catch(() => null);
+        if (data) setOrders(data);
+      } catch (_) { /* ignore */ }
+    }, 60000);
+
     return () => {
-      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+	      cancelled = true;
+	      if (localAbly) { localAbly.close(); localAbly = null; }
+	      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
       if (pollInterval) clearInterval(pollInterval);
+      clearInterval(ordersInterval);
     };
   }, [isAuthenticated]); // re-run when user logs in
 
@@ -735,6 +784,7 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   // Map activity feed to events format (fall back to empty if no data yet)
   const truncate = (str, n) => str && str.length > n ? str.slice(0, n - 1) + "…" : (str || "");
   const events = (activityFeed || []).map(item => ({
+	    id: item.id,
     time: new Date(item.created_at).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }),
     text: item.text,
     color: colorMap[item.color] || S.gold,
@@ -760,8 +810,8 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
             <span style={{fontSize:11,color:S.textMuted}}>{events.length} events</span>
           </div>
           <div style={{maxHeight:420,overflowY:"auto"}}>
-            {events.map((ev,i) => (
-              <div key={i} onClick={()=>onViewOrder(ev.oid)} style={{padding:"11px 18px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+	            {events.map((ev,i) => (
+	              <div key={ev.id || `${ev.event_type}:${ev.oid}:${i}`} onClick={()=>onViewOrder(ev.oid)} style={{padding:"11px 18px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{width:8,height:8,borderRadius:"50%",background:ev.color,marginTop:5,flexShrink:0}}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:12,color:S.text,lineHeight:1.4}}>{ev.text}</div>
@@ -1447,8 +1497,12 @@ function SettingsScreen() {
   const [notifUnassigned, setNotifUnassigned] = useState(true);
   const [notifComplete, setNotifComplete] = useState(true);
   const [notifCod, setNotifCod] = useState(true);
+  const [vehicleIds, setVehicleIds] = useState({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [settingsTab, setSettingsTab] = useState("pricing");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [simKm, setSimKm] = useState(8);
   const [simVehicle, setSimVehicle] = useState("bike");
   const [simZone, setSimZone] = useState("same");
@@ -1478,8 +1532,126 @@ function SettingsScreen() {
   const simC = getVC()[simVehicle];
   const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight);
   const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
-  const handleSave = () => { setSaved(true); setTimeout(()=>setSaved(false),2500); };
-  const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300); };
+
+  // Load settings from backend on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSettings() {
+      setSettingsLoading(true);
+      try {
+        const [vehicles, settings] = await Promise.all([
+          VehiclesAPI.getAll(),
+          SettingsAPI.get()
+        ]);
+        if (cancelled) return;
+        // pf(): parse a backend decimal safely — 0 is a valid value, so we only
+        // fall back when the field is null/undefined/NaN (not when it is 0).
+        const pf = (val, fb) => { const n = parseFloat(val); return isNaN(n) ? fb : n; };
+        const ids = {};
+        vehicles.forEach(v => {
+          const key = v.name.toLowerCase();
+          ids[key] = v.id;
+          if (key === 'bike') {
+            setBikeBase(pf(v.base_fare, 500));
+            setBikePerKm(pf(v.rate_per_km, 150));
+            setBikeMinKm(pf(v.min_distance_km, 3));
+            setBikeMin(pf(v.min_fee, 1200));
+          } else if (key === 'car') {
+            setCarBase(pf(v.base_fare, 1000));
+            setCarPerKm(pf(v.rate_per_km, 250));
+            setCarMinKm(pf(v.min_distance_km, 3));
+            setCarMin(pf(v.min_fee, 2500));
+          } else if (key === 'van') {
+            setVanBase(pf(v.base_fare, 2000));
+            setVanPerKm(pf(v.rate_per_km, 400));
+            setVanMinKm(pf(v.min_distance_km, 3));
+            setVanMin(pf(v.min_fee, 5000));
+          }
+        });
+        setVehicleIds(ids);
+        // pi(): same null-safe parse for integer fields
+        const pi = (val, fb) => { const n = parseInt(val, 10); return isNaN(n) ? fb : n; };
+        if (settings) {
+          setCodFee(pf(settings.cod_flat_fee, 500));
+          setCodPct(pf(settings.cod_pct_fee, 1.5));
+          setBridgeSurcharge(pf(settings.bridge_surcharge, 500));
+          setOuterZoneSurcharge(pf(settings.outer_zone_surcharge, 800));
+          setIslandPremium(pf(settings.island_premium, 300));
+          setWeightThreshold(pf(settings.weight_threshold_kg, 5));
+          setWeightSurcharge(pf(settings.weight_surcharge_per_unit, 200));
+          setWeightUnit(pf(settings.weight_unit_kg, 5));
+          setSurgeEnabled(settings.surge_enabled ?? true);
+          setSurgeMultiplier(pf(settings.surge_multiplier, 1.5));
+          setSurgeMorningStart(settings.surge_morning_start || "07:00");
+          setSurgeMorningEnd(settings.surge_morning_end || "09:30");
+          setSurgeEveningStart(settings.surge_evening_start || "17:00");
+          setSurgeEveningEnd(settings.surge_evening_end || "20:00");
+          setRainSurge(settings.rain_surge_enabled ?? true);
+          setRainMultiplier(pf(settings.rain_surge_multiplier, 1.3));
+          setTierEnabled(settings.tier_enabled ?? true);
+          setTier1Km(pf(settings.tier1_km, 15));
+          setTier1Discount(pf(settings.tier1_discount_pct, 10));
+          setTier2Km(pf(settings.tier2_km, 25));
+          setTier2Discount(pf(settings.tier2_discount_pct, 15));
+          setAutoAssign(settings.auto_assign_enabled ?? true);
+          setAssignRadius(pf(settings.auto_assign_radius_km, 5));
+          setAcceptTimeout(pi(settings.accept_timeout_sec, 120));
+          setMaxBike(pi(settings.max_concurrent_bike, 2));
+          setMaxCar(pi(settings.max_concurrent_car, 1));
+          setMaxVan(pi(settings.max_concurrent_van, 1));
+          setNotifNew(settings.notif_new_order ?? true);
+          setNotifUnassigned(settings.notif_unassigned ?? true);
+          setNotifComplete(settings.notif_completed ?? true);
+          setNotifCod(settings.notif_cod_settled ?? true);
+        }
+      } catch (err) {
+        if (!cancelled) setSaveError("Failed to load settings: " + err.message);
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
+      }
+    }
+    loadSettings();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleSave = async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      // PATCH each vehicle's pricing
+      await Promise.all(
+        [
+          { key: 'bike', data: { base_fare: bikeBase, rate_per_km: bikePerKm, min_distance_km: bikeMinKm, min_fee: bikeMin } },
+          { key: 'car',  data: { base_fare: carBase,  rate_per_km: carPerKm,  min_distance_km: carMinKm,  min_fee: carMin  } },
+          { key: 'van',  data: { base_fare: vanBase,  rate_per_km: vanPerKm,  min_distance_km: vanMinKm,  min_fee: vanMin  } },
+        ]
+          .filter(({ key }) => vehicleIds[key])
+          .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
+      );
+      // POST system settings
+      await SettingsAPI.update({
+        cod_flat_fee: codFee, cod_pct_fee: codPct,
+        bridge_surcharge: bridgeSurcharge, outer_zone_surcharge: outerZoneSurcharge, island_premium: islandPremium,
+        weight_threshold_kg: weightThreshold, weight_surcharge_per_unit: weightSurcharge, weight_unit_kg: weightUnit,
+        surge_enabled: surgeEnabled, surge_multiplier: surgeMultiplier,
+        surge_morning_start: surgeMorningStart, surge_morning_end: surgeMorningEnd,
+        surge_evening_start: surgeEveningStart, surge_evening_end: surgeEveningEnd,
+        rain_surge_enabled: rainSurge, rain_surge_multiplier: rainMultiplier,
+        tier_enabled: tierEnabled, tier1_km: tier1Km, tier1_discount_pct: tier1Discount,
+        tier2_km: tier2Km, tier2_discount_pct: tier2Discount,
+        auto_assign_enabled: autoAssign, auto_assign_radius_km: assignRadius, accept_timeout_sec: acceptTimeout,
+        max_concurrent_bike: maxBike, max_concurrent_car: maxCar, max_concurrent_van: maxVan,
+        notif_new_order: notifNew, notif_unassigned: notifUnassigned, notif_completed: notifComplete, notif_cod_settled: notifCod,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
 
   const inputStyle = {width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 12px",height:40,fontSize:14,fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy,outline:"none"};
   const labelStyle = {display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.3px"};
@@ -1492,6 +1664,8 @@ function SettingsScreen() {
       <div style={{display:"flex",gap:4,marginBottom:20,background:S.card,borderRadius:12,padding:4,border:`1px solid ${S.border}`,overflowX:"auto"}}>
         {tabs.map(t=>(<button key={t.id} onClick={()=>setSettingsTab(t.id)} style={{flex:1,padding:"10px 0",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",gap:5,whiteSpace:"nowrap",background:settingsTab===t.id?S.navy:"transparent",color:settingsTab===t.id?"#fff":S.textDim}}>{t.icon} {t.label}</button>))}
       </div>
+
+      {settingsLoading && <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(232,168,56,0.08)",border:`1px solid rgba(232,168,56,0.2)`,borderRadius:10,marginBottom:14,fontSize:13,color:S.navy,fontWeight:600}}>⏳ Loading settings from server…</div>}
 
       {/* ═══ PRICING TAB ═══ */}
       {settingsTab==="pricing" && (<div style={{animation:"fadeIn 0.3s ease"}}>
@@ -1555,9 +1729,10 @@ function SettingsScreen() {
           </div>):(<div style={{fontSize:12,color:S.textMuted,textAlign:"center",padding:10}}>Disabled — flat per-km rate applies</div>)}
         </SC>
 
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}>
-          <button onClick={handleReset} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
-          <button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Pricing"}</button>
+          <button onClick={handleReset} disabled={saving} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
+          <button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Pricing"}</button>
         </div>
       </div>)}
 
@@ -1621,9 +1796,10 @@ function SettingsScreen() {
           </div>):(<div style={{fontSize:12,color:S.textMuted,textAlign:"center",padding:10}}>Surge pricing disabled — flat rates 24/7</div>)}
         </SC>
 
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}>
-          <button onClick={handleReset} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
-          <button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Zone Settings"}</button>
+          <button onClick={handleReset} disabled={saving} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
+          <button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Zone Settings"}</button>
         </div>
       </div>)}
 
@@ -1698,7 +1874,8 @@ function SettingsScreen() {
             </div>
           </div>
         </div>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Settings"}</button></div>
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Settings"}</button></div>
       </div>)}
 
       {/* ═══ NOTIFICATIONS TAB ═══ */}
@@ -1706,6 +1883,8 @@ function SettingsScreen() {
         <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
           {[{label:"New order alert",desc:"Sound + desktop notification when a new order arrives",on:notifNew,set:setNotifNew},{label:"Unassigned order warning",desc:"Alert if an order is unassigned for more than 3 minutes",on:notifUnassigned,set:setNotifUnassigned},{label:"Delivery completion",desc:"Notification when a rider confirms delivery",on:notifComplete,set:setNotifComplete},{label:"COD settlement",desc:"Notification when COD is collected and settled to merchant wallet",on:notifCod,set:setNotifCod}].map((n,i,arr)=>(<div key={n.label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:i<arr.length-1?`1px solid ${S.borderLight}`:"none"}}><div><div style={{fontSize:13,fontWeight:600}}>{n.label}</div><div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{n.desc}</div></div><Toggle on={n.on} setOn={n.set}/></div>))}
         </div>
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Notifications"}</button></div>
       </div>)}
 
       {/* ═══ INTEGRATIONS TAB ═══ */}

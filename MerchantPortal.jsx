@@ -2831,7 +2831,31 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const totalCost = totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
-  const canProceed = pickupAddress && totalDeliveries > 0;
+	const isBlank = (v) => !v || !String(v).trim();
+	const proceedErrors = [];
+
+	if (isBlank(pickupAddress)) proceedErrors.push('Pickup address is required.');
+	if (isBlank(senderName)) proceedErrors.push('Sender name is required.');
+	if (isBlank(senderPhone)) proceedErrors.push('Sender phone is required.');
+
+	if (mode === 'quick') {
+		if (isBlank(dropoffAddress)) proceedErrors.push('Delivery address is required.');
+		if (isBlank(receiverName)) proceedErrors.push('Receiver name is required.');
+		if (isBlank(receiverPhone)) proceedErrors.push('Receiver phone is required.');
+	} else if (mode === 'multi' || mode === 'bulk') {
+		if (totalDeliveries <= 0) proceedErrors.push('At least one delivery is required.');
+		const active = getActiveDropoffs();
+		const missingReceiver = active.some(d => isBlank(d.name) || isBlank(d.phone));
+		if (missingReceiver) proceedErrors.push('Receiver name and phone are required for all deliveries.');
+	}
+
+	const canProceed = proceedErrors.length === 0;
+	const showProceedErrors = !canProceed && (
+		totalDeliveries > 0 ||
+		(mode === 'quick' && !isBlank(dropoffAddress)) ||
+		(mode === 'multi' && drops.some(d => !isBlank(d.address) || !isBlank(d.name) || !isBlank(d.phone))) ||
+		(mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
+	);
 
   const handleConfirmAll = () => {
     const deliveries = getActiveDropoffs();
@@ -3375,6 +3399,25 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               Review & Pay →
             </button>
           </div>
+			  		{showProceedErrors && (
+			  			<div style={{
+			  				marginTop: 10,
+			  				padding: '10px 14px',
+			  				borderRadius: 12,
+			  				border: '1px solid #fecaca',
+			  				background: '#fef2f2',
+			  				color: '#991b1b',
+			  				fontSize: 12,
+			  				fontWeight: 600
+			  			}}>
+			  				<div style={{ marginBottom: 6 }}>Please complete the required fields:</div>
+			  				<ul style={{ margin: 0, paddingLeft: 18 }}>
+			  					{proceedErrors.map((e, i) => (
+			  						<li key={i}>{e}</li>
+			  					))}
+			  				</ul>
+			  			</div>
+			  		)}
         </>
       )}
 
