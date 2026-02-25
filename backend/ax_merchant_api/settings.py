@@ -222,7 +222,10 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
-CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev")
+CORS_ALLOWED_ORIGINS.append(
+    "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+    "https://aexpress-dispatcher-frontend.vercel.app",
+)
 
 CSRF_TRUSTED_ORIGINS = [
     "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
