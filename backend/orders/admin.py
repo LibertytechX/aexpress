@@ -6,7 +6,7 @@ class DeliveryInline(admin.TabularInline):
     """Inline admin for deliveries within an order."""
     model = Delivery
     extra = 0
-    fields = ['sequence', 'dropoff_address', 'receiver_name', 'receiver_phone', 'package_type', 'status']
+    fields = ['sequence', 'pickup_address', 'sender_name', 'sender_phone', 'dropoff_address', 'receiver_name', 'receiver_phone', 'package_type', 'status']
     readonly_fields = ['sequence']
 
 
@@ -77,8 +77,11 @@ class DeliveryAdmin(admin.ModelAdmin):
         ('Order Information', {
             'fields': ('order', 'sequence', 'status')
         }),
+        ('Pickup Details', {
+            'fields': ('pickup_address', 'pickup_latitude', 'pickup_longitude', 'sender_name', 'sender_phone')
+        }),
         ('Dropoff Details', {
-            'fields': ('dropoff_address', 'receiver_name', 'receiver_phone')
+            'fields': ('dropoff_address', 'dropoff_latitude', 'dropoff_longitude', 'receiver_name', 'receiver_phone')
         }),
         ('Package Information', {
             'fields': ('package_type', 'notes')

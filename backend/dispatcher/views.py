@@ -74,7 +74,17 @@ class OrderViewSet(viewsets.ModelViewSet):
     lookup_field = "order_number"
 
     def get_queryset(self):
-        return super().get_queryset().order_by("-created_at")
+        qs = super().get_queryset().order_by("-created_at")
+        # Only prefetch relay legs on detail view (keeps list payload fast)
+        if getattr(self, "action", None) == "retrieve":
+            return qs.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "legs__rider",
+                "legs__rider__user",
+            )
+        return qs
 
     def create(self, request, *args, **kwargs):
         """Override create to return full OrderSerializer data after creation."""
@@ -221,6 +231,91 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["post"], url_path="generate-relay-route")
+    def generate_relay_route(self, request, order_number=None):
+        """Synchronously generate relay legs for this order (triggered manually by dispatcher)."""
+        from orders.models import Order
+        from .tasks import generate_relay_legs_sync
+
+        order = self.get_object()
+
+        # Auto-convert non-relay orders to relay when dispatcher triggers routing
+        if not getattr(order, "is_relay_order", False):
+            # Geocode missing coordinates from address strings
+            from orders.utils import geocode_address
+
+            first_delivery = order.deliveries.first()
+
+            if not order.pickup_latitude or not order.pickup_longitude:
+                if order.pickup_address:
+                    geo = geocode_address(order.pickup_address)
+                    if geo:
+                        order.pickup_latitude = geo["lat"]
+                        order.pickup_longitude = geo["lng"]
+
+            if first_delivery and (not first_delivery.dropoff_latitude or not first_delivery.dropoff_longitude):
+                if first_delivery.dropoff_address:
+                    geo = geocode_address(first_delivery.dropoff_address)
+                    if geo:
+                        first_delivery.dropoff_latitude = geo["lat"]
+                        first_delivery.dropoff_longitude = geo["lng"]
+                        first_delivery.save(update_fields=["dropoff_latitude", "dropoff_longitude"])
+
+            # Check again after geocoding attempt
+            pickup_ok = order.pickup_latitude and order.pickup_longitude
+            dropoff_ok = first_delivery and first_delivery.dropoff_latitude and first_delivery.dropoff_longitude
+
+            if not pickup_ok or not dropoff_ok:
+                missing = []
+                if not pickup_ok:
+                    missing.append("pickup")
+                if not dropoff_ok:
+                    missing.append("dropoff")
+                return Response(
+                    {"error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order.is_relay_order = True
+            order.routing_status = Order.RoutingStatus.PENDING
+            order.save(update_fields=["is_relay_order", "routing_status", "pickup_latitude", "pickup_longitude"])
+
+        # If already ready with legs and not a forced retry, return current state
+        if (
+            getattr(order, "routing_status", None) == Order.RoutingStatus.READY
+            and order.legs.exists()
+            and not request.data.get("force", False)
+        ):
+            serializer = self.get_serializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        emit_activity(
+            event_type="relay_route_processing",
+            order_id=order.order_number,
+            text=f"Relay routing started for {order.order_number}",
+            color="blue",
+            metadata={},
+        )
+
+        # Run synchronously — blocking until legs are created or an error is set
+        generate_relay_legs_sync(str(order.id))
+
+        # Re-fetch with all needed relations so the serializer includes relay legs
+        from orders.models import Order as OrderModel
+        order = (
+            OrderModel.objects.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "deliveries",
+            )
+            .select_related("user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider")
+            .get(pk=order.pk)
+        )
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class ActivityFeedView(views.APIView):

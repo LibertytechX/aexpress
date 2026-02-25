@@ -92,6 +92,12 @@ class Vehicle(models.Model):
 class Order(models.Model):
     """Main order model for delivery requests."""
 
+    class RoutingStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
     MODE_CHOICES = [
         ("quick", "Quick Send"),
         ("multi", "Multi-Drop"),
@@ -200,6 +206,28 @@ class Order(models.Model):
         help_text="Total number of relay legs (0 for standard single-rider orders)",
     )
 
+    # Relay routing (async)
+    routing_status = models.CharField(
+        max_length=20,
+        choices=RoutingStatus.choices,
+        default=RoutingStatus.READY,
+        db_index=True,
+        help_text="Async relay routing status (only meaningful for relay orders)",
+    )
+    routing_error = models.TextField(
+        blank=True,
+        default="",
+        help_text="Error details when relay routing fails",
+    )
+    suggested_rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggested_for_orders",
+        help_text="Suggested first-leg rider for relay orders",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
@@ -257,6 +285,13 @@ class Delivery(models.Model):
     order = models.ForeignKey(
         Order, on_delete=models.CASCADE, related_name="deliveries"
     )
+
+    # Pickup information
+    pickup_address = models.TextField(blank=True, default="")
+    pickup_latitude = models.FloatField(null=True, blank=True)
+    pickup_longitude = models.FloatField(null=True, blank=True)
+    sender_name = models.CharField(max_length=255, blank=True, default="")
+    sender_phone = models.CharField(max_length=20, blank=True, default="")
 
     # Dropoff information
     dropoff_address = models.TextField()

@@ -110,6 +110,11 @@ class QuickSendView(APIView):
         # Create single delivery
         Delivery.objects.create(
             order=order,
+            pickup_address=data["pickup_address"],
+            pickup_latitude=order.pickup_latitude,
+            pickup_longitude=order.pickup_longitude,
+            sender_name=data["sender_name"],
+            sender_phone=data["sender_phone"],
             dropoff_address=data["dropoff_address"],
             receiver_name=data["receiver_name"],
             receiver_phone=data["receiver_phone"],
@@ -239,6 +244,11 @@ class MultiDropView(APIView):
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
+                pickup_address=data["pickup_address"],
+                pickup_latitude=order.pickup_latitude,
+                pickup_longitude=order.pickup_longitude,
+                sender_name=data["sender_name"],
+                sender_phone=data["sender_phone"],
                 dropoff_address=delivery_data["dropoff_address"],
                 receiver_name=delivery_data["receiver_name"],
                 receiver_phone=delivery_data["receiver_phone"],
@@ -350,6 +360,11 @@ class BulkImportView(APIView):
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
+                pickup_address=data["pickup_address"],
+                pickup_latitude=order.pickup_latitude,
+                pickup_longitude=order.pickup_longitude,
+                sender_name=data["sender_name"],
+                sender_phone=data["sender_phone"],
                 dropoff_address=delivery_data["dropoff_address"],
                 receiver_name=delivery_data["receiver_name"],
                 receiver_phone=delivery_data["receiver_phone"],

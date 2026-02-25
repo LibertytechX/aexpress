@@ -440,6 +440,156 @@ function DeliveryRouteMap({ order, rider }) {
   );
 }
 
+// ─── RELAY ROUTE MAP (Google Maps: multi-hop relay legs) ────────
+function RelayRouteMap({ order, riders }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const rendererRef = useRef(null);
+  const [mapStatus, setMapStatus] = useState('loading');
+  const [mapReady, setMapReady] = useState(false);
+
+  // Effect 1: Initialize map (once)
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) { setMapStatus('error'); return; }
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      rendererRef.current = new window.google.maps.DirectionsRenderer({
+        map, suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
+          icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
+        }
+      });
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (rendererRef.current) { rendererRef.current.setMap(null); rendererRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: Draw relay route whenever legs change
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    if (!order.relayLegs || order.relayLegs.length === 0) return;
+    const map = mapInstanceRef.current;
+    const geocoder = new window.google.maps.Geocoder();
+    const geocodeAddr = (addr) => new Promise(resolve => {
+      geocoder.geocode({ address: addr + ', Lagos, Nigeria' }, (results, status) => {
+        resolve((status === 'OK' && results[0]) ? results[0].geometry.location : null);
+      });
+    });
+    (async () => {
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (rendererRef.current) rendererRef.current.setDirections({ routes: [] });
+
+      // Resolve pickup coordinates
+      const pickupLoc = (order.pickupLat && order.pickupLng)
+        ? new window.google.maps.LatLng(parseFloat(order.pickupLat), parseFloat(order.pickupLng))
+        : await geocodeAddr(order.pickup);
+      if (!pickupLoc) { setMapStatus('error'); return; }
+
+      // Resolve dropoff coordinates
+      const dropoffLoc = (order.dropoffLat && order.dropoffLng)
+        ? new window.google.maps.LatLng(parseFloat(order.dropoffLat), parseFloat(order.dropoffLng))
+        : await geocodeAddr(order.dropoff);
+      if (!dropoffLoc) { setMapStatus('error'); return; }
+
+      // Extract intermediate relay nodes (end_relay_node of every leg except the last)
+      const legs = order.relayLegs;
+      const intermediateNodes = [];
+      for (let i = 0; i < legs.length - 1; i++) {
+        const node = legs[i].end_relay_node;
+        if (node && node.latitude && node.longitude) {
+          intermediateNodes.push({ lat: parseFloat(node.latitude), lng: parseFloat(node.longitude), name: node.name });
+        }
+      }
+
+      // Fit the map to all points
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(pickupLoc); bounds.extend(dropoffLoc);
+      intermediateNodes.forEach(n => bounds.extend({ lat: n.lat, lng: n.lng }));
+      map.fitBounds(bounds, { padding: 50 });
+
+      // Draw route through all waypoints
+      const waypoints = intermediateNodes.map(n => ({ location: new window.google.maps.LatLng(n.lat, n.lng), stopover: true }));
+      new window.google.maps.DirectionsService().route({
+        origin: pickupLoc, destination: dropoffLoc, waypoints,
+        travelMode: window.google.maps.TravelMode.DRIVING, optimizeWaypoints: false,
+      }, (result, status) => {
+        if (status === 'OK' && rendererRef.current) rendererRef.current.setDirections(result);
+        setMapStatus('ready');
+      });
+
+      // Pickup marker (📦)
+      markersRef.current.push(new window.google.maps.Marker({
+        position: pickupLoc, map, title: 'Pickup: ' + order.pickup, zIndex: 10,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#1B2A4A', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '📦', fontSize: '16px' }
+      }));
+
+      // Numbered relay node markers (⬡ purple)
+      intermediateNodes.forEach((n, i) => {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: { lat: n.lat, lng: n.lng }, map, title: `Relay ${i + 1}: ${n.name}`, zIndex: 9,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#8B5CF6', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { text: String(i + 1), fontSize: '11px', color: '#fff', fontWeight: 'bold' }
+        }));
+      });
+
+      // Dropoff marker (🏠)
+      markersRef.current.push(new window.google.maps.Marker({
+        position: dropoffLoc, map, title: 'Dropoff: ' + order.dropoff, zIndex: 10,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '🏠', fontSize: '16px' }
+      }));
+
+      // Rider marker (🏍️) — show suggested rider GPS if available
+      if (order.suggestedRiderId && riders) {
+        const riderObj = riders.find(r => r.id === order.suggestedRiderId);
+        if (riderObj && riderObj.lat && riderObj.lng) {
+          markersRef.current.push(new window.google.maps.Marker({
+            position: { lat: riderObj.lat, lng: riderObj.lng }, map, zIndex: 11,
+            title: 'Rider: ' + (riderObj.name || 'Rider'),
+            icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+            label: { text: '🏍️', fontSize: '16px' }
+          }));
+        }
+      }
+    })().catch(err => { console.error('RelayRouteMap error:', err); setMapStatus('error'); });
+  }, [mapReady, order.id, order.relayLegs?.length, order.suggestedRiderId]);
+
+  return (
+    <div style={{ position:'relative', borderRadius:10, overflow:'hidden', border:`1px solid ${S.border}` }}>
+      <div ref={mapRef} style={{ height:300, width:'100%' }} />
+      {mapStatus === 'loading' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:8 }}>
+          <div style={{ fontSize:24 }}>🗺️</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Loading relay route…</div>
+        </div>
+      )}
+      {mapStatus === 'error' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:6 }}>
+          <div style={{ fontSize:24 }}>📍</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Could not render relay route map</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── RELAY NETWORK MAP (Google Maps: zones + relay nodes) ───────
 function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
   const mapRef = useRef(null);
@@ -1075,7 +1225,12 @@ export default function AXDispatchPortal() {
           codFee: parseFloat(created.codFee) || 0,
           vehicle: created.vehicle || "Bike",
           created: created.created || new Date().toLocaleString(),
-          pkg: created.pkg || "Box"
+          pkg: created.pkg || "Box",
+          isRelayOrder: created.isRelayOrder || false,
+          routingStatus: created.routingStatus || "ready",
+          relayLegsCount: created.relayLegsCount || 0,
+          relayLegs: created.relayLegs || [],
+          suggestedRiderId: created.suggestedRiderId || null,
         };
         setOrders(p=>[newOrder,...p]);
       }}/>}
@@ -1247,6 +1402,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [editPrice, setEditPrice] = useState(false);
   const [priceVal, setPriceVal] = useState(String(order.amount));
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [relayLoading, setRelayLoading] = useState(false);
+  const [relayError, setRelayError] = useState("");
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered","Cancelled","Failed"].includes(order.status);
@@ -1264,6 +1421,26 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const savePickup = () => { onUpdateOrder(order.id, { pickup: pickupVal }); addLog(order.id, `Pickup address changed to: ${pickupVal}`, "Dispatch", "edit"); setEditPickup(false); };
   const saveDropoff = () => { onUpdateOrder(order.id, { dropoff: dropoffVal }); addLog(order.id, `Dropoff address changed to: ${dropoffVal}`, "Dispatch", "edit"); setEditDropoff(false); };
   const savePrice = () => { const n = parseInt(priceVal)||order.amount; onUpdateOrder(order.id, { amount: n }); addLog(order.id, `Price changed to ₦${n.toLocaleString()}`, "Dispatch", "edit"); setEditPrice(false); };
+
+  const handleGenerateRelayRoute = async (force=false) => {
+    setRelayLoading(true);
+    setRelayError("");
+    try {
+      const updated = await OrdersAPI.generateRelayRoute(order.id, force);
+      onUpdateOrder(order.id, {
+        isRelayOrder: updated.isRelayOrder,
+        routingStatus: updated.routingStatus,
+        routingError: updated.routingError,
+        relayLegsCount: updated.relayLegsCount,
+        relayLegs: updated.relayLegs,
+        suggestedRiderId: updated.suggestedRiderId,
+      });
+    } catch(e) {
+      setRelayError(e?.error || e?.message || "Failed to generate relay route");
+    } finally {
+      setRelayLoading(false);
+    }
+  };
 
   const logColors = { create:S.gold, payment:S.blue, assign:S.green, status:S.textDim, pickup:S.purple, transit:S.gold, cod:S.green, delivered:S.green, settlement:S.gold, cancel:S.red, fail:S.red, edit:S.blue };
 
@@ -1485,6 +1662,101 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 )}
               </div>
             )}
+          </div>
+
+          {/* RELAY ROUTING SECTION — always visible */}
+          <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,padding:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px"}}>🔗 Relay Route</span>
+                {order.isRelayOrder&&order.routingStatus==="ready"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.greenBg,color:S.green,fontWeight:700}}>READY</span>}
+                {order.isRelayOrder&&order.routingStatus==="pending"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.yellowBg,color:S.yellow,fontWeight:700}}>PENDING</span>}
+                {order.isRelayOrder&&order.routingStatus==="processing"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.blueBg,color:S.blue,fontWeight:700}}>PROCESSING</span>}
+                {order.isRelayOrder&&order.routingStatus==="failed"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.redBg,color:S.red,fontWeight:700}}>FAILED</span>}
+              </div>
+              {(!order.isRelayOrder||order.routingStatus==="pending"||order.routingStatus==="failed")&&!relayLoading&&(
+                <button onClick={()=>handleGenerateRelayRoute(order.routingStatus==="failed")} style={{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",background:`linear-gradient(135deg,${S.blue},#3b82f6)`,color:"#fff",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                  {order.routingStatus==="failed"?"🔄 Retry":"⚡ Generate Route"}
+                </button>
+              )}
+              {relayLoading&&<span style={{fontSize:11,color:S.blue,fontWeight:600}}>⏳ Generating...</span>}
+            </div>
+
+            {/* Error message */}
+            {(relayError||(order.isRelayOrder&&order.routingStatus==="failed"&&order.routingError))&&(
+              <div style={{marginBottom:12,padding:"8px 12px",borderRadius:8,background:S.redBg,border:`1px solid ${S.red}30`,fontSize:11,color:S.red,fontWeight:500}}>
+                ⚠ {relayError||order.routingError}
+              </div>
+            )}
+
+            {/* Not yet a relay order — info message */}
+            {!order.isRelayOrder&&!relayLoading&&!relayError&&(
+              <div style={{padding:12,borderRadius:8,background:S.borderLight,border:`1px dashed ${S.border}`,fontSize:11,color:S.textMuted,fontWeight:500,textAlign:"center"}}>
+                Click "⚡ Generate Route" to plan multi-hop relay legs for this delivery.
+              </div>
+            )}
+
+            {/* Pending placeholder */}
+            {order.isRelayOrder&&order.routingStatus==="pending"&&!relayLoading&&(
+              <div style={{padding:12,borderRadius:8,background:S.yellowBg,border:`1px dashed ${S.yellow}`,fontSize:11,color:S.yellow,fontWeight:600,textAlign:"center"}}>
+                Route not yet generated. Click "Generate Route" to plan relay legs.
+              </div>
+            )}
+
+              {/* Loading placeholder */}
+              {relayLoading&&(
+                <div style={{padding:12,borderRadius:8,background:S.blueBg,border:`1px dashed ${S.blue}30`,fontSize:11,color:S.blue,fontWeight:600,textAlign:"center"}}>
+                  ⏳ Calculating relay legs via Google Directions API…
+                </div>
+              )}
+
+              {/* Legs list */}
+              {order.routingStatus==="ready"&&order.relayLegs&&order.relayLegs.length>0&&(
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {order.relayLegs.map((leg,idx)=>(
+                    <div key={leg.id||idx} style={{borderRadius:10,border:`1px solid ${S.border}`,padding:"10px 12px",background:S.borderLight}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:5,background:S.blue,color:"#fff"}}>LEG {leg.leg_number||idx+1}</span>
+                          {leg.status&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:5,background:leg.status==="completed"?S.greenBg:S.goldPale,color:leg.status==="completed"?S.green:S.gold,fontWeight:700}}>{leg.status.toUpperCase()}</span>}
+                        </div>
+                        <span style={{fontSize:11,fontWeight:700,color:S.green,fontFamily:"'Space Mono',monospace"}}>₦{(parseFloat(leg.rider_payout)||0).toLocaleString()}</span>
+                      </div>
+                      <div style={{fontSize:11,color:S.textDim,marginBottom:4}}>
+                        <span style={{color:S.green,fontWeight:600}}>From:</span> {leg.start_relay_node?.name||"Pickup"} → <span style={{color:S.red,fontWeight:600}}>To:</span> {leg.end_relay_node?.name||"Dropoff"}
+                      </div>
+                      <div style={{display:"flex",gap:16,fontSize:10,color:S.textMuted}}>
+                        <span>📍 {(parseFloat(leg.distance_km)||0).toFixed(1)} km</span>
+                        <span>⏱ {leg.duration_minutes||0} min</span>
+                        {leg.hub_pin&&<span>🔑 PIN: <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>{leg.hub_pin}</span></span>}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:600,padding:"8px 4px",borderTop:`1px solid ${S.border}`,marginTop:4}}>
+                    <span style={{color:S.textMuted}}>{order.relayLegs.length} legs total</span>
+                    <span style={{color:S.green}}>Total payout: ₦{order.relayLegs.reduce((s,l)=>s+(parseFloat(l.rider_payout)||0),0).toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Suggested rider for leg 1 */}
+              {order.routingStatus==="ready"&&order.suggestedRiderId&&(
+                <div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:S.blueBg,border:`1px solid ${S.blue}30`,fontSize:11,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{color:S.blue,fontWeight:600}}>💡 Suggested for leg 1: {riders.find(r=>r.id===order.suggestedRiderId)?.name||`Rider #${order.suggestedRiderId}`}</span>
+                  <button onClick={()=>onAssign(order.id,order.suggestedRiderId)} style={{padding:"4px 12px",borderRadius:6,border:"none",cursor:"pointer",background:S.blue,color:"#fff",fontSize:10,fontWeight:700,fontFamily:"inherit"}}>Assign</button>
+                </div>
+              )}
+
+              {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
+              {order.routingStatus==="ready"&&order.relayLegs&&order.relayLegs.length>0&&(
+                <div style={{marginTop:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                    <span style={{fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px"}}>🗺️ Route Map</span>
+                    <span style={{fontSize:10,color:S.textMuted}}>📦 Pickup · ⬡ Relay nodes · 🏠 Dropoff{order.suggestedRiderId?" · 🏍️ Rider":""}</span>
+                  </div>
+                  <RelayRouteMap order={order} riders={riders} />
+                </div>
+              )}
           </div>
         </div>
 
@@ -2406,12 +2678,14 @@ function SettingsScreen() {
   );
 }
 // ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
+// onPlaceSelected(place) is called with { address, lat, lng } when a suggestion is picked
+function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
+  const geocoder = useRef(null);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -2419,6 +2693,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
     const init = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
+        geocoder.current = new window.google.maps.Geocoder();
       }
     };
     if (window.googleMapsLoaded) { init(); }
@@ -2466,7 +2741,19 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
       {showDropdown && suggestions.length > 0 && (
         <div ref={dropdownRef} style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:`1px solid ${S.border}`, borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:9999, maxHeight:220, overflowY:'auto', marginTop:4 }}>
           {suggestions.map((s, idx) => (
-            <div key={s.place_id} onClick={() => { onChange(s.description); setSuggestions([]); setShowDropdown(false); }}
+            <div key={s.place_id} onClick={() => {
+              onChange(s.description);
+              setSuggestions([]);
+              setShowDropdown(false);
+              if (onPlaceSelected && geocoder.current) {
+                geocoder.current.geocode({ placeId: s.place_id }, (results, status) => {
+                  if (status === 'OK' && results[0] && results[0].geometry) {
+                    const loc = results[0].geometry.location;
+                    onPlaceSelected({ address: s.description, lat: loc.lat(), lng: loc.lng() });
+                  }
+                });
+              }
+            }}
               style={{ padding:'10px 14px', cursor:'pointer', borderBottom: idx < suggestions.length-1 ? `1px solid ${S.border}` : 'none', fontSize:13, color:S.navy }}
               onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
               onMouseLeave={e => e.currentTarget.style.background='#fff'}>
@@ -2502,6 +2789,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [priceOverride, setPriceOverride] = useState("");
   const [codOn, setCodOn] = useState(false);
   const [codAmount, setCodAmount] = useState("");
+
+  // Relay order fields
+  const [isRelayOrder, setIsRelayOrder] = useState(false);
+  const [pickupLat, setPickupLat] = useState(null);
+  const [pickupLng, setPickupLng] = useState(null);
+  const [dropoffLat, setDropoffLat] = useState(null);
+  const [dropoffLng, setDropoffLng] = useState(null);
 
   // Pricing & route state
   const [vehiclePricing, setVehiclePricing] = useState({
@@ -2581,6 +2875,11 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         merchantId: merchantId || "",
         distance_km: routeDistance || 0,
         duration_minutes: routeDuration || 0,
+        is_relay_order: isRelayOrder,
+        pickup_lat: pickupLat,
+        pickup_lng: pickupLng,
+        dropoff_lat: dropoffLat,
+        dropoff_lng: dropoffLng,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -2626,13 +2925,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} placeholder="Enter pickup address..." style={iSt}/>
+            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{setPickupLat(p.lat);setPickupLng(p.lng);}} placeholder="Enter pickup address..." style={iSt}/>
           </div>
 
           {/* Dropoff */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} placeholder="Enter delivery address..." style={iSt}/>
+            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{setDropoffLat(p.lat);setDropoffLng(p.lng);}} placeholder="Enter delivery address..." style={iSt}/>
           </div>
 
           {/* Receiver */}
@@ -2693,6 +2992,17 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
               </div>
             </div>
             {codOn&&<div style={{marginTop:10}}><input value={codAmount} onChange={e=>setCodAmount(e.target.value)} placeholder="COD amount (₦)" style={{...iSt,fontFamily:"'Space Mono',monospace",fontWeight:700}}/></div>}
+          </div>
+
+          {/* Relay Order */}
+          <div style={{marginBottom:16,padding:"14px 16px",borderRadius:10,border:isRelayOrder?`2px solid ${S.blue}`:`1px solid ${S.border}`,background:isRelayOrder?S.blueBg:"transparent"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div><div style={{fontSize:13,fontWeight:600}}>🔗 Relay Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Multi-hop via relay hubs (≤15 km per leg)</div></div>
+              <div onClick={()=>setIsRelayOrder(!isRelayOrder)} style={{width:40,height:22,borderRadius:11,cursor:"pointer",background:isRelayOrder?S.blue:S.border,position:"relative",flexShrink:0}}>
+                <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:isRelayOrder?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+              </div>
+            </div>
+            {isRelayOrder&&<div style={{marginTop:8,fontSize:11,color:S.blue,fontWeight:500}}>ℹ Route will be generated by the dispatcher after order creation. Select addresses above to capture coordinates.</div>}
           </div>
 
           {/* Rider */}

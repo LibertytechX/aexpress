@@ -366,6 +366,11 @@ class ActivityFeed(models.Model):
         ("delivered", "Delivered"),
         ("cancelled", "Cancelled"),
         ("failed", "Failed"),
+
+        # Relay routing
+        ("relay_route_processing", "Relay Route Processing"),
+        ("relay_route_ready", "Relay Route Ready"),
+        ("relay_route_failed", "Relay Route Failed"),
     ]
     COLOR_CHOICES = [
         ("gold", "Gold"),
