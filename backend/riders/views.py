@@ -21,6 +21,7 @@ from .serializers import (
     RiderTodayTripSerializer,
     RiderWalletInfoSerializer,
     RiderTransactionSerializer,
+    RiderLocationSerializer,
 )
 from .models import (
     RiderSession,
@@ -28,6 +29,7 @@ from .models import (
     AreaDemand,
     OrderOffer,
     RiderCodRecord,
+    RiderLocation,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -729,3 +731,59 @@ class RiderTransactionListView(APIView):
                 {"success": False, "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class RiderLocationUpdateView(APIView):
+    """
+    Mobile app regularly POSTs GPS coordinates here.
+    Creates or updates the single RiderLocation record for the authenticated rider
+    and mirrors the coords onto the Rider master profile for fast lookups.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        serializer = RiderLocationSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        data = serializer.validated_data
+
+        # Upsert the dedicated location record (one row per rider)
+        RiderLocation.objects.update_or_create(
+            rider=rider,
+            defaults={
+                "latitude": data["latitude"],
+                "longitude": data["longitude"],
+                "accuracy": data.get("accuracy"),
+                "heading": data.get("heading"),
+                "speed": data.get("speed"),
+            },
+        )
+
+        # Mirror onto rider profile for quick access elsewhere in the system
+        rider.current_latitude = data["latitude"]
+        rider.current_longitude = data["longitude"]
+        rider.last_location_update = timezone.now()
+        rider.save(
+            update_fields=[
+                "current_latitude",
+                "current_longitude",
+                "last_location_update",
+            ]
+        )
+
+        return Response(
+            {"success": True, "message": "Location updated."},
+            status=status.HTTP_200_OK,
+        )

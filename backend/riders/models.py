@@ -324,3 +324,33 @@ class RiderNotification(models.Model):
 
     def __str__(self):
         return f"Notification for {self.rider.rider_id}: {self.title}"
+
+
+class RiderLocation(models.Model):
+    """
+    Live GPS location for a rider.
+    One record per rider — upserted on every ping from the mobile app.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.OneToOneField(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="location"
+    )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    accuracy = models.FloatField(
+        null=True, blank=True, help_text="GPS accuracy in metres"
+    )
+    heading = models.FloatField(
+        null=True, blank=True, help_text="Bearing in degrees (0-360)"
+    )
+    speed = models.FloatField(null=True, blank=True, help_text="Speed in m/s")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_locations"
+
+    def __str__(self):
+        return (
+            f"Location for {self.rider.rider_id}: ({self.latitude}, {self.longitude})"
+        )

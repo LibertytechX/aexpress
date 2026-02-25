@@ -473,3 +473,16 @@ class RiderTransactionSerializer(serializers.ModelSerializer):
     def get_time(self, obj):
         # Format: "2:15 PM"
         return obj.created_at.strftime("%-I:%M %p")
+
+
+class RiderLocationSerializer(serializers.Serializer):
+    """
+    Input serializer for the rider location update endpoint.
+    """
+
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=7)
+    longitude = serializers.DecimalField(max_digits=10, decimal_places=7)
+    accuracy = serializers.FloatField(required=False, allow_null=True)
+    heading = serializers.FloatField(required=False, allow_null=True)
+    speed = serializers.FloatField(required=False, allow_null=True)
+
