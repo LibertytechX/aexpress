@@ -1214,7 +1214,7 @@ export default function AXDispatchPortal() {
         <div style={{flex:1,overflow:"auto",padding:24,animation:"fadeIn 0.3s ease"}}>
           {screen==="dashboard"&&<DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id=>navTo("orders",id)} onViewRider={id=>navTo("riders",id)}/>}
           {screen==="orders"&&<OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={()=>setSelectedOrderId(null)} onViewRider={id=>navTo("riders",id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs}/>}
-          {screen==="riders"&&<RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={()=>setSelectedRiderId(null)} onViewOrder={id=>navTo("orders",id)}/>}
+          {screen==="riders"&&<RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={()=>setSelectedRiderId(null)} onViewOrder={id=>navTo("orders",id)} onRiderCreated={()=>RidersAPI.getAll().then(setRiders).catch(()=>{})}/>}
           {screen==="merchants"&&<MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA}/>}
           {screen==="customers"&&<CustomersScreen data={CUSTOMERS_DATA}/>}
           {screen==="messaging"&&<MessagingScreen/>}
@@ -1939,10 +1939,136 @@ function RidersLocationMap({ riders }) {
   );
 }
 
+// ─── CREATE RIDER MODAL ─────────────────────────────────────────
+function CreateRiderModal({ onClose, onRiderCreated }) {
+  const [form, setForm] = useState({
+    first_name: "", last_name: "", phone: "", email: "",
+    password: "", vehicle_type: "", city: "", is_verified: false,
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = { ...form };
+      if (!payload.vehicle_type) delete payload.vehicle_type;
+      if (!payload.city) delete payload.city;
+      await RidersAPI.createRider(payload);
+      onRiderCreated();
+      onClose();
+    } catch (err) {
+      const msg = err?.phone?.[0] || err?.email?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to create rider.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iSt = { width:"100%", padding:"10px 12px", border:`1px solid ${S.border}`, borderRadius:8, fontSize:13, background:S.bg, color:S.text, fontFamily:"inherit", boxSizing:"border-box" };
+  const lSt = { display:"block", fontSize:12, fontWeight:600, color:S.textDim, marginBottom:5 };
+  const row = { display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:S.card,borderRadius:16,padding:28,width:480,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:800,color:S.navy}}>Add New Rider</div>
+            <div style={{fontSize:12,color:S.textMuted,marginTop:2}}>Create a rider account on the platform</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:S.textMuted,lineHeight:1}}>✕</button>
+        </div>
+
+        {error && <div style={{padding:"10px 14px",background:S.redBg,color:S.red,borderRadius:8,fontSize:13,marginBottom:16}}>{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          {/* Name row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>First Name *</label>
+              <input value={form.first_name} onChange={e=>set("first_name",e.target.value)} placeholder="e.g. Musa" style={iSt} required/>
+            </div>
+            <div>
+              <label style={lSt}>Last Name *</label>
+              <input value={form.last_name} onChange={e=>set("last_name",e.target.value)} placeholder="e.g. Kabiru" style={iSt} required/>
+            </div>
+          </div>
+
+          {/* Contact row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>Phone *</label>
+              <input value={form.phone} onChange={e=>set("phone",e.target.value)} placeholder="+234..." style={iSt} required/>
+            </div>
+            <div>
+              <label style={lSt}>Email *</label>
+              <input type="email" value={form.email} onChange={e=>set("email",e.target.value)} placeholder="rider@email.com" style={iSt} required/>
+            </div>
+          </div>
+
+          {/* Password */}
+          <div style={{marginBottom:14}}>
+            <label style={lSt}>Password *</label>
+            <div style={{position:"relative"}}>
+              <input type={showPassword?"text":"password"} value={form.password} onChange={e=>set("password",e.target.value)} placeholder="Min. 6 characters" style={{...iSt,paddingRight:44}} required minLength={6}/>
+              <button type="button" onClick={()=>setShowPassword(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:S.textMuted,fontSize:13,fontFamily:"inherit"}}>
+                {showPassword?"Hide":"Show"}
+              </button>
+            </div>
+          </div>
+
+          {/* Vehicle + City row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>Vehicle Type</label>
+              <select value={form.vehicle_type} onChange={e=>set("vehicle_type",e.target.value)} style={iSt}>
+                <option value="">— Select —</option>
+                <option value="1">Bike</option>
+                <option value="2">Car</option>
+                <option value="3">Van</option>
+              </select>
+            </div>
+            <div>
+              <label style={lSt}>City</label>
+              <input value={form.city} onChange={e=>set("city",e.target.value)} placeholder="e.g. Lagos" style={iSt}/>
+            </div>
+          </div>
+
+          {/* Verified checkbox */}
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:22,padding:"12px 14px",background:S.borderLight,borderRadius:10,border:`1px solid ${S.border}`}}>
+            <input id="verified-cb" type="checkbox" checked={form.is_verified} onChange={e=>set("is_verified",e.target.checked)} style={{width:16,height:16,accentColor:S.gold,cursor:"pointer"}}/>
+            <label htmlFor="verified-cb" style={{cursor:"pointer",flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:S.text}}>Mark as Verified</div>
+              <div style={{fontSize:11,color:S.textMuted}}>Skips OTP — phone and email will be marked verified immediately</div>
+            </label>
+            {form.is_verified && <span style={{fontSize:10,fontWeight:700,color:S.green,padding:"2px 8px",background:S.greenBg,borderRadius:6}}>✓ Verified</span>}
+          </div>
+
+          {/* Actions */}
+          <div style={{display:"flex",gap:10}}>
+            <button type="button" onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,border:`1px solid ${S.border}`,background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Cancel</button>
+            <button type="submit" disabled={loading} style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:loading?0.7:1}}>
+              {loading?"Creating Rider…":"Create Rider"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── RIDERS SCREEN ──────────────────────────────────────────────
-function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder }) {
+function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder, onRiderCreated }) {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
+  const [showCreateRider, setShowCreateRider] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r=>r.id===selectedId);
@@ -2028,6 +2154,9 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               <span style={{opacity:0.4}}>{I.search}</span>
               <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search riders..." style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
             </div>
+            <button onClick={()=>setShowCreateRider(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,whiteSpace:"nowrap",flexShrink:0}}>
+              {I.plus} Add Rider
+            </button>
           </div>
           <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden",flex:1,display:"flex",flexDirection:"column"}}>
             <div style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`,flexShrink:0}}>
@@ -2059,6 +2188,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         </div>
 
       </div>
+
+      {showCreateRider && (
+        <CreateRiderModal
+          onClose={()=>setShowCreateRider(false)}
+          onRiderCreated={()=>{ if(onRiderCreated) onRiderCreated(); }}
+        />
+      )}
     </div>
   );
 }
