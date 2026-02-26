@@ -8,6 +8,13 @@ from decimal import Decimal
 @receiver(post_save, sender=Order)
 def create_order_offer(sender, instance, created, **kwargs):
     if created:
+        # Get system settings for timeout
+        settings = SystemSettings.objects.first() or SystemSettings.objects.create()
+        timeout = settings.accept_timeout_sec or 120
+
+        # Calculate expiration time
+        expires_at = timezone.now() + timedelta(seconds=timeout)
+
         # Calculate estimated earnings (80% of total_amount)
         total_amount = Decimal(str(instance.total_amount or 0))
         estimated_earnings = (total_amount * Decimal("0.2")).quantize(Decimal("0.01"))

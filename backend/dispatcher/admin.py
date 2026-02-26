@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Rider, DispatcherProfile, Merchant, SystemSettings, ActivityFeed
+from .models import Rider, DispatcherProfile, Merchant, SystemSettings, ActivityFeed, Zone, RelayNode
 
 
 @admin.register(Rider)
@@ -49,3 +49,25 @@ class ActivityFeedAdmin(admin.ModelAdmin):
     search_fields = ("order_id", "text")
     readonly_fields = ("id", "created_at")
     ordering = ("-created_at",)
+
+
+@admin.register(Zone)
+class ZoneAdmin(admin.ModelAdmin):
+    list_display = ("name", "center_lat", "center_lng", "radius_km", "is_active", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+class RelayNodeInline(admin.TabularInline):
+    model = RelayNode
+    extra = 0
+    fields = ("name", "address", "latitude", "longitude", "catchment_radius_km", "is_active")
+
+
+@admin.register(RelayNode)
+class RelayNodeAdmin(admin.ModelAdmin):
+    list_display = ("name", "zone", "latitude", "longitude", "catchment_radius_km", "is_active")
+    list_filter = ("is_active", "zone")
+    search_fields = ("name", "address")
+    readonly_fields = ("id", "created_at", "updated_at")

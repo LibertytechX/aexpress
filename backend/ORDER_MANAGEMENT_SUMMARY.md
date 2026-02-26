@@ -9,7 +9,7 @@
 The Order Management system for AX Merchant Portal has been successfully implemented with full support for three delivery modes:
 
 1. **Quick Send** - Single pickup, single delivery
-2. **Multi-Drop** - Single pickup, multiple deliveries  
+2. **Multi-Drop** - Single pickup, multiple deliveries
 3. **Bulk Import** - Single pickup, multiple deliveries (CSV/text/OCR)
 
 ---
@@ -193,11 +193,11 @@ response = requests.post('http://127.0.0.1:8000/api/auth/login/', json={
 token = response.json()['tokens']['access']
 
 # Create Quick Send order
-response = requests.post('http://127.0.0.1:8000/api/orders/quick-send/', 
+response = requests.post('http://127.0.0.1:8000/api/orders/quick-send/',
     headers={'Authorization': f'Bearer {token}'},
     json={
         'pickup_address': '27A Idowu Martins St, Victoria Island',
-        'sender_name': 'Yetunde Igbene',
+        'sender_name': 'Ogun Lami',
         'sender_phone': '08051832508',
         'dropoff_address': '24 Harvey Rd, Sabo Yaba',
         'receiver_name': 'Adebayo Johnson',
@@ -213,8 +213,8 @@ print(response.json())
 
 ---
 
-**Status:** ✅ COMPLETE  
-**Total Lines of Code:** ~1,495 lines  
-**Test Coverage:** 100% of endpoints tested  
+**Status:** ✅ COMPLETE
+**Total Lines of Code:** ~1,495 lines
+**Test Coverage:** 100% of endpoints tested
 **Documentation:** Complete API documentation provided
 

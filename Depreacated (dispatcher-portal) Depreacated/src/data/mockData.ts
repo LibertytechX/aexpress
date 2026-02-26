@@ -27,7 +27,7 @@ export const INIT_ORDERS: Order[] = [
 ];
 
 export const MERCHANTS_DATA: Merchant[] = [
-    { id: "M001", name: "Vivid Print", contact: "Yetunde Igbene", phone: "08051832508", category: "Printing", totalOrders: 234, monthOrders: 42, walletBalance: 87900, status: "Active", joined: "Nov 2024" },
+    { id: "M001", name: "Vivid Print", contact: "Ogun Lami", phone: "08051832508", category: "Printing", totalOrders: 234, monthOrders: 42, walletBalance: 87900, status: "Active", joined: "Nov 2024" },
     { id: "M002", name: "TechZone Gadgets", contact: "Ade Bakare", phone: "09012345678", category: "Electronics", totalOrders: 567, monthOrders: 89, walletBalance: 234500, status: "Active", joined: "Sep 2024" },
     { id: "M003", name: "Mama Nkechi Kitchen", contact: "Nkechi Obi", phone: "07033445566", category: "Food", totalOrders: 1203, monthOrders: 156, walletBalance: 56700, status: "Active", joined: "Jul 2024" },
     { id: "M004", name: "FreshFit Lagos", contact: "Sola Adams", phone: "08055667788", category: "Fashion", totalOrders: 89, monthOrders: 12, walletBalance: 12300, status: "Active", joined: "Jan 2025" },

@@ -386,10 +386,10 @@ function MerchantPortal() {
     try {
       const response = await window.API.Auth.resendVerification();
 
-      if (data.success) {
-        showNotif(data.message || "Verification email sent! Please check your inbox.", "success");
+      if (response.success) {
+        showNotif(response.message || "Verification email sent! Please check your inbox.", "success");
       } else {
-        showNotif(data.error || "Failed to send verification email", "error");
+        showNotif(response.error || "Failed to send verification email", "error");
       }
     } catch (error) {
       showNotif("Network error. Please try again.", "error");
@@ -1352,7 +1352,7 @@ function SignupScreen({ onBack, onComplete }) {
             <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 24 }}>Create your account</h2>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Full Name</label>
-              <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Yetunde Igbene" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }} />
+              <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Ogun Lami" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }} />
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Phone Number</label>
@@ -2831,7 +2831,31 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const totalCost = totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
-  const canProceed = pickupAddress && totalDeliveries > 0;
+	const isBlank = (v) => !v || !String(v).trim();
+	const proceedErrors = [];
+
+	if (isBlank(pickupAddress)) proceedErrors.push('Pickup address is required.');
+	if (isBlank(senderName)) proceedErrors.push('Sender name is required.');
+	if (isBlank(senderPhone)) proceedErrors.push('Sender phone is required.');
+
+	if (mode === 'quick') {
+		if (isBlank(dropoffAddress)) proceedErrors.push('Delivery address is required.');
+		if (isBlank(receiverName)) proceedErrors.push('Receiver name is required.');
+		if (isBlank(receiverPhone)) proceedErrors.push('Receiver phone is required.');
+	} else if (mode === 'multi' || mode === 'bulk') {
+		if (totalDeliveries <= 0) proceedErrors.push('At least one delivery is required.');
+		const active = getActiveDropoffs();
+		const missingReceiver = active.some(d => isBlank(d.name) || isBlank(d.phone));
+		if (missingReceiver) proceedErrors.push('Receiver name and phone are required for all deliveries.');
+	}
+
+	const canProceed = proceedErrors.length === 0;
+	const showProceedErrors = !canProceed && (
+		totalDeliveries > 0 ||
+		(mode === 'quick' && !isBlank(dropoffAddress)) ||
+		(mode === 'multi' && drops.some(d => !isBlank(d.address) || !isBlank(d.name) || !isBlank(d.phone))) ||
+		(mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
+	);
 
   const handleConfirmAll = () => {
     const deliveries = getActiveDropoffs();
@@ -3375,6 +3399,25 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               Review & Pay →
             </button>
           </div>
+			  		{showProceedErrors && (
+			  			<div style={{
+			  				marginTop: 10,
+			  				padding: '10px 14px',
+			  				borderRadius: 12,
+			  				border: '1px solid #fecaca',
+			  				background: '#fef2f2',
+			  				color: '#991b1b',
+			  				fontSize: 12,
+			  				fontWeight: 600
+			  			}}>
+			  				<div style={{ marginBottom: 6 }}>Please complete the required fields:</div>
+			  				<ul style={{ margin: 0, paddingLeft: 18 }}>
+			  					{proceedErrors.map((e, i) => (
+			  						<li key={i}>{e}</li>
+			  					))}
+			  				</ul>
+			  			</div>
+			  		)}
         </>
       )}
 

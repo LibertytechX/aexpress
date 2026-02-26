@@ -9,12 +9,16 @@ from .views import (
     S3PresignedUrlView,
     ActivityFeedView,
     AblyTokenView,
+    ZoneViewSet,
+    RelayNodeViewSet,
 )
 
 router = DefaultRouter()
 router.register(r"riders", RiderViewSet)
 router.register(r"orders", OrderViewSet)
 router.register(r"merchants", MerchantViewSet)
+router.register(r"zones", ZoneViewSet)
+router.register(r"relay-nodes", RelayNodeViewSet)
 
 urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),

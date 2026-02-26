@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed
+from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -101,6 +101,22 @@ class OrderSerializer(serializers.ModelSerializer):
     time = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
 
+    # Relay routing (async)
+    routing_status = serializers.CharField(read_only=True)
+    routing_error = serializers.CharField(read_only=True)
+    is_relay_order = serializers.BooleanField(read_only=True)
+    relay_legs_count = serializers.IntegerField(read_only=True)
+    suggested_rider_id = serializers.CharField(
+        source="suggested_rider.id", read_only=True, allow_null=True
+    )
+
+    pickup_lat = serializers.SerializerMethodField()
+    pickup_lng = serializers.SerializerMethodField()
+    dropoff_lat = serializers.SerializerMethodField()
+    dropoff_lng = serializers.SerializerMethodField()
+
+    relay_legs = serializers.SerializerMethodField()
+
     class Meta:
         from orders.models import Order
 
@@ -127,7 +143,39 @@ class OrderSerializer(serializers.ModelSerializer):
             "customer",
             "customerPhone",
             "vehicle",
+
+            # Relay routing details (populated for relay orders)
+            "is_relay_order",
+            "routing_status",
+            "routing_error",
+            "relay_legs_count",
+            "suggested_rider_id",
+            "pickup_lat",
+            "pickup_lng",
+            "dropoff_lat",
+            "dropoff_lng",
+            "relay_legs",
         ]
+
+    def get_pickup_lat(self, obj):
+        return obj.pickup_latitude
+
+    def get_pickup_lng(self, obj):
+        return obj.pickup_longitude
+
+    def get_dropoff_lat(self, obj):
+        first = obj.deliveries.first()
+        return getattr(first, "dropoff_latitude", None) if first else None
+
+    def get_dropoff_lng(self, obj):
+        first = obj.deliveries.first()
+        return getattr(first, "dropoff_longitude", None) if first else None
+
+    def get_relay_legs(self, obj):
+        """Always include relay legs so the map survives list refreshes."""
+        return OrderLegSerializer(
+            obj.legs.all().order_by("leg_number"), many=True, context=self.context
+        ).data
 
     def get_rider(self, obj):
         if obj.rider and obj.rider.user:
@@ -241,6 +289,15 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     )
     duration_minutes = serializers.IntegerField(write_only=True, required=False)
 
+    # Optional lat/lng to skip geocoding
+    pickup_lat = serializers.FloatField(write_only=True, required=False, allow_null=True)
+    pickup_lng = serializers.FloatField(write_only=True, required=False, allow_null=True)
+    dropoff_lat = serializers.FloatField(write_only=True, required=False, allow_null=True)
+    dropoff_lng = serializers.FloatField(write_only=True, required=False, allow_null=True)
+
+    # Relay
+    is_relay_order = serializers.BooleanField(write_only=True, required=False, default=False)
+
     class Meta:
         from orders.models import Order
 
@@ -249,6 +306,10 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "id",
             "pickup",
             "dropoff",
+            "pickup_lat",
+            "pickup_lng",
+            "dropoff_lat",
+            "dropoff_lng",
             "senderName",
             "senderPhone",
             "receiverName",
@@ -261,6 +322,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "merchantId",
             "distance_km",
             "duration_minutes",
+            "is_relay_order",
         ]
 
     def create(self, validated_data):
@@ -271,6 +333,11 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         # Extract non-model fields
         pickup = validated_data.pop("pickup")
         dropoff = validated_data.pop("dropoff")
+        pickup_lat = validated_data.pop("pickup_lat", None)
+        pickup_lng = validated_data.pop("pickup_lng", None)
+        dropoff_lat = validated_data.pop("dropoff_lat", None)
+        dropoff_lng = validated_data.pop("dropoff_lng", None)
+        is_relay_order = validated_data.pop("is_relay_order", False)
         sender_name = validated_data.pop("senderName")
         sender_phone = validated_data.pop("senderPhone")
         receiver_name = validated_data.pop("receiverName")
@@ -322,6 +389,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         order = Order.objects.create(
             user=order_user,
             pickup_address=pickup,
+            pickup_latitude=pickup_lat,
+            pickup_longitude=pickup_lng,
             sender_name=sender_name,
             sender_phone=sender_phone,
             vehicle=vehicle_obj,
@@ -330,18 +399,65 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             status="Assigned" if rider_obj else "Pending",
             distance_km=distance_km,
             duration_minutes=duration_minutes,
+            is_relay_order=is_relay_order,
+            routing_status=(
+                Order.RoutingStatus.PENDING
+                if is_relay_order
+                else Order.RoutingStatus.READY
+            ),
+            routing_error="",
+            suggested_rider=None,
         )
 
         # Create Delivery
         Delivery.objects.create(
             order=order,
+            pickup_address=pickup,
+            pickup_latitude=pickup_lat,
+            pickup_longitude=pickup_lng,
+            sender_name=sender_name,
+            sender_phone=sender_phone,
             dropoff_address=dropoff,
+            dropoff_latitude=dropoff_lat,
+            dropoff_longitude=dropoff_lng,
             receiver_name=receiver_name,
             receiver_phone=receiver_phone,
             package_type=package_type,
         )
 
         return order
+
+
+class RelayNodeMiniSerializer(serializers.ModelSerializer):
+    class Meta:
+        from .models import RelayNode
+
+        model = RelayNode
+        fields = ["id", "name", "latitude", "longitude", "zone"]
+
+
+class OrderLegSerializer(serializers.ModelSerializer):
+    start_relay_node = RelayNodeMiniSerializer(read_only=True)
+    end_relay_node = RelayNodeMiniSerializer(read_only=True)
+    rider_id = serializers.CharField(source="rider.id", read_only=True, allow_null=True)
+
+    class Meta:
+        from orders.models import OrderLeg
+
+        model = OrderLeg
+        fields = [
+            "id",
+            "leg_number",
+            "status",
+            "hub_pin",
+            "distance_km",
+            "duration_minutes",
+            "rider_payout",
+            "zone_compliance_bonus",
+            "rider_id",
+            "start_relay_node",
+            "end_relay_node",
+        ]
 
 
 class MerchantSerializer(serializers.ModelSerializer):
@@ -557,3 +673,30 @@ class ActivityFeedSerializer(serializers.ModelSerializer):
     class Meta:
         model = ActivityFeed
         fields = ["id", "event_type", "order_id", "text", "color", "metadata", "created_at"]
+
+
+class ZoneSerializer(serializers.ModelSerializer):
+    relay_nodes_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Zone
+        fields = [
+            "id", "name", "center_lat", "center_lng", "radius_km",
+            "is_active", "relay_nodes_count", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def get_relay_nodes_count(self, obj):
+        return obj.relay_nodes.count()
+
+
+class RelayNodeSerializer(serializers.ModelSerializer):
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = RelayNode
+        fields = [
+            "id", "name", "address", "latitude", "longitude",
+            "zone", "zone_name", "catchment_radius_km", "is_active", "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
