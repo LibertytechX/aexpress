@@ -32,7 +32,7 @@ class OTPService:
         # recipient_phone and (message_body or template)
         message_body = f"Your Assured Express verification code is: {otp}. It expires in 10 minutes."
         payload = {
-            "recipient": phone,
+            "receiver": phone,
             "place_holders": {"message": message_body},
         }
 
