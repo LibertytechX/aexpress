@@ -11,6 +11,7 @@ import hashlib
 import hmac
 import logging
 from decimal import Decimal
+import uuid as uuid_module
 
 from .models import Wallet, Transaction, VirtualAccount, WebhookLog
 from .serializers import (
@@ -299,6 +300,80 @@ def get_virtual_account(request):
             'success': False,
             'errors': {'detail': str(e)},
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def confirm_transfer_payment(request):
+    """
+    Called when a merchant clicks 'I have paid' on the bank transfer modal.
+    Creates a pending credit transaction so the transfer claim is recorded.
+    The wallet balance is NOT credited yet — that happens automatically when
+    the bank sends the CoreBanking webhook confirming the transfer.
+    """
+    try:
+        from django.utils import timezone
+        amount = request.data.get('amount')
+        if not amount:
+            return Response(
+                {'success': False, 'errors': {'detail': 'Amount is required'}},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            amount = Decimal(str(amount))
+        except Exception:
+            return Response(
+                {'success': False, 'errors': {'detail': 'Invalid amount'}},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if amount <= 0:
+            return Response(
+                {'success': False, 'errors': {'detail': 'Amount must be greater than zero'}},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        wallet, _ = Wallet.objects.get_or_create(user=request.user)
+
+        # Generate a unique reference for this claim
+        reference = f"TRANSFER-{uuid_module.uuid4().hex[:12].upper()}"
+
+        transaction = Transaction.objects.create(
+            wallet=wallet,
+            type='credit',
+            amount=amount,
+            description='Bank transfer (awaiting bank confirmation)',
+            reference=reference,
+            balance_before=wallet.balance,
+            balance_after=wallet.balance,  # Balance unchanged until webhook confirms
+            status='pending',
+            metadata={
+                'source': 'user_claim',
+                'claimed_at': timezone.now().isoformat(),
+            }
+        )
+
+        logger.info(
+            f"Bank transfer claim recorded — user: {request.user.business_name}, "
+            f"amount: ₦{amount}, ref: {reference}"
+        )
+
+        return Response({
+            'success': True,
+            'data': {
+                'message': 'Transfer claim recorded. Your wallet will be credited once the bank confirms the payment.',
+                'reference': reference,
+                'transaction_id': str(transaction.id),
+            }
+        }, status=status.HTTP_201_CREATED)
+
+    except Exception as e:
+        logger.error(f"confirm_transfer_payment error: {e}", exc_info=True)
+        return Response(
+            {'success': False, 'errors': {'detail': str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
 
 
 @api_view(['POST'])

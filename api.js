@@ -373,6 +373,19 @@ const WalletAPI = {
       method: 'GET',
     });
   },
+
+  /**
+   * Record that the merchant has claimed to have made a bank transfer.
+   * Creates a pending transaction so the claim is audited.
+   * The actual wallet credit happens when the bank webhook confirms the transfer.
+   * @param {number} amount - Amount in Naira
+   */
+  claimTransfer: async (amount) => {
+    return await apiRequest('/wallet/fund/transfer-claim/', {
+      method: 'POST',
+      body: JSON.stringify({ amount: amount.toString() }),
+    });
+  },
 };
 
 // Export API modules

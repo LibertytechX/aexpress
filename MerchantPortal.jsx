@@ -543,7 +543,8 @@ function MerchantPortal() {
           virtualAccount={bankTransferVirtualAccount}
           onClose={() => setBankTransferModal(false)}
           onSuccess={() => {
-            showNotif('Payment confirmation received! Your wallet will be credited once verified.', 'success');
+            setBankTransferModal(false);
+            showNotif('Transfer recorded! Your wallet will be credited once the bank confirms payment.', 'success');
             loadWalletBalance();
             loadTransactions();
           }}
@@ -4122,6 +4123,7 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
   // Start directly at 'show-details' since virtual account was already fetched
   const [state, setState] = useState(virtualAccount ? 'show-details' : 'loading');
   const [copied, setCopied] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
 
   // Build bank details from the virtual account prop
   const bankDetails = virtualAccount ? {
@@ -4144,17 +4146,27 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
+    setConfirmError(null);
     setState('confirming');
-    setTimeout(() => {
-      setState('success');
-    }, 2500);
+    try {
+      const response = await window.API.Wallet.claimTransfer(amount);
+      if (response.success) {
+        setState('success');
+        // Notify parent to refresh balance + transactions
+        if (onSuccess) onSuccess();
+      } else {
+        const msg = response.errors?.detail || 'Failed to record transfer. Please try again.';
+        setConfirmError(msg);
+        setState('show-details');
+      }
+    } catch (e) {
+      setConfirmError(e.message || 'Failed to record transfer. Please try again.');
+      setState('show-details');
+    }
   };
 
   const handleClose = () => {
-    if (state === 'success' && onSuccess) {
-      onSuccess();
-    }
     onClose();
   };
 
@@ -4259,6 +4271,13 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
                   <li>Click "I have paid" only after completing the transfer</li>
                 </ul>
               </div>
+
+              {/* Error message */}
+              {confirmError && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#dc2626" }}>
+                  ⚠️ {confirmError}
+                </div>
+              )}
 
               {/* Confirm Button */}
               <button onClick={handleConfirmPayment} style={{

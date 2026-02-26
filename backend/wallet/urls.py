@@ -21,6 +21,9 @@ urlpatterns = [
     # CoreBanking (LibertyPay) virtual account
     path('virtual-account/', views.get_virtual_account, name='virtual-account'),
 
+    # Called when merchant clicks "I have paid" on the bank transfer modal
+    path('fund/transfer-claim/', views.confirm_transfer_payment, name='transfer-claim'),
+
     # CoreBanking webhook (receives transfer notifications)
     path('corebanking-webhook/', views.corebanking_webhook, name='corebanking-webhook'),
 ]
