@@ -288,6 +288,11 @@ class AblyTokenView(views.APIView):
                 {"error": "Ably not configured"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        rider_id = None
+        try:
+            rider_id = request.user.rider_profile.rider_id
+        except Exception:
+            pass
 
         # Wildcard capability: covers "assigned-{any-rider-id}" and the broadcast feed.
         # Dispatchers (no rider profile) only get dispatch-feed.
@@ -296,7 +301,7 @@ class AblyTokenView(views.APIView):
             "assigned-*": ["subscribe"],
             "for-you": ["subscribe"],
             "for-you*": ["subscribe"],
-            "for-you-*": ["subscribe"],
+            f"for-you-{rider_id}": ["subscribe"],
             "assigned*": ["subscribe"],
             "order*": ["subscribe"],
         }
@@ -313,10 +318,12 @@ class AblyTokenView(views.APIView):
                 return token_details, token_request
 
             token_details, token_request = asyncio.run(_create_both())
-            return Response({
-                "token": token_details.token,
-                "token_request": token_request.to_dict(),
-            })
+            return Response(
+                {
+                    "token": token_details.token,
+                    "token_request": token_request.to_dict(),
+                }
+            )
         except Exception as exc:
             return Response(
                 {"error": str(exc)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
