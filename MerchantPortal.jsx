@@ -1964,40 +1964,33 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
-      const request = {
-        input: input,
-        componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
-        types: ['address'], // Only addresses
-        // Bias results to Lagos
-        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
-        radius: 50000, // 50km radius
-      };
-
-      autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
-        setLoading(false);
-
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Filter to only Lagos addresses
-          const lagosResults = predictions.filter(p =>
-            p.description.toLowerCase().includes('lagos')
-          );
-
-          if (lagosResults.length === 0) {
-            setError('No addresses found in Lagos');
-            setSuggestions([]);
-          } else {
-            setSuggestions(lagosResults);
+      const lagosCenter = new window.google.maps.LatLng(6.5244, 3.3792);
+      const doSearch = (searchTypes, fallback) => {
+        const request = {
+          input,
+          componentRestrictions: { country: 'ng' },
+          location: lagosCenter,
+          radius: 50000,
+        };
+        if (searchTypes) request.types = searchTypes;
+        autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
+            setLoading(false);
+            setSuggestions(predictions.slice(0, 8));
             setShowDropdown(true);
             setError(null);
+          } else if (fallback) {
+            fallback();
+          } else {
+            setLoading(false);
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('No results found');
           }
-        } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          setError('No addresses found in Lagos');
-          setSuggestions([]);
-        } else {
-          setError('Failed to fetch suggestions');
-          setSuggestions([]);
-        }
-      });
+        });
+      };
+      // Try establishments first (restaurants, malls, shops), then addresses, then unrestricted
+      doSearch(['establishment'], () => doSearch(['geocode'], () => doSearch(null)));
     }, 550); // 550ms debounce
   };
 
