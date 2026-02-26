@@ -219,6 +219,8 @@ function MerchantPortal() {
   const [verificationToken, setVerificationToken] = useState(null);
   const [passwordResetToken, setPasswordResetToken] = useState(null);
 
+  const ablyRef = useRef(null);
+
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
@@ -266,6 +268,58 @@ function MerchantPortal() {
       loadTransactions();
     }
   }, [screen, currentUser]);
+
+  // ─── Ably real-time order updates ───────────────────────────────
+  useEffect(() => {
+    // Disconnect if logged out
+    if (!currentUser) {
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      return;
+    }
+
+    let cancelled = false;
+    let localAbly = null;
+    let pollInterval = null;
+
+    const setupAbly = async () => {
+      let ablyActive = false;
+      try {
+        if (!window.Ably) throw new Error('Ably SDK not loaded');
+        const tokenData = await window.API.Activity.getAblyToken();
+        if (cancelled) return;
+
+        const ably = new window.Ably.Realtime({
+          authCallback: (_, callback) => { callback(null, tokenData); },
+        });
+        localAbly = ably;
+        ablyRef.current = ably;
+
+        const ch = ably.channels.get('dispatch-feed');
+        ch.subscribe('activity', () => {
+          // Any order activity — refresh the merchant's own orders list
+          loadOrders();
+        });
+        ablyActive = true;
+        console.log('[Ably] Merchant subscribed to dispatch-feed ✅');
+      } catch (err) {
+        console.warn('[Ably] Subscription failed, falling back to 15s polling:', err);
+      }
+
+      // Polling fallback when Ably is unavailable
+      if (!ablyActive && !cancelled) {
+        pollInterval = setInterval(() => { loadOrders(); }, 15000);
+      }
+    };
+
+    setupAbly();
+
+    return () => {
+      cancelled = true;
+      if (localAbly) { localAbly.close(); localAbly = null; }
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [currentUser]); // re-run on login / logout
 
   const loadOrders = async () => {
     try {

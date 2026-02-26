@@ -388,11 +388,24 @@ const WalletAPI = {
   },
 };
 
+// Activity / Ably API
+const ActivityAPI = {
+  /**
+   * Request an Ably token from the backend.
+   * The returned object contains { token, token_request } and can be
+   * passed directly to Ably's authCallback.
+   */
+  getAblyToken: async () => {
+    return await apiRequest('/dispatch/ably-token/', { method: 'GET' });
+  },
+};
+
 // Export API modules
 window.API = {
   Auth: AuthAPI,
   Orders: OrdersAPI,
   Wallet: WalletAPI,
+  Activity: ActivityAPI,
   Token: TokenManager,
 };
 
