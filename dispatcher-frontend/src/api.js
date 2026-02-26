@@ -1,5 +1,7 @@
 // API Service for Dispatcher Frontend
-const API_BASE_URL = 'http://localhost:8000/api';
+// In dev: create dispatcher-frontend/.env.local with VITE_API_BASE_URL=http://localhost:8000/api
+// In prod: the default .env value (production server) is used automatically
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://www.orders.axpress.net/api';
 
 // Get stored auth token
 const getToken = () => localStorage.getItem('access_token');
