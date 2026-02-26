@@ -2040,35 +2040,37 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
-      const lagosCenter = new window.google.maps.LatLng(6.5244, 3.3792);
-      const doSearch = (searchTypes, fallback) => {
-        const request = {
-          input,
-          componentRestrictions: { country: 'ng' },
-          location: lagosCenter,
-          radius: 50000,
-        };
-        if (searchTypes) request.types = searchTypes;
-        console.log('[AC] getPlacePredictions request:', JSON.stringify(request));
-        autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
-          console.log('[AC] status:', status, 'predictions:', predictions);
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
-            setLoading(false);
-            setSuggestions(predictions.slice(0, 8));
-            setShowDropdown(true);
-            setError(null);
-          } else if (fallback) {
-            fallback();
-          } else {
-            setLoading(false);
-            setSuggestions([]);
-            setShowDropdown(false);
-            setError('No results found');
-          }
-        });
+      // Hard-restrict predictions to Lagos State bounding box
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),  // SW corner
+        new window.google.maps.LatLng(6.75, 3.95)   // NE corner
+      );
+      const request = {
+        input,
+        bounds: lagosBounds,
+        strictBounds: true,            // reject anything outside the box
+        componentRestrictions: { country: 'ng' },
       };
-      // Try establishments first (restaurants, malls, shops), then addresses, then unrestricted
-      doSearch(['establishment'], () => doSearch(['geocode'], () => doSearch(null)));
+      console.log('[AC] getPlacePredictions request (Lagos-restricted):', input);
+      autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
+        console.log('[AC] status:', status, 'count:', predictions?.length);
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
+          // Secondary filter: keep only predictions that reference Lagos in their terms
+          const lagosOnly = predictions.filter(p =>
+            p.terms?.some(t => /lagos/i.test(t.value)) ||
+            /lagos/i.test(p.description)
+          );
+          const final = (lagosOnly.length > 0 ? lagosOnly : predictions).slice(0, 8);
+          setSuggestions(final);
+          setShowDropdown(true);
+          setError(null);
+        } else {
+          setSuggestions([]);
+          setShowDropdown(false);
+          setError('Address not found in Lagos — we only deliver within Lagos State.');
+        }
+      });
     }, 550); // 550ms debounce
   };
 

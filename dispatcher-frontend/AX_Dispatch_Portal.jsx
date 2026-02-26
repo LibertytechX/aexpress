@@ -3157,27 +3157,32 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
     setLoading(true);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      const lagosCenter = new window.google.maps.LatLng(6.5244, 3.3792);
-      // Try establishment search first, then fallback to geocode (addresses)
-      const doSearch = (searchTypes, fallback) => {
-        const req = { input, componentRestrictions: { country: 'ng' }, location: lagosCenter, radius: 50000 };
-        if (searchTypes) req.types = searchTypes;
-        autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
-            setLoading(false);
-            setSuggestions(predictions.slice(0, 8));
-            setShowDropdown(true);
-          } else if (fallback) {
-            fallback();
-          } else {
-            setLoading(false);
-            setSuggestions([]);
-            setShowDropdown(false);
-          }
-        });
+      // Hard-restrict predictions to Lagos State bounding box
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),  // SW corner
+        new window.google.maps.LatLng(6.75, 3.95)   // NE corner
+      );
+      const req = {
+        input,
+        bounds: lagosBounds,
+        strictBounds: true,            // reject anything outside the box
+        componentRestrictions: { country: 'ng' },
       };
-      // Search establishments first, then addresses, then no type restriction
-      doSearch(['establishment'], () => doSearch(['geocode'], () => doSearch(null)));
+      autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
+          // Secondary filter: keep only predictions that reference Lagos
+          const lagosOnly = predictions.filter(p =>
+            p.terms?.some(t => /lagos/i.test(t.value)) ||
+            /lagos/i.test(p.description)
+          );
+          setSuggestions((lagosOnly.length > 0 ? lagosOnly : predictions).slice(0, 8));
+          setShowDropdown(true);
+        } else {
+          setSuggestions([]);
+          setShowDropdown(false);
+        }
+      });
     }, 500);
   };
 
@@ -3197,7 +3202,15 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
                 geocoder.current.geocode({ placeId: s.place_id }, (results, status) => {
                   if (status === 'OK' && results[0] && results[0].geometry) {
                     const loc = results[0].geometry.location;
-                    onPlaceSelected({ address: s.description, lat: loc.lat(), lng: loc.lng() });
+                    const lat = loc.lat(), lng = loc.lng();
+                    // Validate coordinates fall within Lagos State bounds
+                    const inLagos = lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95;
+                    if (!inLagos) {
+                      onChange('');
+                      onPlaceSelected({ outOfScope: true, address: s.description });
+                    } else {
+                      onPlaceSelected({ address: s.description, lat, lng });
+                    }
                   }
                 });
               }
@@ -3386,13 +3399,19 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{setPickupLat(p.lat);setPickupLng(p.lng);}} placeholder="Enter pickup address..." style={iSt}/>
+            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{
+              if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              setPickupLat(p.lat); setPickupLng(p.lng);
+            }} placeholder="Enter pickup address..." style={iSt}/>
           </div>
 
           {/* Dropoff */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{setDropoffLat(p.lat);setDropoffLng(p.lng);}} placeholder="Enter delivery address..." style={iSt}/>
+            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{
+              if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              setDropoffLat(p.lat); setDropoffLng(p.lng);
+            }} placeholder="Enter delivery address..." style={iSt}/>
           </div>
 
           {/* Receiver */}
