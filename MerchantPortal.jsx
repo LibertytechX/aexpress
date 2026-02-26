@@ -1910,20 +1910,23 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   // Initialize Google Maps services
   useEffect(() => {
     const initServices = () => {
+      console.log('[AC] initServices called. google=', !!window.google, 'maps=', !!(window.google && window.google.maps), 'places=', !!(window.google && window.google.maps && window.google.maps.places));
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
-        // Create a dummy div for PlacesService (required by Google Maps API)
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
         setError(null);
+        console.log('[AC] AutocompleteService initialized OK');
       } else {
         setError('Google Maps not loaded');
+        console.error('[AC] Google Maps or Places library not available');
       }
     };
 
     if (window.googleMapsLoaded) {
       initServices();
     } else {
+      console.log('[AC] Waiting for google-maps-loaded event...');
       window.addEventListener('google-maps-loaded', initServices);
       return () => window.removeEventListener('google-maps-loaded', initServices);
     }
@@ -1951,9 +1954,11 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     if (!autocompleteService.current) {
+      console.error('[AC] fetchSuggestions called but autocompleteService is null');
       setError('Google Maps not ready');
       return;
     }
+    console.log('[AC] fetchSuggestions for:', input);
 
     setLoading(true);
     setError(null);
@@ -1973,7 +1978,9 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
           radius: 50000,
         };
         if (searchTypes) request.types = searchTypes;
+        console.log('[AC] getPlacePredictions request:', JSON.stringify(request));
         autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
+          console.log('[AC] status:', status, 'predictions:', predictions);
           if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
             setLoading(false);
             setSuggestions(predictions.slice(0, 8));

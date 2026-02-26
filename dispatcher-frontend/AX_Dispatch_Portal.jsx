@@ -3115,20 +3115,27 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
     setLoading(true);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      autocompleteService.current.getPlacePredictions({
-        input,
-        componentRestrictions: { country: 'ng' },
-        types: ['address'],
-        location: new window.google.maps.LatLng(6.5244, 3.3792),
-        radius: 50000,
-      }, (predictions, status) => {
-        setLoading(false);
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          const lagos = predictions.filter(p => p.description.toLowerCase().includes('lagos'));
-          setSuggestions(lagos.length ? lagos : predictions.slice(0, 5));
-          setShowDropdown(true);
-        } else { setSuggestions([]); setShowDropdown(false); }
-      });
+      const lagosCenter = new window.google.maps.LatLng(6.5244, 3.3792);
+      // Try establishment search first, then fallback to geocode (addresses)
+      const doSearch = (searchTypes, fallback) => {
+        const req = { input, componentRestrictions: { country: 'ng' }, location: lagosCenter, radius: 50000 };
+        if (searchTypes) req.types = searchTypes;
+        autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
+          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
+            setLoading(false);
+            setSuggestions(predictions.slice(0, 8));
+            setShowDropdown(true);
+          } else if (fallback) {
+            fallback();
+          } else {
+            setLoading(false);
+            setSuggestions([]);
+            setShowDropdown(false);
+          }
+        });
+      };
+      // Search establishments first, then addresses, then no type restriction
+      doSearch(['establishment'], () => doSearch(['geocode'], () => doSearch(null)));
     }, 500);
   };
 
