@@ -284,34 +284,46 @@ function MerchantPortal() {
     const setupAbly = async () => {
       let ablyActive = false;
       try {
-        if (!window.Ably) throw new Error('Ably SDK not loaded');
+        if (!window.Ably) throw new Error('[Ably] SDK not loaded — check index.html script tag');
         if (cancelled) return;
 
+        console.log('[Ably] Initializing Merchant Realtime client...');
         const ably = new window.Ably.Realtime({
-          // authCallback must return just the token string, not the whole response object
           authCallback: async (_, callback) => {
+            console.log('[Ably] authCallback called — fetching token...');
             try {
               const td = await window.API.Activity.getAblyToken();
+              console.log('[Ably] Token received, first 20 chars:', String(td.token).slice(0, 20));
               callback(null, td.token);
-            } catch (e) { callback(e, null); }
+            } catch (e) {
+              console.error('[Ably] authCallback error:', e);
+              callback(e, null);
+            }
           },
         });
         localAbly = ably;
         ablyRef.current = ably;
 
+        // Log connection state changes
+        ably.connection.on('connecting',   () => console.log('[Ably] Connecting...'));
+        ably.connection.on('connected',    () => console.log('[Ably] Connected! ✅'));
+        ably.connection.on('disconnected', (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
+        ably.connection.on('failed',       (s) => console.error('[Ably] FAILED:', s?.reason?.message));
+
         const ch = ably.channels.get('dispatch-feed');
-        ch.subscribe('activity', () => {
-          // Any order activity — refresh the merchant's own orders list
+        // In Ably v2, ch.subscribe() returns a Promise — must be awaited
+        await ch.subscribe('activity', () => {
           loadOrders();
         });
         ablyActive = true;
         console.log('[Ably] Merchant subscribed to dispatch-feed ✅');
       } catch (err) {
-        console.warn('[Ably] Subscription failed, falling back to 15s polling:', err);
+        console.error('[Ably] Setup failed, falling back to 15s polling:', err);
       }
 
       // Polling fallback when Ably is unavailable
       if (!ablyActive && !cancelled) {
+        console.log('[Ably] Using 15s polling fallback.');
         pollInterval = setInterval(() => { loadOrders(); }, 15000);
       }
     };

@@ -1029,26 +1029,41 @@ export default function AXDispatchPortal() {
       let ablyActive = false;
       try {
         if (cancelled) return;
-	        const ably = new Realtime({
-          // authCallback must receive just the token string (or TokenDetails),
-          // not the whole { token, token_request } response object.
+        console.log('[Ably] Initializing Realtime client...');
+        const ably = new Realtime({
+          // authCallback: async fn returning token string (Ably v2 Promise style)
           authCallback: async (_, callback) => {
+            console.log('[Ably] authCallback called — fetching token from backend...');
             try {
               const td = await ActivityFeedAPI.getAblyToken();
+              console.log('[Ably] Token received, first 20 chars:', String(td.token).slice(0, 20));
               callback(null, td.token);
-            } catch (e) { callback(e, null); }
+            } catch (e) {
+              console.error('[Ably] authCallback error:', e);
+              callback(e, null);
+            }
           }
         });
-	        localAbly = ably;
-	        ablyRef.current = ably;
+        localAbly = ably;
+        ablyRef.current = ably;
+
+        // Log connection state changes so we can see exactly where it stalls
+        ably.connection.on('connecting',    () => console.log('[Ably] Connecting...'));
+        ably.connection.on('connected',     () => console.log('[Ably] Connected! ✅ WebSocket open'));
+        ably.connection.on('disconnected',  (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
+        ably.connection.on('suspended',     (s) => console.warn('[Ably] Suspended:', s?.reason?.message));
+        ably.connection.on('failed',        (s) => console.error('[Ably] FAILED:', s?.reason?.message));
+        ably.connection.on('closed',        () => console.log('[Ably] Closed.'));
+
         const ch = ably.channels.get("dispatch-feed");
-        ch.subscribe("activity", (msg) => {
-	          const d = msg.data;
-	          setActivityFeed(prev => {
-	            if (!d) return prev;
-	            if (d.id && prev.some(x => x.id === d.id)) return prev;
-	            return [d, ...prev].slice(0, 100);
-	          });
+        // In Ably v2, ch.subscribe() returns a Promise — must be awaited
+        await ch.subscribe("activity", (msg) => {
+          const d = msg.data;
+          setActivityFeed(prev => {
+            if (!d) return prev;
+            if (d.id && prev.some(x => x.id === d.id)) return prev;
+            return [d, ...prev].slice(0, 100);
+          });
           // Sync order status from real-time events so the orders list stays fresh
           if (d && d.order_id) {
             const statusEventMap = {
@@ -1074,13 +1089,15 @@ export default function AXDispatchPortal() {
             }
           }
         });
+        console.log('[Ably] Subscribed to dispatch-feed ✅');
         ablyActive = true;
       } catch (err) {
-        console.warn("Ably subscription failed, falling back to polling:", err);
+        console.error('[Ably] Setup failed, falling back to polling:', err);
       }
 
       // Polling fallback: refresh feed from DB every 10 s when Ably is down
       if (!ablyActive) {
+        console.log('[Ably] Using 10s polling fallback.');
         pollInterval = setInterval(async () => {
           try {
             const feedData = await ActivityFeedAPI.getRecent(50).catch(() => null);
