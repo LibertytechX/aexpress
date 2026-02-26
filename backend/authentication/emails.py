@@ -25,7 +25,7 @@ def send_verification_email(user, otp=None):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
+        api_key = os.getenv("MAILGUN_API_KEY")
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
@@ -39,13 +39,20 @@ def send_verification_email(user, otp=None):
         token = generate_verification_token()
         user.email_verification_token = token
         user.email_verification_token_created = timezone.now()
-        user.save(update_fields=["email_verification_token", "email_verification_token_created"])
+        user.save(
+            update_fields=[
+                "email_verification_token",
+                "email_verification_token_created",
+            ]
+        )
 
         # Create verification link
         verify_url = f"{frontend_url}/?token={token}"
 
         # Create HTML email template
-        html_content = get_verification_email_template(user.contact_name, verify_url, otp)
+        html_content = get_verification_email_template(
+            user.contact_name, verify_url, otp
+        )
 
         # Create text email content
         text_content = f"Hi {user.contact_name},\n\nWelcome to Assured Express! Please verify your email by visiting: {verify_url}"
@@ -140,7 +147,7 @@ def send_password_reset_email(user):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
+        api_key = os.getenv("MAILGUN_API_KEY")
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")

@@ -32,7 +32,9 @@ def emit_activity(event_type, order_id, text, color="gold", metadata=None):
     try:
         api_key = getattr(settings, "ABLY_API_KEY", "")
         if not api_key:
-            logger.warning("emit_activity: ABLY_API_KEY not configured, skipping publish")
+            logger.warning(
+                "emit_activity: ABLY_API_KEY not configured, skipping publish"
+            )
             return
 
         import asyncio
@@ -65,7 +67,7 @@ class MailgunEmailService:
         """
         Sends an onboarding email to a new driver with their generated password.
         """
-        if not all([settings.MAILGUN_DOMAIN, settings.MAILGUN_APIKEY]):
+        if not all([settings.MAILGUN_DOMAIN, settings.MAILGUN_API_KEY]):
             logger.error("Mailgun settings are not fully configured.")
             return False
 
@@ -105,7 +107,7 @@ class MailgunEmailService:
         try:
             response = requests.post(
                 api_url,
-                auth=("api", settings.MAILGUN_APIKEY),
+                auth=("api", settings.MAILGUN_API_KEY),
                 data=email_data,
                 timeout=10,
             )
