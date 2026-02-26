@@ -295,6 +295,10 @@ class AblyTokenView(views.APIView):
             "dispatch-feed": ["subscribe"],
             "assigned-*": ["subscribe"],
             "for-you": ["subscribe"],
+            "for-you*": ["subscribe"],
+            "for-you-*": ["subscribe"],
+            "assigned*": ["subscribe"],
+            "order*": ["subscribe"],
         }
 
         try:
