@@ -2530,7 +2530,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             pricing[v.name] = {
               base_fare: parseFloat(v.base_fare),
               rate_per_km: parseFloat(v.rate_per_km),
-              rate_per_minute: parseFloat(v.rate_per_minute)
+              rate_per_minute: parseFloat(v.rate_per_minute),
+              pricing_tiers: v.pricing_tiers || null,
             };
           });
           setVehiclePricing(pricing);
@@ -2777,6 +2778,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     setBulkRows(bulkRows.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
+  // ─── Tiered price calculation (rate-switch with boundary floors) ───
+  const calcTieredPrice = (km, pt) => {
+    if (!pt || pt.type !== 'tiered') return null;
+    if (km <= pt.floor_km) return pt.floor_fee;
+    const t = pt.tiers || [];
+    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
+    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
+    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
+    return Math.round(km * (t[t.length - 1]?.rate || 0));
+  };
+
   // ─── Price calculation ───
   // Calculate price for a specific vehicle using early route data
   const calculateEarlyPrice = (vehicleName) => {
@@ -2785,11 +2797,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicleName];
     if (!pricing) return null;
 
+    // Use tiered pricing if available
+    const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+
     const distanceCost = earlyRouteDistance * pricing.rate_per_km;
     const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const total = pricing.base_fare + distanceCost + timeCost;
-
-    return Math.round(total);
+    return Math.round(pricing.base_fare + distanceCost + timeCost);
   };
 
   const getActiveDropoffs = () => {
@@ -2807,24 +2821,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return 0;
 
     // Step 2 uses the full route (map) calculation.
-    // IMPORTANT: Don't use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
-    // after navigating Step 2 → Step 1 and editing addresses.
     if (step === 2 && routeDistance && routeDuration) {
-      const distanceCost = routeDistance * pricing.rate_per_km;
-      const timeCost = routeDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total); // Round to nearest naira
+      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
     }
 
     // Step 1 (Quick Send): if we already calculated an early route, use it
     if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-      const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total);
+      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
     }
 
-    // Fallback: estimate based on base fare only (will be updated when route loads)
+    // Fallback: floor fee for tiered, or base fare for simple
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
     return pricing.base_fare;
   };
 
