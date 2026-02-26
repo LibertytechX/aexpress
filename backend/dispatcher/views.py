@@ -75,16 +75,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-created_at")
-        # Only prefetch relay legs on detail view (keeps list payload fast)
-        if getattr(self, "action", None) == "retrieve":
-            return qs.prefetch_related(
-                "legs",
-                "legs__start_relay_node",
-                "legs__end_relay_node",
-                "legs__rider",
-                "legs__rider__user",
-            )
-        return qs
+        # Always prefetch relay legs so the list endpoint returns them too.
+        # This keeps relayLegs alive through 60-second auto-refreshes.
+        return qs.prefetch_related(
+            "legs",
+            "legs__start_relay_node",
+            "legs__end_relay_node",
+            "legs__rider",
+            "legs__rider__user",
+        )
 
     def create(self, request, *args, **kwargs):
         """Override create to return full OrderSerializer data after creation."""

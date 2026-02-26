@@ -1352,7 +1352,7 @@ function SignupScreen({ onBack, onComplete }) {
             <h2 style={{ fontSize: 22, fontWeight: 700, color: "#1B2A4A", marginBottom: 24 }}>Create your account</h2>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Full Name</label>
-              <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Yetunde Igbene" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }} />
+              <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Ogun Lami" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 44, fontSize: 14, fontFamily: "inherit" }} />
             </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>Phone Number</label>

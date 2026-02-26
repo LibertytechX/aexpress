@@ -172,11 +172,7 @@ class OrderSerializer(serializers.ModelSerializer):
         return getattr(first, "dropoff_longitude", None) if first else None
 
     def get_relay_legs(self, obj):
-        """Include legs on detail view and after relay route generation."""
-        view = self.context.get("view")
-        action = getattr(view, "action", None) if view else None
-        if action not in ("retrieve", "generate_relay_route"):
-            return []
+        """Always include relay legs so the map survives list refreshes."""
         return OrderLegSerializer(
             obj.legs.all().order_by("leg_number"), many=True, context=self.context
         ).data

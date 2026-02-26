@@ -124,7 +124,7 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
-def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=27.0, max_hops=12):
+def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
     """Greedy hop selection using haversine distance as a cheap proxy."""
     nodes = _get_active_relay_nodes_cached()
     direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
@@ -334,12 +334,12 @@ def generate_relay_legs_sync(order_id):
 
             # Build hop chain (2-pass: tighter hops if road legs exceed cap)
             hop_nodes = (
-                _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=27.0)
-                or _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=24.0)
+                _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0)
+                or _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=80.0)
             )
             if hop_nodes is None:
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "Could not find relay hops to keep legs within 30km."
+                order.routing_error = "Could not find relay hops to keep legs within 100km."
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",
@@ -364,10 +364,10 @@ def generate_relay_legs_sync(order_id):
             if legs_metrics is None:
                 legs_metrics = _estimate_legs_haversine(pickup, points)
 
-            # Enforce 30km cap (best-effort; haversine fallback may exceed in real roads)
-            if any(d > 30.0 for d, _ in legs_metrics):
+            # Enforce 100km cap (best-effort; haversine fallback may exceed in real roads)
+            if any(d > 100.0 for d, _ in legs_metrics):
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "One or more legs exceed 30km after routing validation."
+                order.routing_error = "One or more legs exceed 100km after routing validation."
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",

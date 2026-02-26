@@ -873,7 +873,7 @@ const INIT_ORDERS = [
   { id:"AX-6158251",customer:"Funke Adeyemi",customerPhone:"09012345678",merchant:"GlowUp Beauty",pickup:"10 Adeola Odeku, VI",dropoff:"25 Adetokunbo Ademola, VI",rider:"Femi Akinola",riderId:"R008",status:"Delivered",amount:1210,cod:8500,codFee:500,vehicle:"Bike",created:"Feb 13, 3:00 PM",pkg:"Box" },
 ];
 const MERCHANTS_DATA = [
-  { id:"M001",name:"Vivid Print",contact:"Yetunde Igbene",phone:"08051832508",category:"Printing",totalOrders:234,monthOrders:42,walletBalance:87900,status:"Active",joined:"Nov 2024" },
+  { id:"M001",name:"Vivid Print",contact:"Ogun Lami",phone:"08051832508",category:"Printing",totalOrders:234,monthOrders:42,walletBalance:87900,status:"Active",joined:"Nov 2024" },
   { id:"M002",name:"TechZone Gadgets",contact:"Ade Bakare",phone:"09012345678",category:"Electronics",totalOrders:567,monthOrders:89,walletBalance:234500,status:"Active",joined:"Sep 2024" },
   { id:"M003",name:"Mama Nkechi Kitchen",contact:"Nkechi Obi",phone:"07033445566",category:"Food",totalOrders:1203,monthOrders:156,walletBalance:56700,status:"Active",joined:"Jul 2024" },
   { id:"M004",name:"FreshFit Lagos",contact:"Sola Adams",phone:"08055667788",category:"Fashion",totalOrders:89,monthOrders:12,walletBalance:12300,status:"Active",joined:"Jan 2025" },
@@ -1061,7 +1061,7 @@ export default function AXDispatchPortal() {
             if (d.event_type === "new_order") {
               setOrders(prev => {
                 if (!prev.find(o => o.id === d.order_id)) {
-                  OrdersAPI.getAll().then(data => setOrders(data)).catch(() => {});
+                  OrdersAPI.getAll().then(data => setOrders(cur => mergeOrders(data, cur))).catch(() => {});
                 }
                 return prev;
               });
@@ -1086,11 +1086,23 @@ export default function AXDispatchPortal() {
     setupAbly();
 
     // Periodic orders refresh (60 s) so orders from the merchant portal
-    // and external status changes stay in sync even when Ably is active
+    // and external status changes stay in sync even when Ably is active.
+    // We merge relayLegs from the existing state so the route map is never
+    // wiped by a list response that has empty legs (belt-and-suspenders guard
+    // now that the backend always returns legs on all actions).
+    const mergeOrders = (fresh, prev) =>
+      fresh.map(o => {
+        const existing = prev.find(e => e.id === o.id);
+        if (existing && (!o.relayLegs || o.relayLegs.length === 0) && existing.relayLegs?.length > 0) {
+          return { ...o, relayLegs: existing.relayLegs };
+        }
+        return o;
+      });
+
     const ordersInterval = setInterval(async () => {
       try {
         const data = await OrdersAPI.getAll().catch(() => null);
-        if (data) setOrders(data);
+        if (data) setOrders(prev => mergeOrders(data, prev));
       } catch (_) { /* ignore */ }
     }, 60000);
 
@@ -1816,6 +1828,117 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   );
 }
 
+// ─── RIDERS LOCATION MAP ────────────────────────────────────────
+function RidersLocationMap({ riders }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Effect 1: Initialize map (once)
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: Update rider markers whenever riders data changes
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    // Clear old markers
+    markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    riders.forEach(rider => {
+      if (!rider.lat || !rider.lng) return;
+      const lat = parseFloat(rider.lat);
+      const lng = parseFloat(rider.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const color = rider.status === 'online' ? '#22c55e' : rider.status === 'on_delivery' ? '#a855f7' : '#6b7280';
+      const statusLabel = rider.status === 'online' ? 'Online' : rider.status === 'on_delivery' ? 'On Delivery' : 'Offline';
+
+      const marker = new window.google.maps.Marker({
+        position: { lat, lng }, map, title: rider.name,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 9, fillColor: color, fillOpacity: 1,
+          strokeColor: '#ffffff', strokeWeight: 2.5,
+        }
+      });
+
+      marker.addListener('click', () => {
+        infoWindowRef.current.setContent(
+          `<div style="font-family:sans-serif;padding:6px 2px;min-width:140px;">` +
+          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${rider.name}</div>` +
+          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
+          (rider.currentOrder ? `<div style="margin-top:5px;color:#a855f7;font-size:11px;">📦 ${rider.currentOrder}</div>` : '') +
+          `<div style="color:#888;margin-top:4px;font-size:10px;">${rider.vehicle || ''}</div>` +
+          `<div style="color:#aaa;font-size:10px;">${rider.phone || ''}</div>` +
+          `</div>`
+        );
+        infoWindowRef.current.open(map, marker);
+      });
+
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      hasPoints = true;
+    });
+
+    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+  }, [mapReady, riders]);
+
+  const ridersWithLocation = riders.filter(r => r.lat && r.lng).length;
+
+  return (
+    <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span>🗺️ Rider Locations</span>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{ridersWithLocation} of {riders.length} riders with GPS</span>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+        {ridersWithLocation === 0 && mapReady && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.03)' }}>
+            <div style={{ textAlign: 'center', color: S.textMuted }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>No GPS data available</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Riders will appear here when their location is shared</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
+        <span><span style={{ color: '#22c55e', fontWeight: 700 }}>●</span> Online</span>
+        <span><span style={{ color: '#a855f7', fontWeight: 700 }}>●</span> On Delivery</span>
+        <span><span style={{ color: '#6b7280', fontWeight: 700 }}>●</span> Offline</span>
+        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── RIDERS SCREEN ──────────────────────────────────────────────
 function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder }) {
   const [filter, setFilter] = useState("All");
@@ -1884,42 +2007,57 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 
   return (
     <div>
+      {/* Stat cards */}
       <div style={{display:"flex",gap:12,marginBottom:16}}>
         <StatCard label="Total Riders" value={riders.length}/>
         <StatCard label="Online" value={riders.filter(r=>r.status==="online").length} color={S.green}/>
         <StatCard label="On Delivery" value={riders.filter(r=>r.status==="on_delivery").length} color={S.purple}/>
         <StatCard label="Deliveries Today" value={riders.reduce((s,r)=>s+r.todayOrders,0)} color={S.gold}/>
       </div>
-      <div style={{display:"flex",gap:10,marginBottom:14}}>
-        <div style={{display:"flex",gap:4}}>
-          {["All","Online","On Delivery","Offline"].map(f=>(<button key={f} onClick={()=>setFilter(f)} style={{padding:"7px 14px",borderRadius:8,border:`1px solid ${filter===f?"transparent":S.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:filter===f?S.goldPale:S.card,color:filter===f?S.gold:S.textMuted}}>{f}</button>))}
-        </div>
-        <div style={{flex:1,background:S.card,borderRadius:10,border:`1px solid ${S.border}`,display:"flex",alignItems:"center",gap:8,padding:"0 12px"}}>
-          <span style={{opacity:0.4}}>{I.search}</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search riders..." style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
-        </div>
-      </div>
-      <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
-        <div style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
-          <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
-        </div>
-        <div style={{maxHeight:"calc(100vh - 310px)",overflowY:"auto"}}>
-          {filtered.map(r=>(
-            <div key={r.id} onClick={()=>onSelect(r.id)} style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:11,fontWeight:700,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.id}</span>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:32,height:32,borderRadius:8,background:`${sc(r.status)}12`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:sc(r.status)}}>{r.name.split(" ").map(n=>n[0]).join("")}</div>
-                <span style={{fontSize:12,fontWeight:600}}>{r.name}</span>
-              </div>
-              <span style={{fontSize:11,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.phone}</span>
-              <span style={{fontSize:11,color:S.textDim}}>{r.vehicle}</span>
-              <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:`${sc(r.status)}12`,color:sc(r.status)}}>{r.status==="online"?"Online":r.status==="on_delivery"?"On Delivery":"Offline"}</span>
-              <span style={{fontSize:11,color:r.currentOrder?S.purple:S.textMuted,fontWeight:r.currentOrder?700:400,fontFamily:"'Space Mono',monospace"}}>{r.currentOrder||"— Available"}</span>
-              <div><span style={{fontSize:12,fontWeight:700}}>{r.todayOrders} orders</span><div style={{fontSize:10,color:S.textMuted}}>₦{r.todayEarnings.toLocaleString()}</div></div>
-              <span style={{fontSize:12,color:S.gold}}>⭐ {r.rating}</span>
+
+      {/* 50/50 split: table (left) + map (right) */}
+      <div style={{display:"flex",gap:16,alignItems:"flex-start",height:"calc(100vh - 240px)"}}>
+
+        {/* Left – filters + table (50%) */}
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",height:"100%"}}>
+          <div style={{display:"flex",gap:10,marginBottom:14,flexShrink:0}}>
+            <div style={{display:"flex",gap:4}}>
+              {["All","Online","On Delivery","Offline"].map(f=>(<button key={f} onClick={()=>setFilter(f)} style={{padding:"7px 14px",borderRadius:8,border:`1px solid ${filter===f?"transparent":S.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:filter===f?S.goldPale:S.card,color:filter===f?S.gold:S.textMuted}}>{f}</button>))}
             </div>
-          ))}
+            <div style={{flex:1,background:S.card,borderRadius:10,border:`1px solid ${S.border}`,display:"flex",alignItems:"center",gap:8,padding:"0 12px"}}>
+              <span style={{opacity:0.4}}>{I.search}</span>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search riders..." style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
+            </div>
+          </div>
+          <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden",flex:1,display:"flex",flexDirection:"column"}}>
+            <div style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`,flexShrink:0}}>
+              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+            </div>
+            <div style={{overflowY:"auto",flex:1}}>
+              {filtered.map(r=>(
+                <div key={r.id} onClick={()=>onSelect(r.id)} style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <span style={{fontSize:11,fontWeight:700,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.id}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:32,height:32,borderRadius:8,background:`${sc(r.status)}12`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:sc(r.status)}}>{r.name.split(" ").map(n=>n[0]).join("")}</div>
+                    <span style={{fontSize:12,fontWeight:600}}>{r.name}</span>
+                  </div>
+                  <span style={{fontSize:11,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.phone}</span>
+                  <span style={{fontSize:11,color:S.textDim}}>{r.vehicle}</span>
+                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:`${sc(r.status)}12`,color:sc(r.status)}}>{r.status==="online"?"Online":r.status==="on_delivery"?"On Delivery":"Offline"}</span>
+                  <span style={{fontSize:11,color:r.currentOrder?S.purple:S.textMuted,fontWeight:r.currentOrder?700:400,fontFamily:"'Space Mono',monospace"}}>{r.currentOrder||"— Available"}</span>
+                  <div><span style={{fontSize:12,fontWeight:700}}>{r.todayOrders} orders</span><div style={{fontSize:10,color:S.textMuted}}>₦{r.todayEarnings.toLocaleString()}</div></div>
+                  <span style={{fontSize:12,color:S.gold}}>⭐ {r.rating}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {/* Right – riders location map (50%) */}
+        <div style={{flex:1,minWidth:0,height:"100%"}}>
+          <RidersLocationMap riders={riders}/>
+        </div>
+
       </div>
     </div>
   );

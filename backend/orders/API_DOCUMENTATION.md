@@ -76,7 +76,7 @@ Create a Quick Send order with a single delivery.
 ```json
 {
   "pickup_address": "27A Idowu Martins St, Victoria Island, Lagos",
-  "sender_name": "Yetunde Igbene",
+  "sender_name": "Ogun Lami",
   "sender_phone": "08051832508",
   "dropoff_address": "24 Harvey Rd, Sabo Yaba, Lagos",
   "receiver_name": "Adebayo Johnson",
@@ -115,7 +115,7 @@ Create a Quick Send order with a single delivery.
     "vehicle_name": "Bike",
     "vehicle_price": "1200.00",
     "pickup_address": "27A Idowu Martins St, Victoria Island, Lagos",
-    "sender_name": "Yetunde Igbene",
+    "sender_name": "Ogun Lami",
     "sender_phone": "08051832508",
     "payment_method": "wallet",
     "total_amount": "1200.00",
@@ -167,7 +167,7 @@ Create a Multi-Drop order with multiple deliveries from a single pickup location
 ```json
 {
   "pickup_address": "15 Admiralty Way, Lekki Phase 1, Lagos",
-  "sender_name": "Yetunde Igbene",
+  "sender_name": "Ogun Lami",
   "sender_phone": "08051832508",
   "vehicle": "Car",
   "payment_method": "wallet",
@@ -298,7 +298,7 @@ GET /api/orders/?status=Done&limit=10
       "vehicle_name": "Van",
       "vehicle_price": "12000.00",
       "pickup_address": "24 Alara St, Iwaya, Lagos",
-      "sender_name": "Yetunde Igbene",
+      "sender_name": "Ogun Lami",
       "sender_phone": "08051832508",
       "payment_method": "cash_on_pickup",
       "total_amount": "60000.00",
