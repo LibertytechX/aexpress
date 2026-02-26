@@ -216,6 +216,11 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5177",
     "http://localhost:5180",
     "https://aexpress-dispatcher-frontend.vercel.app",
+    "https://dispatcherx.axpress.net",
+    "https://send.axpress.net",
+    "https://move.axpress.net",
+    "https://axpress.net",
+    "https://axpress.net",
 ]
 
 # Add production frontend URL if set
@@ -228,6 +233,12 @@ CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-fre
 
 CSRF_TRUSTED_ORIGINS = [
     "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+    "https://aexpress-dispatcher-frontend.vercel.app",
+    "https://dispatcherx.axpress.net",
+    "https://send.axpress.net",
+    "https://move.axpress.net",
+    "https://axpress.net",
+    "https://axpress.net",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
