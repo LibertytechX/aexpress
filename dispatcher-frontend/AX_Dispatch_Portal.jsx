@@ -1370,6 +1370,22 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   );
 }
 
+// ─── DATE/TIME FORMATTER ────────────────────────────────────────
+// Accepts ISO strings ("2026-02-14T15:42:00Z"), epoch ms, or legacy
+// strings like "Feb 14, 3:42 PM". Returns { date, time } parts.
+function formatOrderDateTime(raw) {
+  if (!raw) return { date: "—", time: "" };
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    const date = d.toLocaleDateString("en-NG", { day: "2-digit", month: "short", year: "numeric" });
+    const time = d.toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit", hour12: true });
+    return { date, time };
+  }
+  // Fallback for legacy "Feb 14, 3:42 PM" strings already in display form
+  const parts = raw.split(", ");
+  return { date: parts[0] || raw, time: parts[1] || "" };
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs }) {
   const [statusFilter, setStatusFilter] = useState("All");
@@ -1404,13 +1420,16 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       </div>
 
       <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
-        <div style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
-          <span>Order ID</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
+        <div style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
+          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
         </div>
         <div style={{maxHeight:"calc(100vh - 280px)",overflowY:"auto"}}>
-          {filtered.map(o=>(
-            <div key={o.id} onClick={()=>onSelect(o.id)} style={{display:"grid",gridTemplateColumns:"110px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          {filtered.map(o=>{
+            const dt = formatOrderDateTime(o.created);
+            return (
+            <div key={o.id} onClick={()=>onSelect(o.id)} style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
               <span style={{fontSize:12,fontWeight:700,color:S.gold,fontFamily:"'Space Mono',monospace"}}>{o.id}</span>
+              <div><div style={{fontSize:11,fontWeight:600,color:S.text}}>{dt.date}</div><div style={{fontSize:10,color:S.textMuted}}>{dt.time}</div></div>
               <div><div style={{fontSize:12,fontWeight:600}}>{o.customer}</div><div style={{fontSize:10,color:S.textMuted}}>{o.customerPhone}</div></div>
               <span style={{fontSize:12,color:S.textDim}}>{o.merchant}</span>
               <div style={{fontSize:11,color:S.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
@@ -1419,7 +1438,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
               <span style={{fontSize:11,color:o.cod>0?S.green:S.textMuted,fontFamily:"'Space Mono',monospace"}}>{o.cod>0?`₦${(o.cod/1000).toFixed(0)}K`:"—"}</span>
               <Badge status={o.status}/>
             </div>
-          ))}
+          );})}
           {filtered.length===0&&<div style={{padding:"40px 0",textAlign:"center",fontSize:13,color:S.textMuted}}>No orders match filters</div>}
         </div>
       </div>
