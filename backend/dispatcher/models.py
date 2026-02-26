@@ -287,6 +287,7 @@ class SystemSettings(models.Model):
     """
     Singleton model to store global system settings/pricing configuration.
     """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Zone Surcharges
     bridge_surcharge = models.DecimalField(max_digits=10, decimal_places=2, default=500)
