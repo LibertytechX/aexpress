@@ -1966,6 +1966,12 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
   );
 }
 
+// Lagos State bounding box — used for both suggestion filtering and post-geocode validation
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat, lng) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
 function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }) {
   const [suggestions, setSuggestions] = useState([]);
@@ -1977,20 +1983,19 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
   const placesService = useRef(null);
+  const geocoderRef = useRef(null);
 
   // Initialize Google Maps services
   useEffect(() => {
     const initServices = () => {
-      console.log('[AC] initServices called. google=', !!window.google, 'maps=', !!(window.google && window.google.maps), 'places=', !!(window.google && window.google.maps && window.google.maps.places));
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
+        geocoderRef.current = new window.google.maps.Geocoder();
         setError(null);
-        console.log('[AC] AutocompleteService initialized OK');
       } else {
         setError('Google Maps not loaded');
-        console.error('[AC] Google Maps or Places library not available');
       }
     };
 
@@ -2040,31 +2045,33 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
-      // Hard-restrict predictions to Lagos State bounding box
+      // Bias results towards Lagos (bounds is a preference, not a hard filter for AutocompleteService)
       const lagosBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(6.25, 2.70),  // SW corner
-        new window.google.maps.LatLng(6.75, 3.95)   // NE corner
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
       );
       const request = {
         input,
         bounds: lagosBounds,
-        strictBounds: true,            // reject anything outside the box
         componentRestrictions: { country: 'ng' },
       };
-      console.log('[AC] getPlacePredictions request (Lagos-restricted):', input);
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
-        console.log('[AC] status:', status, 'count:', predictions?.length);
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Secondary filter: keep only predictions that reference Lagos in their terms
+          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
           const lagosOnly = predictions.filter(p =>
             p.terms?.some(t => /lagos/i.test(t.value)) ||
             /lagos/i.test(p.description)
           );
-          const final = (lagosOnly.length > 0 ? lagosOnly : predictions).slice(0, 8);
-          setSuggestions(final);
-          setShowDropdown(true);
-          setError(null);
+          if (lagosOnly.length > 0) {
+            setSuggestions(lagosOnly.slice(0, 8));
+            setShowDropdown(true);
+            setError(null);
+          } else {
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('Address not found in Lagos — we only deliver within Lagos State.');
+          }
         } else {
           setSuggestions([]);
           setShowDropdown(false);
@@ -2081,10 +2088,27 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   };
 
   const handleSelectSuggestion = (suggestion) => {
-    onChange(suggestion.description);
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
+    // Geocode the selection and validate it falls within Lagos State
+    if (geocoderRef.current) {
+      geocoderRef.current.geocode({ placeId: suggestion.place_id }, (results, status) => {
+        if (status === 'OK' && results[0]?.geometry) {
+          const loc = results[0].geometry.location;
+          if (!isInLagos(loc.lat(), loc.lng())) {
+            onChange('');
+            setError('⚠️ Outside service area — we only deliver within Lagos State.');
+          } else {
+            onChange(suggestion.description);
+          }
+        } else {
+          onChange(suggestion.description); // geocode failed, allow through and let backend validate
+        }
+      });
+    } else {
+      onChange(suggestion.description);
+    }
   };
 
   return (

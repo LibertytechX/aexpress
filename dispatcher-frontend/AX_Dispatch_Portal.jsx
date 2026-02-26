@@ -3157,27 +3157,31 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
     setLoading(true);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      // Hard-restrict predictions to Lagos State bounding box
+      // Bias results towards Lagos (bounds is a preference for AutocompleteService, not a hard filter)
       const lagosBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(6.25, 2.70),  // SW corner
-        new window.google.maps.LatLng(6.75, 3.95)   // NE corner
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
       );
       const req = {
         input,
         bounds: lagosBounds,
-        strictBounds: true,            // reject anything outside the box
         componentRestrictions: { country: 'ng' },
       };
       autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Secondary filter: keep only predictions that reference Lagos
+          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
           const lagosOnly = predictions.filter(p =>
             p.terms?.some(t => /lagos/i.test(t.value)) ||
             /lagos/i.test(p.description)
           );
-          setSuggestions((lagosOnly.length > 0 ? lagosOnly : predictions).slice(0, 8));
-          setShowDropdown(true);
+          if (lagosOnly.length > 0) {
+            setSuggestions(lagosOnly.slice(0, 8));
+            setShowDropdown(true);
+          } else {
+            setSuggestions([]);
+            setShowDropdown(false);
+          }
         } else {
           setSuggestions([]);
           setShowDropdown(false);
