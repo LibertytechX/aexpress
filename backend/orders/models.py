@@ -43,6 +43,11 @@ class Vehicle(models.Model):
         default=0,
         help_text="Minimum fee charged for any trip",
     )
+    pricing_tiers = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Tiered pricing config, e.g. {type:'tiered', floor_km:6, floor_fee:1700, tiers:[{max_km:10,rate:275},...]}"
+    )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
 

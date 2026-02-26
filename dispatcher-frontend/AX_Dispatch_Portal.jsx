@@ -2326,10 +2326,16 @@ const SC = ({children,title,icon,desc,right})=>(<div style={{background:S.card,b
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
   // ─── PRICING STATE (Research-based Lagos defaults) ───
-  const [bikeBase, setBikeBase] = useState(500);
-  const [bikePerKm, setBikePerKm] = useState(150);
-  const [bikeMinKm, setBikeMinKm] = useState(3);
-  const [bikeMin, setBikeMin] = useState(1200);
+  // Bike uses tiered rate-switch pricing
+  const [bikeFloorKm, setBikeFloorKm] = useState(6);
+  const [bikeFloorFee, setBikeFloorFee] = useState(1700);
+  const [bikeT1MaxKm, setBikeT1MaxKm] = useState(10);
+  const [bikeT1Rate, setBikeT1Rate] = useState(275);
+  const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
+  const [bikeT2Rate, setBikeT2Rate] = useState(235);
+  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+  // Legacy bike state kept for getVC compatibility
+  const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
   const [carBase, setCarBase] = useState(1000);
   const [carPerKm, setCarPerKm] = useState(250);
   const [carMinKm, setCarMinKm] = useState(3);
@@ -2399,9 +2405,18 @@ function SettingsScreen() {
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
   const [nodeSaving, setNodeSaving] = useState(false);
 
-  const calcPrice = (base, perKm, minKm, minFee, km, zone, weight) => {
+  // Bike tiered price: rate-switch with boundary floors
+  const calcBikePrice = (km) => {
+    if (km <= bikeFloorKm) return bikeFloorFee;
+    if (km <= bikeT1MaxKm) return Math.max(km * bikeT1Rate, bikeFloorFee);
+    if (km <= bikeT2MaxKm) return Math.max(km * bikeT2Rate, bikeT1MaxKm * bikeT1Rate);
+    return Math.max(km * bikeT3Rate, bikeT2MaxKm * bikeT2Rate);
+  };
+  const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
-    if (km <= minKm) { price = minFee; }
+    if (vehicleType === "bike") {
+      price = calcBikePrice(km);
+    } else if (km <= minKm) { price = minFee; }
     else {
       price = base + (km * perKm);
       if (tierEnabled && km >= tier2Km) price = price * (1 - tier2Discount / 100);
@@ -2415,12 +2430,12 @@ function SettingsScreen() {
     return Math.round(price);
   };
   const getVC = () => ({
-    bike: { base:bikeBase, perKm:bikePerKm, minKm:bikeMinKm, min:bikeMin },
-    car: { base:carBase, perKm:carPerKm, minKm:carMinKm, min:carMin },
-    van: { base:vanBase, perKm:vanPerKm, minKm:vanMinKm, min:vanMin },
+    bike: { base:bikeBase, perKm:bikePerKm, minKm:bikeMinKm, min:bikeMin, type:"bike" },
+    car: { base:carBase, perKm:carPerKm, minKm:carMinKm, min:carMin, type:"car" },
+    van: { base:vanBase, perKm:vanPerKm, minKm:vanMinKm, min:vanMin, type:"van" },
   });
   const simC = getVC()[simVehicle];
-  const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight);
+  const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight, simVehicle);
   const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
 
   // Load settings from backend on mount
@@ -2442,10 +2457,19 @@ function SettingsScreen() {
           const key = v.name.toLowerCase();
           ids[key] = v.id;
           if (key === 'bike') {
-            setBikeBase(pf(v.base_fare, 500));
-            setBikePerKm(pf(v.rate_per_km, 150));
-            setBikeMinKm(pf(v.min_distance_km, 3));
-            setBikeMin(pf(v.min_fee, 1200));
+            const pt = v.pricing_tiers;
+            if (pt && pt.type === 'tiered') {
+              setBikeFloorKm(pt.floor_km ?? 6);
+              setBikeFloorFee(pt.floor_fee ?? 1700);
+              setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
+              setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
+              setBikeT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
+              setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+            } else {
+              setBikeFloorKm(pf(v.min_distance_km, 6));
+              setBikeFloorFee(pf(v.min_fee, 1700));
+            }
           } else if (key === 'car') {
             setCarBase(pf(v.base_fare, 1000));
             setCarPerKm(pf(v.rate_per_km, 250));
@@ -2531,7 +2555,7 @@ function SettingsScreen() {
       // PATCH each vehicle's pricing
       await Promise.all(
         [
-          { key: 'bike', data: { base_fare: bikeBase, rate_per_km: bikePerKm, min_distance_km: bikeMinKm, min_fee: bikeMin } },
+          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: bikeT2MaxKm, rate: bikeT2Rate }, { rate: bikeT3Rate }] } } },
           { key: 'car',  data: { base_fare: carBase,  rate_per_km: carPerKm,  min_distance_km: carMinKm,  min_fee: carMin  } },
           { key: 'van',  data: { base_fare: vanBase,  rate_per_km: vanPerKm,  min_distance_km: vanMinKm,  min_fee: vanMin  } },
         ]
@@ -2561,7 +2585,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-  const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
+  const handleReset = () => { setBikeFloorKm(6);setBikeFloorFee(1700);setBikeT1MaxKm(10);setBikeT1Rate(275);setBikeT2MaxKm(15);setBikeT2Rate(235);setBikeT3Rate(200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
 
   const tabs = [{id:"pricing",label:"Pricing & Fees",icon:"💰"},{id:"zones",label:"Zones & Surcharges",icon:"🗺️"},{id:"simulator",label:"Price Calculator",icon:"🧮"},{id:"dispatch",label:"Dispatch Rules",icon:"⚙️"},{id:"relay",label:"Relay Network",icon:"🔗"},{id:"notifications",label:"Notifications",icon:"🔔"},{id:"integrations",label:"API & Integrations",icon:"🔌"}];
 
@@ -2588,8 +2612,51 @@ function SettingsScreen() {
           </div>
         </div>
 
-        {[{label:"Bike",emoji:"🏍️",color:"#10B981",base:bikeBase,setBase:setBikeBase,perKm:bikePerKm,setPerKm:setBikePerKm,minKm:bikeMinKm,setMinKm:setBikeMinKm,min:bikeMin,setMin:setBikeMin,desc:"Small packages, documents, food. Max 25kg.",mr:"₦100–₦200/km"},
-          {label:"Car",emoji:"🚗",color:"#3B82F6",base:carBase,setBase:setCarBase,perKm:carPerKm,setPerKm:setCarPerKm,minKm:carMinKm,setMinKm:setCarMinKm,min:carMin,setMin:setCarMin,desc:"Medium packages, electronics, fragile. Max 100kg.",mr:"₦200–₦350/km"},
+        {/* ── BIKE CARD (Tiered Pricing) ── */}
+        <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
+          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>🏍️</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>Bike Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Small packages, documents, food. Max 25kg.</div></div></div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{background:"#f8fafc",padding:"4px 10px",borderRadius:6,fontSize:10,color:S.textMuted}}>Tiered Pricing</div><div style={{background:"#10B98112",padding:"6px 14px",borderRadius:8}}><span style={{fontSize:11,fontWeight:700,color:"#10B981"}}>MIN ₦{bikeFloorFee.toLocaleString()}</span></div></div>
+          </div>
+          <div style={{padding:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📐 Floor Price</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
+              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={bikeFloorKm} onChange={e=>setBikeFloorKm(Number(e.target.value)||0)} style={inputStyle}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Orders up to this distance = flat fee</div></div>
+              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={bikeFloorFee} onChange={e=>setBikeFloorFee(Number(e.target.value)||0)} style={{...inputStyle,color:"#10B981",borderColor:"#10B98140"}}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Fixed charge for ≤{bikeFloorKm}km</div></div>
+            </div>
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📊 Distance Tier Rates</div>
+            <div style={{border:`1px solid ${S.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",background:"#f8fafc",padding:"8px 14px",borderBottom:`1px solid ${S.border}`,fontSize:10,fontWeight:700,color:S.textMuted}}>
+                <div>TIER</div><div>UP TO (KM)</div><div>RATE (₦/KM)</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 1 <span style={{fontSize:10,color:S.textMuted}}>({bikeFloorKm}–{bikeT1MaxKm}km)</span></div>
+                <input value={bikeT1MaxKm} onChange={e=>setBikeT1MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={bikeT1Rate} onChange={e=>setBikeT1Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 2 <span style={{fontSize:10,color:S.textMuted}}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
+                <input value={bikeT2MaxKm} onChange={e=>setBikeT2MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={bikeT2Rate} onChange={e=>setBikeT2Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 3 <span style={{fontSize:10,color:S.textMuted}}>({bikeT2MaxKm}km+)</span></div>
+                <div style={{fontSize:11,color:S.textMuted,fontStyle:"italic"}}>∞</div>
+                <input value={bikeT3Rate} onChange={e=>setBikeT3Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+            </div>
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:8}}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {[1,3,5,8,12,20,30].map(km=>{const price=calcBikePrice(km);return (<div key={km} style={{padding:"8px 10px",background:"#fff",borderRadius:8,border:`1px solid ${km<=bikeFloorKm?"#10B98130":S.border}`,textAlign:"center",minWidth:68,flex:1}}><div style={{fontSize:10,color:S.textMuted,fontWeight:600}}>{km} KM</div><div style={{fontSize:14,fontWeight:800,color:"#10B981",fontFamily:"'Space Mono',monospace"}}>₦{price.toLocaleString()}</div>{km<=bikeFloorKm&&<div style={{fontSize:8,color:"#10B981",fontWeight:700}}>FLOOR</div>}</div>);})}
+              </div>
+              <div style={{marginTop:8,fontSize:10,color:S.textMuted,lineHeight:1.5}}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm*bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}km+ → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm*bikeT2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── CAR & VAN CARDS (Simple Pricing — unchanged) ── */}
+        {[{label:"Car",emoji:"🚗",color:"#3B82F6",base:carBase,setBase:setCarBase,perKm:carPerKm,setPerKm:setCarPerKm,minKm:carMinKm,setMinKm:setCarMinKm,min:carMin,setMin:setCarMin,desc:"Medium packages, electronics, fragile. Max 100kg.",mr:"₦200–₦350/km"},
           {label:"Van",emoji:"🚐",color:"#8B5CF6",base:vanBase,setBase:setVanBase,perKm:vanPerKm,setPerKm:setVanPerKm,minKm:vanMinKm,setMinKm:setVanMinKm,min:vanMin,setMin:setVanMin,desc:"Bulk orders, furniture, large cargo. Max 500kg.",mr:"₦350–₦500/km"}
         ].map(v=>(<div key={v.label} style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
           <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
@@ -2669,7 +2736,7 @@ function SettingsScreen() {
           <div style={{background:"#f8fafc",borderRadius:10,padding:"14px 16px"}}>
             <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:10}}>ZONE EXAMPLES (BIKE, 10KM)</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
-              {[{l:"Same Zone",z:"same",d:"Ikeja→Ikeja",i:"🏠"},{l:"Bridge",z:"bridge",d:"Yaba→V.I.",i:"🌉"},{l:"Island",z:"island",d:"V.I.→Lekki",i:"🏝️"},{l:"Outer",z:"outer",d:"Ikeja→Ikorodu",i:"🛤️"}].map(z=>{const p=calcPrice(bikeBase,bikePerKm,bikeMinKm,bikeMin,10,z.z,3);return (<div key={z.z} style={{textAlign:"center",padding:"10px 8px",background:"#fff",borderRadius:8,border:`1px solid ${S.border}`}}><div style={{fontSize:16}}>{z.i}</div><div style={{fontSize:10,fontWeight:700,color:S.navy,marginTop:2}}>{z.l}</div><div style={{fontSize:16,fontWeight:800,color:S.gold,fontFamily:"'Space Mono',monospace",margin:"4px 0"}}>₦{p.toLocaleString()}</div><div style={{fontSize:9,color:S.textMuted}}>{z.d}</div></div>);})}
+              {[{l:"Same Zone",z:"same",d:"Ikeja→Ikeja",i:"🏠"},{l:"Bridge",z:"bridge",d:"Yaba→V.I.",i:"🌉"},{l:"Island",z:"island",d:"V.I.→Lekki",i:"🏝️"},{l:"Outer",z:"outer",d:"Ikeja→Ikorodu",i:"🛤️"}].map(z=>{const p=calcPrice(bikeBase,bikePerKm,bikeMinKm,bikeMin,10,z.z,3,"bike");return (<div key={z.z} style={{textAlign:"center",padding:"10px 8px",background:"#fff",borderRadius:8,border:`1px solid ${S.border}`}}><div style={{fontSize:16}}>{z.i}</div><div style={{fontSize:10,fontWeight:700,color:S.navy,marginTop:2}}>{z.l}</div><div style={{fontSize:16,fontWeight:800,color:S.gold,fontFamily:"'Space Mono',monospace",margin:"4px 0"}}>₦{p.toLocaleString()}</div><div style={{fontSize:9,color:S.textMuted}}>{z.d}</div></div>);})}
             </div>
           </div>
         </SC>
@@ -2740,7 +2807,7 @@ function SettingsScreen() {
               </div>
               <div style={{marginTop:12,background:"#f8fafc",borderRadius:8,padding:"10px 14px"}}>
                 <div style={{fontSize:10,fontWeight:700,color:S.textMuted,marginBottom:6}}>COMPARE ALL VEHICLES</div>
-                <div style={{display:"flex",gap:8}}>{[{id:"bike",i:"🏍️"},{id:"car",i:"🚗"},{id:"van",i:"🚐"}].map(v=>{const c=getVC()[v.id];const p=calcPrice(c.base,c.perKm,c.minKm,c.min,simKm,simZone,simWeight);const f=simSurge?Math.round(p*surgeMultiplier):p;return (<div key={v.id} style={{flex:1,textAlign:"center",padding:6,borderRadius:6,background:simVehicle===v.id?"rgba(232,168,56,0.1)":"transparent",border:simVehicle===v.id?`1px solid ${S.gold}`:"1px solid transparent"}}><div style={{fontSize:14}}>{v.i}</div><div style={{fontSize:14,fontWeight:800,color:S.navy,fontFamily:"'Space Mono',monospace"}}>₦{f.toLocaleString()}</div></div>);})}</div>
+                <div style={{display:"flex",gap:8}}>{[{id:"bike",i:"🏍️"},{id:"car",i:"🚗"},{id:"van",i:"🚐"}].map(v=>{const c=getVC()[v.id];const p=calcPrice(c.base,c.perKm,c.minKm,c.min,simKm,simZone,simWeight,v.id);const f=simSurge?Math.round(p*surgeMultiplier):p;return (<div key={v.id} style={{flex:1,textAlign:"center",padding:6,borderRadius:6,background:simVehicle===v.id?"rgba(232,168,56,0.1)":"transparent",border:simVehicle===v.id?`1px solid ${S.gold}`:"1px solid transparent"}}><div style={{fontSize:14}}>{v.i}</div><div style={{fontSize:14,fontWeight:800,color:S.navy,fontFamily:"'Space Mono',monospace"}}>₦{f.toLocaleString()}</div></div>);})}</div>
               </div>
             </div>
           </div>
@@ -2751,7 +2818,7 @@ function SettingsScreen() {
           <div style={{padding:16,overflowX:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
               <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Route","KM","Zone","🏍️ Bike","🚗 Car","🚐 Van"].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
-              <tbody>{[{r:"Ikeja → Allen Ave",km:3,z:"same",d:"Local"},{r:"Yaba → V.I.",km:12,z:"bridge",d:"Bridge"},{r:"Surulere → Lekki Ph1",km:18,z:"bridge",d:"Bridge"},{r:"V.I. → Lekki",km:8,z:"island",d:"Island"},{r:"Ikeja → Ikorodu",km:28,z:"outer",d:"Outer"},{r:"Maryland → Ajah",km:32,z:"bridge",d:"Bridge"},{r:"Apapa → Ojo",km:15,z:"outer",d:"Outer"},{r:"V.I. → Ajah",km:22,z:"island",d:"Island"}].map((r,i)=>(<tr key={i} style={{borderBottom:`1px solid ${S.borderLight}`}}><td style={{padding:"8px 10px",fontWeight:600}}>{r.r}</td><td style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700}}>{r.km}</td><td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:r.z==="bridge"?"rgba(232,168,56,0.1)":r.z==="island"?"rgba(139,92,246,0.08)":r.z==="outer"?"rgba(16,185,129,0.08)":"#f1f5f9",color:r.z==="bridge"?S.gold:r.z==="island"?"#8B5CF6":r.z==="outer"?S.green:S.textMuted,fontWeight:700}}>{r.d}</span></td>{["bike","car","van"].map(v=>{const c=getVC()[v];return<td key={v} style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>₦{calcPrice(c.base,c.perKm,c.minKm,c.min,r.km,r.z,3).toLocaleString()}</td>;})}</tr>))}</tbody>
+              <tbody>{[{r:"Ikeja → Allen Ave",km:3,z:"same",d:"Local"},{r:"Yaba → V.I.",km:12,z:"bridge",d:"Bridge"},{r:"Surulere → Lekki Ph1",km:18,z:"bridge",d:"Bridge"},{r:"V.I. → Lekki",km:8,z:"island",d:"Island"},{r:"Ikeja → Ikorodu",km:28,z:"outer",d:"Outer"},{r:"Maryland → Ajah",km:32,z:"bridge",d:"Bridge"},{r:"Apapa → Ojo",km:15,z:"outer",d:"Outer"},{r:"V.I. → Ajah",km:22,z:"island",d:"Island"}].map((r,i)=>(<tr key={i} style={{borderBottom:`1px solid ${S.borderLight}`}}><td style={{padding:"8px 10px",fontWeight:600}}>{r.r}</td><td style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700}}>{r.km}</td><td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:r.z==="bridge"?"rgba(232,168,56,0.1)":r.z==="island"?"rgba(139,92,246,0.08)":r.z==="outer"?"rgba(16,185,129,0.08)":"#f1f5f9",color:r.z==="bridge"?S.gold:r.z==="island"?"#8B5CF6":r.z==="outer"?S.green:S.textMuted,fontWeight:700}}>{r.d}</span></td>{["bike","car","van"].map(v=>{const c=getVC()[v];return<td key={v} style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>₦{calcPrice(c.base,c.perKm,c.minKm,c.min,r.km,r.z,3,v).toLocaleString()}</td>;})}</tr>))}</tbody>
             </table>
           </div>
         </div>
@@ -3090,7 +3157,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     VehiclesAPI.getAll().then(res => {
       if (res.success && res.vehicles) {
         const p = {};
-        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute) }; });
+        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute), pricing_tiers: v.pricing_tiers || null }; });
         setVehiclePricing(p);
       }
     }).catch(() => {});
@@ -3122,6 +3189,19 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const calcPrice = (vName) => {
     const p = vehiclePricing[vName];
     if (!p) return null;
+    // Tiered pricing (Bike)
+    const pt = p.pricing_tiers;
+    if (pt && pt.type === 'tiered' && routeDistance) {
+      const km = routeDistance;
+      if (km <= pt.floor_km) return pt.floor_fee;
+      const t = pt.tiers || [];
+      if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
+      if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km||10) * (t[0]?.rate||275)));
+      if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km||15) * (t[1]?.rate||235)));
+      return Math.round(km * (t[t.length-1]?.rate || 200));
+    }
+    if (pt && pt.type === 'tiered') return pt.floor_fee;
+    // Simple pricing (Car, Van)
     if (routeDistance && routeDuration) {
       return Math.round(p.base_fare + routeDistance * p.rate_per_km + routeDuration * p.rate_per_minute);
     }
