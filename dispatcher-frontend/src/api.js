@@ -114,7 +114,7 @@ const normalizeOrder = (o) => ({
 
 export const OrdersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch orders');
@@ -123,7 +123,7 @@ export const OrdersAPI = {
     },
 
     async getOne(orderNumber) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch order');
@@ -132,7 +132,7 @@ export const OrdersAPI = {
     },
 
     async create(orderData) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(orderData)
@@ -170,7 +170,7 @@ export const OrdersAPI = {
     },
 
     async generateRelayRoute(orderNumber, force = false) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/generate-relay-route/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/generate-relay-route/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ force })
@@ -218,7 +218,7 @@ export const VehiclesAPI = {
     },
 
     async update(id, data) {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/${id}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/orders/vehicles/${id}/`, {
             method: 'PATCH',
             headers: authHeaders(),
             body: JSON.stringify(data)
@@ -271,7 +271,7 @@ export const SettingsAPI = {
 // ─── ZONES ──────────────────────────────────────────────────────
 export const ZonesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/zones/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch zones');
@@ -280,7 +280,7 @@ export const ZonesAPI = {
     },
 
     async create(zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/zones/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(zone)
@@ -290,7 +290,7 @@ export const ZonesAPI = {
     },
 
     async update(id, zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/zones/${id}/`, {
             method: 'PATCH',
             headers: authHeaders(),
             body: JSON.stringify(zone)
@@ -300,7 +300,7 @@ export const ZonesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/zones/${id}/`, {
             method: 'DELETE',
             headers: authHeaders()
         });
@@ -311,7 +311,7 @@ export const ZonesAPI = {
 // ─── RELAY NODES ─────────────────────────────────────────────────
 export const RelayNodesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/relay-nodes/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch relay nodes');
@@ -320,7 +320,7 @@ export const RelayNodesAPI = {
     },
 
     async create(node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/relay-nodes/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(node)
@@ -330,7 +330,7 @@ export const RelayNodesAPI = {
     },
 
     async update(id, node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/relay-nodes/${id}/`, {
             method: 'PATCH',
             headers: authHeaders(),
             body: JSON.stringify(node)
@@ -340,7 +340,7 @@ export const RelayNodesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/relay-nodes/${id}/`, {
             method: 'DELETE',
             headers: authHeaders()
         });
