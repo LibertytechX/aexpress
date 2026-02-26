@@ -61,7 +61,7 @@ def publish_order_assigned_event(order, rider):
             return
 
         payload = AssignedOrderSerializer(order).data
-        channel_name = f"assigned-{rider.rider_id}"
+        channel_name = f"for-you-{rider.rider_id}"
 
         async def _publish():
             client = AblyRest(api_key)
