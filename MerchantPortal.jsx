@@ -285,11 +285,16 @@ function MerchantPortal() {
       let ablyActive = false;
       try {
         if (!window.Ably) throw new Error('Ably SDK not loaded');
-        const tokenData = await window.API.Activity.getAblyToken();
         if (cancelled) return;
 
         const ably = new window.Ably.Realtime({
-          authCallback: (_, callback) => { callback(null, tokenData); },
+          // authCallback must return just the token string, not the whole response object
+          authCallback: async (_, callback) => {
+            try {
+              const td = await window.API.Activity.getAblyToken();
+              callback(null, td.token);
+            } catch (e) { callback(e, null); }
+          },
         });
         localAbly = ably;
         ablyRef.current = ably;

@@ -1028,10 +1028,16 @@ export default function AXDispatchPortal() {
       // Try Ably real-time; fall back to polling if unavailable
       let ablyActive = false;
       try {
-        const tokenRequest = await ActivityFeedAPI.getAblyToken();
-	        if (cancelled) return;
+        if (cancelled) return;
 	        const ably = new Realtime({
-          authCallback: (_, callback) => { callback(null, tokenRequest); }
+          // authCallback must receive just the token string (or TokenDetails),
+          // not the whole { token, token_request } response object.
+          authCallback: async (_, callback) => {
+            try {
+              const td = await ActivityFeedAPI.getAblyToken();
+              callback(null, td.token);
+            } catch (e) { callback(e, null); }
+          }
         });
 	        localAbly = ably;
 	        ablyRef.current = ably;
