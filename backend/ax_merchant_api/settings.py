@@ -215,6 +215,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5176",
     "http://localhost:5177",
     "http://localhost:5180",
+    "https://aexpress-dispatcher-frontend.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -223,6 +224,7 @@ if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 
 CORS_ALLOWED_ORIGINS.append("https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev")
+
 
 CSRF_TRUSTED_ORIGINS = [
     "https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
@@ -293,6 +295,16 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+# Celery Beat Schedule
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "publish-random-order-offer-every-minute": {
+        "task": "riders.tasks.publish_random_order_offer",
+        "schedule": crontab(minute="*"),
+    },
+}
+
 # Production Security Settings
 if not DEBUG:
     SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True") == "True"
@@ -308,11 +320,11 @@ if not DEBUG:
     X_FRAME_OPTIONS = "DENY"
 
 # WhatsApp Bot Configuration
-BOT_API_KEY = os.getenv('BOT_API_KEY', '')
+BOT_API_KEY = os.getenv("BOT_API_KEY", "")
 
 # respond.io Integration
-RESPOND_IO_API_KEY = os.getenv('RESPOND_IO_API_KEY', '')
-RESPOND_IO_BASE_URL = os.getenv('RESPOND_IO_BASE_URL', 'https://api.respond.io/v2')
+RESPOND_IO_API_KEY = os.getenv("RESPOND_IO_API_KEY", "")
+RESPOND_IO_BASE_URL = os.getenv("RESPOND_IO_BASE_URL", "https://api.respond.io/v2")
 
 # Google Maps API Configuration
-GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY', '')
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")

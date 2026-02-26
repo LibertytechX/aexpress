@@ -12,6 +12,15 @@ from .views import (
     CalculateFareView,
     VehicleUpdateView,
     AssignedOrdersView,
+    AssignedOrderDetailView,
+    AssignedRoutesView,
+    OrderPickupView,
+    cancel_order,
+    DeliveryStartView,
+    DeliveryCompleteView,
+    OrderStartView,
+    OrderArrivedView,
+    OrderCompleteView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -34,6 +43,26 @@ urlpatterns = [
     # Order management endpoints
     path("", OrderListView.as_view(), name="order_list"),
     path("assigned/", AssignedOrdersView.as_view(), name="assigned_orders"),
+    path(
+        "assigned/<str:order_number>/",
+        AssignedOrderDetailView.as_view(),
+        name="assigned_order_detail",
+    ),
+    path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
+    path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
+    path("start/", OrderStartView.as_view(), name="order_start"),
+    path("arrived/", OrderArrivedView.as_view(), name="order_arrived"),
+    path("complete/", OrderCompleteView.as_view(), name="order_complete"),
+    path(
+        "delivery/<uuid:delivery_id>/start/",
+        DeliveryStartView.as_view(),
+        name="delivery_start",
+    ),
+    path(
+        "delivery/<uuid:delivery_id>/deliver/",
+        DeliveryCompleteView.as_view(),
+        name="delivery_deliver",
+    ),
     path("stats/", OrderStatsView.as_view(), name="order_stats"),
     # Escrow management endpoints
     path("escrow-history/", EscrowHistoryView.as_view(), name="escrow_history"),
@@ -53,6 +82,11 @@ urlpatterns = [
         "escrow-status/<str:order_number>/",
         EscrowStatusView.as_view(),
         name="escrow_status",
+    ),
+    path(
+        "<uuid:order_id>/rider-cancel/",
+        cancel_order,
+        name="rider_cancel_order",
     ),
     path("cancel/<str:order_number>/", CancelOrderView.as_view(), name="cancel_order"),
     # Generic order detail (must come last to avoid matching specific endpoints)

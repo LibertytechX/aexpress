@@ -99,7 +99,9 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
+        ("PickedUp", "Picked Up"),
         ("Started", "Started"),
+        ("Arrived", "Arrived"),
         ("Done", "Done"),
         ("CustomerCanceled", "Customer Canceled"),
         ("RiderCanceled", "Rider Canceled"),
@@ -108,8 +110,16 @@ class Order(models.Model):
 
     PAYMENT_METHOD_CHOICES = [
         ("wallet", "Wallet"),
+        ("cash", "Cash"),
         ("cash_on_pickup", "Cash on Pickup"),
         ("receiver_pays", "Receiver Pays"),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ("Pending", "Pending"),
+        ("Paid", "Paid"),
+        ("Failed", "Failed"),
+        ("Refunded", "Refunded"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -139,6 +149,9 @@ class Order(models.Model):
     # Payment
     payment_method = models.CharField(
         max_length=20, choices=PAYMENT_METHOD_CHOICES, default="wallet"
+    )
+    payment_status = models.CharField(
+        max_length=20, choices=PAYMENT_STATUS_CHOICES, default="Pending"
     )
     total_amount = models.DecimalField(max_digits=10, decimal_places=2)
 
@@ -170,10 +183,15 @@ class Order(models.Model):
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
+    picked_up_at = models.DateTimeField(null=True, blank=True)
+    arrived_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
     scheduled_pickup_time = models.DateTimeField(null=True, blank=True)
 
     # Additional info
     notes = models.TextField(blank=True)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
 
     class Meta:
         db_table = "orders"
@@ -270,3 +288,19 @@ class Delivery(models.Model):
 
     def __str__(self):
         return f"Delivery to {self.receiver_name} - Order {self.order.order_number}"
+
+
+class OrderEvent(models.Model):
+    """Event log for orders."""
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
+    event = models.CharField(max_length=100)
+    description = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "order_events"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.event} for {self.order.order_number}"

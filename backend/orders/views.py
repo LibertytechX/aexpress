@@ -1,10 +1,12 @@
+import logging
 from rest_framework import status, generics, permissions
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
-from .models import Order, Delivery, Vehicle
+from .models import Order, Delivery, Vehicle, OrderEvent
 from .serializers import (
     OrderSerializer,
     VehicleSerializer,
@@ -12,11 +14,18 @@ from .serializers import (
     MultiDropSerializer,
     BulkImportSerializer,
     AssignedOrderSerializer,
+    AssignedRouteSerializer,
+    OrderCancelSerializer,
+    OrderStatusUpdateSerializer,
 )
-from .permissions import IsDriver
+from .permissions import IsRider
+from dispatcher.models import Rider, SystemSettings
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
+from riders.notifications import notify_rider
+from riders.models import RiderEarning, RiderCodRecord
 
+logger = logging.getLogger(__name__)
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
@@ -35,15 +44,15 @@ class VehicleListView(APIView):
 
 class VehicleUpdateView(generics.UpdateAPIView):
     """API endpoint to update vehicle pricing."""
-    
+
     queryset = Vehicle.objects.all()
     serializer_class = VehicleSerializer
     permission_classes = [permissions.IsAuthenticated]
-    lookup_field = 'id'
+    lookup_field = "id"
 
     def update(self, request, *args, **kwargs):
         """Update vehicle details."""
-        partial = kwargs.pop('partial', False)
+        partial = kwargs.pop("partial", False)
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
@@ -53,9 +62,9 @@ class VehicleUpdateView(generics.UpdateAPIView):
             {
                 "success": True,
                 "message": f"Vehicle {instance.name} updated successfully",
-                "vehicle": serializer.data
+                "vehicle": serializer.data,
             },
-            status=status.HTTP_200_OK
+            status=status.HTTP_200_OK,
         )
 
 
@@ -153,6 +162,21 @@ class QuickSendView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Quick Send pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "quick"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
 
         # Return created order
         order_serializer = OrderSerializer(order)
@@ -265,6 +289,21 @@ class MultiDropView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Multi-Drop ({num_deliveries} stops) pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "multi"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
+
         # Return created order
         order_serializer = OrderSerializer(order)
 
@@ -375,6 +414,21 @@ class BulkImportView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        # Notify all online riders about the new order
+        try:
+            online_riders = Rider.objects.filter(
+                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
+            )
+            for rider in online_riders:
+                notify_rider(
+                    rider=rider,
+                    title="New Order Available",
+                    body=f"Bulk Import ({num_deliveries} stops) pickup from {order.pickup_address}",
+                    data={"order_number": order.order_number, "mode": "bulk"},
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send new-order notifications: {e}")
 
         # Return created order
         order_serializer = OrderSerializer(order)
@@ -708,30 +762,26 @@ class CancelableOrdersView(APIView):
             status=status.HTTP_200_OK,
         )
 
+
 class AssignedOrdersView(APIView):
     """
     Get list of orders assigned to the authenticated rider.
     Excludes certain terminal/canceled statuses.
     """
-    
-    permission_classes = [permissions.IsAuthenticated, IsDriver]
-    
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
     def get(self, request):
-        excluded_statuses = [
-            "Done",
-            "CustomerCanceled",
-            "RiderCanceled",
-            "Failed"
-        ]
-        
+        excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+
         # Get rider profile
         rider_profile = getattr(request.user, "rider_profile", None)
         if not rider_profile:
             return Response(
                 {"success": False, "message": "Authenticated user is not a driver."},
-                status=status.HTTP_403_FORBIDDEN
+                status=status.HTTP_403_FORBIDDEN,
             )
-            
+
         orders = (
             Order.objects.filter(rider=rider_profile)
             .exclude(status__in=excluded_statuses)
@@ -739,6 +789,506 @@ class AssignedOrdersView(APIView):
             .prefetch_related("deliveries", "rider_offers")
             .order_by("-created_at")
         )
-        
+
         serializer = AssignedOrderSerializer(orders, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+def _advance_order(request, order_number, new_status, event_desc):
+    """Helper to advance order status with validation."""
+    try:
+        order = Order.objects.get(order_number=order_number)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    ser = OrderStatusUpdateSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    old_status = order.status
+    order.status = new_status
+    if new_status == "PickedUp" and not order.picked_up_at:
+        order.picked_up_at = timezone.now()
+    elif new_status == "Arrived" and not order.arrived_at:
+        order.arrived_at = timezone.now()
+    elif new_status == "Done" and not order.completed_at:
+        order.completed_at = timezone.now()
+
+    update_fields = ["status", "updated_at"]
+    if order.picked_up_at:
+        update_fields.append("picked_up_at")
+    if order.arrived_at:
+        update_fields.append("arrived_at")
+    if order.completed_at:
+        update_fields.append("completed_at")
+
+    order.save(update_fields=update_fields)
+
+    # Update rider location if provided
+    rider_profile = getattr(request.user, "rider_profile", None)
+    if rider_profile and ser.validated_data.get("latitude"):
+        rider_profile.current_latitude = ser.validated_data["latitude"]
+        rider_profile.current_longitude = ser.validated_data["longitude"]
+        rider_profile.last_location_update = timezone.now()
+        rider_profile.save(
+            update_fields=[
+                "current_latitude",
+                "current_longitude",
+                "last_location_update",
+            ]
+        )
+
+    OrderEvent.objects.create(
+        order=order,
+        event=event_desc,
+        description=f"By rider {request.user.contact_name or request.user.phone}",
+    )
+
+    return Response({"status": new_status, "previous": old_status})
+
+
+class OrderPickupView(APIView):
+    """
+    Endpoint for riders to mark an order as picked up.
+    POST /api/orders/pickup/
+    {
+        "order_number": "6158001",
+        "latitude": 6.45,
+        "longitude": 3.39
+    }
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return _advance_order(request, order_number, "PickedUp", "Order Picked Up")
+
+
+class OrderStartView(APIView):
+    """
+    Endpoint for riders to mark an order as started (trip to pickup).
+    POST /api/orders/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # TODO: check if the rider is assigned to this order
+
+        response = _advance_order(request, order_number, "Started", "Order Started")
+
+        # Push notification — fire-and-forget, don't block the response
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if rider:
+                notify_rider(
+                    rider=rider,
+                    title="Trip Started 🚀",
+                    body=f"You're on your way to pick up order #{order_number}.",
+                    data={"order_number": order_number, "status": "Started"},
+                )
+        except Exception as exc:
+            logger.warning(f"Start notification failed: {exc}")
+
+        return response
+
+
+class OrderArrivedView(APIView):
+    """
+    Endpoint for riders to mark themselves as arrived at pickup.
+    POST /api/orders/arrived/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return _advance_order(
+            request, order_number, "Arrived", "Rider Arrived at Pickup"
+        )
+
+
+class OrderCompleteView(APIView):
+    """
+    Endpoint for riders to mark an entire order as completed.
+    POST /api/orders/complete/
+
+    Completion flow:
+      1. If COD order → verify rider wallet has enough balance (they must
+         have collected the cash and deposited it). Debit that amount.
+      2. Calculate rider net earning using commission_rate from SystemSettings
+         (default 20 %). Create RiderEarning record and credit rider wallet.
+      3. Mark pending RiderCodRecord as remitted.
+      4. Advance order status to Done, mark deliveries Delivered.
+      5. Send push notification to rider.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    # COD payment methods that require a wallet balance check
+    COD_METHODS = {"cash", "cash_on_pickup", "receiver_pays"}
+    # Default commission percentage if SystemSettings row doesn't exist yet
+    DEFAULT_COMMISSION_PCT = Decimal("20.00")
+
+    @transaction.atomic
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        if not order_number:
+            return Response(
+                {"error": "order_number is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            order = Order.objects.select_for_update().get(order_number=order_number)
+        except Order.DoesNotExist:
+            return Response(
+                {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"error": "Rider profile not found."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # ── Step 1: COD wallet balance check ─────────────────────────────────
+        is_cod = order.payment_method in self.COD_METHODS
+        cod_total = Decimal("0.00")
+
+        if is_cod:
+            # Sum COD across all deliveries for this order
+            from django.db.models import Sum
+            cod_total = (
+                order.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"]
+                or Decimal("0.00")
+            )
+
+            if cod_total > 0:
+                try:
+                    rider_wallet = Wallet.objects.get(user=rider.user)
+                except Wallet.DoesNotExist:
+                    return Response(
+                        {"error": "Rider wallet not found. Cannot process COD payment."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                if not rider_wallet.can_debit(cod_total):
+                    return Response(
+                        {
+                            "error": (
+                                f"Insufficient wallet balance for COD settlement. "
+                                f"Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                # Debit COD amount from rider wallet
+                rider_wallet.debit(
+                    amount=cod_total,
+                    description=f"COD remittance for order #{order_number}",
+                    reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
+                    metadata={"order_number": order_number, "order_id": str(order.id)},
+                )
+
+        # ── Step 2: Calculate and record rider earnings ───────────────────────
+        settings_obj = SystemSettings.objects.first()
+        # SystemSettings stores cod_pct_fee; we repurpose a rider-specific
+        # commission field if it exists — fall back to hard-coded default.
+        commission_pct = self.DEFAULT_COMMISSION_PCT
+
+        order_amount = Decimal(str(order.total_amount))
+        commission_amount = (commission_pct / Decimal("100")) * order_amount
+        net_earning = order_amount - commission_amount
+
+        # Create or update RiderEarning for this order (idempotent)
+        earning, _ = RiderEarning.objects.get_or_create(
+            order=order,
+            defaults={
+                "rider": rider,
+                "base_fare": order_amount,
+                "commission_pct": commission_pct,
+                "commission_amount": commission_amount,
+                "net_earning": net_earning,
+                "cod_amount": cod_total,
+            },
+        )
+
+        # Credit rider wallet with net earning
+        rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+        rider_wallet_for_credit.credit(
+            amount=net_earning,
+            description=f"Trip earning for order #{order_number}",
+            reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+            metadata={
+                "order_number": order_number,
+                "gross": str(order_amount),
+                "commission_pct": str(commission_pct),
+                "net_earning": str(net_earning),
+            },
+        )
+
+        # ── Step 3: Mark COD record as remitted ──────────────────────────────
+        if is_cod and cod_total > 0:
+            RiderCodRecord.objects.filter(
+                order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+            ).update(
+                status=RiderCodRecord.Status.REMITTED,
+                remitted_at=timezone.now(),
+            )
+
+        # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
+
+        # ── Step 5: Push notification ─────────────────────────────────────────
+        try:
+            notify_rider(
+                rider=rider,
+                title="Order Completed 🎉",
+                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                data={"order_number": order_number, "net_earning": str(net_earning)},
+            )
+        except Exception as exc:
+            logger.warning(f"Failed to send completion notification to rider {rider.rider_id}: {exc}")
+
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
+
+
+class AssignedOrderDetailView(APIView):
+    """
+    Get details of a specific assigned order.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request, order_number):
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            order = (
+                Order.objects.filter(rider=rider_profile, order_number=order_number)
+                .select_related("vehicle", "user")
+                .prefetch_related("deliveries", "rider_offers")
+                .get()
+            )
+        except Order.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Assigned order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = AssignedOrderSerializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AssignedRoutesView(APIView):
+    """
+    Get list of orders assigned to the authenticated rider,
+    formatted as routes and stops.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        # excluded_statuses = ["Done", "CustomerCanceled", "RiderCanceled", "Failed"]
+        statuses = ["Pending", "Assigned", "PickedUp", "Started"]
+        order_status = request.query_params.get("status", "active")
+        if order_status == "done":
+            statuses = ["Done"]
+
+        # Get rider profile
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if not rider_profile:
+            return Response(
+                {"success": False, "message": "Authenticated user is not a driver."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orders = (
+            Order.objects.filter(rider=rider_profile)
+            .filter(status__in=statuses)
+            .select_related("vehicle", "user")
+            .prefetch_related("deliveries", "rider_offers")
+            .order_by("-created_at")
+        )
+
+        serializer = AssignedRouteSerializer(orders, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([IsRider])
+def cancel_order(request, order_id):
+    """POST /api/orders/<id>/rider-cancel/"""
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND)
+
+    ser = OrderCancelSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+
+    # Get rider profile
+    rider = request.user.rider_profile
+    order.status = "Pending"
+    order.canceled_at = timezone.now()
+    order.cancellation_reason = ser.validated_data.get("reason")
+    order.rider = None
+    order.save()
+
+    rider.current_order = None
+    rider.status = Rider.Status.ONLINE
+    rider.save(update_fields=["current_order", "status"])
+
+    OrderEvent.objects.create(
+        order=order,
+        event="Driver Canceled",
+        description=f"Canceled by {request.user.contact_name or request.user.phone}: {ser.validated_data['reason']}",
+    )
+
+    return Response({"status": "canceled"})
+
+
+class DeliveryStartView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as In Transit.
+    POST /api/orders/delivery/<delivery_id>/start/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "InTransit"
+        delivery.save(update_fields=["status"])
+
+        # Update order status if it's currently PickedUp
+        if order.status == "PickedUp":
+            order.status = "Started"
+            order.save(update_fields=["status", "updated_at"])
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Started",
+            description=f"Delivery to {delivery.receiver_name} started by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "InTransit", "previous": old_status})
+
+
+class DeliveryCompleteView(APIView):
+    """
+    Endpoint for riders to mark a specific delivery as Delivered.
+    POST /api/orders/delivery/<delivery_id>/deliver/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @transaction.atomic
+    def post(self, request, delivery_id):
+        try:
+            delivery = Delivery.objects.select_for_update().get(id=delivery_id)
+            order = delivery.order
+        except Delivery.DoesNotExist:
+            return Response(
+                {"error": "Delivery not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        ser = OrderStatusUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        old_status = delivery.status
+        delivery.status = "Delivered"
+        delivery.delivered_at = timezone.now()
+        delivery.save(update_fields=["status", "delivered_at"])
+
+        # Check if all deliveries for this order are completed
+        # all_delivered = not order.deliveries.exclude(status="Delivered").exists()
+        # if all_delivered:
+        #     order.status = "Done"
+        #     order.save(update_fields=["status", "updated_at"])
+
+        #     OrderEvent.objects.create(
+        #         order=order,
+        #         event="Order Completed",
+        #         description="All deliveries completed.",
+        #     )
+
+        # Update rider location if provided
+        rider_profile = getattr(request.user, "rider_profile", None)
+        if rider_profile and ser.validated_data.get("latitude"):
+            rider_profile.current_latitude = ser.validated_data["latitude"]
+            rider_profile.current_longitude = ser.validated_data["longitude"]
+            rider_profile.last_location_update = timezone.now()
+            rider_profile.save(
+                update_fields=[
+                    "current_latitude",
+                    "current_longitude",
+                    "last_location_update",
+                ]
+            )
+
+        OrderEvent.objects.create(
+            order=order,
+            event="Delivery Completed",
+            description=f"Delivery to {delivery.receiver_name} completed by rider {request.user.contact_name or request.user.phone}",
+        )
+
+        return Response({"status": "Delivered", "previous": old_status})

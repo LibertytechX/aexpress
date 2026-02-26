@@ -1,3 +1,4 @@
+from django.db import models
 from rest_framework import serializers
 from .models import Order, Delivery, Vehicle
 from authentication.serializers import UserSerializer
@@ -86,6 +87,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "sender_name",
             "sender_phone",
             "payment_method",
+            "payment_status",
             "total_amount",
             "distance_km",
             "duration_minutes",
@@ -120,7 +122,7 @@ class QuickSendSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     package_type = serializers.ChoiceField(
@@ -176,7 +178,7 @@ class MultiDropSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
@@ -218,7 +220,7 @@ class BulkImportSerializer(serializers.Serializer):
     # Order details
     vehicle = serializers.CharField(required=True)
     payment_method = serializers.ChoiceField(
-        choices=["wallet", "cash_on_pickup", "receiver_pays"], default="wallet"
+        choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
@@ -272,11 +274,13 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
 
     delivered_at = serializers.SerializerMethodField()
     delivery_proofs = serializers.SerializerMethodField()
+    package_type = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             "id",
+            "order_number",
             "status",
             "pickup_address",
             "pickup_latitude",
@@ -292,6 +296,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "dropoff_notes",
             "vehicle_type",
             "payment_method",
+            "payment_status",
             "merchant_name",
             "estimated_earnings",
             "distance_km",
@@ -301,6 +306,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "created_at",
             "delivered_at",
             "delivery_proofs",
+            "package_type",
         ]
 
     def _get_first_delivery(self, obj):
@@ -308,6 +314,10 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
         if not hasattr(obj, "_first_delivery"):
             obj._first_delivery = obj.deliveries.first()
         return obj._first_delivery
+
+    def get_package_type(self, obj):
+        delivery = self._get_first_delivery(obj)
+        return delivery.package_type if delivery else ""
 
     def get_dropoff_address(self, obj):
         delivery = self._get_first_delivery(obj)
@@ -363,3 +373,92 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
     def get_delivery_proofs(self, obj):
         # We don't have a DeliveryProof model yet, returning empty list as fallback.
         return []
+
+
+class StopSerializer(serializers.ModelSerializer):
+    """Serializer for individual deliveries as 'stops' in a route."""
+
+    address = serializers.CharField(source="dropoff_address", read_only=True)
+    contact_name = serializers.CharField(source="receiver_name", read_only=True)
+    contact_phone = serializers.CharField(source="receiver_phone", read_only=True)
+
+    class Meta:
+        model = Delivery
+        fields = [
+            "id",
+            "sequence",
+            "status",
+            "address",
+            "contact_name",
+            "contact_phone",
+            "cod_amount",
+            "notes",
+        ]
+
+
+class AssignedRouteSerializer(serializers.ModelSerializer):
+    """Serializer for assigned orders formatted as 'routes' for mobile app."""
+
+    ref = serializers.CharField(source="order_number", read_only=True)
+    vehicle_type = serializers.CharField(source="vehicle.name", read_only=True)
+    pickup_contact = serializers.CharField(source="sender_name", read_only=True)
+    total_stops = serializers.SerializerMethodField()
+    total_distance_km = serializers.FloatField(source="distance_km", read_only=True)
+    total_estimated_time_mins = serializers.IntegerField(
+        source="duration_minutes", read_only=True
+    )
+    total_earnings = serializers.SerializerMethodField()
+    total_cod = serializers.SerializerMethodField()
+    completed_stops = serializers.SerializerMethodField()
+    stops = StopSerializer(many=True, source="deliveries", read_only=True)
+
+    class Meta:
+        model = Order
+        fields = [
+            "id",
+            "ref",
+            "status",
+            "vehicle_type",
+            "pickup_address",
+            "pickup_contact",
+            "total_stops",
+            "total_distance_km",
+            "total_estimated_time_mins",
+            "total_earnings",
+            "total_cod",
+            "completed_stops",
+            "stops",
+        ]
+
+    def get_total_stops(self, obj):
+        return obj.deliveries.count()
+
+    def get_total_earnings(self, obj):
+        offer = getattr(obj, "rider_offers", None)
+        if offer and offer.exists():
+            acc = offer.filter(status="accepted").first()
+            if acc:
+                return float(acc.estimated_earnings)
+            return float(offer.first().estimated_earnings)
+        return 0.0
+
+    def get_total_cod(self, obj):
+        total = obj.deliveries.aggregate(models.Sum("cod_amount"))["cod_amount__sum"]
+        return float(total) if total else 0.0
+
+    def get_completed_stops(self, obj):
+        return obj.deliveries.filter(status="Delivered").count()
+
+
+class OrderCancelSerializer(serializers.Serializer):
+    """Serializer for order cancellation."""
+
+    reason = serializers.CharField(required=True, max_length=5000)
+
+
+class OrderStatusUpdateSerializer(serializers.Serializer):
+    """Serializer for rider order status updates with location."""
+
+    latitude = serializers.FloatField(required=False)
+    longitude = serializers.FloatField(required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
