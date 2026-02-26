@@ -14,9 +14,8 @@ const TokenManager = {
     localStorage.setItem('refresh_token', refresh);
   },
   clearTokens: () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
+    localStorage.clear();
+    sessionStorage.clear();
   },
   getUser: () => {
     const user = localStorage.getItem('user');
@@ -128,14 +127,24 @@ const AuthAPI = {
   },
 
   logout: async () => {
+    // Blacklist the refresh token on the server (best-effort)
     try {
       const refreshToken = TokenManager.getRefreshToken();
-      await apiRequest('/auth/logout/', {
-        method: 'POST',
-        body: JSON.stringify({ refresh: refreshToken }),
-      });
-    } finally {
-      TokenManager.clearTokens();
+      if (refreshToken) {
+        await apiRequest('/auth/logout/', {
+          method: 'POST',
+          body: JSON.stringify({ refresh: refreshToken }),
+        });
+      }
+    } catch (_) { /* always clear locally even if server call fails */ }
+    // Wipe all local storage and session storage
+    TokenManager.clearTokens();
+    // Wipe all browser caches (service workers, fetch cache)
+    if ('caches' in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (_) {}
     }
   },
 

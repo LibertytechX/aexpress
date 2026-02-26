@@ -32,9 +32,32 @@ export const AuthAPI = {
         return data;
     },
 
-    logout() {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+    async logout() {
+        // Blacklist the refresh token on the server (best-effort)
+        try {
+            const refreshToken = localStorage.getItem('refresh_token');
+            const accessToken = localStorage.getItem('access_token');
+            if (refreshToken) {
+                await fetch(`${API_BASE_URL}/auth/logout/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+                    },
+                    body: JSON.stringify({ refresh_token: refreshToken })
+                });
+            }
+        } catch (_) { /* always clear locally even if server call fails */ }
+        // Wipe all local storage and session storage
+        localStorage.clear();
+        sessionStorage.clear();
+        // Wipe all browser caches (service workers, fetch cache)
+        if ('caches' in window) {
+            try {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+            } catch (_) {}
+        }
     },
 
     isAuthenticated() {
