@@ -1,8 +1,11 @@
+from dispatcher.models import SystemSettings
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .models import Order
 from riders.models import OrderOffer
 from decimal import Decimal
+from django.utils import timezone
+from datetime import timedelta
 
 
 @receiver(post_save, sender=Order)
