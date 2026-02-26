@@ -77,7 +77,7 @@ else:
 print_header("STEP 3: CREATE QUICK SEND ORDER")
 quick_send_data = {
     "pickup_address": "27A Idowu Martins St, Victoria Island, Lagos",
-    "sender_name": "Yetunde Igbene",
+    "sender_name": "Ogun Lami",
     "sender_phone": "08051832508",
     "dropoff_address": "24 Harvey Rd, Sabo Yaba, Lagos",
     "receiver_name": "Adebayo Johnson",
@@ -105,7 +105,7 @@ else:
 print_header("STEP 4: CREATE MULTI-DROP ORDER")
 multi_drop_data = {
     "pickup_address": "15 Admiralty Way, Lekki Phase 1, Lagos",
-    "sender_name": "Yetunde Igbene",
+    "sender_name": "Ogun Lami",
     "sender_phone": "08051832508",
     "vehicle": "Car",
     "payment_method": "wallet",
@@ -151,7 +151,7 @@ else:
 print_header("STEP 5: CREATE BULK IMPORT ORDER")
 bulk_import_data = {
     "pickup_address": "24 Alara St, Iwaya, Lagos",
-    "sender_name": "Yetunde Igbene",
+    "sender_name": "Ogun Lami",
     "sender_phone": "08051832508",
     "vehicle": "Van",
     "payment_method": "cash_on_pickup",

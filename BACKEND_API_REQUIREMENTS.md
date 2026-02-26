@@ -6,6 +6,16 @@ This document lists **ALL** backend API endpoints required for the AX Rider mobi
 
 **Base URL**: `https://api.axpress.ng/api/v1/rider` (or your configured base URL)
 
+**Start Super User**
+
+Field	Value
+Phone	08031346316
+Password	Admin1234!
+Email	inyang1@gmail.com
+Is Superuser	✅
+
+## End Super User
+
 ---
 
 ## 🔐 Authentication Endpoints

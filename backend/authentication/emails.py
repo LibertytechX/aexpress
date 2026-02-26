@@ -42,7 +42,7 @@ def send_verification_email(user, otp=None):
         user.save(update_fields=["email_verification_token", "email_verification_token_created"])
 
         # Create verification link
-        verify_url = f"{frontend_url}/verify-email?token={token}"
+        verify_url = f"{frontend_url}/?token={token}"
 
         # Create HTML email template
         html_content = get_verification_email_template(user.contact_name, verify_url, otp)
@@ -118,7 +118,7 @@ def get_verification_email_template(name, verify_url, otp=None):
         <h2>Verify Your Email Address</h2>
         <p>Hi {name},</p>
         <p>Welcome to Assured Express! To complete your registration and start sending deliveries, please verify your email address.</p>
-        
+
         {otp_section}
 
         <div style="text-align: center; margin: 30px 0;">

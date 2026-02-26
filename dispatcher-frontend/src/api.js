@@ -1,5 +1,5 @@
 // API Service for Dispatcher Frontend
-const API_BASE_URL = 'http://localhost:8000/api';
+const API_BASE_URL = window.VITE_API_BASE_URL;
 
 // Get stored auth token
 const getToken = () => localStorage.getItem('access_token');
@@ -16,7 +16,7 @@ const authHeaders = () => {
 // ─── AUTHENTICATION ─────────────────────────────────────────────
 export const AuthAPI = {
     async login(phone, password) {
-        const res = await fetch(`${API_BASE_URL}/auth/login/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/auth/login/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ phone, password })
@@ -43,7 +43,7 @@ export const AuthAPI = {
 // ─── RIDERS ─────────────────────────────────────────────────────
 export const RidersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/riders/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch riders');
@@ -71,7 +71,7 @@ export const RidersAPI = {
     },
 
     async updateLocation(riderUuid, lat, lng) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/update_location/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/riders/${riderUuid}/update_location/`, {
             method: 'PATCH',
             headers: authHeaders(),
             body: JSON.stringify({ lat, lng })
@@ -82,6 +82,36 @@ export const RidersAPI = {
 };
 
 // ─── ORDERS ─────────────────────────────────────────────────────
+// Normalize a single order object from backend (snake_case) to frontend (camelCase)
+const normalizeOrder = (o) => ({
+    id: o.id || 'N/A',
+    customer: o.customer || 'Unknown',
+    customerPhone: o.customerPhone || '',
+    merchant: o.merchant || 'Unknown',
+    pickup: o.pickup || '',
+    dropoff: o.dropoff || '',
+    rider: o.rider || null,
+    riderId: o.riderId || null,
+    status: o.status || 'Pending',
+    amount: parseFloat(o.amount) || 0,
+    cod: parseFloat(o.cod) || 0,
+    codFee: parseFloat(o.codFee) || 0,
+    vehicle: o.vehicle || 'Bike',
+    created: o.created || new Date().toLocaleString(),
+    pkg: o.pkg || 'Box',
+    // Relay routing fields
+    isRelayOrder: o.is_relay_order || false,
+    routingStatus: o.routing_status || 'ready',
+    routingError: o.routing_error || '',
+    relayLegsCount: o.relay_legs_count || 0,
+    suggestedRiderId: o.suggested_rider_id || null,
+    pickupLat: o.pickup_lat || null,
+    pickupLng: o.pickup_lng || null,
+    dropoffLat: o.dropoff_lat || null,
+    dropoffLng: o.dropoff_lng || null,
+    relayLegs: o.relay_legs || [],
+});
+
 export const OrdersAPI = {
     async getAll() {
         const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
@@ -89,48 +119,38 @@ export const OrdersAPI = {
         });
         if (!res.ok) throw new Error('Failed to fetch orders');
         const data = await res.json();
-        // Transform backend data to match frontend interface
-        return data.map(o => ({
-            id: o.id || 'N/A',
-            customer: o.customer || 'Unknown',
-            customerPhone: o.customerPhone || '',
-            merchant: o.merchant || 'Unknown',
-            pickup: o.pickup || '',
-            dropoff: o.dropoff || '',
-            rider: o.rider || null,
-            riderId: o.riderId || null,
-            status: o.status || 'Pending',
-            amount: parseFloat(o.amount) || 0,
-            cod: parseFloat(o.cod) || 0,
-            codFee: parseFloat(o.codFee) || 0,
-            vehicle: o.vehicle || 'Bike',
-            created: o.created || new Date().toLocaleString(),
-            pkg: o.pkg || 'Box'
-        }));
+        return data.map(normalizeOrder);
     },
 
-	    async create(orderData) {
-	        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
-	            method: 'POST',
-	            headers: authHeaders(),
-	            body: JSON.stringify(orderData)
-	        });
-	        let data;
-	        try {
-	            data = await res.json();
-	        } catch (e) {
-	            // If response is not JSON, throw a generic error
-	            throw new Error('Failed to create order');
-	        }
-	        if (!res.ok) {
-	            // Bubble up server-provided error details when available
-	            throw data || new Error('Failed to create order');
-	        }
-	        return data;
-	    },
+    async getOne(orderNumber) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch order');
+        const data = await res.json();
+        return normalizeOrder(data);
+    },
+
+    async create(orderData) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(orderData)
+        });
+        let data;
+        try {
+            data = await res.json();
+        } catch (e) {
+            throw new Error('Failed to create order');
+        }
+        if (!res.ok) {
+            throw data || new Error('Failed to create order');
+        }
+        return normalizeOrder(data);
+    },
 
     async assignRider(orderNumber, riderId) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/assign_rider/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/assign_rider/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ rider_id: riderId })
@@ -140,20 +160,32 @@ export const OrdersAPI = {
     },
 
     async updateStatus(orderNumber, newStatus) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/update_status/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ status: newStatus })
         });
         if (!res.ok) throw new Error('Failed to update status');
         return await res.json();
+    },
+
+    async generateRelayRoute(orderNumber, force = false) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/generate-relay-route/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ force })
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to generate relay route'); }
+        if (!res.ok) throw data || new Error('Failed to generate relay route');
+        return normalizeOrder(data);
     }
 };
 
 // ─── MERCHANTS ──────────────────────────────────────────────────
 export const MerchantsAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/merchants/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/merchants/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch merchants');
@@ -176,10 +208,22 @@ export const MerchantsAPI = {
 // ─── VEHICLES ───────────────────────────────────────────────────
 export const VehiclesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/orders/vehicles/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch vehicles');
+        const data = await res.json();
+        // Response shape is { success: true, vehicles: [...] }
+        return Array.isArray(data) ? data : (data.vehicles || []);
+    },
+
+    async update(id, data) {
+        const res = await fetch(`${API_BASE_URL}/orders/vehicles/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to update vehicle');
         return await res.json();
     }
 };
@@ -187,7 +231,7 @@ export const VehiclesAPI = {
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/activity/?limit=${limit}`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/activity/?limit=${limit}`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch activity feed');
@@ -195,7 +239,7 @@ export const ActivityFeedAPI = {
     },
 
     async getAblyToken() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/ably-token/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/ably-token/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to get Ably token');
@@ -206,7 +250,7 @@ export const ActivityFeedAPI = {
 // ─── SETTINGS ───────────────────────────────────────────────────
 export const SettingsAPI = {
     async get() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/settings/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch settings');
@@ -214,13 +258,93 @@ export const SettingsAPI = {
     },
 
     async update(settings) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/settings/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(settings)
         });
         if (!res.ok) throw new Error('Failed to update settings');
         return await res.json();
+    }
+};
+
+// ─── ZONES ──────────────────────────────────────────────────────
+export const ZonesAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch zones');
+        const data = await res.json();
+        return Array.isArray(data) ? data : (data.results || []);
+    },
+
+    async create(zone) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(zone)
+        });
+        if (!res.ok) throw new Error('Failed to create zone');
+        return await res.json();
+    },
+
+    async update(id, zone) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(zone)
+        });
+        if (!res.ok) throw new Error('Failed to update zone');
+        return await res.json();
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete zone');
+    }
+};
+
+// ─── RELAY NODES ─────────────────────────────────────────────────
+export const RelayNodesAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch relay nodes');
+        const data = await res.json();
+        return Array.isArray(data) ? data : (data.results || []);
+    },
+
+    async create(node) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(node)
+        });
+        if (!res.ok) throw new Error('Failed to create relay node');
+        return await res.json();
+    },
+
+    async update(id, node) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(node)
+        });
+        if (!res.ok) throw new Error('Failed to update relay node');
+        return await res.json();
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete relay node');
     }
 };
 

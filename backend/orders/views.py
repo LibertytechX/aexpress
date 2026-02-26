@@ -19,7 +19,8 @@ from .serializers import (
     OrderStatusUpdateSerializer,
 )
 from .permissions import IsRider
-from dispatcher.models import Rider, SystemSettings
+from dispatcher.models import Rider
+from dispatcher.utils import emit_activity
 from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 from riders.notifications import notify_rider
@@ -113,12 +114,36 @@ class QuickSendView(APIView):
         # Create single delivery
         Delivery.objects.create(
             order=order,
+            pickup_address=data["pickup_address"],
+            pickup_latitude=order.pickup_latitude,
+            pickup_longitude=order.pickup_longitude,
+            sender_name=data["sender_name"],
+            sender_phone=data["sender_phone"],
             dropoff_address=data["dropoff_address"],
             receiver_name=data["receiver_name"],
             receiver_phone=data["receiver_phone"],
             package_type=data.get("package_type", "Box"),
             notes=data.get("notes", ""),
             sequence=1,
+        )
+
+        # Emit activity event for live feed
+        merchant_name = (
+            getattr(request.user, "business_name", None)
+            or getattr(request.user, "contact_name", None)
+            or "Unknown"
+        )
+        emit_activity(
+            event_type="new_order",
+            order_id=order.order_number,
+            text=f"New order {order.order_number} from {merchant_name}",
+            color="gold",
+            metadata={
+                "merchant": merchant_name,
+                "amount": str(total_amount),
+                "pickup": data["pickup_address"],
+                "dropoff": data["dropoff_address"],
+            },
         )
 
         # Hold funds in escrow if payment method is wallet
@@ -238,6 +263,11 @@ class MultiDropView(APIView):
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
+                pickup_address=data["pickup_address"],
+                pickup_latitude=order.pickup_latitude,
+                pickup_longitude=order.pickup_longitude,
+                sender_name=data["sender_name"],
+                sender_phone=data["sender_phone"],
                 dropoff_address=delivery_data["dropoff_address"],
                 receiver_name=delivery_data["receiver_name"],
                 receiver_phone=delivery_data["receiver_phone"],
@@ -364,6 +394,11 @@ class BulkImportView(APIView):
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
                 order=order,
+                pickup_address=data["pickup_address"],
+                pickup_latitude=order.pickup_latitude,
+                pickup_longitude=order.pickup_longitude,
+                sender_name=data["sender_name"],
+                sender_phone=data["sender_phone"],
                 dropoff_address=delivery_data["dropoff_address"],
                 receiver_name=delivery_data["receiver_name"],
                 receiver_phone=delivery_data["receiver_phone"],
@@ -650,7 +685,7 @@ class CancelOrderView(APIView):
             )
 
         # Check if order can be canceled
-        if order.status == "Canceled":
+        if order.status in ["Canceled", "CustomerCanceled"]:
             return Response(
                 {"error": "Order is already canceled"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -697,9 +732,27 @@ class CancelOrderView(APIView):
 
         # Update order status
         old_status = order.status
-        order.status = "Canceled"
+        order.status = "CustomerCanceled"
         order.updated_at = timezone.now()
         order.save()
+
+        # Emit live-feed activity event for the dispatcher
+        merchant_name = (
+            getattr(request.user, "business_name", None)
+            or getattr(request.user, "contact_name", None)
+            or "Unknown"
+        )
+        emit_activity(
+            event_type="cancelled",
+            order_id=order.order_number,
+            text=f"Order {order.order_number} cancelled by {merchant_name}",
+            color="red",
+            metadata={
+                "merchant": merchant_name,
+                "reason": reason,
+                "old_status": old_status,
+            },
+        )
 
         # Prepare response
         response_data = {

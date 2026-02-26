@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -35,13 +35,31 @@ const S = {
   yellow: "#F59E0B", yellowBg: "rgba(245,158,11,0.08)",
 };
 // ─── LAGOS MAP COMPONENT (Enhanced with zones & routes) ─────────
-function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
+function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes, zones, mode }) {
   const [hoverPin, setHoverPin] = useState(null);
   const [mapView, setMapView] = useState("live"); // live | zones | heatmap
   const h = small ? 140 : 320;
 
-  // Lagos zones with real approximate positions
-  const zones = [
+  const isRelayMode = mode === "relay";
+
+  // Lagos bounding box: lat 6.38–6.70, lng 3.10–3.75
+  const latMin=6.38,latMax=6.70,lngMin=3.10,lngMax=3.75;
+  const toPct = (lat,lng) => {
+    const xPct = ((lng - lngMin) / (lngMax - lngMin)) * 100;
+    const yPct = ((latMax - lat) / (latMax - latMin)) * 100;
+    return {xPct, yPct};
+  };
+  const kmToPctRadius = (km, atLat) => {
+    const latDeg = km / 111;
+    const cos = Math.cos((parseFloat(atLat) || 0) * Math.PI / 180) || 0.00001;
+    const lngDeg = km / (111 * cos);
+    const rx = (lngDeg / (lngMax - lngMin)) * 100;
+    const ry = (latDeg / (latMax - latMin)) * 100;
+    return {rx, ry};
+  };
+
+  // Mock zones (used in legacy/non-relay views)
+  const mockZones = [
     {id:"mainland-core",label:"Mainland Core",x:32,y:32,w:22,h:20,color:"rgba(59,130,246,0.08)",areas:"Ikeja · Maryland · Yaba · Surulere"},
     {id:"island",label:"Island",x:50,y:48,w:22,h:22,color:"rgba(232,168,56,0.08)",areas:"V.I. · Ikoyi · Lekki Phase 1"},
     {id:"lekki-ajah",label:"Lekki-Ajah",x:74,y:45,w:20,h:18,color:"rgba(139,92,246,0.08)",areas:"Lekki · Ajah · Sangotedo · VGC"},
@@ -49,8 +67,8 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"outer-north",label:"Outer Lagos",x:10,y:15,w:24,h:18,color:"rgba(16,185,129,0.06)",areas:"Ikorodu · Agbara · Ojo · Badagry"},
   ];
 
-  // Order pins with pickup→dropoff routes
-  const pins = [
+  // Mock order pins (used in legacy/non-relay views)
+  const mockPins = [
     {id:"AX-6158260",px:36,py:40,dx:55,dy:52,label:"Yaba→VI",color:S.gold,status:"In Transit",rider:"Musa K."},
     {id:"AX-6158261",px:38,py:48,dx:56,dy:56,label:"Surulere→VI",color:S.purple,status:"Picked Up",rider:"Chinedu O."},
     {id:"AX-6158262",px:30,py:28,dx:78,dy:50,label:"Ikeja→Lekki",color:S.yellow,status:"Pending",rider:null},
@@ -59,7 +77,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"AX-6158257",px:36,py:40,dx:54,dy:52,label:"Yaba→VI",color:S.green,status:"Delivered",rider:"Musa K."},
     {id:"AX-6158255",px:72,py:48,dx:76,dy:52,label:"Lekki→Lekki",color:S.green,status:"Delivered",rider:"Emeka N."},
   ];
-  const riderDots = [
+  const mockRiderDots = [
     {id:"R001",x:48,y:46,name:"Musa K.",status:"on_delivery",vehicle:"🏍️"},
     {id:"R002",x:58,y:50,name:"Ahmed B.",status:"on_delivery",vehicle:"🏍️"},
     {id:"R003",x:52,y:52,name:"Chinedu O.",status:"on_delivery",vehicle:"🚗"},
@@ -67,6 +85,11 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
     {id:"R006",x:30,y:36,name:"Kola A.",status:"on_delivery",vehicle:"🚗"},
     {id:"R007",x:70,y:44,name:"Emeka N.",status:"online",vehicle:"🏍️"},
   ];
+
+  // In relay mode we do not show mock orders/riders at all.
+  const pins = isRelayMode ? [] : mockPins;
+  const riderDots = isRelayMode ? [] : mockRiderDots;
+  const zonesToRender = isRelayMode ? (Array.isArray(zones) ? zones : []) : mockZones;
 
   const activeOrders = pins.filter(p => !["Delivered","Cancelled","Failed"].includes(p.status));
   const displayPins = highlightOrder ? pins.filter(p=>p.id===highlightOrder) : (mapView==="live"?activeOrders:pins);
@@ -97,12 +120,33 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </svg>
 
       {/* Zone overlays */}
-      {(mapView==="zones"||showZones) && zones.map(z=>(
+      {(mapView==="zones"||showZones) && !isRelayMode && zonesToRender.map(z=>(
         <div key={z.id} style={{position:"absolute",left:`${z.x}%`,top:`${z.y}%`,width:`${z.w}%`,height:`${z.h}%`,background:z.color,border:"1px dashed rgba(0,0,0,0.12)",borderRadius:8,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",zIndex:1}}>
           <div style={{fontSize:7,fontWeight:800,color:S.navy,opacity:0.5,textTransform:"uppercase",letterSpacing:"0.5px"}}>{z.label}</div>
           <div style={{fontSize:6,color:S.textMuted,opacity:0.6,textAlign:"center"}}>{z.areas}</div>
         </div>
       ))}
+      {(mapView==="zones"||showZones) && isRelayMode && zonesToRender.length>0 && (
+        <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:2}} viewBox="0 0 100 100" preserveAspectRatio="none">
+          {zonesToRender.map((z, idx) => {
+            const lat = parseFloat(z.center_lat);
+            const lng = parseFloat(z.center_lng);
+            const rkm = parseFloat(z.radius_km);
+            if ([lat,lng,rkm].some(n => isNaN(n))) return null;
+            const {xPct,yPct} = toPct(lat,lng);
+            const {rx,ry} = kmToPctRadius(rkm, lat);
+            const fill = ["rgba(59,130,246,0.10)","rgba(232,168,56,0.10)","rgba(16,185,129,0.10)","rgba(139,92,246,0.10)","rgba(239,68,68,0.08)"][idx%5];
+            const stroke = ["rgba(59,130,246,0.40)","rgba(232,168,56,0.45)","rgba(16,185,129,0.40)","rgba(139,92,246,0.40)","rgba(239,68,68,0.35)"][idx%5];
+            return (
+              <g key={z.id || z.name || idx}>
+                <ellipse cx={xPct} cy={yPct} rx={rx} ry={ry} fill={fill} stroke={stroke} strokeWidth="0.6" strokeDasharray="2,2"/>
+                <circle cx={xPct} cy={yPct} r="0.8" fill={stroke} opacity="0.7"/>
+                {!small && <text x={xPct} y={yPct} textAnchor="middle" dominantBaseline="central" fontSize="2.6" fill={stroke} style={{fontWeight:800}}>{(z.name||"").slice(0,18)}</text>}
+              </g>
+            );
+          })}
+        </svg>
+      )}
 
       {/* Area labels (when no zones) */}
       {mapView!=="zones"&&!showZones&&!small && <>
@@ -119,20 +163,22 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </>}
 
       {/* Route lines (pickup → current position for active, or pickup → dropoff) */}
-      <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:4}} viewBox="0 0 100 100" preserveAspectRatio="none">
-        {displayPins.filter(p=>!["Delivered","Cancelled","Failed"].includes(p.status)).map(p=>(
-          <g key={p.id+"route"}>
-            <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={p.color} strokeWidth={highlightOrder===p.id?"0.8":"0.4"} strokeDasharray="2,2" opacity={highlightOrder===p.id?0.8:0.4}/>
-            {/* Pickup dot */}
-            <circle cx={p.px} cy={p.py} r={highlightOrder===p.id?1.5:1} fill="#fff" stroke={p.color} strokeWidth="0.5"/>
-            {/* Dropoff dot */}
-            <circle cx={p.dx} cy={p.dy} r={highlightOrder===p.id?1.5:1} fill={p.color} stroke="#fff" strokeWidth="0.4"/>
-          </g>
-        ))}
-      </svg>
+      {!isRelayMode && (
+        <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:4}} viewBox="0 0 100 100" preserveAspectRatio="none">
+          {displayPins.filter(p=>!["Delivered","Cancelled","Failed"].includes(p.status)).map(p=>(
+            <g key={p.id+"route"}>
+              <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={p.color} strokeWidth={highlightOrder===p.id?"0.8":"0.4"} strokeDasharray="2,2" opacity={highlightOrder===p.id?0.8:0.4}/>
+              {/* Pickup dot */}
+              <circle cx={p.px} cy={p.py} r={highlightOrder===p.id?1.5:1} fill="#fff" stroke={p.color} strokeWidth="0.5"/>
+              {/* Dropoff dot */}
+              <circle cx={p.dx} cy={p.dy} r={highlightOrder===p.id?1.5:1} fill={p.color} stroke="#fff" strokeWidth="0.4"/>
+            </g>
+          ))}
+        </svg>
+      )}
 
       {/* Order pins */}
-      {displayPins.map(p => {
+      {!isRelayMode && displayPins.map(p => {
         const isH = highlightOrder===p.id || hoverPin===p.id;
         const cx = p.status==="Delivered"?p.dx: p.status==="Pending"?p.px: (p.px+p.dx)/2;
         const cy = p.status==="Delivered"?p.dy: p.status==="Pending"?p.py: (p.py+p.dy)/2;
@@ -153,7 +199,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       })}
 
       {/* Rider dots */}
-      {!highlightOrder && riderDots.map(r => (
+      {!isRelayMode && !highlightOrder && riderDots.map(r => (
         <div key={r.id} style={{position:"absolute",left:`${r.x}%`,top:`${r.y+3}%`,zIndex:6}}>
           <div style={{position:"relative"}}>
             <div style={{width:10,height:10,borderRadius:"50%",background:r.status==="online"?S.green:S.gold,border:"2px solid #fff",boxShadow:"0 1px 6px rgba(0,0,0,0.2)"}}/>
@@ -163,6 +209,18 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
         </div>
       ))}
 
+      {/* Relay node pins */}
+      {relayNodes && relayNodes.map(nd => {
+        // Map real Lagos lat/lng to approximate SVG viewport coordinates.
+        const {xPct,yPct} = toPct(nd.latitude, nd.longitude);
+        return (
+          <div key={nd.id} style={{position:"absolute",left:`${xPct}%`,top:`${yPct}%`,transform:"translate(-50%,-50%)",zIndex:12}}>
+            <div title={`${nd.name}\n${nd.address||""}`} style={{width:14,height:14,borderRadius:"50%",background:"#8B5CF6",border:"2.5px solid #fff",boxShadow:"0 2px 6px rgba(139,92,246,0.6)",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:7,color:"#fff",fontWeight:800}}>⬡</div>
+            {!small && <div style={{position:"absolute",top:15,left:"50%",transform:"translateX(-50%)",fontSize:6,fontWeight:700,color:"#8B5CF6",whiteSpace:"nowrap",background:"rgba(255,255,255,0.9)",padding:"1px 4px",borderRadius:3,maxWidth:60,overflow:"hidden",textOverflow:"ellipsis"}}>{nd.name}</div>}
+          </div>
+        );
+      })}
+
       {/* Bridge labels */}
       {!small && <>
         <div style={{position:"absolute",left:"40%",top:"45%",fontSize:6,color:"rgba(232,168,56,0.6)",fontWeight:700,transform:"rotate(-35deg)",whiteSpace:"nowrap"}}>3rd Mainland Bridge</div>
@@ -170,7 +228,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       </>}
 
       {/* Map controls */}
-      {!small && (
+      {!isRelayMode && !small && (
         <div style={{position:"absolute",top:8,right:8,display:"flex",gap:4,zIndex:20}}>
           {[{id:"live",label:"Live",icon:"📡"},{id:"zones",label:"Zones",icon:"🗺️"},{id:"heatmap",label:"Heat",icon:"🔥"}].map(v=>(
             <button key={v.id} onClick={()=>setMapView(v.id)} style={{
@@ -185,14 +243,18 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
 
       {/* Legend */}
       <div style={{position:"absolute",bottom:8,right:8,display:"flex",gap:8,background:"rgba(255,255,255,0.95)",padding:"5px 10px",borderRadius:8,boxShadow:"0 1px 4px rgba(0,0,0,0.08)",zIndex:10}}>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.gold}}/> Active</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.green}}/> Rider</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.yellow}}/> Pending</span>
-        <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.purple}}/> In Progress</span>
+        {!isRelayMode && <>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.gold}}/> Active</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:S.green}}/> Rider</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.yellow}}/> Pending</span>
+          <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50% 50% 50% 0",transform:"rotate(-45deg)",background:S.purple}}/> In Progress</span>
+        </>}
+        {isRelayMode && zonesToRender.length>0 && <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:10,height:6,borderRadius:6,border:"1px dashed rgba(59,130,246,0.55)",background:"rgba(59,130,246,0.10)"}}/> Zone</span>}
+        {relayNodes && relayNodes.length > 0 && <span style={{fontSize:8,color:S.textMuted,display:"flex",alignItems:"center",gap:3}}><span style={{width:6,height:6,borderRadius:"50%",background:"#8B5CF6"}}/> Relay Hub</span>}
       </div>
 
       {/* Live stats overlay */}
-      {!small && mapView==="live" && (
+      {!isRelayMode && !small && mapView==="live" && (
         <div style={{position:"absolute",bottom:8,left:8,background:"rgba(27,42,74,0.9)",padding:"6px 12px",borderRadius:8,zIndex:10}}>
           <div style={{display:"flex",gap:14}}>
             <div style={{textAlign:"center"}}>
@@ -212,7 +274,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones }) {
       )}
 
       {/* Heatmap overlay */}
-      {mapView==="heatmap" && !small && (
+      {!isRelayMode && mapView==="heatmap" && !small && (
         <svg width="100%" height="100%" style={{position:"absolute",top:0,left:0,pointerEvents:"none",zIndex:3}} viewBox="0 0 100 100" preserveAspectRatio="none">
           <defs>
             <radialGradient id="heat1"><stop offset="0%" stopColor="rgba(239,68,68,0.4)"/><stop offset="100%" stopColor="rgba(239,68,68,0)"/></radialGradient>
@@ -378,6 +440,414 @@ function DeliveryRouteMap({ order, rider }) {
   );
 }
 
+// ─── RELAY ROUTE MAP (Google Maps: multi-hop relay legs) ────────
+function RelayRouteMap({ order, riders }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const rendererRef = useRef(null);
+  const [mapStatus, setMapStatus] = useState('loading');
+  const [mapReady, setMapReady] = useState(false);
+
+  // Effect 1: Initialize map (once)
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) { setMapStatus('error'); return; }
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      rendererRef.current = new window.google.maps.DirectionsRenderer({
+        map, suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
+          icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
+        }
+      });
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (rendererRef.current) { rendererRef.current.setMap(null); rendererRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: Draw relay route whenever legs change
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    if (!order.relayLegs || order.relayLegs.length === 0) return;
+    const map = mapInstanceRef.current;
+    const geocoder = new window.google.maps.Geocoder();
+    const geocodeAddr = (addr) => new Promise(resolve => {
+      geocoder.geocode({ address: addr + ', Lagos, Nigeria' }, (results, status) => {
+        resolve((status === 'OK' && results[0]) ? results[0].geometry.location : null);
+      });
+    });
+    (async () => {
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (rendererRef.current) rendererRef.current.setDirections({ routes: [] });
+
+      // Resolve pickup coordinates
+      const pickupLoc = (order.pickupLat && order.pickupLng)
+        ? new window.google.maps.LatLng(parseFloat(order.pickupLat), parseFloat(order.pickupLng))
+        : await geocodeAddr(order.pickup);
+      if (!pickupLoc) { setMapStatus('error'); return; }
+
+      // Resolve dropoff coordinates
+      const dropoffLoc = (order.dropoffLat && order.dropoffLng)
+        ? new window.google.maps.LatLng(parseFloat(order.dropoffLat), parseFloat(order.dropoffLng))
+        : await geocodeAddr(order.dropoff);
+      if (!dropoffLoc) { setMapStatus('error'); return; }
+
+      // Extract intermediate relay nodes (end_relay_node of every leg except the last)
+      const legs = order.relayLegs;
+      const intermediateNodes = [];
+      for (let i = 0; i < legs.length - 1; i++) {
+        const node = legs[i].end_relay_node;
+        if (node && node.latitude && node.longitude) {
+          intermediateNodes.push({ lat: parseFloat(node.latitude), lng: parseFloat(node.longitude), name: node.name });
+        }
+      }
+
+      // Fit the map to all points
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(pickupLoc); bounds.extend(dropoffLoc);
+      intermediateNodes.forEach(n => bounds.extend({ lat: n.lat, lng: n.lng }));
+      map.fitBounds(bounds, { padding: 50 });
+
+      // Draw route through all waypoints
+      const waypoints = intermediateNodes.map(n => ({ location: new window.google.maps.LatLng(n.lat, n.lng), stopover: true }));
+      new window.google.maps.DirectionsService().route({
+        origin: pickupLoc, destination: dropoffLoc, waypoints,
+        travelMode: window.google.maps.TravelMode.DRIVING, optimizeWaypoints: false,
+      }, (result, status) => {
+        if (status === 'OK' && rendererRef.current) rendererRef.current.setDirections(result);
+        setMapStatus('ready');
+      });
+
+      // Pickup marker (📦)
+      markersRef.current.push(new window.google.maps.Marker({
+        position: pickupLoc, map, title: 'Pickup: ' + order.pickup, zIndex: 10,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#1B2A4A', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '📦', fontSize: '16px' }
+      }));
+
+      // Numbered relay node markers (⬡ purple)
+      intermediateNodes.forEach((n, i) => {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: { lat: n.lat, lng: n.lng }, map, title: `Relay ${i + 1}: ${n.name}`, zIndex: 9,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 11, fillColor: '#8B5CF6', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { text: String(i + 1), fontSize: '11px', color: '#fff', fontWeight: 'bold' }
+        }));
+      });
+
+      // Dropoff marker (🏠)
+      markersRef.current.push(new window.google.maps.Marker({
+        position: dropoffLoc, map, title: 'Dropoff: ' + order.dropoff, zIndex: 10,
+        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+        label: { text: '🏠', fontSize: '16px' }
+      }));
+
+      // Rider marker (🏍️) — show suggested rider GPS if available
+      if (order.suggestedRiderId && riders) {
+        const riderObj = riders.find(r => r.id === order.suggestedRiderId);
+        if (riderObj && riderObj.lat && riderObj.lng) {
+          markersRef.current.push(new window.google.maps.Marker({
+            position: { lat: riderObj.lat, lng: riderObj.lng }, map, zIndex: 11,
+            title: 'Rider: ' + (riderObj.name || 'Rider'),
+            icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+            label: { text: '🏍️', fontSize: '16px' }
+          }));
+        }
+      }
+    })().catch(err => { console.error('RelayRouteMap error:', err); setMapStatus('error'); });
+  }, [mapReady, order.id, order.relayLegs?.length, order.suggestedRiderId]);
+
+  return (
+    <div style={{ position:'relative', borderRadius:10, overflow:'hidden', border:`1px solid ${S.border}` }}>
+      <div ref={mapRef} style={{ height:300, width:'100%' }} />
+      {mapStatus === 'loading' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:8 }}>
+          <div style={{ fontSize:24 }}>🗺️</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Loading relay route…</div>
+        </div>
+      )}
+      {mapStatus === 'error' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:6 }}>
+          <div style={{ fontSize:24 }}>📍</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Could not render relay route map</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RELAY NETWORK MAP (Google Maps: zones + relay nodes) ───────
+function RelayNetworkMap({ zones = [], relayNodes = [], height = 360 }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const circlesRef = useRef([]);
+  const labelOverlaysRef = useRef([]);
+  const LabelOverlayCtorRef = useRef(null);
+  const infoWindowRef = useRef(null);
+  const [mapStatus, setMapStatus] = useState('loading');
+  const [mapReady, setMapReady] = useState(false);
+
+  const num = (v) => {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const clearOverlays = () => {
+    markersRef.current.forEach(m => m.setMap(null));
+    markersRef.current = [];
+    circlesRef.current.forEach(c => c.setMap(null));
+    circlesRef.current = [];
+    labelOverlaysRef.current.forEach(o => o.setMap(null));
+    labelOverlaysRef.current = [];
+  };
+
+  // Effect 1: Initialize the Google Map (once)
+  useEffect(() => {
+    const initializeMap = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) { setMapStatus('error'); return; }
+
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 },
+        zoom: 11,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+
+      mapInstanceRef.current = map;
+      setMapReady(true);
+      setMapStatus('ready');
+    };
+
+    let unsubscribe = null;
+    if (window.google && window.google.maps) {
+      initializeMap();
+    } else {
+      window.addEventListener('google-maps-loaded', initializeMap);
+      unsubscribe = () => window.removeEventListener('google-maps-loaded', initializeMap);
+    }
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      clearOverlays();
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Effect 2: Render zones + nodes whenever data changes
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google || !window.google.maps) return;
+    const map = mapInstanceRef.current;
+
+    clearOverlays();
+    if (!infoWindowRef.current) infoWindowRef.current = new window.google.maps.InfoWindow();
+
+	    // Build (once) an OverlayView-based label that supports proper "pill/card" styling.
+	    if (!LabelOverlayCtorRef.current) {
+	      const g = window.google.maps;
+	      LabelOverlayCtorRef.current = class MapLabelOverlay extends g.OverlayView {
+	        constructor(position, text, opts = {}) {
+	          super();
+	          this.position = position;
+	          this.text = text;
+	          this.opts = opts;
+	          this.div = null;
+	        }
+	        onAdd() {
+	          const div = document.createElement('div');
+	          div.style.position = 'absolute';
+	          div.style.pointerEvents = 'none';
+	          div.style.userSelect = 'none';
+	          div.style.whiteSpace = 'nowrap';
+	          div.style.maxWidth = this.opts.maxWidth || '190px';
+	          div.style.overflow = 'hidden';
+	          div.style.textOverflow = 'ellipsis';
+
+	          // Professional label styling (Google/Uber-like)
+	          div.style.background = this.opts.background || 'rgba(255,255,255,0.90)';
+	          div.style.border = this.opts.border || '1px solid rgba(15,23,42,0.12)';
+	          div.style.borderRadius = this.opts.borderRadius || '999px';
+	          div.style.padding = this.opts.padding || '5px 8px';
+	          div.style.boxShadow = this.opts.boxShadow || '0 2px 6px rgba(0,0,0,0.18)';
+	          div.style.backdropFilter = this.opts.backdropFilter || 'blur(2px)';
+
+	          div.style.color = this.opts.color || '#1B2A4A';
+	          div.style.fontSize = this.opts.fontSize || '12px';
+	          div.style.fontWeight = this.opts.fontWeight || '700';
+	          div.style.lineHeight = '1.1';
+	          div.style.letterSpacing = '0.1px';
+
+	          if (typeof this.opts.zIndex === 'number') div.style.zIndex = String(this.opts.zIndex);
+
+	          div.textContent = this.text;
+	          this.div = div;
+
+	          const panes = this.getPanes();
+	          // floatPane keeps labels above circles/tiles; still non-interactive.
+	          (panes.floatPane || panes.overlayLayer).appendChild(div);
+	        }
+	        draw() {
+	          if (!this.div) return;
+	          const projection = this.getProjection();
+	          if (!projection) return;
+	          const pt = projection.fromLatLngToDivPixel(this.position);
+	          if (!pt) return;
+	          const ox = this.opts.offsetX || 0;
+	          const oy = this.opts.offsetY || 0;
+	          this.div.style.left = (pt.x + ox) + 'px';
+	          this.div.style.top = (pt.y + oy) + 'px';
+
+	          const anchor = this.opts.anchor || 'top';
+	          if (anchor === 'center') this.div.style.transform = 'translate(-50%, -50%)';
+	          else if (anchor === 'bottom') this.div.style.transform = 'translate(-50%, 0%)';
+	          else this.div.style.transform = 'translate(-50%, -115%)'; // top (above point)
+	        }
+	        onRemove() {
+	          if (this.div && this.div.parentNode) this.div.parentNode.removeChild(this.div);
+	          this.div = null;
+	        }
+	      };
+	    }
+	    const MapLabelOverlay = LabelOverlayCtorRef.current;
+
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasAny = false;
+    const palette = [S.blue, S.gold, S.green, S.purple, S.red];
+	    const zoneColorById = {};
+
+	    // Zones are used for color-coding nodes. We intentionally do NOT render
+	    // zone labels or zone radius circles to keep the map clean.
+	    (Array.isArray(zones) ? zones : []).forEach((z, idx) => {
+	      if (z && z.id != null) zoneColorById[String(z.id)] = palette[idx % palette.length];
+	      // Still extend bounds to keep the map centered around configured zones.
+	      const lat = num(z.center_lat);
+	      const lng = num(z.center_lng);
+	      if (lat == null || lng == null) return;
+	      bounds.extend({ lat, lng });
+	      hasAny = true;
+	    });
+
+    (Array.isArray(relayNodes) ? relayNodes : []).forEach((n) => {
+      const lat = num(n.latitude);
+      const lng = num(n.longitude);
+      if (lat == null || lng == null) return;
+	      const nodeName = (n.name || 'Relay Node').toString();
+	      const zoneId = (n && n.zone != null) ? String(n.zone) : null;
+	      const color = (zoneId && zoneColorById[zoneId]) ? zoneColorById[zoneId] : S.purple;
+
+	      // Relay node catchment radius (visual)
+	      const crkm = num(n.catchment_radius_km);
+	      if (crkm != null && crkm > 0) {
+	        const nodeCircle = new window.google.maps.Circle({
+	          map,
+	          center: { lat, lng },
+	          radius: crkm * 1000,
+	          strokeColor: color,
+	          strokeOpacity: 0.55,
+	          strokeWeight: 1,
+	          fillColor: color,
+	          fillOpacity: 0.08,
+	          clickable: false,
+	        });
+	        circlesRef.current.push(nodeCircle);
+	        const nb = nodeCircle.getBounds();
+	        if (nb) bounds.union(nb);
+	      }
+
+      const marker = new window.google.maps.Marker({
+        map,
+        position: { lat, lng },
+	        title: nodeName,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+	          fillColor: color,
+          fillOpacity: 1,
+          strokeColor: '#fff',
+          strokeWeight: 3,
+        },
+      });
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      hasAny = true;
+
+	      // Always-on styled node label (OverlayView), positioned above the marker
+	      const nodeLabel = new MapLabelOverlay(
+	        new window.google.maps.LatLng(lat, lng),
+	        nodeName,
+	        {
+	          anchor: 'top',
+	          offsetY: -12,
+	          fontSize: '11px',
+	          fontWeight: '800',
+	          padding: '5px 8px',
+	          borderRadius: '999px',
+	          zIndex: 1001,
+	        }
+	      );
+	      nodeLabel.setMap(map);
+	      labelOverlaysRef.current.push(nodeLabel);
+
+      marker.addListener('click', () => {
+        const title = n.name || 'Relay Node';
+        const addr = n.address ? `<div style="opacity:0.8;margin-top:4px">${n.address}</div>` : '';
+        const zone = n.zone_name ? `<div style="opacity:0.8;margin-top:4px">Zone: ${n.zone_name}</div>` : '';
+        infoWindowRef.current.setContent(`<div style="font-size:12px"><b>${title}</b>${addr}${zone}</div>`);
+        infoWindowRef.current.open({ map, anchor: marker });
+      });
+    });
+
+    if (hasAny) {
+      map.fitBounds(bounds, { padding: 50 });
+      const z = map.getZoom?.();
+      if (typeof z === 'number' && z > 16) map.setZoom(16);
+    } else {
+      map.setCenter({ lat: 6.5244, lng: 3.3792 });
+      map.setZoom(11);
+    }
+    setMapStatus('ready');
+  }, [mapReady, zones, relayNodes]);
+
+  return (
+    <div style={{ position:'relative', borderRadius:14, overflow:'hidden', border:`1px solid ${S.border}`, background:'#EEF2F7' }}>
+      <div ref={mapRef} style={{ height, width:'100%' }} />
+      {mapStatus === 'loading' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:8 }}>
+          <div style={{ fontSize:24 }}>🗺️</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Loading map…</div>
+        </div>
+      )}
+      {mapStatus === 'error' && (
+        <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#EEF2F7', gap:6 }}>
+          <div style={{ fontSize:24 }}>📍</div>
+          <div style={{ fontSize:11, color:S.textMuted }}>Google Maps not available</div>
+          <div style={{ fontSize:10, color:S.textMuted }}>Check API key / network</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const INIT_RIDERS = [
   { id:"R001",name:"Musa Kabiru",phone:"08034561234",vehicle:"Bike",status:"online",currentOrder:"AX-6158260",todayOrders:8,todayEarnings:14400,rating:4.8,totalDeliveries:1234,completionRate:96,avgTime:"28 min",joined:"Sep 2024" },
   { id:"R002",name:"Ahmed Bello",phone:"09012349876",vehicle:"Bike",status:"online",currentOrder:"AX-6158258",todayOrders:6,todayEarnings:10800,rating:4.6,totalDeliveries:876,completionRate:94,avgTime:"32 min",joined:"Nov 2024" },
@@ -403,7 +873,7 @@ const INIT_ORDERS = [
   { id:"AX-6158251",customer:"Funke Adeyemi",customerPhone:"09012345678",merchant:"GlowUp Beauty",pickup:"10 Adeola Odeku, VI",dropoff:"25 Adetokunbo Ademola, VI",rider:"Femi Akinola",riderId:"R008",status:"Delivered",amount:1210,cod:8500,codFee:500,vehicle:"Bike",created:"Feb 13, 3:00 PM",pkg:"Box" },
 ];
 const MERCHANTS_DATA = [
-  { id:"M001",name:"Vivid Print",contact:"Yetunde Igbene",phone:"08051832508",category:"Printing",totalOrders:234,monthOrders:42,walletBalance:87900,status:"Active",joined:"Nov 2024" },
+  { id:"M001",name:"Vivid Print",contact:"Ogun Lami",phone:"08051832508",category:"Printing",totalOrders:234,monthOrders:42,walletBalance:87900,status:"Active",joined:"Nov 2024" },
   { id:"M002",name:"TechZone Gadgets",contact:"Ade Bakare",phone:"09012345678",category:"Electronics",totalOrders:567,monthOrders:89,walletBalance:234500,status:"Active",joined:"Sep 2024" },
   { id:"M003",name:"Mama Nkechi Kitchen",contact:"Nkechi Obi",phone:"07033445566",category:"Food",totalOrders:1203,monthOrders:156,walletBalance:56700,status:"Active",joined:"Jul 2024" },
   { id:"M004",name:"FreshFit Lagos",contact:"Sola Adams",phone:"08055667788",category:"Fashion",totalOrders:89,monthOrders:12,walletBalance:12300,status:"Active",joined:"Jan 2025" },
@@ -513,6 +983,12 @@ export default function AXDispatchPortal() {
 
   // Fetch data whenever authenticated becomes true
   useEffect(() => {
+	    // In React 18 dev + StrictMode, effects can mount/unmount/mount rapidly.
+	    // Guard async work so we don't end up with multiple Ably subscriptions.
+	    let cancelled = false;
+	    let localAbly = null;
+	    let pollInterval = null;
+
     if (!isAuthenticated) {
       setLoading(false);
       // Clean up Ably if user logs out
@@ -527,6 +1003,7 @@ export default function AXDispatchPortal() {
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => [])
         ]);
+	        if (cancelled) return;
         setRiders(ridersData);
         setOrders(ordersData);
         setMerchants(merchantsData);
@@ -536,36 +1013,105 @@ export default function AXDispatchPortal() {
         AuthAPI.logout();
         setIsAuthenticated(false);
       } finally {
-        setLoading(false);
+	        if (!cancelled) setLoading(false);
       }
     };
     fetchData();
 
-    // Load initial activity feed + subscribe to live updates
+	    // Load initial activity feed + subscribe to live updates
     const setupAbly = async () => {
       try {
         const feedData = await ActivityFeedAPI.getRecent(50).catch(() => []);
-        setActivityFeed(feedData);
+	        if (!cancelled) setActivityFeed(feedData);
       } catch (_) { /* ignore */ }
 
+      // Try Ably real-time; fall back to polling if unavailable
+      let ablyActive = false;
       try {
         const tokenRequest = await ActivityFeedAPI.getAblyToken();
-        const ably = new Realtime({
+	        if (cancelled) return;
+	        const ably = new Realtime({
           authCallback: (_, callback) => { callback(null, tokenRequest); }
         });
-        ablyRef.current = ably;
+	        localAbly = ably;
+	        ablyRef.current = ably;
         const ch = ably.channels.get("dispatch-feed");
         ch.subscribe("activity", (msg) => {
-          setActivityFeed(prev => [msg.data, ...prev.slice(0, 99)]);
+	          const d = msg.data;
+	          setActivityFeed(prev => {
+	            if (!d) return prev;
+	            if (d.id && prev.some(x => x.id === d.id)) return prev;
+	            return [d, ...prev].slice(0, 100);
+	          });
+          // Sync order status from real-time events so the orders list stays fresh
+          if (d && d.order_id) {
+            const statusEventMap = {
+              cancelled: "Cancelled",
+              delivered: "Delivered",
+              in_transit: "In Transit",
+              assigned: "Assigned",
+              unassigned: "Pending",
+              failed: "Failed",
+            };
+            const newStatus = statusEventMap[d.event_type];
+            if (newStatus) {
+              setOrders(prev => prev.map(o => o.id === d.order_id ? { ...o, status: newStatus } : o));
+            }
+            // If a new_order event arrives for an order not yet in the list, refresh
+            if (d.event_type === "new_order") {
+              setOrders(prev => {
+                if (!prev.find(o => o.id === d.order_id)) {
+                  OrdersAPI.getAll().then(data => setOrders(cur => mergeOrders(data, cur))).catch(() => {});
+                }
+                return prev;
+              });
+            }
+          }
         });
+        ablyActive = true;
       } catch (err) {
-        console.warn("Ably subscription failed:", err);
+        console.warn("Ably subscription failed, falling back to polling:", err);
+      }
+
+      // Polling fallback: refresh feed from DB every 10 s when Ably is down
+      if (!ablyActive) {
+        pollInterval = setInterval(async () => {
+          try {
+            const feedData = await ActivityFeedAPI.getRecent(50).catch(() => null);
+            if (feedData) setActivityFeed(feedData);
+          } catch (_) { /* ignore */ }
+        }, 10000);
       }
     };
     setupAbly();
 
+    // Periodic orders refresh (60 s) so orders from the merchant portal
+    // and external status changes stay in sync even when Ably is active.
+    // We merge relayLegs from the existing state so the route map is never
+    // wiped by a list response that has empty legs (belt-and-suspenders guard
+    // now that the backend always returns legs on all actions).
+    const mergeOrders = (fresh, prev) =>
+      fresh.map(o => {
+        const existing = prev.find(e => e.id === o.id);
+        if (existing && (!o.relayLegs || o.relayLegs.length === 0) && existing.relayLegs?.length > 0) {
+          return { ...o, relayLegs: existing.relayLegs };
+        }
+        return o;
+      });
+
+    const ordersInterval = setInterval(async () => {
+      try {
+        const data = await OrdersAPI.getAll().catch(() => null);
+        if (data) setOrders(prev => mergeOrders(data, prev));
+      } catch (_) { /* ignore */ }
+    }, 60000);
+
     return () => {
-      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+	      cancelled = true;
+	      if (localAbly) { localAbly.close(); localAbly = null; }
+	      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      if (pollInterval) clearInterval(pollInterval);
+      clearInterval(ordersInterval);
     };
   }, [isAuthenticated]); // re-run when user logs in
 
@@ -691,7 +1237,12 @@ export default function AXDispatchPortal() {
           codFee: parseFloat(created.codFee) || 0,
           vehicle: created.vehicle || "Bike",
           created: created.created || new Date().toLocaleString(),
-          pkg: created.pkg || "Box"
+          pkg: created.pkg || "Box",
+          isRelayOrder: created.isRelayOrder || false,
+          routingStatus: created.routingStatus || "ready",
+          relayLegsCount: created.relayLegsCount || 0,
+          relayLegs: created.relayLegs || [],
+          suggestedRiderId: created.suggestedRiderId || null,
         };
         setOrders(p=>[newOrder,...p]);
       }}/>}
@@ -718,11 +1269,16 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   const colorMap = { gold:S.gold, green:S.green, red:S.red, blue:S.blue, purple:S.purple, yellow:S.yellow };
 
   // Map activity feed to events format (fall back to empty if no data yet)
+  const truncate = (str, n) => str && str.length > n ? str.slice(0, n - 1) + "…" : (str || "");
   const events = (activityFeed || []).map(item => ({
+	    id: item.id,
     time: new Date(item.created_at).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }),
     text: item.text,
     color: colorMap[item.color] || S.gold,
     oid: item.order_id,
+    event_type: item.event_type,
+    pickup: truncate(item.metadata?.pickup || "", 30),
+    dropoff: truncate(item.metadata?.dropoff || "", 30),
   }));
 
   return (
@@ -741,11 +1297,21 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
             <span style={{fontSize:11,color:S.textMuted}}>{events.length} events</span>
           </div>
           <div style={{maxHeight:420,overflowY:"auto"}}>
-            {events.map((ev,i) => (
-              <div key={i} onClick={()=>onViewOrder(ev.oid)} style={{padding:"11px 18px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+	            {events.map((ev,i) => (
+	              <div key={ev.id || `${ev.event_type}:${ev.oid}:${i}`} onClick={()=>onViewOrder(ev.oid)} style={{padding:"11px 18px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",display:"flex",alignItems:"flex-start",gap:12,transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <div style={{width:8,height:8,borderRadius:"50%",background:ev.color,marginTop:5,flexShrink:0}}/>
-                <div style={{flex:1,fontSize:12,color:S.text,lineHeight:1.4}}>{ev.text}</div>
-                <span style={{fontSize:10,color:S.textMuted,fontFamily:"'Space Mono',monospace",flexShrink:0}}>{ev.time}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,color:S.text,lineHeight:1.4}}>{ev.text}</div>
+                  {ev.event_type === "new_order" && ev.pickup && ev.dropoff && (
+                    <div style={{fontSize:11,color:S.textMuted,marginTop:2,display:"flex",alignItems:"center",gap:4,overflow:"hidden"}}>
+                      <span style={{flexShrink:0}}>📍</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.pickup}</span>
+                      <span style={{flexShrink:0,color:S.gold}}>→</span>
+                      <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ev.dropoff}</span>
+                    </div>
+                  )}
+                </div>
+                <span style={{fontSize:10,color:S.textMuted,fontFamily:"'Space Mono',monospace",flexShrink:0,paddingTop:2}}>{ev.time}</span>
               </div>
             ))}
           </div>
@@ -848,6 +1414,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [editPrice, setEditPrice] = useState(false);
   const [priceVal, setPriceVal] = useState(String(order.amount));
   const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [relayLoading, setRelayLoading] = useState(false);
+  const [relayError, setRelayError] = useState("");
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered","Cancelled","Failed"].includes(order.status);
@@ -865,6 +1433,26 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const savePickup = () => { onUpdateOrder(order.id, { pickup: pickupVal }); addLog(order.id, `Pickup address changed to: ${pickupVal}`, "Dispatch", "edit"); setEditPickup(false); };
   const saveDropoff = () => { onUpdateOrder(order.id, { dropoff: dropoffVal }); addLog(order.id, `Dropoff address changed to: ${dropoffVal}`, "Dispatch", "edit"); setEditDropoff(false); };
   const savePrice = () => { const n = parseInt(priceVal)||order.amount; onUpdateOrder(order.id, { amount: n }); addLog(order.id, `Price changed to ₦${n.toLocaleString()}`, "Dispatch", "edit"); setEditPrice(false); };
+
+  const handleGenerateRelayRoute = async (force=false) => {
+    setRelayLoading(true);
+    setRelayError("");
+    try {
+      const updated = await OrdersAPI.generateRelayRoute(order.id, force);
+      onUpdateOrder(order.id, {
+        isRelayOrder: updated.isRelayOrder,
+        routingStatus: updated.routingStatus,
+        routingError: updated.routingError,
+        relayLegsCount: updated.relayLegsCount,
+        relayLegs: updated.relayLegs,
+        suggestedRiderId: updated.suggestedRiderId,
+      });
+    } catch(e) {
+      setRelayError(e?.error || e?.message || "Failed to generate relay route");
+    } finally {
+      setRelayLoading(false);
+    }
+  };
 
   const logColors = { create:S.gold, payment:S.blue, assign:S.green, status:S.textDim, pickup:S.purple, transit:S.gold, cod:S.green, delivered:S.green, settlement:S.gold, cancel:S.red, fail:S.red, edit:S.blue };
 
@@ -1087,6 +1675,101 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               </div>
             )}
           </div>
+
+          {/* RELAY ROUTING SECTION — always visible */}
+          <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,padding:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px"}}>🔗 Relay Route</span>
+                {order.isRelayOrder&&order.routingStatus==="ready"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.greenBg,color:S.green,fontWeight:700}}>READY</span>}
+                {order.isRelayOrder&&order.routingStatus==="pending"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.yellowBg,color:S.yellow,fontWeight:700}}>PENDING</span>}
+                {order.isRelayOrder&&order.routingStatus==="processing"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.blueBg,color:S.blue,fontWeight:700}}>PROCESSING</span>}
+                {order.isRelayOrder&&order.routingStatus==="failed"&&<span style={{fontSize:10,padding:"2px 8px",borderRadius:6,background:S.redBg,color:S.red,fontWeight:700}}>FAILED</span>}
+              </div>
+              {(!order.isRelayOrder||order.routingStatus==="pending"||order.routingStatus==="failed")&&!relayLoading&&(
+                <button onClick={()=>handleGenerateRelayRoute(order.routingStatus==="failed")} style={{padding:"6px 14px",borderRadius:8,border:"none",cursor:"pointer",background:`linear-gradient(135deg,${S.blue},#3b82f6)`,color:"#fff",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                  {order.routingStatus==="failed"?"🔄 Retry":"⚡ Generate Route"}
+                </button>
+              )}
+              {relayLoading&&<span style={{fontSize:11,color:S.blue,fontWeight:600}}>⏳ Generating...</span>}
+            </div>
+
+            {/* Error message */}
+            {(relayError||(order.isRelayOrder&&order.routingStatus==="failed"&&order.routingError))&&(
+              <div style={{marginBottom:12,padding:"8px 12px",borderRadius:8,background:S.redBg,border:`1px solid ${S.red}30`,fontSize:11,color:S.red,fontWeight:500}}>
+                ⚠ {relayError||order.routingError}
+              </div>
+            )}
+
+            {/* Not yet a relay order — info message */}
+            {!order.isRelayOrder&&!relayLoading&&!relayError&&(
+              <div style={{padding:12,borderRadius:8,background:S.borderLight,border:`1px dashed ${S.border}`,fontSize:11,color:S.textMuted,fontWeight:500,textAlign:"center"}}>
+                Click "⚡ Generate Route" to plan multi-hop relay legs for this delivery.
+              </div>
+            )}
+
+            {/* Pending placeholder */}
+            {order.isRelayOrder&&order.routingStatus==="pending"&&!relayLoading&&(
+              <div style={{padding:12,borderRadius:8,background:S.yellowBg,border:`1px dashed ${S.yellow}`,fontSize:11,color:S.yellow,fontWeight:600,textAlign:"center"}}>
+                Route not yet generated. Click "Generate Route" to plan relay legs.
+              </div>
+            )}
+
+              {/* Loading placeholder */}
+              {relayLoading&&(
+                <div style={{padding:12,borderRadius:8,background:S.blueBg,border:`1px dashed ${S.blue}30`,fontSize:11,color:S.blue,fontWeight:600,textAlign:"center"}}>
+                  ⏳ Calculating relay legs via Google Directions API…
+                </div>
+              )}
+
+              {/* Legs list */}
+              {order.routingStatus==="ready"&&order.relayLegs&&order.relayLegs.length>0&&(
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {order.relayLegs.map((leg,idx)=>(
+                    <div key={leg.id||idx} style={{borderRadius:10,border:`1px solid ${S.border}`,padding:"10px 12px",background:S.borderLight}}>
+                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:10,fontWeight:800,padding:"2px 7px",borderRadius:5,background:S.blue,color:"#fff"}}>LEG {leg.leg_number||idx+1}</span>
+                          {leg.status&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:5,background:leg.status==="completed"?S.greenBg:S.goldPale,color:leg.status==="completed"?S.green:S.gold,fontWeight:700}}>{leg.status.toUpperCase()}</span>}
+                        </div>
+                        <span style={{fontSize:11,fontWeight:700,color:S.green,fontFamily:"'Space Mono',monospace"}}>₦{(parseFloat(leg.rider_payout)||0).toLocaleString()}</span>
+                      </div>
+                      <div style={{fontSize:11,color:S.textDim,marginBottom:4}}>
+                        <span style={{color:S.green,fontWeight:600}}>From:</span> {leg.start_relay_node?.name||"Pickup"} → <span style={{color:S.red,fontWeight:600}}>To:</span> {leg.end_relay_node?.name||"Dropoff"}
+                      </div>
+                      <div style={{display:"flex",gap:16,fontSize:10,color:S.textMuted}}>
+                        <span>📍 {(parseFloat(leg.distance_km)||0).toFixed(1)} km</span>
+                        <span>⏱ {leg.duration_minutes||0} min</span>
+                        {leg.hub_pin&&<span>🔑 PIN: <span style={{fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>{leg.hub_pin}</span></span>}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontWeight:600,padding:"8px 4px",borderTop:`1px solid ${S.border}`,marginTop:4}}>
+                    <span style={{color:S.textMuted}}>{order.relayLegs.length} legs total</span>
+                    <span style={{color:S.green}}>Total payout: ₦{order.relayLegs.reduce((s,l)=>s+(parseFloat(l.rider_payout)||0),0).toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Suggested rider for leg 1 */}
+              {order.routingStatus==="ready"&&order.suggestedRiderId&&(
+                <div style={{marginTop:10,padding:"8px 12px",borderRadius:8,background:S.blueBg,border:`1px solid ${S.blue}30`,fontSize:11,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{color:S.blue,fontWeight:600}}>💡 Suggested for leg 1: {riders.find(r=>r.id===order.suggestedRiderId)?.name||`Rider #${order.suggestedRiderId}`}</span>
+                  <button onClick={()=>onAssign(order.id,order.suggestedRiderId)} style={{padding:"4px 12px",borderRadius:6,border:"none",cursor:"pointer",background:S.blue,color:"#fff",fontSize:10,fontWeight:700,fontFamily:"inherit"}}>Assign</button>
+                </div>
+              )}
+
+              {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
+              {order.routingStatus==="ready"&&order.relayLegs&&order.relayLegs.length>0&&(
+                <div style={{marginTop:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+                    <span style={{fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px"}}>🗺️ Route Map</span>
+                    <span style={{fontSize:10,color:S.textMuted}}>📦 Pickup · ⬡ Relay nodes · 🏠 Dropoff{order.suggestedRiderId?" · 🏍️ Rider":""}</span>
+                  </div>
+                  <RelayRouteMap order={order} riders={riders} />
+                </div>
+              )}
+          </div>
         </div>
 
         {/* RIGHT — Map + Event Log */}
@@ -1140,6 +1823,117 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           </div>
         </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RIDERS LOCATION MAP ────────────────────────────────────────
+function RidersLocationMap({ riders }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Effect 1: Initialize map (once)
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Effect 2: Update rider markers whenever riders data changes
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    // Clear old markers
+    markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    riders.forEach(rider => {
+      if (!rider.lat || !rider.lng) return;
+      const lat = parseFloat(rider.lat);
+      const lng = parseFloat(rider.lng);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const color = rider.status === 'online' ? '#22c55e' : rider.status === 'on_delivery' ? '#a855f7' : '#6b7280';
+      const statusLabel = rider.status === 'online' ? 'Online' : rider.status === 'on_delivery' ? 'On Delivery' : 'Offline';
+
+      const marker = new window.google.maps.Marker({
+        position: { lat, lng }, map, title: rider.name,
+        icon: {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 9, fillColor: color, fillOpacity: 1,
+          strokeColor: '#ffffff', strokeWeight: 2.5,
+        }
+      });
+
+      marker.addListener('click', () => {
+        infoWindowRef.current.setContent(
+          `<div style="font-family:sans-serif;padding:6px 2px;min-width:140px;">` +
+          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${rider.name}</div>` +
+          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
+          (rider.currentOrder ? `<div style="margin-top:5px;color:#a855f7;font-size:11px;">📦 ${rider.currentOrder}</div>` : '') +
+          `<div style="color:#888;margin-top:4px;font-size:10px;">${rider.vehicle || ''}</div>` +
+          `<div style="color:#aaa;font-size:10px;">${rider.phone || ''}</div>` +
+          `</div>`
+        );
+        infoWindowRef.current.open(map, marker);
+      });
+
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      hasPoints = true;
+    });
+
+    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+  }, [mapReady, riders]);
+
+  const ridersWithLocation = riders.filter(r => r.lat && r.lng).length;
+
+  return (
+    <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span>🗺️ Rider Locations</span>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{ridersWithLocation} of {riders.length} riders with GPS</span>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+        {ridersWithLocation === 0 && mapReady && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.03)' }}>
+            <div style={{ textAlign: 'center', color: S.textMuted }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>No GPS data available</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Riders will appear here when their location is shared</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
+        <span><span style={{ color: '#22c55e', fontWeight: 700 }}>●</span> Online</span>
+        <span><span style={{ color: '#a855f7', fontWeight: 700 }}>●</span> On Delivery</span>
+        <span><span style={{ color: '#6b7280', fontWeight: 700 }}>●</span> Offline</span>
+        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
       </div>
     </div>
   );
@@ -1213,42 +2007,57 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 
   return (
     <div>
+      {/* Stat cards */}
       <div style={{display:"flex",gap:12,marginBottom:16}}>
         <StatCard label="Total Riders" value={riders.length}/>
         <StatCard label="Online" value={riders.filter(r=>r.status==="online").length} color={S.green}/>
         <StatCard label="On Delivery" value={riders.filter(r=>r.status==="on_delivery").length} color={S.purple}/>
         <StatCard label="Deliveries Today" value={riders.reduce((s,r)=>s+r.todayOrders,0)} color={S.gold}/>
       </div>
-      <div style={{display:"flex",gap:10,marginBottom:14}}>
-        <div style={{display:"flex",gap:4}}>
-          {["All","Online","On Delivery","Offline"].map(f=>(<button key={f} onClick={()=>setFilter(f)} style={{padding:"7px 14px",borderRadius:8,border:`1px solid ${filter===f?"transparent":S.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:filter===f?S.goldPale:S.card,color:filter===f?S.gold:S.textMuted}}>{f}</button>))}
-        </div>
-        <div style={{flex:1,background:S.card,borderRadius:10,border:`1px solid ${S.border}`,display:"flex",alignItems:"center",gap:8,padding:"0 12px"}}>
-          <span style={{opacity:0.4}}>{I.search}</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search riders..." style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
-        </div>
-      </div>
-      <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
-        <div style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
-          <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
-        </div>
-        <div style={{maxHeight:"calc(100vh - 310px)",overflowY:"auto"}}>
-          {filtered.map(r=>(
-            <div key={r.id} onClick={()=>onSelect(r.id)} style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:11,fontWeight:700,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.id}</span>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:32,height:32,borderRadius:8,background:`${sc(r.status)}12`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:sc(r.status)}}>{r.name.split(" ").map(n=>n[0]).join("")}</div>
-                <span style={{fontSize:12,fontWeight:600}}>{r.name}</span>
-              </div>
-              <span style={{fontSize:11,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.phone}</span>
-              <span style={{fontSize:11,color:S.textDim}}>{r.vehicle}</span>
-              <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:`${sc(r.status)}12`,color:sc(r.status)}}>{r.status==="online"?"Online":r.status==="on_delivery"?"On Delivery":"Offline"}</span>
-              <span style={{fontSize:11,color:r.currentOrder?S.purple:S.textMuted,fontWeight:r.currentOrder?700:400,fontFamily:"'Space Mono',monospace"}}>{r.currentOrder||"— Available"}</span>
-              <div><span style={{fontSize:12,fontWeight:700}}>{r.todayOrders} orders</span><div style={{fontSize:10,color:S.textMuted}}>₦{r.todayEarnings.toLocaleString()}</div></div>
-              <span style={{fontSize:12,color:S.gold}}>⭐ {r.rating}</span>
+
+      {/* 50/50 split: table (left) + map (right) */}
+      <div style={{display:"flex",gap:16,alignItems:"flex-start",height:"calc(100vh - 240px)"}}>
+
+        {/* Left – filters + table (50%) */}
+        <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",height:"100%"}}>
+          <div style={{display:"flex",gap:10,marginBottom:14,flexShrink:0}}>
+            <div style={{display:"flex",gap:4}}>
+              {["All","Online","On Delivery","Offline"].map(f=>(<button key={f} onClick={()=>setFilter(f)} style={{padding:"7px 14px",borderRadius:8,border:`1px solid ${filter===f?"transparent":S.border}`,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,background:filter===f?S.goldPale:S.card,color:filter===f?S.gold:S.textMuted}}>{f}</button>))}
             </div>
-          ))}
+            <div style={{flex:1,background:S.card,borderRadius:10,border:`1px solid ${S.border}`,display:"flex",alignItems:"center",gap:8,padding:"0 12px"}}>
+              <span style={{opacity:0.4}}>{I.search}</span>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search riders..." style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
+            </div>
+          </div>
+          <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden",flex:1,display:"flex",flexDirection:"column"}}>
+            <div style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`,flexShrink:0}}>
+              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+            </div>
+            <div style={{overflowY:"auto",flex:1}}>
+              {filtered.map(r=>(
+                <div key={r.id} onClick={()=>onSelect(r.id)} style={{display:"grid",gridTemplateColumns:"60px 1fr 100px 80px 90px 110px 100px 70px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <span style={{fontSize:11,fontWeight:700,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.id}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <div style={{width:32,height:32,borderRadius:8,background:`${sc(r.status)}12`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:800,color:sc(r.status)}}>{r.name.split(" ").map(n=>n[0]).join("")}</div>
+                    <span style={{fontSize:12,fontWeight:600}}>{r.name}</span>
+                  </div>
+                  <span style={{fontSize:11,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{r.phone}</span>
+                  <span style={{fontSize:11,color:S.textDim}}>{r.vehicle}</span>
+                  <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:6,background:`${sc(r.status)}12`,color:sc(r.status)}}>{r.status==="online"?"Online":r.status==="on_delivery"?"On Delivery":"Offline"}</span>
+                  <span style={{fontSize:11,color:r.currentOrder?S.purple:S.textMuted,fontWeight:r.currentOrder?700:400,fontFamily:"'Space Mono',monospace"}}>{r.currentOrder||"— Available"}</span>
+                  <div><span style={{fontSize:12,fontWeight:700}}>{r.todayOrders} orders</span><div style={{fontSize:10,color:S.textMuted}}>₦{r.todayEarnings.toLocaleString()}</div></div>
+                  <span style={{fontSize:12,color:S.gold}}>⭐ {r.rating}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
+
+        {/* Right – riders location map (50%) */}
+        <div style={{flex:1,minWidth:0,height:"100%"}}>
+          <RidersLocationMap riders={riders}/>
+        </div>
+
       </div>
     </div>
   );
@@ -1372,6 +2181,12 @@ function MessagingScreen() {
   );
 }
 
+// ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
+const inputStyle = {width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 12px",height:40,fontSize:14,fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy,outline:"none"};
+const labelStyle = {display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.3px"};
+const Toggle = ({on,setOn,size})=>{const w=size==="sm"?36:44;const d=size==="sm"?16:20;return (<div onClick={()=>setOn(!on)} style={{width:w,height:Math.round(w/1.83),borderRadius:w/2,cursor:"pointer",background:on?S.green:S.border,position:"relative",transition:"background 0.2s",flexShrink:0}}><div style={{width:d,height:d,borderRadius:"50%",background:"#fff",position:"absolute",top:Math.round((w/1.83-d)/2),left:on?w-d-Math.round((w/1.83-d)/2):Math.round((w/1.83-d)/2),transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/></div>)};
+const SC = ({children,title,icon,desc,right})=>(<div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}><div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>{icon}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{title}</div>{desc&&<div style={{fontSize:11,color:S.textMuted}}>{desc}</div>}</div></div>{right}</div><div style={{padding:20}}>{children}</div></div>);
+
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
   // ─── PRICING STATE (Research-based Lagos defaults) ───
@@ -1418,13 +2233,35 @@ function SettingsScreen() {
   const [notifUnassigned, setNotifUnassigned] = useState(true);
   const [notifComplete, setNotifComplete] = useState(true);
   const [notifCod, setNotifCod] = useState(true);
+  const [vehicleIds, setVehicleIds] = useState({});
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [saveError, setSaveError] = useState(null);
   const [settingsTab, setSettingsTab] = useState("pricing");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [simKm, setSimKm] = useState(8);
   const [simVehicle, setSimVehicle] = useState("bike");
   const [simZone, setSimZone] = useState("same");
   const [simWeight, setSimWeight] = useState(3);
   const [simSurge, setSimSurge] = useState(false);
+
+  // ── Relay Network state ──────────────────────────────────────
+  const [rnZones, setRnZones] = useState([]);
+  const [rnNodes, setRnNodes] = useState([]);
+  const [rnLoading, setRnLoading] = useState(false);
+  const [rnError, setRnError] = useState(null);
+
+  // Zone form
+  const [zoneForm, setZoneForm] = useState({ name:"", center_lat:"", center_lng:"", radius_km:5, is_active:true });
+  const [zoneEditing, setZoneEditing] = useState(null); // null = create, string id = edit
+  const [zoneFormOpen, setZoneFormOpen] = useState(false);
+  const [zoneSaving, setZoneSaving] = useState(false);
+
+  // Relay node form
+  const [nodeForm, setNodeForm] = useState({ name:"", address:"", latitude:"", longitude:"", zone:"", catchment_radius_km:0.5, is_active:true });
+  const [nodeEditing, setNodeEditing] = useState(null);
+  const [nodeFormOpen, setNodeFormOpen] = useState(false);
+  const [nodeSaving, setNodeSaving] = useState(false);
 
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight) => {
     let price;
@@ -1449,20 +2286,156 @@ function SettingsScreen() {
   const simC = getVC()[simVehicle];
   const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight);
   const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
-  const handleSave = () => { setSaved(true); setTimeout(()=>setSaved(false),2500); };
-  const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300); };
 
-  const inputStyle = {width:"100%",border:`1.5px solid ${S.border}`,borderRadius:10,padding:"0 12px",height:40,fontSize:14,fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy,outline:"none"};
-  const labelStyle = {display:"block",fontSize:11,fontWeight:600,color:S.textMuted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.3px"};
-  const Toggle = ({on,setOn,size})=>{const w=size==="sm"?36:44;const d=size==="sm"?16:20;return (<div onClick={()=>setOn(!on)} style={{width:w,height:Math.round(w/1.83),borderRadius:w/2,cursor:"pointer",background:on?S.green:S.border,position:"relative",transition:"background 0.2s",flexShrink:0}}><div style={{width:d,height:d,borderRadius:"50%",background:"#fff",position:"absolute",top:Math.round((w/1.83-d)/2),left:on?w-d-Math.round((w/1.83-d)/2):Math.round((w/1.83-d)/2),transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/></div>)};
-  const SC = ({children,title,icon,desc,right})=>(<div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}><div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:20}}>{icon}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{title}</div>{desc&&<div style={{fontSize:11,color:S.textMuted}}>{desc}</div>}</div></div>{right}</div><div style={{padding:20}}>{children}</div></div>);
-  const tabs = [{id:"pricing",label:"Pricing & Fees",icon:"💰"},{id:"zones",label:"Zones & Surcharges",icon:"🗺️"},{id:"simulator",label:"Price Calculator",icon:"🧮"},{id:"dispatch",label:"Dispatch Rules",icon:"⚙️"},{id:"notifications",label:"Notifications",icon:"🔔"},{id:"integrations",label:"API & Integrations",icon:"🔌"}];
+  // Load settings from backend on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSettings() {
+      setSettingsLoading(true);
+      try {
+        const [vehicles, settings] = await Promise.all([
+          VehiclesAPI.getAll(),
+          SettingsAPI.get()
+        ]);
+        if (cancelled) return;
+        // pf(): parse a backend decimal safely — 0 is a valid value, so we only
+        // fall back when the field is null/undefined/NaN (not when it is 0).
+        const pf = (val, fb) => { const n = parseFloat(val); return isNaN(n) ? fb : n; };
+        const ids = {};
+        vehicles.forEach(v => {
+          const key = v.name.toLowerCase();
+          ids[key] = v.id;
+          if (key === 'bike') {
+            setBikeBase(pf(v.base_fare, 500));
+            setBikePerKm(pf(v.rate_per_km, 150));
+            setBikeMinKm(pf(v.min_distance_km, 3));
+            setBikeMin(pf(v.min_fee, 1200));
+          } else if (key === 'car') {
+            setCarBase(pf(v.base_fare, 1000));
+            setCarPerKm(pf(v.rate_per_km, 250));
+            setCarMinKm(pf(v.min_distance_km, 3));
+            setCarMin(pf(v.min_fee, 2500));
+          } else if (key === 'van') {
+            setVanBase(pf(v.base_fare, 2000));
+            setVanPerKm(pf(v.rate_per_km, 400));
+            setVanMinKm(pf(v.min_distance_km, 3));
+            setVanMin(pf(v.min_fee, 5000));
+          }
+        });
+        setVehicleIds(ids);
+        // pi(): same null-safe parse for integer fields
+        const pi = (val, fb) => { const n = parseInt(val, 10); return isNaN(n) ? fb : n; };
+        if (settings) {
+          setCodFee(pf(settings.cod_flat_fee, 500));
+          setCodPct(pf(settings.cod_pct_fee, 1.5));
+          setBridgeSurcharge(pf(settings.bridge_surcharge, 500));
+          setOuterZoneSurcharge(pf(settings.outer_zone_surcharge, 800));
+          setIslandPremium(pf(settings.island_premium, 300));
+          setWeightThreshold(pf(settings.weight_threshold_kg, 5));
+          setWeightSurcharge(pf(settings.weight_surcharge_per_unit, 200));
+          setWeightUnit(pf(settings.weight_unit_kg, 5));
+          setSurgeEnabled(settings.surge_enabled ?? true);
+          setSurgeMultiplier(pf(settings.surge_multiplier, 1.5));
+          setSurgeMorningStart(settings.surge_morning_start || "07:00");
+          setSurgeMorningEnd(settings.surge_morning_end || "09:30");
+          setSurgeEveningStart(settings.surge_evening_start || "17:00");
+          setSurgeEveningEnd(settings.surge_evening_end || "20:00");
+          setRainSurge(settings.rain_surge_enabled ?? true);
+          setRainMultiplier(pf(settings.rain_surge_multiplier, 1.3));
+          setTierEnabled(settings.tier_enabled ?? true);
+          setTier1Km(pf(settings.tier1_km, 15));
+          setTier1Discount(pf(settings.tier1_discount_pct, 10));
+          setTier2Km(pf(settings.tier2_km, 25));
+          setTier2Discount(pf(settings.tier2_discount_pct, 15));
+          setAutoAssign(settings.auto_assign_enabled ?? true);
+          setAssignRadius(pf(settings.auto_assign_radius_km, 5));
+          setAcceptTimeout(pi(settings.accept_timeout_sec, 120));
+          setMaxBike(pi(settings.max_concurrent_bike, 2));
+          setMaxCar(pi(settings.max_concurrent_car, 1));
+          setMaxVan(pi(settings.max_concurrent_van, 1));
+          setNotifNew(settings.notif_new_order ?? true);
+          setNotifUnassigned(settings.notif_unassigned ?? true);
+          setNotifComplete(settings.notif_completed ?? true);
+          setNotifCod(settings.notif_cod_settled ?? true);
+        }
+      } catch (err) {
+        if (!cancelled) setSaveError("Failed to load settings: " + err.message);
+      } finally {
+        if (!cancelled) setSettingsLoading(false);
+      }
+    }
+    loadSettings();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load relay network data when the relay tab is opened
+  useEffect(() => {
+    if (settingsTab !== "relay") return;
+    let cancelled = false;
+    async function loadRelayNetwork() {
+      setRnLoading(true);
+      setRnError(null);
+      try {
+        const [zones, nodes] = await Promise.all([ZonesAPI.getAll(), RelayNodesAPI.getAll()]);
+        if (!cancelled) { setRnZones(zones); setRnNodes(nodes); }
+      } catch (err) {
+        if (!cancelled) setRnError("Failed to load relay network: " + err.message);
+      } finally {
+        if (!cancelled) setRnLoading(false);
+      }
+    }
+    loadRelayNetwork();
+    return () => { cancelled = true; };
+  }, [settingsTab]);
+
+  const handleSave = async () => {
+    setSaveError(null);
+    setSaving(true);
+    try {
+      // PATCH each vehicle's pricing
+      await Promise.all(
+        [
+          { key: 'bike', data: { base_fare: bikeBase, rate_per_km: bikePerKm, min_distance_km: bikeMinKm, min_fee: bikeMin } },
+          { key: 'car',  data: { base_fare: carBase,  rate_per_km: carPerKm,  min_distance_km: carMinKm,  min_fee: carMin  } },
+          { key: 'van',  data: { base_fare: vanBase,  rate_per_km: vanPerKm,  min_distance_km: vanMinKm,  min_fee: vanMin  } },
+        ]
+          .filter(({ key }) => vehicleIds[key])
+          .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
+      );
+      // POST system settings
+      await SettingsAPI.update({
+        cod_flat_fee: codFee, cod_pct_fee: codPct,
+        bridge_surcharge: bridgeSurcharge, outer_zone_surcharge: outerZoneSurcharge, island_premium: islandPremium,
+        weight_threshold_kg: weightThreshold, weight_surcharge_per_unit: weightSurcharge, weight_unit_kg: weightUnit,
+        surge_enabled: surgeEnabled, surge_multiplier: surgeMultiplier,
+        surge_morning_start: surgeMorningStart, surge_morning_end: surgeMorningEnd,
+        surge_evening_start: surgeEveningStart, surge_evening_end: surgeEveningEnd,
+        rain_surge_enabled: rainSurge, rain_surge_multiplier: rainMultiplier,
+        tier_enabled: tierEnabled, tier1_km: tier1Km, tier1_discount_pct: tier1Discount,
+        tier2_km: tier2Km, tier2_discount_pct: tier2Discount,
+        auto_assign_enabled: autoAssign, auto_assign_radius_km: assignRadius, accept_timeout_sec: acceptTimeout,
+        max_concurrent_bike: maxBike, max_concurrent_car: maxCar, max_concurrent_van: maxVan,
+        notif_new_order: notifNew, notif_unassigned: notifUnassigned, notif_completed: notifComplete, notif_cod_settled: notifCod,
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    } catch (err) {
+      setSaveError("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleReset = () => { setBikeBase(500);setBikePerKm(150);setBikeMinKm(3);setBikeMin(1200);setCarBase(1000);setCarPerKm(250);setCarMinKm(3);setCarMin(2500);setVanBase(2000);setVanPerKm(400);setVanMinKm(3);setVanMin(5000);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
+
+  const tabs = [{id:"pricing",label:"Pricing & Fees",icon:"💰"},{id:"zones",label:"Zones & Surcharges",icon:"🗺️"},{id:"simulator",label:"Price Calculator",icon:"🧮"},{id:"dispatch",label:"Dispatch Rules",icon:"⚙️"},{id:"relay",label:"Relay Network",icon:"🔗"},{id:"notifications",label:"Notifications",icon:"🔔"},{id:"integrations",label:"API & Integrations",icon:"🔌"}];
 
   return (
     <div style={{maxWidth:900}}>
       <div style={{display:"flex",gap:4,marginBottom:20,background:S.card,borderRadius:12,padding:4,border:`1px solid ${S.border}`,overflowX:"auto"}}>
         {tabs.map(t=>(<button key={t.id} onClick={()=>setSettingsTab(t.id)} style={{flex:1,padding:"10px 0",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,transition:"all 0.2s",display:"flex",alignItems:"center",justifyContent:"center",gap:5,whiteSpace:"nowrap",background:settingsTab===t.id?S.navy:"transparent",color:settingsTab===t.id?"#fff":S.textDim}}>{t.icon} {t.label}</button>))}
       </div>
+
+      {settingsLoading && <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 16px",background:"rgba(232,168,56,0.08)",border:`1px solid rgba(232,168,56,0.2)`,borderRadius:10,marginBottom:14,fontSize:13,color:S.navy,fontWeight:600}}>⏳ Loading settings from server…</div>}
 
       {/* ═══ PRICING TAB ═══ */}
       {settingsTab==="pricing" && (<div style={{animation:"fadeIn 0.3s ease"}}>
@@ -1526,9 +2499,10 @@ function SettingsScreen() {
           </div>):(<div style={{fontSize:12,color:S.textMuted,textAlign:"center",padding:10}}>Disabled — flat per-km rate applies</div>)}
         </SC>
 
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}>
-          <button onClick={handleReset} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
-          <button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Pricing"}</button>
+          <button onClick={handleReset} disabled={saving} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
+          <button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Pricing"}</button>
         </div>
       </div>)}
 
@@ -1592,9 +2566,10 @@ function SettingsScreen() {
           </div>):(<div style={{fontSize:12,color:S.textMuted,textAlign:"center",padding:10}}>Surge pricing disabled — flat rates 24/7</div>)}
         </SC>
 
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
         <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}>
-          <button onClick={handleReset} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
-          <button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Zone Settings"}</button>
+          <button onClick={handleReset} disabled={saving} style={{padding:"10px 24px",borderRadius:10,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Reset Defaults</button>
+          <button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Zone Settings"}</button>
         </div>
       </div>)}
 
@@ -1669,7 +2644,154 @@ function SettingsScreen() {
             </div>
           </div>
         </div>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>{saved?"✓ Saved!":"Save Settings"}</button></div>
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Settings"}</button></div>
+      </div>)}
+
+      {/* ═══ RELAY NETWORK TAB ═══ */}
+      {settingsTab==="relay" && (<div style={{animation:"fadeIn 0.3s ease"}}>
+        {rnError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginBottom:12}}>⚠️ {rnError}</div>}
+        {rnLoading && <div style={{textAlign:"center",padding:40,color:S.textMuted,fontSize:13}}>Loading relay network…</div>}
+
+        {!rnLoading && (<>
+          {/* ── Zone list + Zone form ── */}
+          <SC title="Delivery Zones" icon="🌐" desc="Zones group relay nodes. Each zone has a centre point and a radius." right={<button onClick={()=>{setZoneEditing(null);setZoneForm({name:"",center_lat:"",center_lng:"",radius_km:5,is_active:true});setZoneFormOpen(true);}} style={{padding:"6px 16px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:S.gold,color:S.navy}}>+ Add Zone</button>}>
+            {zoneFormOpen && (
+              <div style={{background:"#f8fafc",borderRadius:10,padding:16,border:`1px solid ${S.border}`,marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:S.navy,marginBottom:12}}>{zoneEditing?"Edit Zone":"New Zone"}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                  <div style={{gridColumn:"1/-1"}}><label style={labelStyle}>Zone Name</label><input value={zoneForm.name} onChange={e=>setZoneForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Lagos Island" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Centre Latitude</label><input value={zoneForm.center_lat} onChange={e=>setZoneForm(f=>({...f,center_lat:e.target.value}))} placeholder="6.4541" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Centre Longitude</label><input value={zoneForm.center_lng} onChange={e=>setZoneForm(f=>({...f,center_lng:e.target.value}))} placeholder="3.3947" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Radius (km)</label><input value={zoneForm.radius_km} onChange={e=>setZoneForm(f=>({...f,radius_km:e.target.value}))} type="number" step="0.5" style={inputStyle}/></div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:20}}><Toggle on={zoneForm.is_active} setOn={v=>setZoneForm(f=>({...f,is_active:v}))} size="sm"/><span style={{fontSize:12,color:S.textMuted}}>Active</span></div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>setZoneFormOpen(false)} style={{padding:"7px 18px",borderRadius:8,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,color:S.textDim}}>Cancel</button>
+                  <button disabled={zoneSaving} onClick={async()=>{
+                    if(!zoneForm.name||zoneForm.center_lat===""||zoneForm.center_lng===""){setRnError("Zone name, latitude and longitude are required.");return;}
+                    setZoneSaving(true);setRnError(null);
+                    try{
+                      const payload={name:zoneForm.name,center_lat:parseFloat(zoneForm.center_lat),center_lng:parseFloat(zoneForm.center_lng),radius_km:parseFloat(zoneForm.radius_km)||5,is_active:zoneForm.is_active};
+                      if(zoneEditing){const updated=await ZonesAPI.update(zoneEditing,payload);setRnZones(z=>z.map(x=>x.id===zoneEditing?updated:x));}
+                      else{const created=await ZonesAPI.create(payload);setRnZones(z=>[...z,created]);}
+                      setZoneFormOpen(false);
+                    }catch(e){setRnError(e.message);}finally{setZoneSaving(false);}
+                  }} style={{padding:"7px 22px",borderRadius:8,border:"none",cursor:zoneSaving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:zoneSaving?0.7:1}}>{zoneSaving?"Saving…":zoneEditing?"Update Zone":"Save Zone"}</button>
+                </div>
+              </div>
+            )}
+            {rnZones.length===0 ? (
+              <div style={{textAlign:"center",padding:"20px 0",color:S.textMuted,fontSize:12}}>No zones yet. Add your first zone above.</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Name","Centre","Radius","Nodes","Status",""].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
+                  <tbody>{rnZones.map(z=>(
+                    <tr key={z.id} style={{borderBottom:`1px solid ${S.borderLight}`}}>
+                      <td style={{padding:"9px 10px",fontWeight:700}}>{z.name}</td>
+                      <td style={{padding:"9px 10px",fontFamily:"'Space Mono',monospace",fontSize:11}}>{Number(z.center_lat).toFixed(4)}, {Number(z.center_lng).toFixed(4)}</td>
+                      <td style={{padding:"9px 10px"}}>{z.radius_km} km</td>
+                      <td style={{padding:"9px 10px"}}>{z.relay_nodes_count ?? "—"}</td>
+                      <td style={{padding:"9px 10px"}}><span style={{fontSize:10,padding:"3px 8px",borderRadius:5,fontWeight:700,background:z.is_active?S.greenBg:S.redBg,color:z.is_active?S.green:S.red}}>{z.is_active?"Active":"Inactive"}</span></td>
+                      <td style={{padding:"9px 10px",display:"flex",gap:6}}>
+                        <button onClick={()=>{setZoneEditing(z.id);setZoneForm({name:z.name,center_lat:z.center_lat,center_lng:z.center_lng,radius_km:z.radius_km,is_active:z.is_active});setZoneFormOpen(true);}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontSize:11,fontWeight:600,color:S.navy}}>Edit</button>
+                        <button onClick={async()=>{if(!window.confirm("Deactivate this zone?"))return;try{const u=await ZonesAPI.update(z.id,{is_active:false});setRnZones(prev=>prev.map(x=>x.id===z.id?u:x));}catch(e){setRnError(e.message);}}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid rgba(239,68,68,0.25)`,background:"rgba(239,68,68,0.06)",cursor:"pointer",fontSize:11,fontWeight:600,color:S.red}}>Deactivate</button>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SC>
+
+          {/* ── Relay Node list + Node form ── */}
+          <SC title="Relay Nodes" icon="📍" desc="Physical handoff points. Enter an address to geocode coordinates." right={<button onClick={()=>{setNodeEditing(null);setNodeForm({name:"",address:"",latitude:"",longitude:"",zone:"",catchment_radius_km:0.5,is_active:true});setNodeFormOpen(true);}} style={{padding:"6px 16px",borderRadius:8,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:S.gold,color:S.navy}}>+ Add Node</button>}>
+            {nodeFormOpen && (
+              <div style={{background:"#f8fafc",borderRadius:10,padding:16,border:`1px solid ${S.border}`,marginBottom:16}}>
+                <div style={{fontSize:13,fontWeight:700,color:S.navy,marginBottom:12}}>{nodeEditing?"Edit Relay Node":"New Relay Node"}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                  <div style={{gridColumn:"1/-1"}}><label style={labelStyle}>Node Name</label><input value={nodeForm.name} onChange={e=>setNodeForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Yaba Market Hub" style={inputStyle}/></div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <label style={labelStyle}>Address (type to geocode)</label>
+                    <div style={{display:"flex",gap:8}}>
+                      <div style={{flex:1}}>
+                        <AddressAutocompleteInput value={nodeForm.address} onChange={v=>setNodeForm(f=>({...f,address:v}))} placeholder="Enter address…" style={inputStyle}/>
+                      </div>
+                      <button onClick={()=>{
+                        if(!nodeForm.address){setRnError("Enter an address first.");return;}
+                        if(!window.google||!window.google.maps){setRnError("Google Maps not loaded.");return;}
+                        const geocoder=new window.google.maps.Geocoder();
+                        geocoder.geocode({address:nodeForm.address,componentRestrictions:{country:"ng"}},(results,status)=>{
+                          if(status==="OK"&&results[0]){
+                            const loc=results[0].geometry.location;
+                            setNodeForm(f=>({...f,latitude:loc.lat().toFixed(6),longitude:loc.lng().toFixed(6)}));
+                            setRnError(null);
+                          } else { setRnError("Geocoding failed: "+status); }
+                        });
+                      }} style={{padding:"0 14px",borderRadius:8,border:`1px solid ${S.gold}`,background:S.goldPale,cursor:"pointer",fontSize:12,fontWeight:700,color:S.gold,whiteSpace:"nowrap"}}>📍 Geocode</button>
+                    </div>
+                  </div>
+                  <div><label style={labelStyle}>Latitude</label><input value={nodeForm.latitude} onChange={e=>setNodeForm(f=>({...f,latitude:e.target.value}))} placeholder="6.5166" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Longitude</label><input value={nodeForm.longitude} onChange={e=>setNodeForm(f=>({...f,longitude:e.target.value}))} placeholder="3.3705" style={inputStyle}/></div>
+                  <div><label style={labelStyle}>Zone</label>
+                    <select value={nodeForm.zone} onChange={e=>setNodeForm(f=>({...f,zone:e.target.value}))} style={{...inputStyle,background:"#fff"}}>
+                      <option value="">— No zone —</option>
+                      {rnZones.map(z=><option key={z.id} value={z.id}>{z.name}</option>)}
+                    </select>
+                  </div>
+                  <div><label style={labelStyle}>Catchment Radius (km)</label><input value={nodeForm.catchment_radius_km} onChange={e=>setNodeForm(f=>({...f,catchment_radius_km:e.target.value}))} type="number" step="0.1" style={inputStyle}/></div>
+                  <div style={{display:"flex",alignItems:"center",gap:10,paddingTop:20}}><Toggle on={nodeForm.is_active} setOn={v=>setNodeForm(f=>({...f,is_active:v}))} size="sm"/><span style={{fontSize:12,color:S.textMuted}}>Active</span></div>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>setNodeFormOpen(false)} style={{padding:"7px 18px",borderRadius:8,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,color:S.textDim}}>Cancel</button>
+                  <button disabled={nodeSaving} onClick={async()=>{
+                    if(!nodeForm.name||nodeForm.latitude===""||nodeForm.longitude===""){setRnError("Node name, latitude and longitude are required.");return;}
+                    setNodeSaving(true);setRnError(null);
+                    try{
+                      const payload={name:nodeForm.name,address:nodeForm.address,latitude:parseFloat(nodeForm.latitude),longitude:parseFloat(nodeForm.longitude),zone:nodeForm.zone||null,catchment_radius_km:parseFloat(nodeForm.catchment_radius_km)||0.5,is_active:nodeForm.is_active};
+                      if(nodeEditing){const updated=await RelayNodesAPI.update(nodeEditing,payload);setRnNodes(n=>n.map(x=>x.id===nodeEditing?updated:x));}
+                      else{const created=await RelayNodesAPI.create(payload);setRnNodes(n=>[...n,created]);}
+                      setNodeFormOpen(false);
+                    }catch(e){setRnError(e.message);}finally{setNodeSaving(false);}
+                  }} style={{padding:"7px 22px",borderRadius:8,border:"none",cursor:nodeSaving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:nodeSaving?0.7:1}}>{nodeSaving?"Saving…":nodeEditing?"Update Node":"Save Node"}</button>
+                </div>
+              </div>
+            )}
+            {rnNodes.length===0 ? (
+              <div style={{textAlign:"center",padding:"20px 0",color:S.textMuted,fontSize:12}}>No relay nodes yet. Add your first node above.</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Name","Address","Coordinates","Zone","Catchment","Status",""].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
+                  <tbody>{rnNodes.map(nd=>(
+                    <tr key={nd.id} style={{borderBottom:`1px solid ${S.borderLight}`}}>
+                      <td style={{padding:"9px 10px",fontWeight:700}}>{nd.name}</td>
+                      <td style={{padding:"9px 10px",maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:S.textMuted,fontSize:11}} title={nd.address}>{nd.address||"—"}</td>
+                      <td style={{padding:"9px 10px",fontFamily:"'Space Mono',monospace",fontSize:10}}>{Number(nd.latitude).toFixed(4)},{Number(nd.longitude).toFixed(4)}</td>
+                      <td style={{padding:"9px 10px",fontSize:11}}>{nd.zone_name||<span style={{color:S.textMuted}}>—</span>}</td>
+                      <td style={{padding:"9px 10px"}}>{nd.catchment_radius_km} km</td>
+                      <td style={{padding:"9px 10px"}}><span style={{fontSize:10,padding:"3px 8px",borderRadius:5,fontWeight:700,background:nd.is_active?S.greenBg:S.redBg,color:nd.is_active?S.green:S.red}}>{nd.is_active?"Active":"Inactive"}</span></td>
+                      <td style={{padding:"9px 10px",display:"flex",gap:6}}>
+                        <button onClick={()=>{setNodeEditing(nd.id);setNodeForm({name:nd.name,address:nd.address||"",latitude:nd.latitude,longitude:nd.longitude,zone:nd.zone||"",catchment_radius_km:nd.catchment_radius_km,is_active:nd.is_active});setNodeFormOpen(true);}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid ${S.border}`,background:S.card,cursor:"pointer",fontSize:11,fontWeight:600,color:S.navy}}>Edit</button>
+                        <button onClick={async()=>{if(!window.confirm("Deactivate this relay node?"))return;try{const u=await RelayNodesAPI.update(nd.id,{is_active:false});setRnNodes(prev=>prev.map(x=>x.id===nd.id?u:x));}catch(e){setRnError(e.message);}}} style={{padding:"4px 10px",borderRadius:6,border:`1px solid rgba(239,68,68,0.25)`,background:"rgba(239,68,68,0.06)",cursor:"pointer",fontSize:11,fontWeight:600,color:S.red}}>Deactivate</button>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+          </SC>
+
+          {/* ── Map view ── */}
+          <SC title="Relay Network Map" icon="🗺️" desc="Active relay nodes overlaid on the Lagos delivery map">
+	            <RelayNetworkMap
+	              height={380}
+	              zones={rnZones.filter(z => z.is_active)}
+	              relayNodes={rnNodes.filter(n => n.is_active)}
+	            />
+          </SC>
+        </>)}
       </div>)}
 
       {/* ═══ NOTIFICATIONS TAB ═══ */}
@@ -1677,6 +2799,8 @@ function SettingsScreen() {
         <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
           {[{label:"New order alert",desc:"Sound + desktop notification when a new order arrives",on:notifNew,set:setNotifNew},{label:"Unassigned order warning",desc:"Alert if an order is unassigned for more than 3 minutes",on:notifUnassigned,set:setNotifUnassigned},{label:"Delivery completion",desc:"Notification when a rider confirms delivery",on:notifComplete,set:setNotifComplete},{label:"COD settlement",desc:"Notification when COD is collected and settled to merchant wallet",on:notifCod,set:setNotifCod}].map((n,i,arr)=>(<div key={n.label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 20px",borderBottom:i<arr.length-1?`1px solid ${S.borderLight}`:"none"}}><div><div style={{fontSize:13,fontWeight:600}}>{n.label}</div><div style={{fontSize:11,color:S.textMuted,marginTop:2}}>{n.desc}</div></div><Toggle on={n.on} setOn={n.set}/></div>))}
         </div>
+        {saveError && <div style={{padding:"10px 14px",background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:8,fontSize:12,color:S.red,fontWeight:600,marginTop:8}}>⚠️ {saveError}</div>}
+        <div style={{display:"flex",justifyContent:"flex-end",gap:10,marginTop:8}}><button onClick={handleSave} disabled={saving||settingsLoading} style={{padding:"10px 32px",borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,boxShadow:"0 2px 8px rgba(232,168,56,0.25)",opacity:saving||settingsLoading?0.7:1}}>{saved?"✓ Saved!":saving?"Saving…":"Save Notifications"}</button></div>
       </div>)}
 
       {/* ═══ INTEGRATIONS TAB ═══ */}
@@ -1692,12 +2816,14 @@ function SettingsScreen() {
   );
 }
 // ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
+// onPlaceSelected(place) is called with { address, lat, lng } when a suggestion is picked
+function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
+  const geocoder = useRef(null);
   const dropdownRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -1705,6 +2831,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
     const init = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
+        geocoder.current = new window.google.maps.Geocoder();
       }
     };
     if (window.googleMapsLoaded) { init(); }
@@ -1752,7 +2879,19 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
       {showDropdown && suggestions.length > 0 && (
         <div ref={dropdownRef} style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:`1px solid ${S.border}`, borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:9999, maxHeight:220, overflowY:'auto', marginTop:4 }}>
           {suggestions.map((s, idx) => (
-            <div key={s.place_id} onClick={() => { onChange(s.description); setSuggestions([]); setShowDropdown(false); }}
+            <div key={s.place_id} onClick={() => {
+              onChange(s.description);
+              setSuggestions([]);
+              setShowDropdown(false);
+              if (onPlaceSelected && geocoder.current) {
+                geocoder.current.geocode({ placeId: s.place_id }, (results, status) => {
+                  if (status === 'OK' && results[0] && results[0].geometry) {
+                    const loc = results[0].geometry.location;
+                    onPlaceSelected({ address: s.description, lat: loc.lat(), lng: loc.lng() });
+                  }
+                });
+              }
+            }}
               style={{ padding:'10px 14px', cursor:'pointer', borderBottom: idx < suggestions.length-1 ? `1px solid ${S.border}` : 'none', fontSize:13, color:S.navy }}
               onMouseEnter={e => e.currentTarget.style.background='#f8fafc'}
               onMouseLeave={e => e.currentTarget.style.background='#fff'}>
@@ -1788,6 +2927,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [priceOverride, setPriceOverride] = useState("");
   const [codOn, setCodOn] = useState(false);
   const [codAmount, setCodAmount] = useState("");
+
+  // Relay order fields
+  const [isRelayOrder, setIsRelayOrder] = useState(false);
+  const [pickupLat, setPickupLat] = useState(null);
+  const [pickupLng, setPickupLng] = useState(null);
+  const [dropoffLat, setDropoffLat] = useState(null);
+  const [dropoffLng, setDropoffLng] = useState(null);
 
   // Pricing & route state
   const [vehiclePricing, setVehiclePricing] = useState({
@@ -1867,6 +3013,11 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         merchantId: merchantId || "",
         distance_km: routeDistance || 0,
         duration_minutes: routeDuration || 0,
+        is_relay_order: isRelayOrder,
+        pickup_lat: pickupLat,
+        pickup_lng: pickupLng,
+        dropoff_lat: dropoffLat,
+        dropoff_lng: dropoffLng,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -1912,13 +3063,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} placeholder="Enter pickup address..." style={iSt}/>
+            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{setPickupLat(p.lat);setPickupLng(p.lng);}} placeholder="Enter pickup address..." style={iSt}/>
           </div>
 
           {/* Dropoff */}
           <div style={{marginBottom:16}}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} placeholder="Enter delivery address..." style={iSt}/>
+            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{setDropoffLat(p.lat);setDropoffLng(p.lng);}} placeholder="Enter delivery address..." style={iSt}/>
           </div>
 
           {/* Receiver */}
@@ -1979,6 +3130,17 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
               </div>
             </div>
             {codOn&&<div style={{marginTop:10}}><input value={codAmount} onChange={e=>setCodAmount(e.target.value)} placeholder="COD amount (₦)" style={{...iSt,fontFamily:"'Space Mono',monospace",fontWeight:700}}/></div>}
+          </div>
+
+          {/* Relay Order */}
+          <div style={{marginBottom:16,padding:"14px 16px",borderRadius:10,border:isRelayOrder?`2px solid ${S.blue}`:`1px solid ${S.border}`,background:isRelayOrder?S.blueBg:"transparent"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div><div style={{fontSize:13,fontWeight:600}}>🔗 Relay Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Multi-hop via relay hubs (≤15 km per leg)</div></div>
+              <div onClick={()=>setIsRelayOrder(!isRelayOrder)} style={{width:40,height:22,borderRadius:11,cursor:"pointer",background:isRelayOrder?S.blue:S.border,position:"relative",flexShrink:0}}>
+                <div style={{width:18,height:18,borderRadius:"50%",background:"#fff",position:"absolute",top:2,left:isRelayOrder?20:2,transition:"left 0.2s",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}/>
+              </div>
+            </div>
+            {isRelayOrder&&<div style={{marginTop:8,fontSize:11,color:S.blue,fontWeight:500}}>ℹ Route will be generated by the dispatcher after order creation. Select addresses above to capture coordinates.</div>}
           </div>
 
           {/* Rider */}

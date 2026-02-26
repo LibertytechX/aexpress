@@ -4,15 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AX Merchant Portal</title>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.development.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
   <!-- Paystack Inline JS -->
   <script src="https://js.paystack.co/v1/inline.js"></script>
   <script>
     // Configuration for API Base URL
     // In a production environment, this could be injected by the deployment server
-    window.VITE_API_BASE_URL = 'https://www.orders.axpress.net/api';
+    window.VITE_API_BASE_URL = 'http://localhost:8000/api';
   </script>
   <!-- Google Maps JavaScript API with Places Library -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCZiuiOnAC157Uf5fkfNkSlydmFaOV7Y3U&libraries=places&callback=initMap" async defer></script>

@@ -61,7 +61,7 @@ class Command(BaseCommand):
         if not api_key:
             raise CommandError("ABLY_API_KEY is not configured in settings.")
 
-        channel_name = f"for-you"
+        channel_name = f"for-you-367901"
         payload = AssignedOrderSerializer(order).data
 
         self.stdout.write(
