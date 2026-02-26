@@ -27,7 +27,10 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from riders.views import publish_order_assigned_event
+        import asyncio
+        from django.conf import settings
+        from ably import AblyRest
+        from orders.serializers import AssignedOrderSerializer
 
         order_number = options["order_number"]
         rider_id = options.get("rider_id")
@@ -47,22 +50,34 @@ class Command(BaseCommand):
             except Rider.DoesNotExist:
                 raise CommandError(f"Rider '{rider_id}' not found.")
         elif order.rider:
-            rider = order.rider
+            _ = order.rider
         else:
             raise CommandError(
                 f"Order '{order_number}' has no assigned rider. "
                 "Pass --rider <rider_id> to specify one."
             )
 
+        api_key = getattr(settings, "ABLY_API_KEY", "")
+        if not api_key:
+            raise CommandError("ABLY_API_KEY is not configured in settings.")
+
+        channel_name = f"assigned-37c34182-7244-494f-a902-a1cd0a8e69cd"
+        payload = AssignedOrderSerializer(order).data
+
         self.stdout.write(
             f"Publishing order_assigned event for order {order.order_number} "
-            f"→ channel assigned-{rider.rider_id} ..."
+            f"→ channel {channel_name} ..."
         )
 
-        publish_order_assigned_event(order, rider)
+        async def _publish():
+            client = AblyRest(api_key)
+            channel = client.channels.get(
+                "for-you"
+            )
+            await channel.publish("order_assigned", payload)
+
+        asyncio.run(_publish())
 
         self.stdout.write(
-            self.style.SUCCESS(
-                f"✓ Published to Ably channel 'assigned-{rider.rider_id}'"
-            )
+            self.style.SUCCESS(f"✓ Published to Ably channel '{channel_name}'")
         )

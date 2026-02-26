@@ -51,7 +51,7 @@ class Command(BaseCommand):
             )
             return
 
-        channel_name = f"assigned-{rider.rider_id}"
+        channel_name = f"assigned-37c34182-7244-494f-a902-a1cd0a8e69cd"
         rider_name = (
             getattr(rider.user, "get_full_name", lambda: rider_id)() or rider_id
         )
