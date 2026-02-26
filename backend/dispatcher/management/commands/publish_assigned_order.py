@@ -61,7 +61,7 @@ class Command(BaseCommand):
         if not api_key:
             raise CommandError("ABLY_API_KEY is not configured in settings.")
 
-        channel_name = f"assigned-37c34182-7244-494f-a902-a1cd0a8e69cd"
+        channel_name = f"for-you"
         payload = AssignedOrderSerializer(order).data
 
         self.stdout.write(
@@ -71,9 +71,7 @@ class Command(BaseCommand):
 
         async def _publish():
             client = AblyRest(api_key)
-            channel = client.channels.get(
-                "for-you"
-            )
+            channel = client.channels.get(channel_name)
             await channel.publish("order_assigned", payload)
 
         asyncio.run(_publish())
