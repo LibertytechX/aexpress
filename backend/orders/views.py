@@ -1,3 +1,4 @@
+from dispatcher.models import SystemSettings
 import logging
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
@@ -27,6 +28,7 @@ from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
 
 logger = logging.getLogger(__name__)
+
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
@@ -1031,17 +1033,19 @@ class OrderCompleteView(APIView):
         if is_cod:
             # Sum COD across all deliveries for this order
             from django.db.models import Sum
-            cod_total = (
-                order.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"]
-                or Decimal("0.00")
-            )
+
+            cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
+                "cod_amount__sum"
+            ] or Decimal("0.00")
 
             if cod_total > 0:
                 try:
                     rider_wallet = Wallet.objects.get(user=rider.user)
                 except Wallet.DoesNotExist:
                     return Response(
-                        {"error": "Rider wallet not found. Cannot process COD payment."},
+                        {
+                            "error": "Rider wallet not found. Cannot process COD payment."
+                        },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
@@ -1126,7 +1130,9 @@ class OrderCompleteView(APIView):
                 data={"order_number": order_number, "net_earning": str(net_earning)},
             )
         except Exception as exc:
-            logger.warning(f"Failed to send completion notification to rider {rider.rider_id}: {exc}")
+            logger.warning(
+                f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
+            )
 
         return _advance_order(
             request, order_number, "Done", "Order Completed (All Deliveries)"

@@ -16,6 +16,9 @@ from .views import (
     RiderWalletInfoView,
     RiderTransactionListView,
     RiderLocationUpdateView,
+    RiderNotificationListView,
+    RiderNotificationDetailView,
+    RiderNotificationMarkReadView,
 )
 
 app_name = "riders"
@@ -60,5 +63,20 @@ urlpatterns = [
         "location/update/",
         RiderLocationUpdateView.as_view(),
         name="rider-location-update",
+    ),
+    path(
+        "notifications/",
+        RiderNotificationListView.as_view(),
+        name="rider-notifications",
+    ),
+    path(
+        "notifications/<uuid:pk>/",
+        RiderNotificationDetailView.as_view(),
+        name="rider-notification-detail",
+    ),
+    path(
+        "notifications/<uuid:pk>/read/",
+        RiderNotificationMarkReadView.as_view(),
+        name="rider-notification-mark-read",
     ),
 ]
