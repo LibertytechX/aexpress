@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
-from backend.orders.views import OrderCompleteView
+from orders.views import OrderCompleteView
 from django.contrib import admin
 from django.urls import path, include
 
