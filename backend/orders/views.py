@@ -241,7 +241,8 @@ class MultiDropView(APIView):
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        total_amount = unit_fare * num_deliveries
 
         # Create order
         order = Order.objects.create(
@@ -372,7 +373,8 @@ class BulkImportView(APIView):
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        total_amount = unit_fare * num_deliveries
 
         # Create order
         order = Order.objects.create(
