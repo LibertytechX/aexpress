@@ -2632,10 +2632,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [step, setStep] = useState(1); // 1=form, 2=review
 
   // ─── Vehicle pricing from backend ───
+  // Defaults mirror the production tiered pricing so the UI is correct even
+  // before the API response arrives (or if it fails).
   const [vehiclePricing, setVehiclePricing] = useState({
-    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
-    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
-    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+    Bike: {
+      base_fare: 0, rate_per_km: 275, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 6, floor_fee: 1700,
+        tiers: [{ max_km: 10, rate: 275 }, { max_km: 15, rate: 235 }, { rate: 200 }] }
+    },
+    Car: {
+      base_fare: 0, rate_per_km: 350, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 3, floor_fee: 2500,
+        tiers: [{ max_km: 8, rate: 350 }, { max_km: 15, rate: 300 }, { rate: 250 }] }
+    },
+    Van: {
+      base_fare: 0, rate_per_km: 500, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 3, floor_fee: 5000,
+        tiers: [{ max_km: 8, rate: 500 }, { max_km: 15, rate: 450 }, { rate: 400 }] }
+    },
   });
 
   // ─── Early price estimation (Step 1) ───
