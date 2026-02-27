@@ -531,7 +531,7 @@ class OrderDetailView(APIView):
             order = (
                 Order.objects.select_related("vehicle")
                 .prefetch_related("deliveries")
-                .get(order_number=order_number, user=request.user)
+                .get(order_number=order_number)
             )
         except Order.DoesNotExist:
             return Response(
