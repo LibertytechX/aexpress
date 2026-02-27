@@ -213,6 +213,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
             "In Transit":  "Started",
+            "At Dropoff":  "Arrived",   # rider is at the dropoff location
             "Delivered":   "Done",
             "Cancelled":   "CustomerCanceled",
             "Picked Up":   "PickedUp",  # distinct stage; rider app uses this too
@@ -224,6 +225,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             "Assigned":         ("assigned",   "blue"),
             "PickedUp":         ("picked_up",  "blue"),
             "Started":          ("in_transit", "gold"),
+            "Arrived":          ("at_dropoff", "orange"),
             "Done":             ("delivered",  "green"),
             "CustomerCanceled": ("cancelled",  "red"),
             "RiderCanceled":    ("cancelled",  "red"),
@@ -244,6 +246,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         ORDER_TO_DELIVERY_STATUS = {
             "PickedUp":         "InTransit",   # rider has picked up → delivery in transit
             "Started":          "InTransit",
+            "Arrived":          "InTransit",   # rider at dropoff; delivery still in progress
             "Done":             "Delivered",
             "CustomerCanceled": "Canceled",
             "RiderCanceled":    "Canceled",

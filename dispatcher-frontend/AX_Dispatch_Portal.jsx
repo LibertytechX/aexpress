@@ -295,7 +295,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
+const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -1181,10 +1181,17 @@ export default function AXDispatchPortal() {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
       await OrdersAPI.updateStatus(oid, ns);
-      updateOrder(oid, { status: ns });
-      addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
-      if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-      if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+      // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
+      if (ns === "Picked Up") {
+        await OrdersAPI.updateStatus(oid, "In Transit");
+        updateOrder(oid, { status: "In Transit" });
+        addLog(oid, "Picked up → In Transit", "Dispatch", "status");
+      } else {
+        updateOrder(oid, { status: ns });
+        addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
+        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+      }
     } catch (err) {
       console.error("Failed to update status:", err);
       alert("Failed to update status. Please try again.");
@@ -1217,7 +1224,7 @@ export default function AXDispatchPortal() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
-          {[{ v: orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
@@ -1289,7 +1296,7 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   });
   // Fall back to all orders if today filter returns nothing (e.g. older data)
   const displayOrders = today.length > 0 ? today : orders;
-  const active = orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status));
+  const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
   const delivered = displayOrders.filter(o => o.status === "Delivered");
   const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
   const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
@@ -1403,7 +1410,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} />;
   }
 
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "Delivered", "Cancelled", "Failed"];
+  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
   const filtered = orders.filter(o => {
     if (statusFilter !== "All" && o.status !== statusFilter) return false;
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
@@ -1473,7 +1480,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   // Status flow for progression
   const nextStatuses = () => {
-    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"];
+    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
     const idx = flow.indexOf(order.status);
     const opts = [];
     if (idx >= 0 && idx < flow.length - 1) opts.push(flow[idx + 1]);
@@ -1548,8 +1555,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            {["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"].map((st, i, arr) => {
-              const idx = arr.indexOf(order.status);
+            {["Pending", "Assigned", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
+              // "Picked Up" is a transient state — treat it as "In Transit" on the bar
+              const barStatus = order.status === "Picked Up" ? "In Transit" : order.status;
+              const idx = arr.indexOf(barStatus);
               const done = i <= idx;
               const current = i === idx;
               return (

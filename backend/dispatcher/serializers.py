@@ -281,6 +281,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "Assigned":         "Assigned",
             "PickedUp":         "Picked Up",   # rider app can set this directly
             "Started":          "In Transit",
+            "Arrived":          "At Dropoff",  # rider is at the dropoff location
             "Done":             "Delivered",
             "CustomerCanceled": "Cancelled",
             "RiderCanceled":    "Cancelled",
