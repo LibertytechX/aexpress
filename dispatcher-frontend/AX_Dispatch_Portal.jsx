@@ -3545,6 +3545,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 function TeamsScreen({ dispatchers, onDispatcherCreated }) {
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [toast, setToast] = useState("");
 
   const filtered = dispatchers.filter(d => {
     const q = search.toLowerCase();
@@ -3556,7 +3557,7 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
   });
 
   return (
-    <div style={{ animation: "fadeIn 0.3s ease" }}>
+    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%" }}>
       {/* Header bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div>
@@ -3631,8 +3632,19 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
       {showAdd && (
         <AddDispatcherModal
           onClose={() => setShowAdd(false)}
-          onCreated={(d) => { onDispatcherCreated(d); setShowAdd(false); }}
+          onCreated={(d) => {
+            onDispatcherCreated(d);
+            setShowAdd(false);
+            setToast(`Dispatcher ${d.name || ''} created successfully`);
+            setTimeout(() => setToast(""), 3500);
+          }}
         />
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", background: S.navy, color: "#fff", padding: "12px 24px", borderRadius: 30, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 2000, animation: "fadeIn 0.3s ease", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: S.green }}>{I.check}</span> {toast}
+        </div>
       )}
     </div>
   );
