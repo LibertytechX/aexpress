@@ -3042,9 +3042,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       vehicle: vehicle,
       payMethod: payMethod,
       notes: notes,
-      // Include route information for pricing calculation
-      distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0,
+      // Include route information for pricing calculation.
+      // Prefer the map-calculated distance (Step 2); fall back to the early
+      // estimate (Step 1) so the backend never receives 0 when the user
+      // submits before DeliveryMapView finishes its geocode/route request.
+      distance_km: routeDistance || earlyRouteDistance || 0,
+      duration_minutes: routeDuration || earlyRouteDuration || 0,
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
     };
