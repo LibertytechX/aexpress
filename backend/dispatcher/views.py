@@ -3,7 +3,7 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed, Zone, RelayNode
+from .models import Rider, ActivityFeed, Zone, RelayNode, DispatcherProfile
 from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
@@ -111,7 +111,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         response_serializer = self.OrderSerializer(order, context={"request": request})
 
         # Emit activity event
-        merchant_name = getattr(order.user, "business_name", None) or getattr(order.user, "contact_name", None) or "Unknown"
+        merchant_name = (
+            getattr(order.user, "business_name", None)
+            or getattr(order.user, "contact_name", None)
+            or "Unknown"
+        )
         pickup = order.pickup_address or ""
         first_delivery = order.deliveries.first()
         dropoff = (first_delivery.dropoff_address if first_delivery else "") or ""
@@ -293,17 +297,26 @@ class OrderViewSet(viewsets.ModelViewSet):
                         order.pickup_latitude = geo["lat"]
                         order.pickup_longitude = geo["lng"]
 
-            if first_delivery and (not first_delivery.dropoff_latitude or not first_delivery.dropoff_longitude):
+            if first_delivery and (
+                not first_delivery.dropoff_latitude
+                or not first_delivery.dropoff_longitude
+            ):
                 if first_delivery.dropoff_address:
                     geo = geocode_address(first_delivery.dropoff_address)
                     if geo:
                         first_delivery.dropoff_latitude = geo["lat"]
                         first_delivery.dropoff_longitude = geo["lng"]
-                        first_delivery.save(update_fields=["dropoff_latitude", "dropoff_longitude"])
+                        first_delivery.save(
+                            update_fields=["dropoff_latitude", "dropoff_longitude"]
+                        )
 
             # Check again after geocoding attempt
             pickup_ok = order.pickup_latitude and order.pickup_longitude
-            dropoff_ok = first_delivery and first_delivery.dropoff_latitude and first_delivery.dropoff_longitude
+            dropoff_ok = (
+                first_delivery
+                and first_delivery.dropoff_latitude
+                and first_delivery.dropoff_longitude
+            )
 
             if not pickup_ok or not dropoff_ok:
                 missing = []
@@ -312,13 +325,22 @@ class OrderViewSet(viewsets.ModelViewSet):
                 if not dropoff_ok:
                     missing.append("dropoff")
                 return Response(
-                    {"error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."},
+                    {
+                        "error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             order.is_relay_order = True
             order.routing_status = Order.RoutingStatus.PENDING
-            order.save(update_fields=["is_relay_order", "routing_status", "pickup_latitude", "pickup_longitude"])
+            order.save(
+                update_fields=[
+                    "is_relay_order",
+                    "routing_status",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                ]
+            )
 
         # If already ready with legs and not a forced retry, return current state
         if (
@@ -342,6 +364,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Re-fetch with all needed relations so the serializer includes relay legs
         from orders.models import Order as OrderModel
+
         order = (
             OrderModel.objects.prefetch_related(
                 "legs",
@@ -349,7 +372,9 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "legs__end_relay_node",
                 "deliveries",
             )
-            .select_related("user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider")
+            .select_related(
+                "user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider"
+            )
             .get(pk=order.pk)
         )
 
@@ -536,3 +561,58 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
         if zone_id:
             qs = qs.filter(zone__id=zone_id)
         return qs
+
+
+class DispatcherListCreateView(views.APIView):
+    """List all dispatchers (GET) or create a new dispatcher user (POST)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        from .serializers import DispatcherProfileSerializer
+
+        profiles = DispatcherProfile.objects.select_related("user").order_by(
+            "-created_at"
+        )
+        serializer = DispatcherProfileSerializer(profiles, many=True)
+        return Response(serializer.data)
+
+    def post(self, request):
+        from .serializers import DispatcherSignupSerializer, DispatcherProfileSerializer
+
+        serializer = DispatcherSignupSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            # Return the new dispatcher profile
+            profile = DispatcherProfile.objects.get(user=user)
+            return Response(
+                DispatcherProfileSerializer(profile).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class DispatcherDetailView(views.APIView):
+    """Get or delete a specific dispatcher profile by its UUID."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, pk):
+        from django.shortcuts import get_object_or_404
+
+        return get_object_or_404(DispatcherProfile, pk=pk)
+
+    def get(self, request, pk):
+        from .serializers import DispatcherProfileSerializer
+
+        profile = self.get_object(pk)
+        return Response(DispatcherProfileSerializer(profile).data)
+
+    def delete(self, request, pk):
+        profile = self.get_object(pk)
+        # Soft-delete: deactivate the user so they can no longer log in
+        profile.user.is_active = False
+        profile.user.save(update_fields=["is_active"])
+        return Response(
+            {"detail": "Dispatcher deactivated."}, status=status.HTTP_200_OK
+        )

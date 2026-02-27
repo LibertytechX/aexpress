@@ -11,6 +11,8 @@ from .views import (
     AblyTokenView,
     ZoneViewSet,
     RelayNodeViewSet,
+    DispatcherListCreateView,
+    DispatcherDetailView,
 )
 
 router = DefaultRouter()
@@ -26,5 +28,15 @@ urlpatterns = [
     path("s3/presigned-url/", S3PresignedUrlView.as_view(), name="s3-presigned-url"),
     path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
     path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
+    path(
+        "dispatchers/",
+        DispatcherListCreateView.as_view(),
+        name="dispatcher-list-create",
+    ),
+    path(
+        "dispatchers/<uuid:pk>/",
+        DispatcherDetailView.as_view(),
+        name="dispatcher-detail",
+    ),
     path("", include(router.urls)),
 ]

@@ -348,3 +348,49 @@ export const RelayNodesAPI = {
     }
 };
 
+
+// ─── DISPATCHERS ─────────────────────────────────────────────────
+export const DispatchersAPI = {
+    async getAll() {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch dispatchers');
+        const data = await res.json();
+        return data.map(d => ({
+            id: d.id,
+            name: d.name || 'Unknown',
+            phone: d.phone || '',
+            email: d.email || '',
+            isActive: d.is_active !== false,
+            joined: d.created_at ? new Date(d.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+        }));
+    },
+
+    async create(data) {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        const json = await res.json();
+        if (!res.ok) throw json;
+        return {
+            id: json.id,
+            name: json.name || data.contact_name || 'Unknown',
+            phone: json.phone || data.phone || '',
+            email: json.email || data.email || '',
+            isActive: json.is_active !== false,
+            joined: json.created_at ? new Date(json.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
+        };
+    },
+
+    async remove(id) {
+        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to deactivate dispatcher');
+        return await res.json();
+    }
+};
