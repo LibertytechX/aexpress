@@ -277,26 +277,30 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj):
         order_map = {
-            "Pending": "Pending",
-            "Assigned": "Assigned",
-            "Started": "In Transit",
-            "Done": "Delivered",
+            "Pending":          "Pending",
+            "Assigned":         "Assigned",
+            "PickedUp":         "Picked Up",   # rider app can set this directly
+            "Started":          "In Transit",
+            "Done":             "Delivered",
             "CustomerCanceled": "Cancelled",
-            "RiderCanceled": "Cancelled",
-            "Failed": "Failed",
+            "RiderCanceled":    "Cancelled",
+            "Failed":           "Failed",
         }
         order_status = order_map.get(obj.status, "Pending")
 
-        # If the Order-level status hasn't advanced past Assigned, check the
-        # Delivery's own status so changes made there are reflected here too.
-        if order_status in ("Pending", "Assigned"):
+        # Safety fallback: if the Delivery record has advanced further than the
+        # Order (e.g. rider-app update vs dispatcher update out of sync), prefer
+        # the more advanced delivery status.  Covers Pending, Assigned, and
+        # In Transit so a rider-completed delivery surfaces as "Delivered" even
+        # when Order.status is still "Started".
+        if order_status in ("Pending", "Assigned", "In Transit"):
             first = obj.deliveries.first()
             if first:
                 delivery_map = {
                     "InTransit": "In Transit",
                     "Delivered": "Delivered",
-                    "Failed": "Failed",
-                    "Canceled": "Cancelled",
+                    "Failed":    "Failed",
+                    "Canceled":  "Cancelled",
                 }
                 delivery_status = delivery_map.get(first.status)
                 if delivery_status:

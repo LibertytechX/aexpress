@@ -212,21 +212,22 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
-            "In Transit": "Started",
-            "Delivered": "Done",
-            "Cancelled": "CustomerCanceled",
-            "Picked Up": "Started",  # "Picked Up" maps to Started (in transit)
+            "In Transit":  "Started",
+            "Delivered":   "Done",
+            "Cancelled":   "CustomerCanceled",
+            "Picked Up":   "PickedUp",  # distinct stage; rider app uses this too
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
         STATUS_MAP = {
-            "Pending": ("new_order", "gold"),
-            "Assigned": ("assigned", "blue"),
-            "Started": ("in_transit", "gold"),
-            "Done": ("delivered", "green"),
-            "CustomerCanceled": ("cancelled", "red"),
-            "RiderCanceled": ("cancelled", "red"),
-            "Failed": ("failed", "red"),
+            "Pending":          ("new_order",  "gold"),
+            "Assigned":         ("assigned",   "blue"),
+            "PickedUp":         ("picked_up",  "blue"),
+            "Started":          ("in_transit", "gold"),
+            "Done":             ("delivered",  "green"),
+            "CustomerCanceled": ("cancelled",  "red"),
+            "RiderCanceled":    ("cancelled",  "red"),
+            "Failed":           ("failed",     "red"),
         }
 
         if new_status not in STATUS_MAP:
@@ -238,6 +239,19 @@ class OrderViewSet(viewsets.ModelViewSet):
         old_status = order.status
         order.status = new_status
         order.save(update_fields=["status"])
+
+        # Keep Delivery records in sync so the serializer fallback stays consistent.
+        ORDER_TO_DELIVERY_STATUS = {
+            "PickedUp":         "InTransit",   # rider has picked up → delivery in transit
+            "Started":          "InTransit",
+            "Done":             "Delivered",
+            "CustomerCanceled": "Canceled",
+            "RiderCanceled":    "Canceled",
+            "Failed":           "Failed",
+        }
+        delivery_sync_status = ORDER_TO_DELIVERY_STATUS.get(new_status)
+        if delivery_sync_status:
+            order.deliveries.all().update(status=delivery_sync_status)
 
         event_type, color = STATUS_MAP[new_status]
         rider_name = None

@@ -1314,17 +1314,18 @@ class DeliveryCompleteView(APIView):
         delivery.delivered_at = timezone.now()
         delivery.save(update_fields=["status", "delivered_at"])
 
-        # Check if all deliveries for this order are completed
-        # all_delivered = not order.deliveries.exclude(status="Delivered").exists()
-        # if all_delivered:
-        #     order.status = "Done"
-        #     order.save(update_fields=["status", "updated_at"])
+        # Advance Order to Done once all deliveries are marked Delivered.
+        all_delivered = not order.deliveries.exclude(status="Delivered").exists()
+        if all_delivered:
+            order.status = "Done"
+            order.completed_at = order.completed_at or timezone.now()
+            order.save(update_fields=["status", "updated_at", "completed_at"])
 
-        #     OrderEvent.objects.create(
-        #         order=order,
-        #         event="Order Completed",
-        #         description="All deliveries completed.",
-        #     )
+            OrderEvent.objects.create(
+                order=order,
+                event="Order Completed",
+                description="All deliveries completed.",
+            )
 
         # Update rider location if provided
         rider_profile = getattr(request.user, "rider_profile", None)
