@@ -52,7 +52,7 @@ urlpatterns = [
     path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
     path("start/", OrderStartView.as_view(), name="order_start"),
     path("arrived/", OrderArrivedView.as_view(), name="order_arrived"),
-    path("complete/", OrderCompleteView.as_view(), name="order_complete"),
+    path("<str:order_number>/complete/", OrderCompleteView.as_view(), name="order_complete"),
     path(
         "delivery/<uuid:delivery_id>/start/",
         DeliveryStartView.as_view(),

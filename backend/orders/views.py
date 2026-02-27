@@ -1004,8 +1004,7 @@ class OrderCompleteView(APIView):
     DEFAULT_COMMISSION_PCT = Decimal("20.00")
 
     @transaction.atomic
-    def post(self, request):
-        order_number = request.data.get("order_number")
+    def post(self, request, order_number):
         if not order_number:
             return Response(
                 {"error": "order_number is required"},
