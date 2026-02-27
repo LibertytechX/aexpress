@@ -56,7 +56,7 @@ export const AuthAPI = {
             try {
                 const keys = await caches.keys();
                 await Promise.all(keys.map(k => caches.delete(k)));
-            } catch (_) {}
+            } catch (_) { }
         }
     },
 
@@ -389,4 +389,27 @@ export const RelayNodesAPI = {
         if (!res.ok) throw new Error('Failed to delete relay node');
     }
 };
+
+// ─── DISPATCHERS ─────────────────────────────────────────────────
+export const DispatchersAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/dispatchers/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch dispatchers');
+        return await res.json();
+    },
+
+    async create(fields) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/dispatchers/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(fields)
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    }
+};
+
 

@@ -91,7 +91,9 @@ class OrderOfferListView(APIView):
     def get(self, request):
         # now = timezone.now()
         offers = (
-            OrderOffer.objects.filter(status="pending", rider__isnull=True)
+            OrderOffer.objects.filter(
+                status="pending", rider__isnull=True, order__status="pending"
+            )
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
             .order_by("-created_at")

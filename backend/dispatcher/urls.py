@@ -11,6 +11,7 @@ from .views import (
     AblyTokenView,
     ZoneViewSet,
     RelayNodeViewSet,
+    DispatcherViewSet,
 )
 
 router = DefaultRouter()
@@ -19,6 +20,7 @@ router.register(r"orders", OrderViewSet)
 router.register(r"merchants", MerchantViewSet)
 router.register(r"zones", ZoneViewSet)
 router.register(r"relay-nodes", RelayNodeViewSet)
+router.register(r"dispatchers", DispatcherViewSet, basename="dispatcher")
 
 urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),

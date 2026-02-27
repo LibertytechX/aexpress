@@ -27,6 +27,72 @@ class DispatcherSignupSerializer(serializers.ModelSerializer):
         return user
 
 
+class DispatcherListSerializer(serializers.ModelSerializer):
+    """Read-only serializer for listing dispatcher profiles."""
+
+    name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    role = serializers.SerializerMethodField()
+    joined = serializers.DateTimeField(
+        source="created_at", format="%Y-%m-%d", read_only=True
+    )
+    is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+
+    class Meta:
+        model = DispatcherProfile
+        fields = ["id", "name", "phone", "email", "role", "joined", "is_active"]
+
+    def get_name(self, obj):
+        return (
+            obj.user.contact_name
+            or f"{obj.user.first_name} {obj.user.last_name}".strip()
+            or obj.user.phone
+        )
+
+    def get_role(self, obj):
+        return "Dispatcher"
+
+
+class DispatcherCreateSerializer(serializers.Serializer):
+    """Write serializer: create a User with usertype=Dispatcher and its DispatcherProfile."""
+
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=20)
+    email = serializers.EmailField()
+    password = serializers.CharField(
+        min_length=6, write_only=True, style={"input_type": "password"}
+    )
+
+    def validate_phone(self, value):
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "A user with this phone number already exists."
+            )
+        return value
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def create(self, validated_data):
+        first_name = validated_data["first_name"]
+        last_name = validated_data["last_name"]
+        user = User.objects.create_user(
+            phone=validated_data["phone"],
+            email=validated_data["email"],
+            password=validated_data["password"],
+            first_name=first_name,
+            last_name=last_name,
+            contact_name=f"{first_name} {last_name}".strip(),
+            usertype="Dispatcher",
+        )
+        profile = DispatcherProfile.objects.create(user=user)
+        return profile
+
+
 class RiderSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="user.contact_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
@@ -143,7 +209,6 @@ class OrderSerializer(serializers.ModelSerializer):
             "customer",
             "customerPhone",
             "vehicle",
-
             # Relay routing details (populated for relay orders)
             "is_relay_order",
             "routing_status",
@@ -290,13 +355,23 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     duration_minutes = serializers.IntegerField(write_only=True, required=False)
 
     # Optional lat/lng to skip geocoding
-    pickup_lat = serializers.FloatField(write_only=True, required=False, allow_null=True)
-    pickup_lng = serializers.FloatField(write_only=True, required=False, allow_null=True)
-    dropoff_lat = serializers.FloatField(write_only=True, required=False, allow_null=True)
-    dropoff_lng = serializers.FloatField(write_only=True, required=False, allow_null=True)
+    pickup_lat = serializers.FloatField(
+        write_only=True, required=False, allow_null=True
+    )
+    pickup_lng = serializers.FloatField(
+        write_only=True, required=False, allow_null=True
+    )
+    dropoff_lat = serializers.FloatField(
+        write_only=True, required=False, allow_null=True
+    )
+    dropoff_lng = serializers.FloatField(
+        write_only=True, required=False, allow_null=True
+    )
 
     # Relay
-    is_relay_order = serializers.BooleanField(write_only=True, required=False, default=False)
+    is_relay_order = serializers.BooleanField(
+        write_only=True, required=False, default=False
+    )
 
     class Meta:
         from orders.models import Order
@@ -531,13 +606,16 @@ class RiderOnboardingSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     password = serializers.CharField(
-        required=False, write_only=True, min_length=6,
+        required=False,
+        write_only=True,
+        min_length=6,
         style={"input_type": "password"},
-        help_text="If omitted a random password is generated and e-mailed to the rider."
+        help_text="If omitted a random password is generated and e-mailed to the rider.",
     )
     is_verified = serializers.BooleanField(
-        required=False, default=False,
-        help_text="Mark phone and email as verified immediately."
+        required=False,
+        default=False,
+        help_text="Mark phone and email as verified immediately.",
     )
 
     # Rider Profile fields
@@ -569,14 +647,18 @@ class RiderOnboardingSerializer(serializers.Serializer):
 
     def validate_email(self, value):
         from authentication.models import User
+
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
     def validate_phone(self, value):
         from authentication.models import User
+
         if User.objects.filter(phone=value).exists():
-            raise serializers.ValidationError("A user with this phone number already exists.")
+            raise serializers.ValidationError(
+                "A user with this phone number already exists."
+            )
         return value
 
     def __init__(self, *args, **kwargs):
@@ -601,7 +683,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
         # Use provided password or generate a random one
         password = validated_data.pop("password", None)
         if not password:
-            password = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+            password = "".join(
+                random.choices(string.ascii_letters + string.digits, k=8)
+            )
 
         from django.db import IntegrityError
 
@@ -623,10 +707,16 @@ class RiderOnboardingSerializer(serializers.Serializer):
                 user.save(update_fields=["phone_verified", "email_verified"])
         except IntegrityError as e:
             if "phone" in str(e).lower():
-                raise serializers.ValidationError({"phone": "A user with this phone number already exists."})
+                raise serializers.ValidationError(
+                    {"phone": "A user with this phone number already exists."}
+                )
             if "email" in str(e).lower():
-                raise serializers.ValidationError({"email": "A user with this email already exists."})
-            raise serializers.ValidationError("An error occurred while creating the user.")
+                raise serializers.ValidationError(
+                    {"email": "A user with this email already exists."}
+                )
+            raise serializers.ValidationError(
+                "An error occurred while creating the user."
+            )
 
         # Create Rider Profile
         rider = Rider.objects.create(user=user, **validated_data)
@@ -689,7 +779,15 @@ class RiderOnboardingSerializer(serializers.Serializer):
 class ActivityFeedSerializer(serializers.ModelSerializer):
     class Meta:
         model = ActivityFeed
-        fields = ["id", "event_type", "order_id", "text", "color", "metadata", "created_at"]
+        fields = [
+            "id",
+            "event_type",
+            "order_id",
+            "text",
+            "color",
+            "metadata",
+            "created_at",
+        ]
 
 
 class ZoneSerializer(serializers.ModelSerializer):
@@ -698,8 +796,14 @@ class ZoneSerializer(serializers.ModelSerializer):
     class Meta:
         model = Zone
         fields = [
-            "id", "name", "center_lat", "center_lng", "radius_km",
-            "is_active", "relay_nodes_count", "created_at",
+            "id",
+            "name",
+            "center_lat",
+            "center_lng",
+            "radius_km",
+            "is_active",
+            "relay_nodes_count",
+            "created_at",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -713,7 +817,15 @@ class RelayNodeSerializer(serializers.ModelSerializer):
     class Meta:
         model = RelayNode
         fields = [
-            "id", "name", "address", "latitude", "longitude",
-            "zone", "zone_name", "catchment_radius_km", "is_active", "created_at",
+            "id",
+            "name",
+            "address",
+            "latitude",
+            "longitude",
+            "zone",
+            "zone_name",
+            "catchment_radius_km",
+            "is_active",
+            "created_at",
         ]
         read_only_fields = ["id", "created_at"]

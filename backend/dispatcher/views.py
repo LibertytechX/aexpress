@@ -111,7 +111,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         response_serializer = self.OrderSerializer(order, context={"request": request})
 
         # Emit activity event
-        merchant_name = getattr(order.user, "business_name", None) or getattr(order.user, "contact_name", None) or "Unknown"
+        merchant_name = (
+            getattr(order.user, "business_name", None)
+            or getattr(order.user, "contact_name", None)
+            or "Unknown"
+        )
         pickup = order.pickup_address or ""
         first_delivery = order.deliveries.first()
         dropoff = (first_delivery.dropoff_address if first_delivery else "") or ""
@@ -293,17 +297,26 @@ class OrderViewSet(viewsets.ModelViewSet):
                         order.pickup_latitude = geo["lat"]
                         order.pickup_longitude = geo["lng"]
 
-            if first_delivery and (not first_delivery.dropoff_latitude or not first_delivery.dropoff_longitude):
+            if first_delivery and (
+                not first_delivery.dropoff_latitude
+                or not first_delivery.dropoff_longitude
+            ):
                 if first_delivery.dropoff_address:
                     geo = geocode_address(first_delivery.dropoff_address)
                     if geo:
                         first_delivery.dropoff_latitude = geo["lat"]
                         first_delivery.dropoff_longitude = geo["lng"]
-                        first_delivery.save(update_fields=["dropoff_latitude", "dropoff_longitude"])
+                        first_delivery.save(
+                            update_fields=["dropoff_latitude", "dropoff_longitude"]
+                        )
 
             # Check again after geocoding attempt
             pickup_ok = order.pickup_latitude and order.pickup_longitude
-            dropoff_ok = first_delivery and first_delivery.dropoff_latitude and first_delivery.dropoff_longitude
+            dropoff_ok = (
+                first_delivery
+                and first_delivery.dropoff_latitude
+                and first_delivery.dropoff_longitude
+            )
 
             if not pickup_ok or not dropoff_ok:
                 missing = []
@@ -312,13 +325,22 @@ class OrderViewSet(viewsets.ModelViewSet):
                 if not dropoff_ok:
                     missing.append("dropoff")
                 return Response(
-                    {"error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."},
+                    {
+                        "error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             order.is_relay_order = True
             order.routing_status = Order.RoutingStatus.PENDING
-            order.save(update_fields=["is_relay_order", "routing_status", "pickup_latitude", "pickup_longitude"])
+            order.save(
+                update_fields=[
+                    "is_relay_order",
+                    "routing_status",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                ]
+            )
 
         # If already ready with legs and not a forced retry, return current state
         if (
@@ -342,6 +364,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Re-fetch with all needed relations so the serializer includes relay legs
         from orders.models import Order as OrderModel
+
         order = (
             OrderModel.objects.prefetch_related(
                 "legs",
@@ -349,7 +372,9 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "legs__end_relay_node",
                 "deliveries",
             )
-            .select_related("user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider")
+            .select_related(
+                "user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider"
+            )
             .get(pk=order.pk)
         )
 
@@ -536,3 +561,33 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
         if zone_id:
             qs = qs.filter(zone__id=zone_id)
         return qs
+
+
+class DispatcherViewSet(viewsets.ViewSet):
+    """List and create dispatcher users / profiles."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        from .models import DispatcherProfile
+        from .serializers import DispatcherListSerializer
+
+        qs = (
+            DispatcherProfile.objects.all()
+            .select_related("user")
+            .order_by("-created_at")
+        )
+        serializer = DispatcherListSerializer(qs, many=True)
+        return Response(serializer.data)
+
+    def create(self, request):
+        from .serializers import DispatcherCreateSerializer, DispatcherListSerializer
+
+        serializer = DispatcherCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            profile = serializer.save()
+            return Response(
+                DispatcherListSerializer(profile).data,
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
