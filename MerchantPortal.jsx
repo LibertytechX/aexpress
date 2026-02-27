@@ -219,6 +219,8 @@ function MerchantPortal() {
   const [verificationToken, setVerificationToken] = useState(null);
   const [passwordResetToken, setPasswordResetToken] = useState(null);
 
+  const ablyRef = useRef(null);
+
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
     setTimeout(() => setNotification(null), 3000);
@@ -266,6 +268,75 @@ function MerchantPortal() {
       loadTransactions();
     }
   }, [screen, currentUser]);
+
+  // ─── Ably real-time order updates ───────────────────────────────
+  useEffect(() => {
+    // Disconnect if logged out
+    if (!currentUser) {
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      return;
+    }
+
+    let cancelled = false;
+    let localAbly = null;
+    let pollInterval = null;
+
+    const setupAbly = async () => {
+      let ablyActive = false;
+      try {
+        if (!window.Ably) throw new Error('[Ably] SDK not loaded — check index.html script tag');
+        if (cancelled) return;
+
+        console.log('[Ably] Initializing Merchant Realtime client...');
+        const ably = new window.Ably.Realtime({
+          authCallback: async (_, callback) => {
+            console.log('[Ably] authCallback called — fetching token...');
+            try {
+              const td = await window.API.Activity.getAblyToken();
+              console.log('[Ably] Token received, first 20 chars:', String(td.token).slice(0, 20));
+              callback(null, td.token);
+            } catch (e) {
+              console.error('[Ably] authCallback error:', e);
+              callback(e, null);
+            }
+          },
+        });
+        localAbly = ably;
+        ablyRef.current = ably;
+
+        // Log connection state changes
+        ably.connection.on('connecting',   () => console.log('[Ably] Connecting...'));
+        ably.connection.on('connected',    () => console.log('[Ably] Connected! ✅'));
+        ably.connection.on('disconnected', (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
+        ably.connection.on('failed',       (s) => console.error('[Ably] FAILED:', s?.reason?.message));
+
+        const ch = ably.channels.get('dispatch-feed');
+        // In Ably v2, ch.subscribe() returns a Promise — must be awaited
+        await ch.subscribe('activity', () => {
+          loadOrders();
+        });
+        ablyActive = true;
+        console.log('[Ably] Merchant subscribed to dispatch-feed ✅');
+      } catch (err) {
+        console.error('[Ably] Setup failed, falling back to 15s polling:', err);
+      }
+
+      // Polling fallback when Ably is unavailable
+      if (!ablyActive && !cancelled) {
+        console.log('[Ably] Using 15s polling fallback.');
+        pollInterval = setInterval(() => { loadOrders(); }, 15000);
+      }
+    };
+
+    setupAbly();
+
+    return () => {
+      cancelled = true;
+      if (localAbly) { localAbly.close(); localAbly = null; }
+      if (ablyRef.current) { ablyRef.current.close(); ablyRef.current = null; }
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [currentUser]); // re-run on login / logout
 
   const loadOrders = async () => {
     try {
@@ -543,7 +614,8 @@ function MerchantPortal() {
           virtualAccount={bankTransferVirtualAccount}
           onClose={() => setBankTransferModal(false)}
           onSuccess={() => {
-            showNotif('Payment confirmation received! Your wallet will be credited once verified.', 'success');
+            setBankTransferModal(false);
+            showNotif('Transfer recorded! Your wallet will be credited once the bank confirms payment.', 'success');
             loadWalletBalance();
             loadTransactions();
           }}
@@ -685,66 +757,112 @@ function MerchantPortal() {
               balance={walletBalance}
               currentUser={currentUser}
               onPlaceOrder={async (orderData) => {
-                try {
-                  console.log('🎯 onPlaceOrder called with:', orderData);
+                // ─── Helper: call API and navigate on success ─────────────
+                const doCreateOrder = async (data) => {
+                  // Normalise payment method — pay_with_transfer is funded into
+                  // the wallet first, so the order itself is charged as 'wallet'
+                  const paymentMethod = data.payMethod === 'pay_with_transfer' ? 'wallet' : data.payMethod;
                   let response;
-
-                  // Call appropriate API based on order mode
-                  if (orderData.mode === 'quick') {
+                  if (data.mode === 'quick') {
                     const apiPayload = {
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      dropoff_address: orderData.dropoff,
-                      receiver_name: orderData.receiverName || '',
-                      receiver_phone: orderData.receiverPhone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      package_type: orderData.packageType || 'Box',
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      dropoff_address: data.dropoff,
+                      receiver_name: data.receiverName || '',
+                      receiver_phone: data.receiverPhone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      package_type: data.packageType || 'Box',
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     };
-                    console.log('📡 Sending to API (Quick Send):', apiPayload);
                     response = await window.API.Orders.createQuickSend(apiPayload);
-                  } else if (orderData.mode === 'multi') {
+                  } else if (data.mode === 'multi') {
                     response = await window.API.Orders.createMultiDrop({
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      deliveries: data.deliveries || [],
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     });
-                  } else if (orderData.mode === 'bulk') {
+                  } else if (data.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      deliveries: data.deliveries || [],
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     });
                   }
-
                   if (response && response.success) {
-                    // Reload orders from API
                     await loadOrders();
-
-                    // Reload wallet balance if payment was made via wallet
-                    if (orderData.payMethod === 'wallet') {
-                      await loadWalletBalance();
-                    }
-
+                    if (paymentMethod === 'wallet') await loadWalletBalance();
                     setScreen("orders");
                     showNotif(response.message || `Order #${response.order?.order_number} created successfully!`);
                   }
+                };
+
+                // ─── Pay with Transfer: open Paystack transfer popup ───────
+                if (orderData.payMethod === 'pay_with_transfer') {
+                  try {
+                    setLoading(true);
+                    const keyResponse = await window.API.Wallet.getPaystackKey();
+                    if (!keyResponse.success) { showNotif('Failed to load payment configuration', 'error'); setLoading(false); return; }
+
+                    const initResponse = await window.API.Wallet.initializePayment(orderData.totalCost);
+                    if (!initResponse.success) { showNotif('Failed to initialize payment', 'error'); setLoading(false); return; }
+                    setLoading(false);
+
+                    const reference = initResponse.data.reference;
+                    const handler = window.PaystackPop.setup({
+                      key: keyResponse.data.public_key,
+                      email: currentUser?.email || 'user@example.com',
+                      amount: orderData.totalCost * 100, // kobo
+                      currency: 'NGN',
+                      ref: reference,
+                      channels: ['bank_transfer'],
+                      onClose: () => showNotif('Payment was not completed. Order not placed.', 'error'),
+                      callback: (paystackResponse) => {
+                        (async () => {
+                          try {
+                            setLoading(true);
+                            const verifyResponse = await window.API.Wallet.verifyPayment(reference);
+                            if (verifyResponse.success) {
+                              showNotif('Transfer confirmed! Creating your order...', 'success');
+                              await loadWalletBalance();
+                              await doCreateOrder(orderData);
+                            } else {
+                              showNotif('Payment verification failed. Please contact support.', 'error');
+                            }
+                          } catch (err) {
+                            showNotif(err.message || 'Failed to complete order after payment', 'error');
+                          } finally {
+                            setLoading(false);
+                          }
+                        })();
+                      }
+                    });
+                    handler.openIframe();
+                  } catch (error) {
+                    showNotif(error.message || 'Payment initialization failed', 'error');
+                    setLoading(false);
+                  }
+                  return;
+                }
+
+                // ─── Normal order creation (wallet / cash / receiver pays) ─
+                try {
+                  await doCreateOrder(orderData);
                 } catch (error) {
                   showNotif(error.message || 'Failed to create order', 'error');
                 }
@@ -1894,6 +2012,12 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
   );
 }
 
+// Lagos State bounding box — used for both suggestion filtering and post-geocode validation
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat, lng) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
 function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }) {
   const [suggestions, setSuggestions] = useState([]);
@@ -1905,15 +2029,16 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
   const placesService = useRef(null);
+  const geocoderRef = useRef(null);
 
   // Initialize Google Maps services
   useEffect(() => {
     const initServices = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
-        // Create a dummy div for PlacesService (required by Google Maps API)
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
+        geocoderRef.current = new window.google.maps.Geocoder();
         setError(null);
       } else {
         setError('Google Maps not loaded');
@@ -1923,6 +2048,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     if (window.googleMapsLoaded) {
       initServices();
     } else {
+      console.log('[AC] Waiting for google-maps-loaded event...');
       window.addEventListener('google-maps-loaded', initServices);
       return () => window.removeEventListener('google-maps-loaded', initServices);
     }
@@ -1950,9 +2076,11 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     if (!autocompleteService.current) {
+      console.error('[AC] fetchSuggestions called but autocompleteService is null');
       setError('Google Maps not ready');
       return;
     }
+    console.log('[AC] fetchSuggestions for:', input);
 
     setLoading(true);
     setError(null);
@@ -1963,38 +2091,37 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
+      // Bias results towards Lagos (bounds is a preference, not a hard filter for AutocompleteService)
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
       const request = {
-        input: input,
-        componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
-        types: ['address'], // Only addresses
-        // Bias results to Lagos
-        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
-        radius: 50000, // 50km radius
+        input,
+        bounds: lagosBounds,
+        componentRestrictions: { country: 'ng' },
       };
-
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
         setLoading(false);
-
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Filter to only Lagos addresses
-          const lagosResults = predictions.filter(p =>
-            p.description.toLowerCase().includes('lagos')
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
+          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
+          const lagosOnly = predictions.filter(p =>
+            p.terms?.some(t => /lagos/i.test(t.value)) ||
+            /lagos/i.test(p.description)
           );
-
-          if (lagosResults.length === 0) {
-            setError('No addresses found in Lagos');
-            setSuggestions([]);
-          } else {
-            setSuggestions(lagosResults);
+          if (lagosOnly.length > 0) {
+            setSuggestions(lagosOnly.slice(0, 8));
             setShowDropdown(true);
             setError(null);
+          } else {
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('Address not found in Lagos — we only deliver within Lagos State.');
           }
-        } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          setError('No addresses found in Lagos');
-          setSuggestions([]);
         } else {
-          setError('Failed to fetch suggestions');
           setSuggestions([]);
+          setShowDropdown(false);
+          setError('Address not found in Lagos — we only deliver within Lagos State.');
         }
       });
     }, 550); // 550ms debounce
@@ -2007,10 +2134,27 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   };
 
   const handleSelectSuggestion = (suggestion) => {
-    onChange(suggestion.description);
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
+    // Geocode the selection and validate it falls within Lagos State
+    if (geocoderRef.current) {
+      geocoderRef.current.geocode({ placeId: suggestion.place_id }, (results, status) => {
+        if (status === 'OK' && results[0]?.geometry) {
+          const loc = results[0].geometry.location;
+          if (!isInLagos(loc.lat(), loc.lng())) {
+            onChange('');
+            setError('⚠️ Outside service area — we only deliver within Lagos State.');
+          } else {
+            onChange(suggestion.description);
+          }
+        } else {
+          onChange(suggestion.description); // geocode failed, allow through and let backend validate
+        }
+      });
+    } else {
+      onChange(suggestion.description);
+    }
   };
 
   return (
@@ -2488,10 +2632,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [step, setStep] = useState(1); // 1=form, 2=review
 
   // ─── Vehicle pricing from backend ───
+  // Defaults mirror the production tiered pricing so the UI is correct even
+  // before the API response arrives (or if it fails).
   const [vehiclePricing, setVehiclePricing] = useState({
-    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
-    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
-    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+    Bike: {
+      base_fare: 0, rate_per_km: 275, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 6, floor_fee: 1700,
+        tiers: [{ max_km: 10, rate: 275 }, { max_km: 15, rate: 235 }, { rate: 200 }] }
+    },
+    Car: {
+      base_fare: 0, rate_per_km: 350, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 3, floor_fee: 2500,
+        tiers: [{ max_km: 8, rate: 350 }, { max_km: 15, rate: 300 }, { rate: 250 }] }
+    },
+    Van: {
+      base_fare: 0, rate_per_km: 500, rate_per_minute: 0,
+      pricing_tiers: { type: 'tiered', floor_km: 3, floor_fee: 5000,
+        tiers: [{ max_km: 8, rate: 500 }, { max_km: 15, rate: 450 }, { rate: 400 }] }
+    },
   });
 
   // ─── Early price estimation (Step 1) ───
@@ -2529,7 +2687,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             pricing[v.name] = {
               base_fare: parseFloat(v.base_fare),
               rate_per_km: parseFloat(v.rate_per_km),
-              rate_per_minute: parseFloat(v.rate_per_minute)
+              rate_per_minute: parseFloat(v.rate_per_minute),
+              pricing_tiers: v.pricing_tiers || null,
             };
           });
           setVehiclePricing(pricing);
@@ -2776,6 +2935,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     setBulkRows(bulkRows.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
+  // ─── Tiered price calculation (rate-switch with boundary floors) ───
+  const calcTieredPrice = (km, pt) => {
+    if (!pt || pt.type !== 'tiered') return null;
+    if (km <= pt.floor_km) return pt.floor_fee;
+    const t = pt.tiers || [];
+    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
+    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
+    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
+    return Math.round(km * (t[t.length - 1]?.rate || 0));
+  };
+
   // ─── Price calculation ───
   // Calculate price for a specific vehicle using early route data
   const calculateEarlyPrice = (vehicleName) => {
@@ -2784,11 +2954,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicleName];
     if (!pricing) return null;
 
+    // Use tiered pricing if available
+    const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+
     const distanceCost = earlyRouteDistance * pricing.rate_per_km;
     const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const total = pricing.base_fare + distanceCost + timeCost;
-
-    return Math.round(total);
+    return Math.round(pricing.base_fare + distanceCost + timeCost);
   };
 
   const getActiveDropoffs = () => {
@@ -2806,24 +2978,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return 0;
 
     // Step 2 uses the full route (map) calculation.
-    // IMPORTANT: Don't use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
-    // after navigating Step 2 → Step 1 and editing addresses.
     if (step === 2 && routeDistance && routeDuration) {
-      const distanceCost = routeDistance * pricing.rate_per_km;
-      const timeCost = routeDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total); // Round to nearest naira
+      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
     }
 
     // Step 1 (Quick Send): if we already calculated an early route, use it
     if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-      const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total);
+      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
     }
 
-    // Fallback: estimate based on base fare only (will be updated when route loads)
+    // Fallback: floor fee for tiered, or base fare for simple
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
     return pricing.base_fare;
   };
 
@@ -2875,7 +3044,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       notes: notes,
       // Include route information for pricing calculation
       distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0
+      duration_minutes: routeDuration || 0,
+      // Total cost — required for pay_with_transfer Paystack initialization
+      totalCost: totalCost,
     };
 
     // Debug: Log order data
@@ -3487,6 +3658,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <h3 style={{ fontSize: 13, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Payment Method</h3>
               {[
                 { id: "wallet", label: "Wallet", sub: `Balance: ₦${balance.toLocaleString()}`, disabled: balance < totalCost, tag: balance >= totalCost ? "RECOMMENDED" : "INSUFFICIENT" },
+                { id: "pay_with_transfer", label: "Pay with Transfer", sub: "Bank transfer via Paystack — funds wallet & creates order instantly", tag: "INSTANT" },
                 { id: "cash_on_pickup", label: "Cash on Pickup", sub: "Pay the rider per delivery" },
                 { id: "receiver_pays", label: "Receiver Pays", sub: "Each receiver pays on delivery" },
               ].map(pm => (
@@ -3509,8 +3681,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   {pm.tag && (
                     <span style={{
                       fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6,
-                      background: pm.tag === "RECOMMENDED" ? S.greenBg : S.redBg,
-                      color: pm.tag === "RECOMMENDED" ? S.green : S.red
+                      background: pm.tag === "RECOMMENDED" ? S.greenBg : pm.tag === "INSTANT" ? "#dbeafe" : S.redBg,
+                      color: pm.tag === "RECOMMENDED" ? S.green : pm.tag === "INSTANT" ? "#1e40af" : S.red
                     }}>{pm.tag}</span>
                   )}
                 </button>
@@ -3528,9 +3700,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
                 boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
               }}>
-                {totalDeliveries === 1
-                  ? `Create Order — ₦${totalCost.toLocaleString()}`
-                  : `Create ${totalDeliveries} Orders — ₦${totalCost.toLocaleString()}`
+                {payMethod === 'pay_with_transfer'
+                  ? `Pay & Create Order — ₦${totalCost.toLocaleString()}`
+                  : totalDeliveries === 1
+                    ? `Create Order — ₦${totalCost.toLocaleString()}`
+                    : `Create ${totalDeliveries} Orders — ₦${totalCost.toLocaleString()}`
                 }
               </button>
             </div>
@@ -4122,6 +4296,7 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
   // Start directly at 'show-details' since virtual account was already fetched
   const [state, setState] = useState(virtualAccount ? 'show-details' : 'loading');
   const [copied, setCopied] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
 
   // Build bank details from the virtual account prop
   const bankDetails = virtualAccount ? {
@@ -4144,17 +4319,27 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleConfirmPayment = () => {
+  const handleConfirmPayment = async () => {
+    setConfirmError(null);
     setState('confirming');
-    setTimeout(() => {
-      setState('success');
-    }, 2500);
+    try {
+      const response = await window.API.Wallet.claimTransfer(amount);
+      if (response.success) {
+        setState('success');
+        // Notify parent to refresh balance + transactions
+        if (onSuccess) onSuccess();
+      } else {
+        const msg = response.errors?.detail || 'Failed to record transfer. Please try again.';
+        setConfirmError(msg);
+        setState('show-details');
+      }
+    } catch (e) {
+      setConfirmError(e.message || 'Failed to record transfer. Please try again.');
+      setState('show-details');
+    }
   };
 
   const handleClose = () => {
-    if (state === 'success' && onSuccess) {
-      onSuccess();
-    }
     onClose();
   };
 
@@ -4259,6 +4444,13 @@ function BankTransferModal({ amount, virtualAccount, onClose, onSuccess }) {
                   <li>Click "I have paid" only after completing the transfer</li>
                 </ul>
               </div>
+
+              {/* Error message */}
+              {confirmError && (
+                <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#dc2626" }}>
+                  ⚠️ {confirmError}
+                </div>
+              )}
 
               {/* Confirm Button */}
               <button onClick={handleConfirmPayment} style={{

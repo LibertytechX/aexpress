@@ -9,10 +9,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
   <!-- Paystack Inline JS -->
   <script src="https://js.paystack.co/v1/inline.js"></script>
+  <!-- Ably Realtime SDK (UMD) — exposes window.Ably -->
+  <script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
   <script>
     // Configuration for API Base URL
     // In a production environment, this could be injected by the deployment server
-    window.VITE_API_BASE_URL = 'http://localhost:8000/api';
+    window.VITE_API_BASE_URL = 'https://www.orders.axpress.net/api';
   </script>
   <!-- Google Maps JavaScript API with Places Library -->
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCZiuiOnAC157Uf5fkfNkSlydmFaOV7Y3U&libraries=places&callback=initMap" async defer></script>

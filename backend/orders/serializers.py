@@ -19,6 +19,7 @@ class VehicleSerializer(serializers.ModelSerializer):
             "rate_per_minute",
             "min_distance_km",
             "min_fee",
+            "pricing_tiers",
             "description",
             "is_active",
         ]

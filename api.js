@@ -3,7 +3,7 @@
  * Handles all backend API communication
  */
 
-const API_BASE_URL = window.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api';
+const API_BASE_URL = 'https://www.orders.axpress.net/api' || 'http://127.0.0.1:8000/api';
 
 // Token management
 const TokenManager = {
@@ -14,9 +14,8 @@ const TokenManager = {
     localStorage.setItem('refresh_token', refresh);
   },
   clearTokens: () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
+    localStorage.clear();
+    sessionStorage.clear();
   },
   getUser: () => {
     const user = localStorage.getItem('user');
@@ -128,14 +127,24 @@ const AuthAPI = {
   },
 
   logout: async () => {
+    // Blacklist the refresh token on the server (best-effort)
     try {
       const refreshToken = TokenManager.getRefreshToken();
-      await apiRequest('/auth/logout/', {
-        method: 'POST',
-        body: JSON.stringify({ refresh: refreshToken }),
-      });
-    } finally {
-      TokenManager.clearTokens();
+      if (refreshToken) {
+        await apiRequest('/auth/logout/', {
+          method: 'POST',
+          body: JSON.stringify({ refresh: refreshToken }),
+        });
+      }
+    } catch (_) { /* always clear locally even if server call fails */ }
+    // Wipe all local storage and session storage
+    TokenManager.clearTokens();
+    // Wipe all browser caches (service workers, fetch cache)
+    if ('caches' in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (_) {}
     }
   },
 
@@ -364,6 +373,31 @@ const WalletAPI = {
       method: 'GET',
     });
   },
+
+  /**
+   * Record that the merchant has claimed to have made a bank transfer.
+   * Creates a pending transaction so the claim is audited.
+   * The actual wallet credit happens when the bank webhook confirms the transfer.
+   * @param {number} amount - Amount in Naira
+   */
+  claimTransfer: async (amount) => {
+    return await apiRequest('/wallet/fund/transfer-claim/', {
+      method: 'POST',
+      body: JSON.stringify({ amount: amount.toString() }),
+    });
+  },
+};
+
+// Activity / Ably API
+const ActivityAPI = {
+  /**
+   * Request an Ably token from the backend.
+   * The returned object contains { token, token_request } and can be
+   * passed directly to Ably's authCallback.
+   */
+  getAblyToken: async () => {
+    return await apiRequest('/dispatch/ably-token/', { method: 'GET' });
+  },
 };
 
 // Export API modules
@@ -371,6 +405,7 @@ window.API = {
   Auth: AuthAPI,
   Orders: OrdersAPI,
   Wallet: WalletAPI,
+  Activity: ActivityAPI,
   Token: TokenManager,
 };
 

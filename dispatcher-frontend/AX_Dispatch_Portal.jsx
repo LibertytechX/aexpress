@@ -1033,15 +1033,36 @@ export default function AXDispatchPortal() {
       // Try Ably real-time; fall back to polling if unavailable
       let ablyActive = false;
       try {
-        const tokenRequest = await ActivityFeedAPI.getAblyToken();
         if (cancelled) return;
+        console.log('[Ably] Initializing Realtime client...');
         const ably = new Realtime({
-          authCallback: (_, callback) => { callback(null, tokenRequest); }
+          // authCallback: async fn returning token string (Ably v2 Promise style)
+          authCallback: async (_, callback) => {
+            console.log('[Ably] authCallback called — fetching token from backend...');
+            try {
+              const td = await ActivityFeedAPI.getAblyToken();
+              console.log('[Ably] Token received, first 20 chars:', String(td.token).slice(0, 20));
+              callback(null, td.token);
+            } catch (e) {
+              console.error('[Ably] authCallback error:', e);
+              callback(e, null);
+            }
+          }
         });
         localAbly = ably;
         ablyRef.current = ably;
+
+        // Log connection state changes so we can see exactly where it stalls
+        ably.connection.on('connecting',    () => console.log('[Ably] Connecting...'));
+        ably.connection.on('connected',     () => console.log('[Ably] Connected! ✅ WebSocket open'));
+        ably.connection.on('disconnected',  (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
+        ably.connection.on('suspended',     (s) => console.warn('[Ably] Suspended:', s?.reason?.message));
+        ably.connection.on('failed',        (s) => console.error('[Ably] FAILED:', s?.reason?.message));
+        ably.connection.on('closed',        () => console.log('[Ably] Closed.'));
+
         const ch = ably.channels.get("dispatch-feed");
-        ch.subscribe("activity", (msg) => {
+        // In Ably v2, ch.subscribe() returns a Promise — must be awaited
+        await ch.subscribe("activity", (msg) => {
           const d = msg.data;
           setActivityFeed(prev => {
             if (!d) return prev;
@@ -1073,13 +1094,15 @@ export default function AXDispatchPortal() {
             }
           }
         });
+        console.log('[Ably] Subscribed to dispatch-feed ✅');
         ablyActive = true;
       } catch (err) {
-        console.warn("Ably subscription failed, falling back to polling:", err);
+        console.error('[Ably] Setup failed, falling back to polling:', err);
       }
 
       // Polling fallback: refresh feed from DB every 10 s when Ably is down
       if (!ablyActive) {
+        console.log('[Ably] Using 10s polling fallback.');
         pollInterval = setInterval(async () => {
           try {
             const feedData = await ActivityFeedAPI.getRecent(50).catch(() => null);
@@ -1220,7 +1243,7 @@ export default function AXDispatchPortal() {
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
-          {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} />}
+          {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={()=>RidersAPI.getAll().then(setRiders).catch(()=>{})} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "teams" && <TeamsScreen dispatchers={dispatchers} onDispatcherAdded={d => setDispatchers(p => [d, ...p])} onDispatcherRemoved={id => setDispatchers(p => p.filter(d => d.id !== id))} />}
@@ -1354,6 +1377,22 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   );
 }
 
+// ─── DATE/TIME FORMATTER ────────────────────────────────────────
+// Accepts ISO strings ("2026-02-14T15:42:00Z"), epoch ms, or legacy
+// strings like "Feb 14, 3:42 PM". Returns { date, time } parts.
+function formatOrderDateTime(raw) {
+  if (!raw) return { date: "—", time: "" };
+  const d = new Date(raw);
+  if (!isNaN(d.getTime())) {
+    const date = d.toLocaleDateString("en-NG", { day: "2-digit", month: "short", year: "numeric" });
+    const time = d.toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit", hour12: true });
+    return { date, time };
+  }
+  // Fallback for legacy "Feb 14, 3:42 PM" strings already in display form
+  const parts = raw.split(", ");
+  return { date: parts[0] || raw, time: parts[1] || "" };
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs }) {
   const [statusFilter, setStatusFilter] = useState("All");
@@ -1389,24 +1428,27 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV</button>
       </div>
 
-      <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr 1.2fr 130px 80px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-          <span>Order ID</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
+      <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
+        <div style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
+          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
         </div>
-        <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
-          {filtered.map(o => (
-            <div key={o.id} onClick={() => onSelect(o.id)} style={{ display: "grid", gridTemplateColumns: "110px 1fr 1fr 1.2fr 130px 80px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-              <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
-              <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
-              <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-              <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-              <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
-              <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-              <Badge status={o.status} />
+        <div style={{maxHeight:"calc(100vh - 280px)",overflowY:"auto"}}>
+          {filtered.map(o=>{
+            const dt = formatOrderDateTime(o.created);
+            return (
+            <div key={o.id} onClick={()=>onSelect(o.id)} style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <span style={{fontSize:12,fontWeight:700,color:S.gold,fontFamily:"'Space Mono',monospace"}}>{o.id}</span>
+              <div><div style={{fontSize:11,fontWeight:600,color:S.text}}>{dt.date}</div><div style={{fontSize:10,color:S.textMuted}}>{dt.time}</div></div>
+              <div><div style={{fontSize:12,fontWeight:600}}>{o.customer}</div><div style={{fontSize:10,color:S.textMuted}}>{o.customerPhone}</div></div>
+              <span style={{fontSize:12,color:S.textDim}}>{o.merchant}</span>
+              <div style={{fontSize:11,color:S.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
+              <div>{o.rider?<div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:6,height:6,borderRadius:"50%",background:S.green}}/><span style={{fontSize:12}}>{o.rider}</span></div>:<span style={{fontSize:11,fontWeight:700,color:S.yellow}}>⚠ Unassigned</span>}</div>
+              <span style={{fontSize:12,fontWeight:600,fontFamily:"'Space Mono',monospace"}}>₦{o.amount.toLocaleString()}</span>
+              <span style={{fontSize:11,color:o.cod>0?S.green:S.textMuted,fontFamily:"'Space Mono',monospace"}}>{o.cod>0?`₦${(o.cod/1000).toFixed(0)}K`:"—"}</span>
+              <Badge status={o.status}/>
             </div>
-          ))}
-          {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
+          );})}
+          {filtered.length===0&&<div style={{padding:"40px 0",textAlign:"center",fontSize:13,color:S.textMuted}}>No orders match filters</div>}
         </div>
       </div>
     </div>
@@ -1948,10 +1990,136 @@ function RidersLocationMap({ riders }) {
   );
 }
 
+// ─── CREATE RIDER MODAL ─────────────────────────────────────────
+function CreateRiderModal({ onClose, onRiderCreated }) {
+  const [form, setForm] = useState({
+    first_name: "", last_name: "", phone: "", email: "",
+    password: "", vehicle_type: "", city: "", is_verified: false,
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = { ...form };
+      if (!payload.vehicle_type) delete payload.vehicle_type;
+      if (!payload.city) delete payload.city;
+      await RidersAPI.createRider(payload);
+      onRiderCreated();
+      onClose();
+    } catch (err) {
+      const msg = err?.phone?.[0] || err?.email?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to create rider.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iSt = { width:"100%", padding:"10px 12px", border:`1px solid ${S.border}`, borderRadius:8, fontSize:13, background:S.bg, color:S.text, fontFamily:"inherit", boxSizing:"border-box" };
+  const lSt = { display:"block", fontSize:12, fontWeight:600, color:S.textDim, marginBottom:5 };
+  const row = { display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:S.card,borderRadius:16,padding:28,width:480,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+          <div>
+            <div style={{fontSize:17,fontWeight:800,color:S.navy}}>Add New Rider</div>
+            <div style={{fontSize:12,color:S.textMuted,marginTop:2}}>Create a rider account on the platform</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:S.textMuted,lineHeight:1}}>✕</button>
+        </div>
+
+        {error && <div style={{padding:"10px 14px",background:S.redBg,color:S.red,borderRadius:8,fontSize:13,marginBottom:16}}>{error}</div>}
+
+        <form onSubmit={handleSubmit}>
+          {/* Name row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>First Name *</label>
+              <input value={form.first_name} onChange={e=>set("first_name",e.target.value)} placeholder="e.g. Musa" style={iSt} required/>
+            </div>
+            <div>
+              <label style={lSt}>Last Name *</label>
+              <input value={form.last_name} onChange={e=>set("last_name",e.target.value)} placeholder="e.g. Kabiru" style={iSt} required/>
+            </div>
+          </div>
+
+          {/* Contact row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>Phone *</label>
+              <input value={form.phone} onChange={e=>set("phone",e.target.value)} placeholder="+234..." style={iSt} required/>
+            </div>
+            <div>
+              <label style={lSt}>Email *</label>
+              <input type="email" value={form.email} onChange={e=>set("email",e.target.value)} placeholder="rider@email.com" style={iSt} required/>
+            </div>
+          </div>
+
+          {/* Password */}
+          <div style={{marginBottom:14}}>
+            <label style={lSt}>Password *</label>
+            <div style={{position:"relative"}}>
+              <input type={showPassword?"text":"password"} value={form.password} onChange={e=>set("password",e.target.value)} placeholder="Min. 6 characters" style={{...iSt,paddingRight:44}} required minLength={6}/>
+              <button type="button" onClick={()=>setShowPassword(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:S.textMuted,fontSize:13,fontFamily:"inherit"}}>
+                {showPassword?"Hide":"Show"}
+              </button>
+            </div>
+          </div>
+
+          {/* Vehicle + City row */}
+          <div style={row}>
+            <div>
+              <label style={lSt}>Vehicle Type</label>
+              <select value={form.vehicle_type} onChange={e=>set("vehicle_type",e.target.value)} style={iSt}>
+                <option value="">— Select —</option>
+                <option value="1">Bike</option>
+                <option value="2">Car</option>
+                <option value="3">Van</option>
+              </select>
+            </div>
+            <div>
+              <label style={lSt}>City</label>
+              <input value={form.city} onChange={e=>set("city",e.target.value)} placeholder="e.g. Lagos" style={iSt}/>
+            </div>
+          </div>
+
+          {/* Verified checkbox */}
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:22,padding:"12px 14px",background:S.borderLight,borderRadius:10,border:`1px solid ${S.border}`}}>
+            <input id="verified-cb" type="checkbox" checked={form.is_verified} onChange={e=>set("is_verified",e.target.checked)} style={{width:16,height:16,accentColor:S.gold,cursor:"pointer"}}/>
+            <label htmlFor="verified-cb" style={{cursor:"pointer",flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:S.text}}>Mark as Verified</div>
+              <div style={{fontSize:11,color:S.textMuted}}>Skips OTP — phone and email will be marked verified immediately</div>
+            </label>
+            {form.is_verified && <span style={{fontSize:10,fontWeight:700,color:S.green,padding:"2px 8px",background:S.greenBg,borderRadius:6}}>✓ Verified</span>}
+          </div>
+
+          {/* Actions */}
+          <div style={{display:"flex",gap:10}}>
+            <button type="button" onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,border:`1px solid ${S.border}`,background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Cancel</button>
+            <button type="submit" disabled={loading} style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:loading?0.7:1}}>
+              {loading?"Creating Rider…":"Create Rider"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── RIDERS SCREEN ──────────────────────────────────────────────
-function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder }) {
+function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrder, onRiderCreated }) {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
+  const [showCreateRider, setShowCreateRider] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
@@ -2037,6 +2205,9 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               <span style={{ opacity: 0.4 }}>{I.search}</span>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search riders..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
             </div>
+            <button onClick={()=>setShowCreateRider(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,whiteSpace:"nowrap",flexShrink:0}}>
+              {I.plus} Add Rider
+            </button>
           </div>
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
@@ -2068,6 +2239,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         </div>
 
       </div>
+
+      {showCreateRider && (
+        <CreateRiderModal
+          onClose={()=>setShowCreateRider(false)}
+          onRiderCreated={()=>{ if(onRiderCreated) onRiderCreated(); }}
+        />
+      )}
     </div>
   );
 }
@@ -2199,18 +2377,34 @@ const SC = ({ children, title, icon, desc, right }) => (<div style={{ background
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
   // ─── PRICING STATE (Research-based Lagos defaults) ───
-  const [bikeBase, setBikeBase] = useState(500);
-  const [bikePerKm, setBikePerKm] = useState(150);
-  const [bikeMinKm, setBikeMinKm] = useState(3);
-  const [bikeMin, setBikeMin] = useState(1200);
-  const [carBase, setCarBase] = useState(1000);
-  const [carPerKm, setCarPerKm] = useState(250);
-  const [carMinKm, setCarMinKm] = useState(3);
-  const [carMin, setCarMin] = useState(2500);
-  const [vanBase, setVanBase] = useState(2000);
-  const [vanPerKm, setVanPerKm] = useState(400);
-  const [vanMinKm, setVanMinKm] = useState(3);
-  const [vanMin, setVanMin] = useState(5000);
+  // Bike uses tiered rate-switch pricing
+  const [bikeFloorKm, setBikeFloorKm] = useState(6);
+  const [bikeFloorFee, setBikeFloorFee] = useState(1700);
+  const [bikeT1MaxKm, setBikeT1MaxKm] = useState(10);
+  const [bikeT1Rate, setBikeT1Rate] = useState(275);
+  const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
+  const [bikeT2Rate, setBikeT2Rate] = useState(235);
+  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+  // Legacy bike state kept for getVC compatibility
+  const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
+  // Car uses tiered rate-switch pricing
+  const [carFloorKm, setCarFloorKm] = useState(3);
+  const [carFloorFee, setCarFloorFee] = useState(2500);
+  const [carT1MaxKm, setCarT1MaxKm] = useState(8);
+  const [carT1Rate, setCarT1Rate] = useState(350);
+  const [carT2MaxKm, setCarT2MaxKm] = useState(15);
+  const [carT2Rate, setCarT2Rate] = useState(300);
+  const [carT3Rate, setCarT3Rate] = useState(250);
+  const carBase = 0, carPerKm = 0, carMinKm = carFloorKm, carMin = carFloorFee;
+  // Van uses tiered rate-switch pricing
+  const [vanFloorKm, setVanFloorKm] = useState(3);
+  const [vanFloorFee, setVanFloorFee] = useState(5000);
+  const [vanT1MaxKm, setVanT1MaxKm] = useState(8);
+  const [vanT1Rate, setVanT1Rate] = useState(500);
+  const [vanT2MaxKm, setVanT2MaxKm] = useState(15);
+  const [vanT2Rate, setVanT2Rate] = useState(450);
+  const [vanT3Rate, setVanT3Rate] = useState(400);
+  const vanBase = 0, vanPerKm = 0, vanMinKm = vanFloorKm, vanMin = vanFloorFee;
   const [codFee, setCodFee] = useState(500);
   const [codPct, setCodPct] = useState(1.5);
   const [bridgeSurcharge, setBridgeSurcharge] = useState(500);
@@ -2272,13 +2466,24 @@ function SettingsScreen() {
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
   const [nodeSaving, setNodeSaving] = useState(false);
 
-  const calcPrice = (base, perKm, minKm, minFee, km, zone, weight) => {
+  // Tiered price: rate-switch with boundary floors
+  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3Rate) => {
+    if (km <= floorKm) return floorFee;
+    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
+    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
+    return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+  };
+  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3Rate);
+  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3Rate);
+  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3Rate);
+  const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
-    if (km <= minKm) { price = minFee; }
+    if (vehicleType === "bike") { price = calcBikePrice(km); }
+    else if (vehicleType === "car") { price = calcCarPrice(km); }
+    else if (vehicleType === "van") { price = calcVanPrice(km); }
+    else if (km <= minKm) { price = minFee; }
     else {
       price = base + (km * perKm);
-      if (tierEnabled && km >= tier2Km) price = price * (1 - tier2Discount / 100);
-      else if (tierEnabled && km >= tier1Km) price = price * (1 - tier1Discount / 100);
       price = Math.max(minFee, Math.round(price));
     }
     if (zone === "bridge") price += bridgeSurcharge;
@@ -2288,12 +2493,12 @@ function SettingsScreen() {
     return Math.round(price);
   };
   const getVC = () => ({
-    bike: { base: bikeBase, perKm: bikePerKm, minKm: bikeMinKm, min: bikeMin },
-    car: { base: carBase, perKm: carPerKm, minKm: carMinKm, min: carMin },
-    van: { base: vanBase, perKm: vanPerKm, minKm: vanMinKm, min: vanMin },
+    bike: { base:bikeBase, perKm:bikePerKm, minKm:bikeMinKm, min:bikeMin, type:"bike" },
+    car: { base:carBase, perKm:carPerKm, minKm:carMinKm, min:carMin, type:"car" },
+    van: { base:vanBase, perKm:vanPerKm, minKm:vanMinKm, min:vanMin, type:"van" },
   });
   const simC = getVC()[simVehicle];
-  const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight);
+  const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight, simVehicle);
   const simFinal = simSurge ? Math.round(simPrice * surgeMultiplier) : simPrice;
 
   // Load settings from backend on mount
@@ -2315,20 +2520,47 @@ function SettingsScreen() {
           const key = v.name.toLowerCase();
           ids[key] = v.id;
           if (key === 'bike') {
-            setBikeBase(pf(v.base_fare, 500));
-            setBikePerKm(pf(v.rate_per_km, 150));
-            setBikeMinKm(pf(v.min_distance_km, 3));
-            setBikeMin(pf(v.min_fee, 1200));
+            const pt = v.pricing_tiers;
+            if (pt && pt.type === 'tiered') {
+              setBikeFloorKm(pt.floor_km ?? 6);
+              setBikeFloorFee(pt.floor_fee ?? 1700);
+              setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
+              setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
+              setBikeT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
+              setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+            } else {
+              setBikeFloorKm(pf(v.min_distance_km, 6));
+              setBikeFloorFee(pf(v.min_fee, 1700));
+            }
           } else if (key === 'car') {
-            setCarBase(pf(v.base_fare, 1000));
-            setCarPerKm(pf(v.rate_per_km, 250));
-            setCarMinKm(pf(v.min_distance_km, 3));
-            setCarMin(pf(v.min_fee, 2500));
+            const pt = v.pricing_tiers;
+            if (pt && pt.type === 'tiered') {
+              setCarFloorKm(pt.floor_km ?? 3);
+              setCarFloorFee(pt.floor_fee ?? 2500);
+              setCarT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
+              setCarT1Rate(pt.tiers?.[0]?.rate ?? 350);
+              setCarT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              setCarT2Rate(pt.tiers?.[1]?.rate ?? 300);
+              setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+            } else {
+              setCarFloorKm(pf(v.min_distance_km, 3));
+              setCarFloorFee(pf(v.min_fee, 2500));
+            }
           } else if (key === 'van') {
-            setVanBase(pf(v.base_fare, 2000));
-            setVanPerKm(pf(v.rate_per_km, 400));
-            setVanMinKm(pf(v.min_distance_km, 3));
-            setVanMin(pf(v.min_fee, 5000));
+            const pt = v.pricing_tiers;
+            if (pt && pt.type === 'tiered') {
+              setVanFloorKm(pt.floor_km ?? 3);
+              setVanFloorFee(pt.floor_fee ?? 5000);
+              setVanT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
+              setVanT1Rate(pt.tiers?.[0]?.rate ?? 500);
+              setVanT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              setVanT2Rate(pt.tiers?.[1]?.rate ?? 450);
+              setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+            } else {
+              setVanFloorKm(pf(v.min_distance_km, 3));
+              setVanFloorFee(pf(v.min_fee, 5000));
+            }
           }
         });
         setVehicleIds(ids);
@@ -2404,9 +2636,9 @@ function SettingsScreen() {
       // PATCH each vehicle's pricing
       await Promise.all(
         [
-          { key: 'bike', data: { base_fare: bikeBase, rate_per_km: bikePerKm, min_distance_km: bikeMinKm, min_fee: bikeMin } },
-          { key: 'car', data: { base_fare: carBase, rate_per_km: carPerKm, min_distance_km: carMinKm, min_fee: carMin } },
-          { key: 'van', data: { base_fare: vanBase, rate_per_km: vanPerKm, min_distance_km: vanMinKm, min_fee: vanMin } },
+          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: bikeT2MaxKm, rate: bikeT2Rate }, { rate: bikeT3Rate }] } } },
+          { key: 'car',  data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: carT2MaxKm, rate: carT2Rate }, { rate: carT3Rate }] } } },
+          { key: 'van',  data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: vanT2MaxKm, rate: vanT2Rate }, { rate: vanT3Rate }] } } },
         ]
           .filter(({ key }) => vehicleIds[key])
           .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
@@ -2434,7 +2666,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-  const handleReset = () => { setBikeBase(500); setBikePerKm(150); setBikeMinKm(3); setBikeMin(1200); setCarBase(1000); setCarPerKm(250); setCarMinKm(3); setCarMin(2500); setVanBase(2000); setVanPerKm(400); setVanMinKm(3); setVanMin(5000); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
+  const handleReset = () => { setBikeFloorKm(6);setBikeFloorFee(1700);setBikeT1MaxKm(10);setBikeT1Rate(275);setBikeT2MaxKm(15);setBikeT2Rate(235);setBikeT3Rate(200);setCarFloorKm(3);setCarFloorFee(2500);setCarT1MaxKm(8);setCarT1Rate(350);setCarT2MaxKm(15);setCarT2Rate(300);setCarT3Rate(250);setVanFloorKm(3);setVanFloorFee(5000);setVanT1MaxKm(8);setVanT1Rate(500);setVanT2MaxKm(15);setVanT2Rate(450);setVanT3Rate(400);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
 
   const tabs = [{ id: "pricing", label: "Pricing & Fees", icon: "💰" }, { id: "zones", label: "Zones & Surcharges", icon: "🗺️" }, { id: "simulator", label: "Price Calculator", icon: "🧮" }, { id: "dispatch", label: "Dispatch Rules", icon: "⚙️" }, { id: "relay", label: "Relay Network", icon: "🔗" }, { id: "notifications", label: "Notifications", icon: "🔔" }, { id: "integrations", label: "API & Integrations", icon: "🔌" }];
 
@@ -2461,27 +2693,98 @@ function SettingsScreen() {
           </div>
         </div>
 
-        {[{ label: "Bike", emoji: "🏍️", color: "#10B981", base: bikeBase, setBase: setBikeBase, perKm: bikePerKm, setPerKm: setBikePerKm, minKm: bikeMinKm, setMinKm: setBikeMinKm, min: bikeMin, setMin: setBikeMin, desc: "Small packages, documents, food. Max 25kg.", mr: "₦100–₦200/km" },
-        { label: "Car", emoji: "🚗", color: "#3B82F6", base: carBase, setBase: setCarBase, perKm: carPerKm, setPerKm: setCarPerKm, minKm: carMinKm, setMinKm: setCarMinKm, min: carMin, setMin: setCarMin, desc: "Medium packages, electronics, fragile. Max 100kg.", mr: "₦200–₦350/km" },
-        { label: "Van", emoji: "🚐", color: "#8B5CF6", base: vanBase, setBase: setVanBase, perKm: vanPerKm, setPerKm: setVanPerKm, minKm: vanMinKm, setMinKm: setVanMinKm, min: vanMin, setMin: setVanMin, desc: "Bulk orders, furniture, large cargo. Max 500kg.", mr: "₦350–₦500/km" }
-        ].map(v => (<div key={v.label} style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
-          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>{v.emoji}</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{v.label} Delivery</div><div style={{ fontSize: 11, color: S.textMuted }}>{v.desc}</div></div></div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ background: "#f8fafc", padding: "4px 10px", borderRadius: 6, fontSize: 10, color: S.textMuted }}>Market: {v.mr}</div><div style={{ background: `${v.color}12`, padding: "6px 14px", borderRadius: 8 }}><span style={{ fontSize: 11, fontWeight: 700, color: v.color }}>MIN ₦{v.min.toLocaleString()}</span></div></div>
+        {/* ── BIKE CARD (Tiered Pricing) ── */}
+        <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
+          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>🏍️</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>Bike Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Small packages, documents, food. Max 25kg.</div></div></div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{background:"#f8fafc",padding:"4px 10px",borderRadius:6,fontSize:10,color:S.textMuted}}>Tiered Pricing</div><div style={{background:"#10B98112",padding:"6px 14px",borderRadius:8}}><span style={{fontSize:11,fontWeight:700,color:"#10B981"}}>MIN ₦{bikeFloorFee.toLocaleString()}</span></div></div>
           </div>
-          <div style={{ padding: 20 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 14, marginBottom: 16 }}>
-              <div><label style={labelStyle}>Base Fee (₦)</label><input value={v.base} onChange={e => v.setBase(Number(e.target.value) || 0)} style={inputStyle} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Flat charge per order</div></div>
-              <div><label style={labelStyle}>Per KM Rate (₦)</label><input value={v.perKm} onChange={e => v.setPerKm(Number(e.target.value) || 0)} style={inputStyle} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Charged after min distance</div></div>
-              <div><label style={labelStyle}>Min Distance (KM)</label><input value={v.minKm} onChange={e => v.setMinKm(Number(e.target.value) || 0)} style={inputStyle} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Covered by minimum fee</div></div>
-              <div><label style={labelStyle}>Minimum Fee (₦)</label><input value={v.min} onChange={e => v.setMin(Number(e.target.value) || 0)} style={{ ...inputStyle, color: v.color, borderColor: `${v.color}40` }} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Floor price for ≤{v.minKm}km</div></div>
+          <div style={{padding:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📐 Floor Price</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
+              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={bikeFloorKm} onChange={e=>setBikeFloorKm(Number(e.target.value)||0)} style={inputStyle}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Orders up to this distance = flat fee</div></div>
+              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={bikeFloorFee} onChange={e=>setBikeFloorFee(Number(e.target.value)||0)} style={{...inputStyle,color:"#10B981",borderColor:"#10B98140"}}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Fixed charge for ≤{bikeFloorKm}km</div></div>
             </div>
-            <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = calcPrice(v.base, v.perKm, v.minKm, v.min, km, "same", 0); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= v.minKm ? `${v.color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: v.color, fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= v.minKm && <div style={{ fontSize: 8, color: v.color, fontWeight: 700 }}>MIN RATE</div>}{tierEnabled && km >= tier1Km && <div style={{ fontSize: 8, color: S.green, fontWeight: 700 }}>−{km >= tier2Km ? tier2Discount : tier1Discount}%</div>}</div>); })}
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📊 Distance Tier Rates</div>
+            <div style={{border:`1px solid ${S.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",background:"#f8fafc",padding:"8px 14px",borderBottom:`1px solid ${S.border}`,fontSize:10,fontWeight:700,color:S.textMuted}}>
+                <div>TIER</div><div>UP TO (KM)</div><div>RATE (₦/KM)</div>
               </div>
-              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>Formula: If ≤{v.minKm}km → ₦{v.min.toLocaleString()}. Otherwise: ₦{v.base.toLocaleString()} + (km × ₦{v.perKm}){tierEnabled ? `, ${tier1Discount}% off >${tier1Km}km, ${tier2Discount}% off >${tier2Km}km` : ""}. Plus zone + weight surcharges.</div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 1 <span style={{fontSize:10,color:S.textMuted}}>({bikeFloorKm}–{bikeT1MaxKm}km)</span></div>
+                <input value={bikeT1MaxKm} onChange={e=>setBikeT1MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={bikeT1Rate} onChange={e=>setBikeT1Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 2 <span style={{fontSize:10,color:S.textMuted}}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
+                <input value={bikeT2MaxKm} onChange={e=>setBikeT2MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={bikeT2Rate} onChange={e=>setBikeT2Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 3 <span style={{fontSize:10,color:S.textMuted}}>({bikeT2MaxKm}km+)</span></div>
+                <div style={{fontSize:11,color:S.textMuted,fontStyle:"italic"}}>∞</div>
+                <input value={bikeT3Rate} onChange={e=>setBikeT3Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+            </div>
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:8}}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {[1,3,5,8,12,20,30].map(km=>{const price=calcBikePrice(km);return (<div key={km} style={{padding:"8px 10px",background:"#fff",borderRadius:8,border:`1px solid ${km<=bikeFloorKm?"#10B98130":S.border}`,textAlign:"center",minWidth:68,flex:1}}><div style={{fontSize:10,color:S.textMuted,fontWeight:600}}>{km} KM</div><div style={{fontSize:14,fontWeight:800,color:"#10B981",fontFamily:"'Space Mono',monospace"}}>₦{price.toLocaleString()}</div>{km<=bikeFloorKm&&<div style={{fontSize:8,color:"#10B981",fontWeight:700}}>FLOOR</div>}</div>);})}
+              </div>
+              <div style={{marginTop:8,fontSize:10,color:S.textMuted,lineHeight:1.5}}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm*bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}km+ → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm*bikeT2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── CAR & VAN CARDS (Tiered Pricing) ── */}
+        {[{label:"Car",emoji:"🚗",color:"#3B82F6",desc:"Medium packages, electronics, fragile. Max 100kg.",
+           floorKm:carFloorKm,setFloorKm:setCarFloorKm,floorFee:carFloorFee,setFloorFee:setCarFloorFee,
+           t1MaxKm:carT1MaxKm,setT1MaxKm:setCarT1MaxKm,t1Rate:carT1Rate,setT1Rate:setCarT1Rate,
+           t2MaxKm:carT2MaxKm,setT2MaxKm:setCarT2MaxKm,t2Rate:carT2Rate,setT2Rate:setCarT2Rate,
+           t3Rate:carT3Rate,setT3Rate:setCarT3Rate,calcFn:calcCarPrice},
+          {label:"Van",emoji:"🚐",color:"#8B5CF6",desc:"Bulk orders, furniture, large cargo. Max 500kg.",
+           floorKm:vanFloorKm,setFloorKm:setVanFloorKm,floorFee:vanFloorFee,setFloorFee:setVanFloorFee,
+           t1MaxKm:vanT1MaxKm,setT1MaxKm:setVanT1MaxKm,t1Rate:vanT1Rate,setT1Rate:setVanT1Rate,
+           t2MaxKm:vanT2MaxKm,setT2MaxKm:setVanT2MaxKm,t2Rate:vanT2Rate,setT2Rate:setVanT2Rate,
+           t3Rate:vanT3Rate,setT3Rate:setVanT3Rate,calcFn:calcVanPrice}
+        ].map(v=>(<div key={v.label} style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
+          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>{v.emoji}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{v.label} Delivery</div><div style={{fontSize:11,color:S.textMuted}}>{v.desc}</div></div></div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{background:"#f8fafc",padding:"4px 10px",borderRadius:6,fontSize:10,color:S.textMuted}}>Tiered Pricing</div><div style={{background:`${v.color}12`,padding:"6px 14px",borderRadius:8}}><span style={{fontSize:11,fontWeight:700,color:v.color}}>MIN ₦{v.floorFee.toLocaleString()}</span></div></div>
+          </div>
+          <div style={{padding:20}}>
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📐 Floor Price</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
+              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={v.floorKm} onChange={e=>v.setFloorKm(Number(e.target.value)||0)} style={inputStyle}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Orders up to this distance = flat fee</div></div>
+              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={v.floorFee} onChange={e=>v.setFloorFee(Number(e.target.value)||0)} style={{...inputStyle,color:v.color,borderColor:`${v.color}40`}}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Fixed charge for ≤{v.floorKm}km</div></div>
+            </div>
+            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📊 Distance Tier Rates</div>
+            <div style={{border:`1px solid ${S.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",background:"#f8fafc",padding:"8px 14px",borderBottom:`1px solid ${S.border}`,fontSize:10,fontWeight:700,color:S.textMuted}}>
+                <div>TIER</div><div>UP TO (KM)</div><div>RATE (₦/KM)</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 1 <span style={{fontSize:10,color:S.textMuted}}>({v.floorKm}–{v.t1MaxKm}km)</span></div>
+                <input value={v.t1MaxKm} onChange={e=>v.setT1MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={v.t1Rate} onChange={e=>v.setT1Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 2 <span style={{fontSize:10,color:S.textMuted}}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
+                <input value={v.t2MaxKm} onChange={e=>v.setT2MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+                <input value={v.t2Rate} onChange={e=>v.setT2Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",alignItems:"center"}}>
+                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 3 <span style={{fontSize:10,color:S.textMuted}}>({v.t2MaxKm}km+)</span></div>
+                <div style={{fontSize:11,color:S.textMuted,fontStyle:"italic"}}>∞</div>
+                <input value={v.t3Rate} onChange={e=>v.setT3Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              </div>
+            </div>
+            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px"}}>
+              <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:8}}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {[1,3,5,8,12,20,30].map(km=>{const price=v.calcFn(km);return (<div key={km} style={{padding:"8px 10px",background:"#fff",borderRadius:8,border:`1px solid ${km<=v.floorKm?`${v.color}30`:S.border}`,textAlign:"center",minWidth:68,flex:1}}><div style={{fontSize:10,color:S.textMuted,fontWeight:600}}>{km} KM</div><div style={{fontSize:14,fontWeight:800,color:v.color,fontFamily:"'Space Mono',monospace"}}>₦{price.toLocaleString()}</div>{km<=v.floorKm&&<div style={{fontSize:8,color:v.color,fontWeight:700}}>FLOOR</div>}</div>);})}
+              </div>
+              <div style={{marginTop:8,fontSize:10,color:S.textMuted,lineHeight:1.5}}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm*v.t1Rate).toLocaleString()}). {v.t2MaxKm}km+ → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm*v.t2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>))}
@@ -2539,10 +2842,10 @@ function SettingsScreen() {
               <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Ikorodu, Ojo, Badagry, Epe, Agbara</div>
             </div>
           </div>
-          <div style={{ background: "#f8fafc", borderRadius: 10, padding: "14px 16px" }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10 }}>ZONE EXAMPLES (BIKE, 10KM)</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-              {[{ l: "Same Zone", z: "same", d: "Ikeja→Ikeja", i: "🏠" }, { l: "Bridge", z: "bridge", d: "Yaba→V.I.", i: "🌉" }, { l: "Island", z: "island", d: "V.I.→Lekki", i: "🏝️" }, { l: "Outer", z: "outer", d: "Ikeja→Ikorodu", i: "🛤️" }].map(z => { const p = calcPrice(bikeBase, bikePerKm, bikeMinKm, bikeMin, 10, z.z, 3); return (<div key={z.z} style={{ textAlign: "center", padding: "10px 8px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}` }}><div style={{ fontSize: 16 }}>{z.i}</div><div style={{ fontSize: 10, fontWeight: 700, color: S.navy, marginTop: 2 }}>{z.l}</div><div style={{ fontSize: 16, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace", margin: "4px 0" }}>₦{p.toLocaleString()}</div><div style={{ fontSize: 9, color: S.textMuted }}>{z.d}</div></div>); })}
+          <div style={{background:"#f8fafc",borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:10}}>ZONE EXAMPLES (BIKE, 10KM)</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+              {[{l:"Same Zone",z:"same",d:"Ikeja→Ikeja",i:"🏠"},{l:"Bridge",z:"bridge",d:"Yaba→V.I.",i:"🌉"},{l:"Island",z:"island",d:"V.I.→Lekki",i:"🏝️"},{l:"Outer",z:"outer",d:"Ikeja→Ikorodu",i:"🛤️"}].map(z=>{const p=calcPrice(bikeBase,bikePerKm,bikeMinKm,bikeMin,10,z.z,3,"bike");return (<div key={z.z} style={{textAlign:"center",padding:"10px 8px",background:"#fff",borderRadius:8,border:`1px solid ${S.border}`}}><div style={{fontSize:16}}>{z.i}</div><div style={{fontSize:10,fontWeight:700,color:S.navy,marginTop:2}}>{z.l}</div><div style={{fontSize:16,fontWeight:800,color:S.gold,fontFamily:"'Space Mono',monospace",margin:"4px 0"}}>₦{p.toLocaleString()}</div><div style={{fontSize:9,color:S.textMuted}}>{z.d}</div></div>);})}
             </div>
           </div>
         </SC>
@@ -2611,20 +2914,20 @@ function SettingsScreen() {
                 <div style={{ fontSize: 32, fontWeight: 900, color: S.gold, fontFamily: "'Space Mono',monospace" }}>₦{simFinal.toLocaleString()}</div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{simVehicle.toUpperCase()} • {simKm}km • {simZone === "bridge" ? "Bridge" : simZone === "island" ? "Island" : simZone === "outer" ? "Outer" : "Local"} • {simWeight}kg{simSurge ? " • SURGE" : ""}</div>
               </div>
-              <div style={{ marginTop: 12, background: "#f8fafc", borderRadius: 8, padding: "10px 14px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, marginBottom: 6 }}>COMPARE ALL VEHICLES</div>
-                <div style={{ display: "flex", gap: 8 }}>{[{ id: "bike", i: "🏍️" }, { id: "car", i: "🚗" }, { id: "van", i: "🚐" }].map(v => { const c = getVC()[v.id]; const p = calcPrice(c.base, c.perKm, c.minKm, c.min, simKm, simZone, simWeight); const f = simSurge ? Math.round(p * surgeMultiplier) : p; return (<div key={v.id} style={{ flex: 1, textAlign: "center", padding: 6, borderRadius: 6, background: simVehicle === v.id ? "rgba(232,168,56,0.1)" : "transparent", border: simVehicle === v.id ? `1px solid ${S.gold}` : "1px solid transparent" }}><div style={{ fontSize: 14 }}>{v.i}</div><div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{f.toLocaleString()}</div></div>); })}</div>
+              <div style={{marginTop:12,background:"#f8fafc",borderRadius:8,padding:"10px 14px"}}>
+                <div style={{fontSize:10,fontWeight:700,color:S.textMuted,marginBottom:6}}>COMPARE ALL VEHICLES</div>
+                <div style={{display:"flex",gap:8}}>{[{id:"bike",i:"🏍️"},{id:"car",i:"🚗"},{id:"van",i:"🚐"}].map(v=>{const c=getVC()[v.id];const p=calcPrice(c.base,c.perKm,c.minKm,c.min,simKm,simZone,simWeight,v.id);const f=simSurge?Math.round(p*surgeMultiplier):p;return (<div key={v.id} style={{flex:1,textAlign:"center",padding:6,borderRadius:6,background:simVehicle===v.id?"rgba(232,168,56,0.1)":"transparent",border:simVehicle===v.id?`1px solid ${S.gold}`:"1px solid transparent"}}><div style={{fontSize:14}}>{v.i}</div><div style={{fontSize:14,fontWeight:800,color:S.navy,fontFamily:"'Space Mono',monospace"}}>₦{f.toLocaleString()}</div></div>);})}</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginTop: 14, overflow: "hidden" }}>
-          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}` }}><div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>🚀 Common Lagos Routes — Quick Reference</div></div>
-          <div style={{ padding: 16, overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-              <thead><tr style={{ borderBottom: `2px solid ${S.border}` }}>{["Route", "KM", "Zone", "🏍️ Bike", "🚗 Car", "🚐 Van"].map(h => (<th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase" }}>{h}</th>))}</tr></thead>
-              <tbody>{[{ r: "Ikeja → Allen Ave", km: 3, z: "same", d: "Local" }, { r: "Yaba → V.I.", km: 12, z: "bridge", d: "Bridge" }, { r: "Surulere → Lekki Ph1", km: 18, z: "bridge", d: "Bridge" }, { r: "V.I. → Lekki", km: 8, z: "island", d: "Island" }, { r: "Ikeja → Ikorodu", km: 28, z: "outer", d: "Outer" }, { r: "Maryland → Ajah", km: 32, z: "bridge", d: "Bridge" }, { r: "Apapa → Ojo", km: 15, z: "outer", d: "Outer" }, { r: "V.I. → Ajah", km: 22, z: "island", d: "Island" }].map((r, i) => (<tr key={i} style={{ borderBottom: `1px solid ${S.borderLight}` }}><td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.r}</td><td style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>{r.km}</td><td style={{ padding: "8px 10px" }}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: r.z === "bridge" ? "rgba(232,168,56,0.1)" : r.z === "island" ? "rgba(139,92,246,0.08)" : r.z === "outer" ? "rgba(16,185,129,0.08)" : "#f1f5f9", color: r.z === "bridge" ? S.gold : r.z === "island" ? "#8B5CF6" : r.z === "outer" ? S.green : S.textMuted, fontWeight: 700 }}>{r.d}</span></td>{["bike", "car", "van"].map(v => { const c = getVC()[v]; return <td key={v} style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>₦{calcPrice(c.base, c.perKm, c.minKm, c.min, r.km, r.z, 3).toLocaleString()}</td>; })}</tr>))}</tbody>
+        <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginTop:14,overflow:"hidden"}}>
+          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`}}><div style={{fontSize:14,fontWeight:700,color:S.navy}}>🚀 Common Lagos Routes — Quick Reference</div></div>
+          <div style={{padding:16,overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Route","KM","Zone","🏍️ Bike","🚗 Car","🚐 Van"].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
+              <tbody>{[{r:"Ikeja → Allen Ave",km:3,z:"same",d:"Local"},{r:"Yaba → V.I.",km:12,z:"bridge",d:"Bridge"},{r:"Surulere → Lekki Ph1",km:18,z:"bridge",d:"Bridge"},{r:"V.I. → Lekki",km:8,z:"island",d:"Island"},{r:"Ikeja → Ikorodu",km:28,z:"outer",d:"Outer"},{r:"Maryland → Ajah",km:32,z:"bridge",d:"Bridge"},{r:"Apapa → Ojo",km:15,z:"outer",d:"Outer"},{r:"V.I. → Ajah",km:22,z:"island",d:"Island"}].map((r,i)=>(<tr key={i} style={{borderBottom:`1px solid ${S.borderLight}`}}><td style={{padding:"8px 10px",fontWeight:600}}>{r.r}</td><td style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700}}>{r.km}</td><td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:r.z==="bridge"?"rgba(232,168,56,0.1)":r.z==="island"?"rgba(139,92,246,0.08)":r.z==="outer"?"rgba(16,185,129,0.08)":"#f1f5f9",color:r.z==="bridge"?S.gold:r.z==="island"?"#8B5CF6":r.z==="outer"?S.green:S.textMuted,fontWeight:700}}>{r.d}</span></td>{["bike","car","van"].map(v=>{const c=getVC()[v];return<td key={v} style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>₦{calcPrice(c.base,c.perKm,c.minKm,c.min,r.km,r.z,3,v).toLocaleString()}</td>;})}</tr>))}</tbody>
             </table>
           </div>
         </div>
@@ -2863,19 +3166,35 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
     setLoading(true);
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
-      autocompleteService.current.getPlacePredictions({
+      // Bias results towards Lagos (bounds is a preference for AutocompleteService, not a hard filter)
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
+      const req = {
         input,
+        bounds: lagosBounds,
         componentRestrictions: { country: 'ng' },
-        types: ['address'],
-        location: new window.google.maps.LatLng(6.5244, 3.3792),
-        radius: 50000,
-      }, (predictions, status) => {
+      };
+      autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
         setLoading(false);
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          const lagos = predictions.filter(p => p.description.toLowerCase().includes('lagos'));
-          setSuggestions(lagos.length ? lagos : predictions.slice(0, 5));
-          setShowDropdown(true);
-        } else { setSuggestions([]); setShowDropdown(false); }
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
+          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
+          const lagosOnly = predictions.filter(p =>
+            p.terms?.some(t => /lagos/i.test(t.value)) ||
+            /lagos/i.test(p.description)
+          );
+          if (lagosOnly.length > 0) {
+            setSuggestions(lagosOnly.slice(0, 8));
+            setShowDropdown(true);
+          } else {
+            setSuggestions([]);
+            setShowDropdown(false);
+          }
+        } else {
+          setSuggestions([]);
+          setShowDropdown(false);
+        }
       });
     }, 500);
   };
@@ -2896,7 +3215,15 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
                 geocoder.current.geocode({ placeId: s.place_id }, (results, status) => {
                   if (status === 'OK' && results[0] && results[0].geometry) {
                     const loc = results[0].geometry.location;
-                    onPlaceSelected({ address: s.description, lat: loc.lat(), lng: loc.lng() });
+                    const lat = loc.lat(), lng = loc.lng();
+                    // Validate coordinates fall within Lagos State bounds
+                    const inLagos = lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95;
+                    if (!inLagos) {
+                      onChange('');
+                      onPlaceSelected({ outOfScope: true, address: s.description });
+                    } else {
+                      onPlaceSelected({ address: s.description, lat, lng });
+                    }
                   }
                 });
               }
@@ -2963,7 +3290,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     VehiclesAPI.getAll().then(res => {
       if (res.success && res.vehicles) {
         const p = {};
-        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute) }; });
+        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute), pricing_tiers: v.pricing_tiers || null }; });
         setVehiclePricing(p);
       }
     }).catch(() => { });
@@ -2995,6 +3322,19 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const calcPrice = (vName) => {
     const p = vehiclePricing[vName];
     if (!p) return null;
+    // Tiered pricing (Bike, Car, Van)
+    const pt = p.pricing_tiers;
+    if (pt && pt.type === 'tiered' && routeDistance) {
+      const km = routeDistance;
+      if (km <= pt.floor_km) return pt.floor_fee;
+      const t = pt.tiers || [];
+      if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
+      if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km||pt.floor_km) * (t[0]?.rate||0)));
+      if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km||0) * (t[1]?.rate||0)));
+      return Math.round(km * (t[t.length-1]?.rate || 0));
+    }
+    if (pt && pt.type === 'tiered') return pt.floor_fee;
+    // Simple pricing fallback
     if (routeDistance && routeDuration) {
       return Math.round(p.base_fare + routeDistance * p.rate_per_km + routeDuration * p.rate_per_minute);
     }
@@ -3072,13 +3412,19 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p => { setPickupLat(p.lat); setPickupLng(p.lng); }} placeholder="Enter pickup address..." style={iSt} />
+            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{
+              if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              setPickupLat(p.lat); setPickupLng(p.lng);
+            }} placeholder="Enter pickup address..." style={iSt}/>
           </div>
 
           {/* Dropoff */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p => { setDropoffLat(p.lat); setDropoffLng(p.lng); }} placeholder="Enter delivery address..." style={iSt} />
+            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{
+              if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              setDropoffLat(p.lat); setDropoffLng(p.lng);
+            }} placeholder="Enter delivery address..." style={iSt}/>
           </div>
 
           {/* Receiver */}

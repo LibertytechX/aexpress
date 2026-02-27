@@ -1,5 +1,7 @@
 // API Service for Dispatcher Frontend
-const API_BASE_URL = window.VITE_API_BASE_URL;
+// In dev: create dispatcher-frontend/.env.local with VITE_API_BASE_URL=http://localhost:8000/api
+// In prod: the default .env value (production server) is used automatically
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://www.orders.axpress.net/api';
 
 // Get stored auth token
 const getToken = () => localStorage.getItem('access_token');
@@ -16,7 +18,7 @@ const authHeaders = () => {
 // ─── AUTHENTICATION ─────────────────────────────────────────────
 export const AuthAPI = {
     async login(phone, password) {
-        const res = await fetch(`https://www.orders.axpress.net/api/auth/login/`, {
+        const res = await fetch(`${API_BASE_URL}/auth/login/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ phone, password })
@@ -30,9 +32,32 @@ export const AuthAPI = {
         return data;
     },
 
-    logout() {
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
+    async logout() {
+        // Blacklist the refresh token on the server (best-effort)
+        try {
+            const refreshToken = localStorage.getItem('refresh_token');
+            const accessToken = localStorage.getItem('access_token');
+            if (refreshToken) {
+                await fetch(`${API_BASE_URL}/auth/logout/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
+                    },
+                    body: JSON.stringify({ refresh_token: refreshToken })
+                });
+            }
+        } catch (_) { /* always clear locally even if server call fails */ }
+        // Wipe all local storage and session storage
+        localStorage.clear();
+        sessionStorage.clear();
+        // Wipe all browser caches (service workers, fetch cache)
+        if ('caches' in window) {
+            try {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+            } catch (_) {}
+        }
     },
 
     isAuthenticated() {
@@ -43,7 +68,7 @@ export const AuthAPI = {
 // ─── RIDERS ─────────────────────────────────────────────────────
 export const RidersAPI = {
     async getAll() {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/riders/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch riders');
@@ -71,13 +96,30 @@ export const RidersAPI = {
     },
 
     async updateLocation(riderUuid, lat, lng) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/riders/${riderUuid}/update_location/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/update_location/`, {
             method: 'PATCH',
             headers: authHeaders(),
             body: JSON.stringify({ lat, lng })
         });
         if (!res.ok) throw new Error('Failed to update rider location');
         return await res.json();
+    },
+
+    async createRider(fields) {
+        // Build multipart/form-data (endpoint uses MultiPartParser)
+        const form = new FormData();
+        Object.entries(fields).forEach(([k, v]) => {
+            if (v !== null && v !== undefined && v !== '') form.append(k, v);
+        });
+        const token = localStorage.getItem('access_token');
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/onboarding/`, {
+            method: 'POST',
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            body: form
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     }
 };
 
@@ -150,7 +192,7 @@ export const OrdersAPI = {
     },
 
     async assignRider(orderNumber, riderId) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/assign_rider/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/assign_rider/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ rider_id: riderId })
@@ -160,7 +202,7 @@ export const OrdersAPI = {
     },
 
     async updateStatus(orderNumber, newStatus) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/orders/${orderNumber}/update_status/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ status: newStatus })
@@ -185,7 +227,7 @@ export const OrdersAPI = {
 // ─── MERCHANTS ──────────────────────────────────────────────────
 export const MerchantsAPI = {
     async getAll() {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/merchants/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchants/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch merchants');
@@ -208,7 +250,7 @@ export const MerchantsAPI = {
 // ─── VEHICLES ───────────────────────────────────────────────────
 export const VehiclesAPI = {
     async getAll() {
-        const res = await fetch(`https://www.orders.axpress.net/api/orders/vehicles/`, {
+        const res = await fetch(`${API_BASE_URL}/orders/vehicles/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch vehicles');
@@ -231,7 +273,7 @@ export const VehiclesAPI = {
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/activity/?limit=${limit}`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/activity/?limit=${limit}`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch activity feed');
@@ -239,7 +281,7 @@ export const ActivityFeedAPI = {
     },
 
     async getAblyToken() {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/ably-token/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/ably-token/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to get Ably token');
@@ -250,7 +292,7 @@ export const ActivityFeedAPI = {
 // ─── SETTINGS ───────────────────────────────────────────────────
 export const SettingsAPI = {
     async get() {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/settings/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
             headers: authHeaders()
         });
         if (!res.ok) throw new Error('Failed to fetch settings');
@@ -258,7 +300,7 @@ export const SettingsAPI = {
     },
 
     async update(settings) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/settings/`, {
+        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify(settings)

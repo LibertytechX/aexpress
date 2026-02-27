@@ -581,6 +581,15 @@ class RiderOnboardingSerializer(serializers.Serializer):
     phone = serializers.CharField()
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
+    password = serializers.CharField(
+        required=False, write_only=True, min_length=6,
+        style={"input_type": "password"},
+        help_text="If omitted a random password is generated and e-mailed to the rider."
+    )
+    is_verified = serializers.BooleanField(
+        required=False, default=False,
+        help_text="Mark phone and email as verified immediately."
+    )
 
     # Rider Profile fields
     bank_name = serializers.CharField(required=False, max_length=100)
@@ -642,9 +651,12 @@ class RiderOnboardingSerializer(serializers.Serializer):
         phone = validated_data.pop("phone")
         first_name = validated_data.pop("first_name")
         last_name = validated_data.pop("last_name")
+        is_verified = validated_data.pop("is_verified", False)
 
-        # Generate random password
-        password = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+        # Use provided password or generate a random one
+        password = validated_data.pop("password", None)
+        if not password:
+            password = "".join(random.choices(string.ascii_letters + string.digits, k=8))
 
         from django.db import IntegrityError
 
@@ -659,6 +671,11 @@ class RiderOnboardingSerializer(serializers.Serializer):
                 contact_name=f"{first_name} {last_name}",
                 usertype="Rider",
             )
+            # Optionally mark as verified
+            if is_verified:
+                user.phone_verified = True
+                user.email_verified = True
+                user.save(update_fields=["phone_verified", "email_verified"])
         except IntegrityError as e:
             if "phone" in str(e).lower():
                 raise serializers.ValidationError(
