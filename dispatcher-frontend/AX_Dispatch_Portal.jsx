@@ -1995,10 +1995,16 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "",
     password: "", vehicle_type: "", city: "", is_verified: false,
+    home_zone: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [relayNodes, setRelayNodes] = useState([]);
+
+  useEffect(() => {
+    RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => {});
+  }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -2010,6 +2016,7 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
       const payload = { ...form };
       if (!payload.vehicle_type) delete payload.vehicle_type;
       if (!payload.city) delete payload.city;
+      if (!payload.home_zone) delete payload.home_zone;
       await RidersAPI.createRider(payload);
       onRiderCreated();
       onClose();
@@ -2091,6 +2098,20 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
               <input value={form.city} onChange={e => set("city", e.target.value)} placeholder="e.g. Lagos" style={iSt} />
             </div>
           </div>
+
+          {/* Relay Node */}
+          {relayNodes.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>Relay Network Node</label>
+              <select value={form.home_zone} onChange={e => set("home_zone", e.target.value)} style={iSt}>
+                <option value="">— None (no relay assignment) —</option>
+                {relayNodes.map(n => (
+                  <option key={n.id} value={n.zone}>{n.name}{n.zone_name ? ` (${n.zone_name})` : ''}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Assigns the rider to the relay node's zone for relay dispatch.</div>
+            </div>
+          )}
 
           {/* Verified checkbox */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22, padding: "12px 14px", background: S.borderLight, borderRadius: 10, border: `1px solid ${S.border}` }}>

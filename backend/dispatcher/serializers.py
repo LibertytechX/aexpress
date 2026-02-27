@@ -636,6 +636,10 @@ class RiderOnboardingSerializer(serializers.Serializer):
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
+    home_zone = serializers.PrimaryKeyRelatedField(
+        queryset=Zone.objects.all(), required=False, allow_null=True,
+        help_text="Relay network zone to assign this rider to.",
+    )
     driving_license_number = serializers.CharField(required=False, max_length=50)
     national_id = serializers.CharField(required=False, max_length=50)
 
