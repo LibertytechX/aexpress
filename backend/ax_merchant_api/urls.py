@@ -15,6 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from backend.orders.views import OrderCompleteView
 from django.contrib import admin
 from django.urls import path, include
 
@@ -23,6 +24,11 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls")),
     path("api/orders/", include("orders.urls")),
     path("api/wallet/", include("wallet.urls")),
+    path(
+        "orders/<str:order_number>/complete/",
+        OrderCompleteView.as_view(),
+        name="order_complete",
+    ),
     path("api/dispatch/", include("dispatcher.urls")),
     path("api/riders/", include("riders.urls")),
     path("api/bot/", include("bot.urls")),
