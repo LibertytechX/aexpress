@@ -3026,12 +3026,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 		(mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
 	);
 
-  const handleConfirmAll = () => {
-    const deliveries = getActiveDropoffs();
+  const [submitting, setSubmitting] = useState(false);
 
-    // Debug: Log route data
-    console.log('🚀 handleConfirmAll called!');
-    console.log('📏 Route data:', { routeDistance, routeDuration });
+  const handleConfirmAll = async () => {
+    if (submitting) return;
+    const deliveries = getActiveDropoffs();
 
     // Prepare order data based on mode
     const orderData = {
@@ -3052,22 +3051,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       totalCost: totalCost,
     };
 
-    // Debug: Log order data
-    console.log('📦 Order data being sent:', orderData);
-    console.log('💰 Pricing data:', {
-      distance_km: orderData.distance_km,
-      duration_minutes: orderData.duration_minutes,
-      vehicle: orderData.vehicle
-    });
-
     if (mode === 'quick') {
-      // Quick Send - single delivery
       orderData.dropoff = dropoffAddress;
       orderData.receiverName = receiverName;
       orderData.receiverPhone = receiverPhone;
       orderData.packageType = drops[0]?.pkg || 'Box';
     } else if (mode === 'multi' || mode === 'bulk') {
-      // Multi-Drop or Bulk Import - multiple deliveries
       orderData.deliveries = deliveries.map(d => ({
         dropoff_address: d.address,
         receiver_name: d.name,
@@ -3077,7 +3066,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       }));
     }
 
-    onPlaceOrder(orderData);
+    setSubmitting(true);
+    try {
+      await onPlaceOrder(orderData);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ─── Saved addresses for quick pick ───
@@ -3708,12 +3702,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 flex: 1, height: 48, border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600,
                 cursor: "pointer", background: "#fff", color: S.navy, fontFamily: "inherit"
               }}>← Back</button>
-              <button onClick={handleConfirmAll} style={{
-                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              <button onClick={handleConfirmAll} disabled={submitting} style={{
+                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700,
+                cursor: submitting ? "not-allowed" : "pointer",
+                background: submitting ? "#cbd5e1" : `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: submitting ? "#64748b" : S.navy, fontFamily: "inherit",
+                boxShadow: submitting ? "none" : "0 4px 12px rgba(232,168,56,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                transition: "all 0.2s ease"
               }}>
-                {payMethod === 'pay_with_transfer'
+                {submitting ? (
+                  <>
+                    <span style={{ width: 16, height: 16, border: "2px solid #94a3b8", borderTopColor: "#1B2A4A", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                    Processing…
+                  </>
+                ) : payMethod === 'pay_with_transfer'
                   ? `Pay & Create Order — ₦${totalCost.toLocaleString()}`
                   : totalDeliveries === 1
                     ? `Create Order — ₦${totalCost.toLocaleString()}`
