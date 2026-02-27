@@ -183,10 +183,10 @@ class Rider(models.Model):
     # GPS Tracking
     gpswox_device_id = models.CharField(max_length=100, null=True, blank=True)
     current_latitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=30, decimal_places=20, null=True, blank=True
     )
     current_longitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=30, decimal_places=20, null=True, blank=True
     )
     current_speed = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     is_moving = models.BooleanField(default=False)
@@ -287,6 +287,7 @@ class SystemSettings(models.Model):
     """
     Singleton model to store global system settings/pricing configuration.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Zone Surcharges
