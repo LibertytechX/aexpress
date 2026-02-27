@@ -757,66 +757,112 @@ function MerchantPortal() {
               balance={walletBalance}
               currentUser={currentUser}
               onPlaceOrder={async (orderData) => {
-                try {
-                  console.log('🎯 onPlaceOrder called with:', orderData);
+                // ─── Helper: call API and navigate on success ─────────────
+                const doCreateOrder = async (data) => {
+                  // Normalise payment method — pay_with_transfer is funded into
+                  // the wallet first, so the order itself is charged as 'wallet'
+                  const paymentMethod = data.payMethod === 'pay_with_transfer' ? 'wallet' : data.payMethod;
                   let response;
-
-                  // Call appropriate API based on order mode
-                  if (orderData.mode === 'quick') {
+                  if (data.mode === 'quick') {
                     const apiPayload = {
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      dropoff_address: orderData.dropoff,
-                      receiver_name: orderData.receiverName || '',
-                      receiver_phone: orderData.receiverPhone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      package_type: orderData.packageType || 'Box',
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      dropoff_address: data.dropoff,
+                      receiver_name: data.receiverName || '',
+                      receiver_phone: data.receiverPhone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      package_type: data.packageType || 'Box',
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     };
-                    console.log('📡 Sending to API (Quick Send):', apiPayload);
                     response = await window.API.Orders.createQuickSend(apiPayload);
-                  } else if (orderData.mode === 'multi') {
+                  } else if (data.mode === 'multi') {
                     response = await window.API.Orders.createMultiDrop({
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      deliveries: data.deliveries || [],
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     });
-                  } else if (orderData.mode === 'bulk') {
+                  } else if (data.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
-                      pickup_address: orderData.pickup,
-                      sender_name: orderData.senderName || currentUser?.contact_name || '',
-                      sender_phone: orderData.senderPhone || currentUser?.phone || '',
-                      vehicle: orderData.vehicle,
-                      payment_method: orderData.payMethod,
-                      deliveries: orderData.deliveries || [],
-                      notes: orderData.notes || '',
-                      distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      pickup_address: data.pickup,
+                      sender_name: data.senderName || currentUser?.contact_name || '',
+                      sender_phone: data.senderPhone || currentUser?.phone || '',
+                      vehicle: data.vehicle,
+                      payment_method: paymentMethod,
+                      deliveries: data.deliveries || [],
+                      notes: data.notes || '',
+                      distance_km: data.distance_km || 0,
+                      duration_minutes: data.duration_minutes || 0
                     });
                   }
-
                   if (response && response.success) {
-                    // Reload orders from API
                     await loadOrders();
-
-                    // Reload wallet balance if payment was made via wallet
-                    if (orderData.payMethod === 'wallet') {
-                      await loadWalletBalance();
-                    }
-
+                    if (paymentMethod === 'wallet') await loadWalletBalance();
                     setScreen("orders");
                     showNotif(response.message || `Order #${response.order?.order_number} created successfully!`);
                   }
+                };
+
+                // ─── Pay with Transfer: open Paystack transfer popup ───────
+                if (orderData.payMethod === 'pay_with_transfer') {
+                  try {
+                    setLoading(true);
+                    const keyResponse = await window.API.Wallet.getPaystackKey();
+                    if (!keyResponse.success) { showNotif('Failed to load payment configuration', 'error'); setLoading(false); return; }
+
+                    const initResponse = await window.API.Wallet.initializePayment(orderData.totalCost);
+                    if (!initResponse.success) { showNotif('Failed to initialize payment', 'error'); setLoading(false); return; }
+                    setLoading(false);
+
+                    const reference = initResponse.data.reference;
+                    const handler = window.PaystackPop.setup({
+                      key: keyResponse.data.public_key,
+                      email: currentUser?.email || 'user@example.com',
+                      amount: orderData.totalCost * 100, // kobo
+                      currency: 'NGN',
+                      ref: reference,
+                      channels: ['bank_transfer'],
+                      onClose: () => showNotif('Payment was not completed. Order not placed.', 'error'),
+                      callback: (paystackResponse) => {
+                        (async () => {
+                          try {
+                            setLoading(true);
+                            const verifyResponse = await window.API.Wallet.verifyPayment(reference);
+                            if (verifyResponse.success) {
+                              showNotif('Transfer confirmed! Creating your order...', 'success');
+                              await loadWalletBalance();
+                              await doCreateOrder(orderData);
+                            } else {
+                              showNotif('Payment verification failed. Please contact support.', 'error');
+                            }
+                          } catch (err) {
+                            showNotif(err.message || 'Failed to complete order after payment', 'error');
+                          } finally {
+                            setLoading(false);
+                          }
+                        })();
+                      }
+                    });
+                    handler.openIframe();
+                  } catch (error) {
+                    showNotif(error.message || 'Payment initialization failed', 'error');
+                    setLoading(false);
+                  }
+                  return;
+                }
+
+                // ─── Normal order creation (wallet / cash / receiver pays) ─
+                try {
+                  await doCreateOrder(orderData);
                 } catch (error) {
                   showNotif(error.message || 'Failed to create order', 'error');
                 }
@@ -2984,7 +3030,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       notes: notes,
       // Include route information for pricing calculation
       distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0
+      duration_minutes: routeDuration || 0,
+      // Total cost — required for pay_with_transfer Paystack initialization
+      totalCost: totalCost,
     };
 
     // Debug: Log order data
@@ -3596,6 +3644,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <h3 style={{ fontSize: 13, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Payment Method</h3>
               {[
                 { id: "wallet", label: "Wallet", sub: `Balance: ₦${balance.toLocaleString()}`, disabled: balance < totalCost, tag: balance >= totalCost ? "RECOMMENDED" : "INSUFFICIENT" },
+                { id: "pay_with_transfer", label: "Pay with Transfer", sub: "Bank transfer via Paystack — funds wallet & creates order instantly", tag: "INSTANT" },
                 { id: "cash_on_pickup", label: "Cash on Pickup", sub: "Pay the rider per delivery" },
                 { id: "receiver_pays", label: "Receiver Pays", sub: "Each receiver pays on delivery" },
               ].map(pm => (
@@ -3618,8 +3667,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   {pm.tag && (
                     <span style={{
                       fontSize: 9, fontWeight: 700, padding: "2px 8px", borderRadius: 6,
-                      background: pm.tag === "RECOMMENDED" ? S.greenBg : S.redBg,
-                      color: pm.tag === "RECOMMENDED" ? S.green : S.red
+                      background: pm.tag === "RECOMMENDED" ? S.greenBg : pm.tag === "INSTANT" ? "#dbeafe" : S.redBg,
+                      color: pm.tag === "RECOMMENDED" ? S.green : pm.tag === "INSTANT" ? "#1e40af" : S.red
                     }}>{pm.tag}</span>
                   )}
                 </button>
@@ -3637,9 +3686,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
                 boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
               }}>
-                {totalDeliveries === 1
-                  ? `Create Order — ₦${totalCost.toLocaleString()}`
-                  : `Create ${totalDeliveries} Orders — ₦${totalCost.toLocaleString()}`
+                {payMethod === 'pay_with_transfer'
+                  ? `Pay & Create Order — ₦${totalCost.toLocaleString()}`
+                  : totalDeliveries === 1
+                    ? `Create Order — ₦${totalCost.toLocaleString()}`
+                    : `Create ${totalDeliveries} Orders — ₦${totalCost.toLocaleString()}`
                 }
               </button>
             </div>
