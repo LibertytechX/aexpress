@@ -3091,8 +3091,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const vehicles = [
     { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", comingSoon: true },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", comingSoon: true },
   ];
 
   const modeConfig = [
@@ -3508,20 +3508,30 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
 
                 return (
-                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                    background: isSelected ? S.goldPale : "#f8fafc",
-                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
-                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                    transition: "all 0.2s"
+                  <button key={v.id} onClick={() => !v.comingSoon && setVehicle(v.id)} disabled={v.comingSoon} style={{
+                    background: v.comingSoon ? "#f1f5f9" : isSelected ? S.goldPale : "#f8fafc",
+                    border: isSelected && !v.comingSoon ? `2px solid ${S.gold}` : "2px solid transparent",
+                    borderRadius: 12, padding: "14px 10px", cursor: v.comingSoon ? "not-allowed" : "pointer", textAlign: "center", fontFamily: "inherit",
+                    transition: "all 0.2s",
+                    opacity: v.comingSoon ? 0.55 : 1,
+                    position: "relative"
                   }}>
-                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
-                    <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
-                      {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+                    {v.comingSoon && (
+                      <div style={{
+                        position: "absolute", top: 6, right: 6,
+                        background: "#e2e8f0", color: "#64748b",
+                        fontSize: 9, fontWeight: 700, padding: "2px 6px",
+                        borderRadius: 6, textTransform: "uppercase", letterSpacing: 0.5
+                      }}>Coming Soon</div>
+                    )}
+                    <div style={{ color: v.comingSoon ? "#94a3b8" : isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: v.comingSoon ? "#94a3b8" : S.navy }}>{v.label}</div>
+                    <div style={{ fontSize: 11, color: v.comingSoon ? "#cbd5e1" : S.grayLight }}>{v.desc}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? "#94a3b8" : S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+                      {v.comingSoon ? '—' : isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
                     </div>
-                    <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
-                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                    <div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
+                      {v.comingSoon ? '' : isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
                     </div>
                   </button>
                 );
