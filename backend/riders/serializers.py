@@ -12,6 +12,7 @@ from .models import (
     OrderOffer,
     AreaDemand,
     RiderEarning,
+    RiderNotification,
 )
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
@@ -493,3 +494,20 @@ class RiderLocationSerializer(serializers.Serializer):
     accuracy = serializers.FloatField(required=False, allow_null=True)
     heading = serializers.FloatField(required=False, allow_null=True)
     speed = serializers.FloatField(required=False, allow_null=True)
+
+
+class RiderNotificationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for rider notifications.
+    """
+
+    class Meta:
+        model = RiderNotification
+        fields = [
+            "id",
+            "title",
+            "body",
+            "data",
+            "is_read",
+            "created_at",
+        ]

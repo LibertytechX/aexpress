@@ -24,6 +24,7 @@ from .serializers import (
     RiderWalletInfoSerializer,
     RiderTransactionSerializer,
     RiderLocationSerializer,
+    RiderNotificationSerializer,
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
@@ -33,6 +34,7 @@ from .models import (
     OrderOffer,
     RiderCodRecord,
     RiderLocation,
+    RiderNotification,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -845,3 +847,86 @@ class RiderLocationUpdateView(APIView):
             {"success": True, "message": "Location updated."},
             status=status.HTTP_200_OK,
         )
+
+
+class RiderNotificationListView(APIView):
+    """
+    API endpoint for listing rider notifications.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        notifications = RiderNotification.objects.filter(rider=rider).order_by(
+            "-created_at"
+        )
+        serializer = RiderNotificationSerializer(notifications, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderNotificationDetailView(APIView):
+    """
+    API endpoint for retrieving a rider notification.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request, pk):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            notification = RiderNotification.objects.get(pk=pk, rider=rider)
+        except RiderNotification.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Notification not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderNotificationSerializer(notification)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderNotificationMarkReadView(APIView):
+    """
+    API endpoint for marking a notification as read.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, pk):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            notification = RiderNotification.objects.get(pk=pk, rider=rider)
+            notification.is_read = True
+            notification.save(update_fields=["is_read"])
+            return Response(
+                {"success": True, "message": "Notification marked as read."},
+                status=status.HTTP_200_OK,
+            )
+        except RiderNotification.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Notification not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
