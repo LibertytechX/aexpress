@@ -3,8 +3,8 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed, Zone, RelayNode
-from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer
+from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset
+from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer, VehicleAssetSerializer
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
@@ -608,3 +608,21 @@ class DispatcherViewSet(viewsets.ViewSet):
                 status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VehicleAssetViewSet(viewsets.ModelViewSet):
+    """CRUD for physical vehicle assets."""
+
+    queryset = VehicleAsset.objects.all().order_by("plate_number")
+    serializer_class = VehicleAssetSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vtype = self.request.query_params.get("type")
+        if vtype:
+            qs = qs.filter(vehicle_type=vtype)
+        active = self.request.query_params.get("active")
+        if active is not None:
+            qs = qs.filter(is_active=active.lower() in ("true", "1"))
+        return qs

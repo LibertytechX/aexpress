@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ const I = {
   x: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
   check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>,
   teams: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
+  vehicles: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10H1v7h2" /><circle cx="7" cy="17" r="2" /><path d="M9 17h6" /><circle cx="17" cy="17" r="2" /><path d="M5 10V6a1 1 0 0 1 1-1h4l3 5" /></svg>,
 };
 
 const S = {
@@ -963,6 +964,8 @@ export default function AXDispatchPortal() {
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
+  const [selectedVehicleId, setSelectedVehicleId] = useState(null);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
   const ablyRef = useRef(null);
@@ -1000,17 +1003,19 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => []),
-          DispatchersAPI.getAll().catch(() => [])
+          DispatchersAPI.getAll().catch(() => []),
+          VehicleAssetsAPI.getAll().catch(() => [])
         ]);
         if (cancelled) return;
         setRiders(ridersData);
         setOrders(ordersData);
         setMerchants(merchantsData);
         setDispatchers(dispatchersData);
+        setVehicleAssets(vehicleAssetsData);
         setEventLogs(initEventLogs(ordersData));
       } catch (error) {
         console.error('Failed to fetch data:', error);
@@ -1203,6 +1208,7 @@ export default function AXDispatchPortal() {
     { id: "dashboard", label: "Dashboard", icon: I.dashboard },
     { id: "orders", label: "Orders", icon: I.orders, count: orders.filter(o => o.status === "Pending").length },
     { id: "riders", label: "Riders", icon: I.riders, count: riders.filter(r => r.status === "online").length },
+    { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
     { id: "messaging", label: "Messaging", icon: I.messaging, count: MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) },
@@ -1227,7 +1233,7 @@ export default function AXDispatchPortal() {
           {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
+          {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); setSelectedVehicleId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1243,13 +1249,14 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? (selectedVehicleId ? "Vehicle Details" : "Vehicles") : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
+          {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} selectedId={selectedVehicleId} onSelect={setSelectedVehicleId} onBack={() => setSelectedVehicleId(null)} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "messaging" && <MessagingScreen />}
@@ -2276,6 +2283,297 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           onRiderCreated={() => { if (onRiderCreated) onRiderCreated(); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── VEHICLES LOCATION MAP ──────────────────────────────────────
+function VehiclesLocationMap({ vehicles }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    vehicles.forEach(v => {
+      if (!v.latitude || !v.longitude) return;
+      const lat = parseFloat(v.latitude);
+      const lng = parseFloat(v.longitude);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
+      const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+      const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
+
+      const marker = new window.google.maps.Marker({
+        position: { lat, lng }, map, title: v.plate_number,
+        icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 6, fillColor: color, fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2, rotation: parseFloat(v.course) || 0 }
+      });
+
+      marker.addListener('click', () => {
+        infoWindowRef.current.setContent(
+          `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
+          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${typeIcon} ${v.plate_number}</div>` +
+          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
+          `<div style="color:#555;font-size:11px;margin-top:4px;">${v.asset_id} • ${(v.vehicle_type || '').toUpperCase()}</div>` +
+          (v.make || v.model ? `<div style="color:#888;font-size:10px;">${v.make || ''} ${v.model || ''}</div>` : '') +
+          (v.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${v.speed} km/h</div>` : '') +
+          (v.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${v.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
+          `</div>`
+        );
+        infoWindowRef.current.open(map, marker);
+      });
+
+      markersRef.current.push(marker);
+      bounds.extend({ lat, lng });
+      hasPoints = true;
+    });
+
+    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+  }, [mapReady, vehicles]);
+
+  const withLocation = vehicles.filter(v => v.latitude && v.longitude).length;
+
+  return (
+    <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span>🗺️ Vehicle Locations</span>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {vehicles.length} vehicles with GPS</span>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+        {withLocation === 0 && mapReady && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.03)' }}>
+            <div style={{ textAlign: 'center', color: S.textMuted }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>No GPS data available</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Vehicles will appear here when telemetry is received</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
+        <span><span style={{ color: '#22c55e', fontWeight: 700 }}>▲</span> Engine On</span>
+        <span><span style={{ color: '#F59E0B', fontWeight: 700 }}>▲</span> Idle</span>
+        <span><span style={{ color: '#EF4444', fontWeight: 700 }}>▲</span> Engine Off</span>
+        <span><span style={{ color: '#6b7280', fontWeight: 700 }}>▲</span> Unknown</span>
+        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── VEHICLES SCREEN ────────────────────────────────────────────
+function VehiclesScreen({ vehicles, selectedId, onSelect, onBack, onVehicleCreated }) {
+  const [filter, setFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [showCreateVehicle, setShowCreateVehicle] = useState(false);
+
+  if (selectedId) {
+    const vehicle = vehicles.find(v => v.id === selectedId);
+    if (!vehicle) return <div style={{ color: S.textMuted }}>Vehicle not found</div>;
+    const typeIcon = vehicle.vehicle_type === 'bike' ? '🏍️' : vehicle.vehicle_type === 'car' ? '🚗' : '🚐';
+    const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
+    return (
+      <div>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Vehicles</button>
+        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
+              <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>{typeIcon}</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>{vehicle.plate_number}</div>
+              <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{vehicle.asset_id}</div>
+              <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: vehicle.is_active ? S.greenBg : S.redBg, color: vehicle.is_active ? S.green : S.red }}>{vehicle.is_active ? "ACTIVE" : "INACTIVE"}</span>
+              <div style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: `${ec}18`, color: ec }}>{(vehicle.engine_status || 'unknown').toUpperCase()}</div>
+              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
+                {[{ l: "Type", v: (vehicle.vehicle_type || '').toUpperCase() }, { l: "Make", v: vehicle.make || '—' }, { l: "Model", v: vehicle.model || '—' }, { l: "Year", v: vehicle.year || '—' }, { l: "Color", v: vehicle.color || '—' }, { l: "VIN", v: vehicle.vin || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Telemetry</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
+                  <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+                ))}
+              </div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Documents</div>
+              {[{ l: "Insurance Expiry", v: vehicle.insurance_expiry || '—' }, { l: "Registration Expiry", v: vehicle.registration_expiry || '—' }, { l: "Road Worthiness", v: vehicle.road_worthiness_expiry || '—' }].map(f => (
+                <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Assigned Rider</div>
+              {vehicle.assigned_rider ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: S.gold }}>{vehicle.assigned_rider.name.split(" ").map(n => n[0]).join("")}</div>
+                  <div><div style={{ fontSize: 14, fontWeight: 700 }}>{vehicle.assigned_rider.name}</div><div style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{vehicle.assigned_rider.rider_id} • {vehicle.assigned_rider.phone}</div></div>
+                </div>
+              ) : (
+                <div style={{ color: S.textMuted, fontSize: 12 }}>No rider assigned to this vehicle</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
+  const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
+  const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Vehicles" value={vehicles.length} />
+        <StatCard label="Active" value={vehicles.filter(v => v.is_active).length} color={S.green} />
+        <StatCard label="Engine On" value={vehicles.filter(v => v.engine_status === "on").length} color={S.green} />
+        <StatCard label="With GPS" value={vehicles.filter(v => v.latitude && v.longitude).length} color={S.gold} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["All", "Active", "Inactive", "Bike", "Car", "Van"].map(f => (<button key={f} onClick={() => setFilter(f)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${filter === f ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: filter === f ? S.goldPale : S.card, color: filter === f ? S.gold : S.textMuted }}>{f}</button>))}
+            </div>
+            <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
+              <span style={{ opacity: 0.4 }}>{I.search}</span>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicles..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
+            </div>
+            <button onClick={() => setShowCreateVehicle(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, whiteSpace: "nowrap", flexShrink: 0 }}>
+              {I.plus} Add Vehicle
+            </button>
+          </div>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Engine</span><span>Speed</span><span>Rider</span><span>Status</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {filtered.map(v => (
+                <div key={v.id} onClick={() => onSelect(v.id)} style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.make || '—'}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.model || '—'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${ec(v.engine_status)}18`, color: ec(v.engine_status) }}>{(v.engine_status || 'unknown').toUpperCase()}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
+                  <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
+          <VehiclesLocationMap vehicles={vehicles} />
+        </div>
+      </div>
+
+      {showCreateVehicle && (
+        <CreateVehicleModal
+          onClose={() => setShowCreateVehicle(false)}
+          onVehicleCreated={() => { if (onVehicleCreated) onVehicleCreated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── CREATE VEHICLE MODAL ───────────────────────────────────────
+function CreateVehicleModal({ onClose, onVehicleCreated }) {
+  const [form, setForm] = useState({ plate_number: "", vehicle_type: "bike", make: "", model: "", year: "", color: "", vin: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10);
+      else delete payload.year;
+      Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+      payload.plate_number = form.plate_number; // always required
+      payload.vehicle_type = form.vehicle_type;
+      await VehicleAssetsAPI.create(payload);
+      onVehicleCreated();
+      onClose();
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to create vehicle.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+  const row = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+          <div><div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Add New Vehicle</div><div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Register a new vehicle asset</div></div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600, marginBottom: 14 }}>{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div style={row}>
+            <div><label style={lSt}>Plate Number *</label><input required value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} placeholder="LAG-123-AB" /></div>
+            <div><label style={lSt}>Type *</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+            <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Year</label><input value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" type="number" /></div>
+            <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+          </div>
+          <div style={{ marginBottom: 14 }}><label style={lSt}>VIN (Optional)</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: 14, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Creating…" : "Create Vehicle"}</button>
+        </form>
+      </div>
     </div>
   );
 }

@@ -270,6 +270,56 @@ export const VehiclesAPI = {
     }
 };
 
+// ─── VEHICLE ASSETS ─────────────────────────────────────────────
+export const VehicleAssetsAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch vehicle assets');
+        return await res.json();
+    },
+
+    async get(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch vehicle asset');
+        return await res.json();
+    },
+
+    async create(data) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw err;
+        }
+        return await res.json();
+    },
+
+    async update(id, data) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to update vehicle asset');
+        return await res.json();
+    },
+
+    async delete(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete vehicle asset');
+    }
+};
+
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {

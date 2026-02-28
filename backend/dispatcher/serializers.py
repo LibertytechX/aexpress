@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode
+from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -838,3 +838,49 @@ class RelayNodeSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class VehicleAssetSerializer(serializers.ModelSerializer):
+    assigned_rider = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VehicleAsset
+        fields = [
+            "id",
+            "asset_id",
+            "plate_number",
+            "vehicle_type",
+            "make",
+            "model",
+            "year",
+            "color",
+            "vin",
+            "photo",
+            "insurance_expiry",
+            "registration_expiry",
+            "road_worthiness_expiry",
+            "engine_status",
+            "stop_duration",
+            "moved_timestamp",
+            "latitude",
+            "longitude",
+            "course",
+            "speed",
+            "last_telemetry_at",
+            "is_active",
+            "assigned_rider",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
+
+    def get_assigned_rider(self, obj):
+        rider = obj.riders.select_related("user").first()
+        if rider:
+            return {
+                "id": str(rider.id),
+                "rider_id": rider.rider_id,
+                "name": rider.user.contact_name if rider.user else "Unknown",
+                "phone": rider.user.phone if rider.user else "",
+            }
+        return None
