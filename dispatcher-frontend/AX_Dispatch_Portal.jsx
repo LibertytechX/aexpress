@@ -2005,6 +2005,81 @@ function RidersLocationMap({ riders }) {
   );
 }
 
+// ─── RESET RIDER PASSWORD MODAL ─────────────────────────────────
+function ResetRiderPasswordModal({ rider, onClose }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    try {
+      await RidersAPI.resetPassword(rider._uuid || rider.id, newPassword);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reset Password</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Password Updated</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's password has been changed successfully.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>New Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showNew ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" style={{ ...iSt, paddingRight: 48 }} required minLength={6} />
+                <button type="button" onClick={() => setShowNew(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showNew ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 22 }}>
+              <label style={lSt}>Confirm Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showConfirm ? "text" : "password"} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" style={{ ...iSt, paddingRight: 48 }} required />
+                <button type="button" onClick={() => setShowConfirm(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showConfirm ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Set New Password"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── CREATE RIDER MODAL ─────────────────────────────────────────
 function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
@@ -2173,12 +2248,14 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showCreateRider, setShowCreateRider] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
     if (!rider) return <div style={{ color: S.textMuted }}>Rider not found</div>;
     const rOrders = orders.filter(o => o.riderId === rider.id);
     return (
+      <>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
         <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
@@ -2193,6 +2270,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                 <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
                 <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
               </div>
+              <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
                 {[{ l: "Vehicle", v: rider.vehicle }, { l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
                   <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
@@ -2228,6 +2306,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           </div>
         </div>
       </div>
+      {showResetPassword && (
+        <ResetRiderPasswordModal
+          rider={rider}
+          onClose={() => setShowResetPassword(false)}
+        />
+      )}
+      </>
     );
   }
 

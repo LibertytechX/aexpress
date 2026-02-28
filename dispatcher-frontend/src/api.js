@@ -120,6 +120,17 @@ export const RidersAPI = {
         const data = await res.json();
         if (!res.ok) throw data;
         return data;
+    },
+
+    async resetPassword(riderUuid, newPassword) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/reset_password/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     }
 };
 

@@ -24,6 +24,20 @@ class RiderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Rider.objects.all().select_related("user", "vehicle_type")
 
+    @action(detail=True, methods=["post"], url_path="reset_password")
+    def reset_password(self, request, pk=None):
+        """Allow dispatcher to set a new password for a rider account."""
+        rider = self.get_object()
+        new_password = request.data.get("new_password", "")
+        if not new_password or len(new_password) < 6:
+            return Response(
+                {"error": "Password must be at least 6 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rider.user.set_password(new_password)
+        rider.user.save(update_fields=["password"])
+        return Response({"success": True, "message": "Password updated successfully."})
+
     @action(detail=True, methods=["patch"], url_path="update_location")
     def update_location(self, request, pk=None):
         """Update a rider's current GPS coordinates."""
