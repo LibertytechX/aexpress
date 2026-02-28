@@ -965,7 +965,6 @@ export default function AXDispatchPortal() {
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [vehicleAssets, setVehicleAssets] = useState([]);
-  const [selectedVehicleId, setSelectedVehicleId] = useState(null);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
   const ablyRef = useRef(null);
@@ -1233,7 +1232,7 @@ export default function AXDispatchPortal() {
           {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
-          {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); setSelectedVehicleId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
+          {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
@@ -1249,14 +1248,14 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? (selectedVehicleId ? "Vehicle Details" : "Vehicles") : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
-          {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} selectedId={selectedVehicleId} onSelect={setSelectedVehicleId} onBack={() => setSelectedVehicleId(null)} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
+          {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "messaging" && <MessagingScreen />}
@@ -2395,65 +2394,13 @@ function VehiclesLocationMap({ vehicles }) {
 }
 
 // ─── VEHICLES SCREEN ────────────────────────────────────────────
-function VehiclesScreen({ vehicles, selectedId, onSelect, onBack, onVehicleCreated }) {
+function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showCreateVehicle, setShowCreateVehicle] = useState(false);
+  const [detailVehicleId, setDetailVehicleId] = useState(null);
 
-  if (selectedId) {
-    const vehicle = vehicles.find(v => v.id === selectedId);
-    if (!vehicle) return <div style={{ color: S.textMuted }}>Vehicle not found</div>;
-    const typeIcon = vehicle.vehicle_type === 'bike' ? '🏍️' : vehicle.vehicle_type === 'car' ? '🚗' : '🚐';
-    const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
-    return (
-      <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Vehicles</button>
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
-              <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>{typeIcon}</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{vehicle.plate_number}</div>
-              <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{vehicle.asset_id}</div>
-              <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: vehicle.is_active ? S.greenBg : S.redBg, color: vehicle.is_active ? S.green : S.red }}>{vehicle.is_active ? "ACTIVE" : "INACTIVE"}</span>
-              <div style={{ display: "inline-block", marginLeft: 6, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: `${ec}18`, color: ec }}>{(vehicle.engine_status || 'unknown').toUpperCase()}</div>
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
-                {[{ l: "Type", v: (vehicle.vehicle_type || '').toUpperCase() }, { l: "Make", v: vehicle.make || '—' }, { l: "Model", v: vehicle.model || '—' }, { l: "Year", v: vehicle.year || '—' }, { l: "Color", v: vehicle.color || '—' }, { l: "VIN", v: vehicle.vin || '—' }].map(f => (
-                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
-                ))}
-              </div>
-            </div>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Telemetry</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
-                  <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
-                ))}
-              </div>
-            </div>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Documents</div>
-              {[{ l: "Insurance Expiry", v: vehicle.insurance_expiry || '—' }, { l: "Registration Expiry", v: vehicle.registration_expiry || '—' }, { l: "Road Worthiness", v: vehicle.road_worthiness_expiry || '—' }].map(f => (
-                <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Assigned Rider</div>
-              {vehicle.assigned_rider ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: S.gold }}>{vehicle.assigned_rider.name.split(" ").map(n => n[0]).join("")}</div>
-                  <div><div style={{ fontSize: 14, fontWeight: 700 }}>{vehicle.assigned_rider.name}</div><div style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{vehicle.assigned_rider.rider_id} • {vehicle.assigned_rider.phone}</div></div>
-                </div>
-              ) : (
-                <div style={{ color: S.textMuted, fontSize: 12 }}>No rider assigned to this vehicle</div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const detailVehicle = detailVehicleId ? vehicles.find(v => v.id === detailVehicleId) : null;
 
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
@@ -2488,7 +2435,7 @@ function VehiclesScreen({ vehicles, selectedId, onSelect, onBack, onVehicleCreat
             </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(v => (
-                <div key={v.id} onClick={() => onSelect(v.id)} style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
                   <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
@@ -2512,9 +2459,181 @@ function VehiclesScreen({ vehicles, selectedId, onSelect, onBack, onVehicleCreat
       {showCreateVehicle && (
         <CreateVehicleModal
           onClose={() => setShowCreateVehicle(false)}
-          onVehicleCreated={() => { if (onVehicleCreated) onVehicleCreated(); }}
+          onVehicleCreated={() => { if (onVehicleCreated) onVehicleCreated(); setShowCreateVehicle(false); }}
         />
       )}
+      {detailVehicle && (
+        <VehicleDetailModal
+          vehicle={detailVehicle}
+          onClose={() => setDetailVehicleId(null)}
+          onVehicleUpdated={() => { if (onVehicleUpdated) onVehicleUpdated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── VEHICLE DETAIL MODAL ───────────────────────────────────────
+function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    plate_number: vehicle.plate_number || "",
+    vehicle_type: vehicle.vehicle_type || "bike",
+    make: vehicle.make || "",
+    model: vehicle.model || "",
+    year: vehicle.year ? String(vehicle.year) : "",
+    color: vehicle.color || "",
+    vin: vehicle.vin || "",
+    insurance_expiry: vehicle.insurance_expiry || "",
+    registration_expiry: vehicle.registration_expiry || "",
+    road_worthiness_expiry: vehicle.road_worthiness_expiry || "",
+    is_active: vehicle.is_active,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const cancelEdit = () => {
+    setEditing(false); setError(null);
+    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active });
+  };
+
+  const handleSave = async () => {
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10); else delete payload.year;
+      Object.keys(payload).forEach(k => { if (payload[k] === "" && k !== "plate_number" && k !== "vehicle_type" && k !== "is_active") delete payload[k]; });
+      await VehicleAssetsAPI.update(vehicle.id, payload);
+      if (onVehicleUpdated) onVehicleUpdated();
+      setEditing(false);
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to save changes.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const typeIcon = vehicle.vehicle_type === 'bike' ? '🏍️' : vehicle.vehicle_type === 'car' ? '🚗' : '🚐';
+  const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
+  const iSt = { width: "100%", padding: "8px 10px", border: `1px solid ${S.border}`, borderRadius: 6, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>{typeIcon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>{vehicle.plate_number}</div>
+            <div style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{vehicle.asset_id}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <>
+                <button onClick={cancelEdit} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.textDim }}>Cancel</button>
+                <button onClick={handleSave} disabled={loading} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Save Changes"}</button>
+              </>
+            ) : (
+              <button onClick={() => setEditing(true)} style={{ padding: "7px 16px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.text, display: "flex", alignItems: "center", gap: 6 }}>✏️ Edit</button>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 4 }}>{I.x}</button>
+          </div>
+        </div>
+
+        {error && <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{error}</div>}
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 22 }}>
+
+          {/* ── Status badges / is_active toggle ── */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Status:</label>
+                <select value={form.is_active ? "active" : "inactive"} onChange={e => set("is_active", e.target.value === "active")} style={{ ...iSt, width: "auto", padding: "6px 10px" }}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            ) : (
+              <>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: vehicle.is_active ? S.greenBg : S.redBg, color: vehicle.is_active ? S.green : S.red }}>{vehicle.is_active ? "ACTIVE" : "INACTIVE"}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: `${ec}18`, color: ec }}>{(vehicle.engine_status || 'unknown').toUpperCase()}</span>
+              </>
+            )}
+          </div>
+
+          {/* ── Vehicle Info ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Vehicle Info</div>
+            {editing ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div><label style={lSt}>Plate Number *</label><input value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Type</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+                <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+                <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+                <div><label style={lSt}>Year</label><input type="number" value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" /></div>
+                <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={lSt}>VIN</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+                {[{ l: "Asset ID", v: vehicle.asset_id }, { l: "Plate Number", v: vehicle.plate_number }, { l: "Type", v: (vehicle.vehicle_type || '').toUpperCase() }, { l: "Make", v: vehicle.make || '—' }, { l: "Model", v: vehicle.model || '—' }, { l: "Year", v: vehicle.year || '—' }, { l: "Color", v: vehicle.color || '—' }, { l: "VIN", v: vehicle.vin || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Telemetry (always read-only) ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Telemetry <span style={{ fontWeight: 400, fontSize: 9 }}>(read-only)</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
+                <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+              ))}
+            </div>
+            {vehicle.latitude && vehicle.longitude && (
+              <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+                📍 {parseFloat(vehicle.latitude).toFixed(6)}, {parseFloat(vehicle.longitude).toFixed(6)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Documents ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Documents</div>
+            {editing ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div><label style={lSt}>Insurance Expiry</label><input type="date" value={form.insurance_expiry} onChange={e => set("insurance_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Registration Expiry</label><input type="date" value={form.registration_expiry} onChange={e => set("registration_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Road Worthiness Expiry</label><input type="date" value={form.road_worthiness_expiry} onChange={e => set("road_worthiness_expiry", e.target.value)} style={iSt} /></div>
+              </div>
+            ) : (
+              <div>
+                {[{ l: "Insurance Expiry", v: vehicle.insurance_expiry || '—' }, { l: "Registration Expiry", v: vehicle.registration_expiry || '—' }, { l: "Road Worthiness Expiry", v: vehicle.road_worthiness_expiry || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Assigned Rider ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Assigned Rider</div>
+            {vehicle.assigned_rider ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: S.borderLight, borderRadius: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: S.gold }}>{vehicle.assigned_rider.name.split(" ").map(n => n[0]).join("")}</div>
+                <div><div style={{ fontSize: 14, fontWeight: 700 }}>{vehicle.assigned_rider.name}</div><div style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{vehicle.assigned_rider.rider_id} • {vehicle.assigned_rider.phone}</div></div>
+              </div>
+            ) : (
+              <div style={{ color: S.textMuted, fontSize: 12, padding: "6px 0" }}>No rider assigned to this vehicle</div>
+            )}
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }
