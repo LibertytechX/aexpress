@@ -205,8 +205,26 @@ ENDSSH
 
 echo -e "${GREEN}✓ Service started${NC}"
 
-# Step 9: Check status
-echo -e "${YELLOW}Step 9: Checking deployment status...${NC}"
+# Step 9: Install cron job for bike telemetry sync
+echo -e "${YELLOW}Step 9: Installing bike telemetry sync cron job...${NC}"
+ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
+# Ensure crons directory exists on server and is executable
+mkdir -p /home/backend/crons
+cp /home/backend/crons/sync_bikes.sh /home/backend/crons/sync_bikes.sh 2>/dev/null || true
+chmod +x /home/backend/crons/sync_bikes.sh
+
+# Add crontab entry if not already present (runs every 2 minutes)
+CRON_ENTRY="*/2 * * * * /home/backend/crons/sync_bikes.sh"
+( crontab -l 2>/dev/null | grep -v "sync_bikes.sh" ; echo "$CRON_ENTRY" ) | crontab -
+
+echo "Cron job installed:"
+crontab -l | grep sync_bikes
+ENDSSH
+
+echo -e "${GREEN}✓ Bike telemetry cron job installed (every 2 minutes)${NC}"
+
+# Step 10: Check status
+echo -e "${YELLOW}Step 10: Checking deployment status...${NC}"
 ssh $SERVER_USER@$SERVER_IP << 'ENDSSH'
 echo ""
 echo "=== Service Status ==="

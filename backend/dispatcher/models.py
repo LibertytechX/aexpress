@@ -156,6 +156,23 @@ class VehicleAsset(models.Model):
     )
     last_telemetry_at = models.DateTimeField(null=True, blank=True)
 
+    # ── External tracking provider ───────────────────────────────────
+    provider_id = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Device ID from the Concept Nova tracking API (used for telemetry sync)",
+    )
+
+    # ── Sync metadata (set by sync_bike_telemetry command) ───────────
+    sync_meta = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Last sync result: {response_code, response_snippet, synced_at}",
+    )
+
     # ── Status flags ────────────────────────────────────────────────
     is_active = models.BooleanField(default=True, help_text="Available for assignment")
 
