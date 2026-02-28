@@ -2558,7 +2558,7 @@ function VehiclesLocationMap({ vehicles }) {
     else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
     return () => {
       if (unsub) unsub();
-      markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+      markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
       if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
       mapInstanceRef.current = null;
     };
@@ -2567,9 +2567,35 @@ function VehiclesLocationMap({ vehicles }) {
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current || !window.google) return;
     const map = mapInstanceRef.current;
-    markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
+    markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
     const bounds = new window.google.maps.LatLngBounds();
     let hasPoints = false;
+
+    // Helper: build a rotated emoji icon as a canvas-based marker image
+    const buildVehicleIcon = (emoji, rotation, borderColor) => {
+      const size = 40;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // Rotate around center
+      ctx.translate(size / 2, size / 2);
+      ctx.rotate((Math.PI / 180) * (rotation || 0));
+      // Status-colored ring
+      ctx.beginPath();
+      ctx.arc(0, 0, size / 2 - 2, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = borderColor;
+      ctx.stroke();
+      // Emoji
+      ctx.font = '20px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.fillText(emoji, 0, 1);
+      return { url: canvas.toDataURL(), scaledSize: new window.google.maps.Size(size, size), anchor: new window.google.maps.Point(size / 2, size / 2) };
+    };
 
     vehicles.forEach(v => {
       if (!v.latitude || !v.longitude) return;
@@ -2580,11 +2606,37 @@ function VehiclesLocationMap({ vehicles }) {
       const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
       const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
       const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
+      const rotation = parseFloat(v.course) || 0;
 
       const marker = new window.google.maps.Marker({
         position: { lat, lng }, map, title: v.plate_number,
-        icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 6, fillColor: color, fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 2, rotation: parseFloat(v.course) || 0 }
+        icon: buildVehicleIcon(typeIcon, rotation, color),
+        zIndex: v.engine_status === 'on' ? 10 : 5,
       });
+
+      // Floating label: plate | rider | speed
+      const riderName = v.assigned_rider ? v.assigned_rider.name : '';
+      const speedStr = v.speed > 0 ? `${v.speed} km/h` : '';
+      const labelParts = [v.plate_number, riderName, speedStr].filter(Boolean);
+      const labelDiv = document.createElement('div');
+      labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
+        'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
+        'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
+        'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+      labelDiv.textContent = labelParts.join(' · ');
+
+      // Use OverlayView for the label
+      const LabelOverlay = class extends window.google.maps.OverlayView {
+        onAdd() { (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(labelDiv); }
+        draw() {
+          const proj = this.getProjection(); if (!proj) return;
+          const pos = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(lat, lng));
+          if (pos) { labelDiv.style.left = (pos.x - labelDiv.offsetWidth / 2) + 'px'; labelDiv.style.top = (pos.y - 32) + 'px'; }
+        }
+        onRemove() { if (labelDiv.parentNode) labelDiv.parentNode.removeChild(labelDiv); }
+      };
+      const overlay = new LabelOverlay();
+      overlay.setMap(map);
 
       marker.addListener('click', () => {
         infoWindowRef.current.setContent(
@@ -2601,6 +2653,8 @@ function VehiclesLocationMap({ vehicles }) {
       });
 
       markersRef.current.push(marker);
+      // Store overlay reference for cleanup
+      marker._labelOverlay = overlay;
       bounds.extend({ lat, lng });
       hasPoints = true;
     });
@@ -2629,10 +2683,12 @@ function VehiclesLocationMap({ vehicles }) {
         )}
       </div>
       <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
-        <span><span style={{ color: '#22c55e', fontWeight: 700 }}>▲</span> Engine On</span>
-        <span><span style={{ color: '#F59E0B', fontWeight: 700 }}>▲</span> Idle</span>
-        <span><span style={{ color: '#EF4444', fontWeight: 700 }}>▲</span> Engine Off</span>
-        <span><span style={{ color: '#6b7280', fontWeight: 700 }}>▲</span> Unknown</span>
+        <span>🏍️ Bike  🚗 Car  🚐 Van</span>
+        <span style={{ marginLeft: 4 }}>|</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22c55e', marginRight: 3, verticalAlign: 'middle' }} /> Engine On</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', marginRight: 3, verticalAlign: 'middle' }} /> Idle</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#EF4444', marginRight: 3, verticalAlign: 'middle' }} /> Engine Off</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#6b7280', marginRight: 3, verticalAlign: 'middle' }} /> Unknown</span>
         <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
       </div>
     </div>
