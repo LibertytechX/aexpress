@@ -2010,15 +2010,17 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "",
     password: "", vehicle_type: "", city: "", is_verified: false,
-    home_zone: "",
+    home_zone: "", vehicle_asset: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [relayNodes, setRelayNodes] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
 
   useEffect(() => {
     RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => {});
+    VehicleAssetsAPI.getAll().then(assets => setVehicleAssets(assets || [])).catch(() => {});
   }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -2032,6 +2034,7 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
       if (!payload.vehicle_type) delete payload.vehicle_type;
       if (!payload.city) delete payload.city;
       if (!payload.home_zone) delete payload.home_zone;
+      if (!payload.vehicle_asset) delete payload.vehicle_asset;
       await RidersAPI.createRider(payload);
       onRiderCreated();
       onClose();
@@ -2112,6 +2115,20 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
               <label style={lSt}>City</label>
               <input value={form.city} onChange={e => set("city", e.target.value)} placeholder="e.g. Lagos" style={iSt} />
             </div>
+          </div>
+
+          {/* Vehicle Asset */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Assign Vehicle Asset</label>
+            <select value={form.vehicle_asset} onChange={e => set("vehicle_asset", e.target.value)} style={iSt}>
+              <option value="">— No Vehicle —</option>
+              {vehicleAssets.filter(v => v.is_active).map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.asset_id} · {v.plate_number}{v.make ? ` — ${v.make}${v.model ? ' ' + v.model : ''}` : ''} ({(v.vehicle_type || 'vehicle').toUpperCase()})
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Only active vehicle assets are shown. Optional — can be assigned later.</div>
           </div>
 
           {/* Relay Node */}
