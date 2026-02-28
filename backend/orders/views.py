@@ -701,6 +701,13 @@ class CancelOrderView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Once the package has been picked up, cancellation is not allowed
+        if order.status in ["PickedUp", "Started"]:
+            return Response(
+                {"error": "Cannot cancel an order that has already been picked up"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Check if escrow was released (delivery completed)
         if order.escrow_held and order.escrow_released:
             return Response(

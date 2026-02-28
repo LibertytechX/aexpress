@@ -3871,8 +3871,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
               </div>
             ))}
 
-            {/* Cancel Order Button */}
-            {!['Delivered', 'Canceled'].includes(order.status) && (
+            {/* Cancel Order Button — hidden once the order has been picked up or beyond */}
+            {!['Delivered', 'Canceled', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled', 'PickedUp', 'Started', 'Done'].includes(order.status) && (
               <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
                 <button
                   onClick={() => {
