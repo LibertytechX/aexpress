@@ -11,9 +11,10 @@
 # ============================================================
 
 DEPLOY_PATH="/home/backend"
+DJANGO_PATH="$DEPLOY_PATH/backend"          # WorkingDirectory used by gunicorn/manage.py
 VENV_PYTHON="$DEPLOY_PATH/venv/bin/python"
 LOG_FILE="$DEPLOY_PATH/logs/bike_sync.log"
-MANAGE="$DEPLOY_PATH/manage.py"
+MANAGE="$DJANGO_PATH/manage.py"
 
 # ── Safety checks ────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
