@@ -79,6 +79,7 @@ export const RidersAPI = {
             name: r.name || 'Unknown',
             phone: r.phone || '',
             vehicle: r.vehicle || 'Bike',
+            vehicle_asset: r.vehicle_asset_detail || null,
             status: r.status || 'offline',
             currentOrder: r.current_order || null,
             todayOrders: r.todayOrders || 0,
@@ -127,6 +128,17 @@ export const RidersAPI = {
             method: 'POST',
             headers: authHeaders(),
             body: JSON.stringify({ new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async assignVehicle(riderUuid, vehicleAssetId) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/assign_vehicle/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ vehicle_asset_id: vehicleAssetId || null }),
         });
         const data = await res.json();
         if (!res.ok) throw data;

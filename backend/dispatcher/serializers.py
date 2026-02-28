@@ -100,6 +100,9 @@ class RiderSerializer(serializers.ModelSerializer):
     # Vehicle fields from Rider model
     vehicle = serializers.SerializerMethodField()
 
+    # Assigned vehicle asset details
+    vehicle_asset_detail = serializers.SerializerMethodField()
+
     # Mock/Computed fields to match frontend interface
     todayOrders = serializers.IntegerField(default=0, read_only=True)
     todayEarnings = serializers.IntegerField(default=0, read_only=True)
@@ -117,6 +120,7 @@ class RiderSerializer(serializers.ModelSerializer):
             "name",
             "phone",
             "vehicle",
+            "vehicle_asset_detail",
             "status",
             "rating",
             "total_deliveries",
@@ -135,6 +139,21 @@ class RiderSerializer(serializers.ModelSerializer):
         if obj.vehicle_type:
             return obj.vehicle_type.name
         return "None"
+
+    def get_vehicle_asset_detail(self, obj):
+        va = obj.vehicle_asset
+        if not va:
+            return None
+        return {
+            "id": str(va.id),
+            "asset_id": va.asset_id,
+            "plate_number": va.plate_number,
+            "make": va.make,
+            "model": va.model,
+            "vehicle_type": va.vehicle_type,
+            "color": va.color,
+            "year": va.year,
+        }
 
 
 class OrderSerializer(serializers.ModelSerializer):

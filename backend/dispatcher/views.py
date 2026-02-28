@@ -17,12 +17,12 @@ User = get_user_model()
 
 
 class RiderViewSet(viewsets.ModelViewSet):
-    queryset = Rider.objects.all().select_related("user", "vehicle_type")
+    queryset = Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
     serializer_class = RiderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Rider.objects.all().select_related("user", "vehicle_type")
+        return Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
 
     @action(detail=True, methods=["post"], url_path="reset_password")
     def reset_password(self, request, pk=None):
@@ -37,6 +37,29 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.user.set_password(new_password)
         rider.user.save(update_fields=["password"])
         return Response({"success": True, "message": "Password updated successfully."})
+
+    @action(detail=True, methods=["post"], url_path="assign_vehicle")
+    def assign_vehicle(self, request, pk=None):
+        """Assign or unassign a vehicle asset to a rider."""
+        rider = self.get_object()
+        vehicle_asset_id = request.data.get("vehicle_asset_id")
+
+        if vehicle_asset_id:
+            from .models import VehicleAsset
+            try:
+                vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
+            except VehicleAsset.DoesNotExist:
+                return Response(
+                    {"error": "Vehicle asset not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            rider.vehicle_asset = vehicle
+        else:
+            rider.vehicle_asset = None
+
+        rider.save(update_fields=["vehicle_asset"])
+        serializer = self.get_serializer(rider)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="update_location")
     def update_location(self, request, pk=None):

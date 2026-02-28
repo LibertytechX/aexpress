@@ -2080,6 +2080,125 @@ function ResetRiderPasswordModal({ rider, onClose }) {
   );
 }
 
+// ─── REASSIGN VEHICLE MODAL ──────────────────────────────────────
+function ReassignVehicleModal({ rider, onClose }) {
+  const [vehicles, setVehicles] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState(rider.vehicle_asset?.id || "");
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    VehicleAssetsAPI.getAll()
+      .then(data => setVehicles(data))
+      .catch(() => setError("Failed to load vehicles."))
+      .finally(() => setFetching(false));
+  }, []);
+
+  const filtered = vehicles.filter(v => {
+    if (!v.is_active) return false;
+    const q = search.toLowerCase();
+    if (!q) return true;
+    return (
+      (v.asset_id || "").toLowerCase().includes(q) ||
+      (v.plate_number || "").toLowerCase().includes(q) ||
+      (v.make || "").toLowerCase().includes(q) ||
+      (v.model || "").toLowerCase().includes(q)
+    );
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await RidersAPI.assignVehicle(rider._uuid || rider.id, selectedVehicleId || null);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to assign vehicle.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iSt = { width: "100%", padding: "8px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reassign Vehicle</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {rider.vehicle_asset && (
+          <div style={{ padding: "10px 14px", background: S.borderLight, borderRadius: 8, marginBottom: 16, fontSize: 12 }}>
+            <span style={{ color: S.textMuted }}>Current: </span>
+            <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{rider.vehicle_asset.asset_id}</span>
+            <span style={{ color: S.textMuted }}> · {rider.vehicle_asset.plate_number} — {rider.vehicle_asset.make} {rider.vehicle_asset.model} ({(rider.vehicle_asset.vehicle_type || "").toUpperCase()})</span>
+          </div>
+        )}
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Vehicle Assigned</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's vehicle has been updated. Refresh to see changes.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by asset ID, plate, make, model…" style={{ ...iSt, marginBottom: 10 }} />
+            {fetching ? (
+              <div style={{ textAlign: "center", padding: 24, color: S.textMuted, fontSize: 13 }}>Loading vehicles…</div>
+            ) : (
+              <div style={{ flex: 1, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 8, marginBottom: 14 }}>
+                <div
+                  onClick={() => setSelectedVehicleId("")}
+                  style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: selectedVehicleId === "" ? S.goldPale : "transparent", display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span style={{ fontSize: 18 }}>🚫</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Unassign (remove vehicle)</span>
+                </div>
+                {filtered.map(v => {
+                  const isSelected = selectedVehicleId === v.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: isSelected ? S.goldPale : "transparent", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = S.borderLight; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold }}>{v.asset_id}</span>
+                        <span style={{ fontSize: 12, color: S.textMuted }}> · {v.plate_number}</span>
+                        <div style={{ fontSize: 11, color: S.textDim, marginTop: 2 }}>{v.make} {v.model} · <span style={{ textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>{v.vehicle_type}</span></div>
+                      </div>
+                      {isSelected && <span style={{ color: S.gold, fontSize: 16 }}>✓</span>}
+                    </div>
+                  );
+                })}
+                {filtered.length === 0 && !fetching && <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles match your search.</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading || fetching} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Confirm Assignment"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── CREATE RIDER MODAL ─────────────────────────────────────────
 function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
@@ -2249,6 +2368,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [search, setSearch] = useState("");
   const [showCreateRider, setShowCreateRider] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showReassignVehicle, setShowReassignVehicle] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
@@ -2271,10 +2391,28 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                 <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
               </div>
               <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
+              <button onClick={() => setShowReassignVehicle(true)} style={{ width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🚗 Reassign Vehicle</button>
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
-                {[{ l: "Vehicle", v: rider.vehicle }, { l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
+                {[{ l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
                   <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
                 ))}
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${S.borderLight}` }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Assigned Vehicle</div>
+                  {rider.vehicle_asset ? (
+                    <>
+                      {[
+                        { l: "Asset ID", v: rider.vehicle_asset.asset_id },
+                        { l: "Plate", v: rider.vehicle_asset.plate_number },
+                        { l: "Make/Model", v: `${rider.vehicle_asset.make} ${rider.vehicle_asset.model}` },
+                        { l: "Type", v: (rider.vehicle_asset.vehicle_type || "").toUpperCase() },
+                      ].map(f => (
+                        <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}><span style={{ fontSize: 11, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>{f.v}</span></div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: S.textMuted, fontStyle: "italic" }}>No vehicle assigned</div>
+                  )}
+                </div>
               </div>
             </div>
             <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
@@ -2310,6 +2448,12 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         <ResetRiderPasswordModal
           rider={rider}
           onClose={() => setShowResetPassword(false)}
+        />
+      )}
+      {showReassignVehicle && (
+        <ReassignVehicleModal
+          rider={rider}
+          onClose={() => setShowReassignVehicle(false)}
         />
       )}
       </>
