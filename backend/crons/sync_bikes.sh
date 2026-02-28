@@ -6,8 +6,8 @@
 # management command, and appends timestamped output to the
 # bike sync log file.
 #
-# Suggested crontab entry (every 2 minutes):
-#   */2 * * * * /home/backend/crons/sync_bikes.sh
+# Suggested crontab entry (every minute — script loops 6× with 10s sleep):
+#   * * * * * /home/backend/backend/crons/sync_bikes.sh
 # ============================================================
 
 DEPLOY_PATH="/home/backend"
@@ -15,6 +15,8 @@ DJANGO_PATH="$DEPLOY_PATH/backend"          # WorkingDirectory used by gunicorn/
 VENV_PYTHON="$DEPLOY_PATH/venv/bin/python"
 LOG_FILE="$DEPLOY_PATH/logs/bike_sync.log"
 MANAGE="$DJANGO_PATH/manage.py"
+SYNC_INTERVAL=10   # seconds between each sync run
+RUNS_PER_MINUTE=6  # 60s / 10s = 6 runs
 
 # ── Safety checks ────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
@@ -34,19 +36,20 @@ if [ -f "$DEPLOY_PATH/.env" ]; then
     set +a
 fi
 
-# ── Run the sync command ─────────────────────────────────────
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] --- bike sync start ---" >> "$LOG_FILE"
+# ── Run the sync command 6 times (every 10 seconds) ──────────
+for i in $(seq 1 $RUNS_PER_MINUTE); do
+    "$VENV_PYTHON" "$MANAGE" sync_bike_telemetry >> "$LOG_FILE" 2>&1
+    EXIT_CODE=$?
 
-"$VENV_PYTHON" "$MANAGE" sync_bike_telemetry >> "$LOG_FILE" 2>&1
-EXIT_CODE=$?
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] sync OK (run $i/$RUNS_PER_MINUTE)" >> "$LOG_FILE"
+    else
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] sync FAILED exit=$EXIT_CODE (run $i/$RUNS_PER_MINUTE)" >> "$LOG_FILE"
+    fi
 
-if [ $EXIT_CODE -eq 0 ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] sync_bike_telemetry finished OK (exit 0)" >> "$LOG_FILE"
-else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] sync_bike_telemetry FAILED (exit $EXIT_CODE)" >> "$LOG_FILE"
-fi
-
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] --- bike sync end ---" >> "$LOG_FILE"
-
-exit $EXIT_CODE
+    # Don't sleep after the last run
+    if [ $i -lt $RUNS_PER_MINUTE ]; then
+        sleep $SYNC_INTERVAL
+    fi
+done
 

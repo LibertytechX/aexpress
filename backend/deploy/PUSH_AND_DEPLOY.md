@@ -75,10 +75,10 @@ python manage.py migrate --noinput
 python manage.py collectstatic --noinput
 
 # 5. Make cron script executable
-chmod +x /home/backend/crons/sync_bikes.sh
+chmod +x /home/backend/backend/crons/sync_bikes.sh
 
-# 6. Install / refresh cron job (every 2 minutes)
-CRON_ENTRY="*/2 * * * * /home/backend/crons/sync_bikes.sh"
+# 6. Install / refresh cron job (every minute — script loops 6× with 10s sleep)
+CRON_ENTRY="* * * * * /home/backend/backend/crons/sync_bikes.sh"
 ( crontab -l 2>/dev/null | grep -v "sync_bikes.sh" ; echo "$CRON_ENTRY" ) | crontab -
 
 # 7. Restart API
@@ -110,7 +110,7 @@ ssh root@144.126.208.115 'systemctl status axpress-api --no-pager | head -20'
 ```bash
 ssh root@144.126.208.115 'crontab -l | grep sync_bikes'
 # Expected output:
-# */2 * * * * /home/backend/crons/sync_bikes.sh
+# * * * * * /home/backend/backend/crons/sync_bikes.sh
 ```
 
 ### Run a manual sync (smoke test)
