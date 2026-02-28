@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("dispatcher", "0007_alter_activityfeed_event_type"),
+        ("dispatcher", "0004_vehicleasset_rider_vehicle_asset"),
     ]
 
     operations = [
