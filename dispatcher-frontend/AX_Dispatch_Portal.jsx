@@ -1098,6 +1098,22 @@ export default function AXDispatchPortal() {
           }
         });
         console.log('[Ably] Subscribed to dispatch-feed ✅');
+
+        // Vehicle telemetry — live map updates from sync_bike_telemetry cron
+        const vch = ably.channels.get("vehicle-telemetry");
+        await vch.subscribe("telemetry_update", (msg) => {
+          const incoming = msg.data;
+          if (!Array.isArray(incoming) || incoming.length === 0) return;
+          console.log(`[Ably] 🏍️ Received telemetry for ${incoming.length} vehicle(s)`);
+          setVehicleAssets(prev => {
+            const map = {};
+            prev.forEach(v => { map[v.id] = v; });
+            incoming.forEach(v => { map[v.id] = v; });
+            return Object.values(map);
+          });
+        });
+        console.log('[Ably] Subscribed to vehicle-telemetry ✅');
+
         ablyActive = true;
       } catch (err) {
         console.error('[Ably] Setup failed, falling back to polling:', err);

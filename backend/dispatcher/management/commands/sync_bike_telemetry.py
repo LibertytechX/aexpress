@@ -285,4 +285,45 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(summary))
         logger.info("sync_bike_telemetry: %s", summary)
 
+        # ── Step 5: publish to Ably for real-time frontend updates ──
+        if not dry_run and (counts["created"] + counts["updated"]) > 0:
+            self._publish_to_ably()
 
+    def _publish_to_ably(self):
+        """
+        Serialize all VehicleAsset records and publish to the
+        'vehicle-telemetry' Ably channel so the dispatcher frontend
+        receives live map updates without polling.
+        """
+        try:
+            from django.conf import settings
+            api_key = getattr(settings, "ABLY_API_KEY", "")
+            if not api_key:
+                self.stdout.write(self.style.WARNING(
+                    "ABLY_API_KEY not configured — skipping real-time publish"
+                ))
+                return
+
+            import asyncio
+            from ably import AblyRest
+            from dispatcher.serializers import VehicleAssetSerializer
+
+            assets = VehicleAsset.objects.select_related().all()
+            payload = VehicleAssetSerializer(assets, many=True).data
+
+            async def _publish():
+                client = AblyRest(api_key)
+                channel = client.channels.get("vehicle-telemetry")
+                await channel.publish("telemetry_update", payload)
+
+            asyncio.run(_publish())
+            self.stdout.write(self.style.SUCCESS(
+                "Published %d vehicle(s) to Ably channel 'vehicle-telemetry'" % len(payload)
+            ))
+            logger.info("sync_bike_telemetry: published %d vehicles to Ably", len(payload))
+        except Exception as exc:
+            # Never let Ably failure break the sync
+            logger.error("sync_bike_telemetry: Ably publish failed — %s", exc)
+            self.stderr.write(self.style.WARNING(
+                "Ably publish failed (sync still succeeded): %s" % exc
+            ))

@@ -472,6 +472,7 @@ class AblyTokenView(views.APIView):
         # Dispatchers (no rider profile) only get dispatch-feed.
         capability = {
             "dispatch-feed": ["subscribe"],
+            "vehicle-telemetry": ["subscribe"],
             "assigned-*": ["subscribe"],
             "for-you": ["subscribe"],
             "for-you*": ["subscribe"],
