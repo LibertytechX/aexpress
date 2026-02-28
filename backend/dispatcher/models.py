@@ -85,6 +85,107 @@ class RelayNode(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Vehicle Assets
+# ---------------------------------------------------------------------------
+
+
+class VehicleAsset(models.Model):
+    """
+    A physical vehicle asset that can be assigned to riders.
+    Tracks real-time GPS telemetry, engine status, and vehicle identification.
+    """
+
+    class VehicleType(models.TextChoices):
+        BIKE = "bike", "Bike"
+        CAR = "car", "Car"
+        VAN = "van", "Van"
+
+    class EngineStatus(models.TextChoices):
+        ON = "on", "On"
+        OFF = "off", "Off"
+        IDLE = "idle", "Idle"
+        UNKNOWN = "unknown", "Unknown"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset_id = models.CharField(
+        max_length=10, unique=True, db_index=True, blank=True,
+        help_text="Auto-generated short identifier (e.g. AX-0001)",
+    )
+
+    # ── Identification ──────────────────────────────────────────────
+    plate_number = models.CharField(max_length=20, unique=True, db_index=True)
+    vehicle_type = models.CharField(
+        max_length=10, choices=VehicleType.choices, default=VehicleType.BIKE,
+    )
+    make = models.CharField(max_length=100, blank=True, default="", help_text="Manufacturer (e.g. Honda, Toyota)")
+    model = models.CharField(max_length=100, blank=True, default="", help_text="Model name (e.g. ACE 125, Hiace)")
+    year = models.PositiveIntegerField(null=True, blank=True, help_text="Year of manufacture")
+    color = models.CharField(max_length=50, blank=True, default="")
+    vin = models.CharField(
+        max_length=50, blank=True, default="",
+        help_text="Vehicle Identification Number / chassis number",
+    )
+    photo = models.CharField(max_length=500, blank=True, default="", help_text="S3 URL for vehicle photo")
+
+    # ── Documents / compliance ──────────────────────────────────────
+    insurance_expiry = models.DateField(null=True, blank=True)
+    registration_expiry = models.DateField(null=True, blank=True)
+    road_worthiness_expiry = models.DateField(null=True, blank=True)
+
+    # ── Telemetry (updated by GPS tracker) ──────────────────────────
+    engine_status = models.CharField(
+        max_length=10, choices=EngineStatus.choices, default=EngineStatus.UNKNOWN,
+    )
+    stop_duration = models.DurationField(
+        null=True, blank=True,
+        help_text="How long the vehicle has been stationary",
+    )
+    moved_timestamp = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Last time the vehicle was detected moving",
+    )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7, null=True, blank=True)
+    course = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        help_text="Direction / heading in degrees (0-360)",
+    )
+    speed = models.DecimalField(
+        max_digits=6, decimal_places=2, default=0.00,
+        help_text="Current speed in km/h",
+    )
+    last_telemetry_at = models.DateTimeField(null=True, blank=True)
+
+    # ── Status flags ────────────────────────────────────────────────
+    is_active = models.BooleanField(default=True, help_text="Available for assignment")
+
+    # ── Timestamps ──────────────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vehicle_assets"
+        ordering = ["plate_number"]
+
+    def save(self, *args, **kwargs):
+        if not self.asset_id:
+            # Generate sequential short ID: AX-0001, AX-0002, …
+            last = VehicleAsset.objects.order_by("-asset_id").values_list("asset_id", flat=True).first()
+            if last and last.startswith("AX-"):
+                try:
+                    seq = int(last.split("-")[1]) + 1
+                except (IndexError, ValueError):
+                    seq = 1
+            else:
+                seq = 1
+            self.asset_id = f"AX-{seq:04d}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.plate_number} ({self.get_vehicle_type_display()}) [{self.asset_id}]"
+
+
+# ---------------------------------------------------------------------------
 
 
 class Rider(models.Model):
@@ -130,6 +231,14 @@ class Rider(models.Model):
         null=True,
         blank=True,
         related_name="riders",
+    )
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="riders",
+        help_text="Physical vehicle asset assigned to this rider",
     )
     vehicle_model = models.CharField(max_length=100, default="Unknown")
     vehicle_plate_number = models.CharField(max_length=20, default="TEMP_PLATE")
