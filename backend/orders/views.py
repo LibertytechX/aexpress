@@ -1071,11 +1071,11 @@ class OrderCompleteView(APIView):
         settings_obj = SystemSettings.objects.first()
         # SystemSettings stores cod_pct_fee; we repurpose a rider-specific
         # commission field if it exists — fall back to hard-coded default.
-        commission_pct = self.DEFAULT_COMMISSION_PCT
+        commission_pct = settings_obj.commission_pct
 
         order_amount = Decimal(str(order.total_amount))
         commission_amount = (commission_pct / Decimal("100")) * order_amount
-        net_earning = order_amount - commission_amount
+        net_earning = commission_amount
 
         # Create or update RiderEarning for this order (idempotent)
         earning, _ = RiderEarning.objects.get_or_create(
@@ -1085,7 +1085,7 @@ class OrderCompleteView(APIView):
                 "base_fare": order_amount,
                 "commission_pct": commission_pct,
                 "commission_amount": commission_amount,
-                "net_earning": net_earning,
+                "net_earning": commission_amount,
                 "cod_amount": cod_total,
             },
         )
@@ -1093,14 +1093,14 @@ class OrderCompleteView(APIView):
         # Credit rider wallet with net earning
         rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
         rider_wallet_for_credit.credit(
-            amount=net_earning,
+            amount=commission_amount,
             description=f"Trip earning for order #{order_number}",
             reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
             metadata={
                 "order_number": order_number,
                 "gross": str(order_amount),
                 "commission_pct": str(commission_pct),
-                "net_earning": str(net_earning),
+                "net_earning": str(commission_amount),
             },
         )
 

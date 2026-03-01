@@ -336,6 +336,7 @@ class SystemSettings(models.Model):
     # Fees
     cod_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=500)
     cod_pct_fee = models.DecimalField(max_digits=4, decimal_places=2, default=1.5)
+    commission_pct = models.DecimalField(max_digits=4, decimal_places=2, default=20)
 
     # Notifications
     notif_new_order = models.BooleanField(default=True)
