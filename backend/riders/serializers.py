@@ -52,6 +52,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
     acceptance_rate = serializers.SerializerMethodField()
     on_time_rate = serializers.SerializerMethodField()
     documents_status = serializers.SerializerMethodField()
+    net_earnings = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -72,6 +73,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "acceptance_rate",
             "on_time_rate",
             "documents_status",
+            "net_earnings",
         ]
 
     def get_wallet_balance(self, obj):
@@ -85,6 +87,10 @@ class RiderMeSerializer(serializers.ModelSerializer):
         total = obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
             "amount__sum"
         ]
+        return total or 0.00
+
+    def get_net_earnings(self, obj):
+        total = obj.earnings.aggregate(Sum("net_earning"))["net_earning__sum"]
         return total or 0.00
 
     def get_acceptance_rate(self, obj):
