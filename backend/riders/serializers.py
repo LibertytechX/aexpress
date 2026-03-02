@@ -233,6 +233,7 @@ class RiderOrderSerializer(AssignedOrderSerializer):
             "dropoff_contact_name",
             "dropoff_contact_phone",
             "dropoff_notes",
+            "total_amount",
             "vehicle_type",
             "payment_method",
             "merchant_name",
