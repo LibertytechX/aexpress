@@ -46,7 +46,7 @@ class Vehicle(models.Model):
     pricing_tiers = models.JSONField(
         null=True,
         blank=True,
-        help_text="Tiered pricing config, e.g. {type:'tiered', floor_km:6, floor_fee:1700, tiers:[{max_km:10,rate:275},...]}"
+        help_text="Tiered pricing config, e.g. {type:'tiered', floor_km:6, floor_fee:1700, tiers:[{max_km:10,rate:275},...]}",
     )
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -112,10 +112,11 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
-        ("PickedUp", "Picked Up"),
+        ("Pickup", "Pick Up"),
         ("Started", "Started"),
+        ("Fulfilling", "Fulfilling"),
         ("Arrived", "Arrived"),
-        ("Done", "Done"),
+        ("Done", "Done"),  # Delivered
         ("CustomerCanceled", "Customer Canceled"),
         ("RiderCanceled", "Rider Canceled"),
         ("Failed", "Failed"),
@@ -371,7 +372,7 @@ class OrderLeg(models.Model):
         ASSIGNED = "Assigned", "Assigned"
         PICKED_UP = "PickedUp", "Picked Up"
         IN_TRANSIT = "InTransit", "In Transit"
-        AT_HUB = "AtHub", "At Hub"         # package dropped, waiting for next rider
+        AT_HUB = "AtHub", "At Hub"  # package dropped, waiting for next rider
         COMPLETED = "Completed", "Completed"
         FAILED = "Failed", "Failed"
 
