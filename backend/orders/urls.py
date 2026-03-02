@@ -21,6 +21,7 @@ from .views import (
     OrderStartView,
     OrderArrivedView,
     OrderCompleteView,
+    OrderStatusChangeView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -52,6 +53,7 @@ urlpatterns = [
     path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
     path("start/", OrderStartView.as_view(), name="order_start"),
     path("arrived/", OrderArrivedView.as_view(), name="order_arrived"),
+    path("status/", OrderStatusChangeView.as_view(), name="order_status_change"),
     # path("<str:order_number>/complete/", OrderCompleteView.as_view(), name="order_complete"),
     path(
         "delivery/<uuid:delivery_id>/start/",

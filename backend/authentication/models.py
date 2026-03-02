@@ -99,7 +99,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.business_name} ({self.phone})"
+        return f"{self.get_full_name()} - ({self.phone})"
 
     def get_full_name(self):
         if self.first_name and self.last_name:

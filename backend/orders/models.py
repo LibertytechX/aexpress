@@ -152,8 +152,8 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
-        ("Pickup", "Pick Up"),
         ("Started", "Started"),
+        ("Pickup", "Pick Up"),
         ("Fulfilling", "Fulfilling"),
         ("Arrived", "Arrived"),
         ("Done", "Done"),  # Delivered
