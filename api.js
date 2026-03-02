@@ -144,7 +144,7 @@ const AuthAPI = {
       try {
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
-      } catch (_) {}
+      } catch (_) { }
     }
   },
 
@@ -218,7 +218,7 @@ const AuthAPI = {
   resetPassword: async (token, newPassword) => {
     return await apiRequest('/auth/reset-password/', {
       method: 'POST',
-      body: JSON.stringify({ token, new_password: newPassword }),
+      body: JSON.stringify({ token, new_password: newPassword, confirm_password: newPassword }),
       skipAuth: true,
     });
   },
