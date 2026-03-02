@@ -3,8 +3,8 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed, Zone, RelayNode
-from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer
+from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset
+from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer, VehicleAssetSerializer
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
@@ -17,12 +17,49 @@ User = get_user_model()
 
 
 class RiderViewSet(viewsets.ModelViewSet):
-    queryset = Rider.objects.all().select_related("user", "vehicle_type")
+    queryset = Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
     serializer_class = RiderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Rider.objects.all().select_related("user", "vehicle_type")
+        return Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
+
+    @action(detail=True, methods=["post"], url_path="reset_password")
+    def reset_password(self, request, pk=None):
+        """Allow dispatcher to set a new password for a rider account."""
+        rider = self.get_object()
+        new_password = request.data.get("new_password", "")
+        if not new_password or len(new_password) < 6:
+            return Response(
+                {"error": "Password must be at least 6 characters."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rider.user.set_password(new_password)
+        rider.user.save(update_fields=["password"])
+        return Response({"success": True, "message": "Password updated successfully."})
+
+    @action(detail=True, methods=["post"], url_path="assign_vehicle")
+    def assign_vehicle(self, request, pk=None):
+        """Assign or unassign a vehicle asset to a rider."""
+        rider = self.get_object()
+        vehicle_asset_id = request.data.get("vehicle_asset_id")
+
+        if vehicle_asset_id:
+            from .models import VehicleAsset
+            try:
+                vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
+            except VehicleAsset.DoesNotExist:
+                return Response(
+                    {"error": "Vehicle asset not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            rider.vehicle_asset = vehicle
+        else:
+            rider.vehicle_asset = None
+
+        rider.save(update_fields=["vehicle_asset"])
+        serializer = self.get_serializer(rider)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["patch"], url_path="update_location")
     def update_location(self, request, pk=None):
@@ -212,21 +249,24 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
-            "In Transit": "Started",
-            "Delivered": "Done",
-            "Cancelled": "CustomerCanceled",
-            "Picked Up": "Started",  # "Picked Up" maps to Started (in transit)
+            "In Transit":  "Started",
+            "At Dropoff":  "Arrived",   # rider is at the dropoff location
+            "Delivered":   "Done",
+            "Cancelled":   "CustomerCanceled",
+            "Picked Up":   "PickedUp",  # distinct stage; rider app uses this too
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
         STATUS_MAP = {
-            "Pending": ("new_order", "gold"),
-            "Assigned": ("assigned", "blue"),
-            "Started": ("in_transit", "gold"),
-            "Done": ("delivered", "green"),
-            "CustomerCanceled": ("cancelled", "red"),
-            "RiderCanceled": ("cancelled", "red"),
-            "Failed": ("failed", "red"),
+            "Pending":          ("new_order",  "gold"),
+            "Assigned":         ("assigned",   "blue"),
+            "PickedUp":         ("picked_up",  "blue"),
+            "Started":          ("in_transit", "gold"),
+            "Arrived":          ("at_dropoff", "orange"),
+            "Done":             ("delivered",  "green"),
+            "CustomerCanceled": ("cancelled",  "red"),
+            "RiderCanceled":    ("cancelled",  "red"),
+            "Failed":           ("failed",     "red"),
         }
 
         if new_status not in STATUS_MAP:
@@ -238,6 +278,20 @@ class OrderViewSet(viewsets.ModelViewSet):
         old_status = order.status
         order.status = new_status
         order.save(update_fields=["status"])
+
+        # Keep Delivery records in sync so the serializer fallback stays consistent.
+        ORDER_TO_DELIVERY_STATUS = {
+            "PickedUp":         "InTransit",   # rider has picked up → delivery in transit
+            "Started":          "InTransit",
+            "Arrived":          "InTransit",   # rider at dropoff; delivery still in progress
+            "Done":             "Delivered",
+            "CustomerCanceled": "Canceled",
+            "RiderCanceled":    "Canceled",
+            "Failed":           "Failed",
+        }
+        delivery_sync_status = ORDER_TO_DELIVERY_STATUS.get(new_status)
+        if delivery_sync_status:
+            order.deliveries.all().update(status=delivery_sync_status)
 
         event_type, color = STATUS_MAP[new_status]
         rider_name = None
@@ -418,6 +472,7 @@ class AblyTokenView(views.APIView):
         # Dispatchers (no rider profile) only get dispatch-feed.
         capability = {
             "dispatch-feed": ["subscribe"],
+            "vehicle-telemetry": ["subscribe"],
             "assigned-*": ["subscribe"],
             "for-you": ["subscribe"],
             "for-you*": ["subscribe"],
@@ -591,3 +646,21 @@ class DispatcherViewSet(viewsets.ViewSet):
                 status=status.HTTP_201_CREATED,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class VehicleAssetViewSet(viewsets.ModelViewSet):
+    """CRUD for physical vehicle assets."""
+
+    queryset = VehicleAsset.objects.all().order_by("plate_number")
+    serializer_class = VehicleAssetSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        vtype = self.request.query_params.get("type")
+        if vtype:
+            qs = qs.filter(vehicle_type=vtype)
+        active = self.request.query_params.get("active")
+        if active is not None:
+            qs = qs.filter(is_active=active.lower() in ("true", "1"))
+        return qs

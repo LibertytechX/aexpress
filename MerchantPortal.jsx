@@ -3026,12 +3026,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 		(mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
 	);
 
-  const handleConfirmAll = () => {
-    const deliveries = getActiveDropoffs();
+  const [submitting, setSubmitting] = useState(false);
 
-    // Debug: Log route data
-    console.log('🚀 handleConfirmAll called!');
-    console.log('📏 Route data:', { routeDistance, routeDuration });
+  const handleConfirmAll = async () => {
+    if (submitting) return;
+    const deliveries = getActiveDropoffs();
 
     // Prepare order data based on mode
     const orderData = {
@@ -3042,29 +3041,22 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       vehicle: vehicle,
       payMethod: payMethod,
       notes: notes,
-      // Include route information for pricing calculation
-      distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0,
+      // Include route information for pricing calculation.
+      // Prefer the map-calculated distance (Step 2); fall back to the early
+      // estimate (Step 1) so the backend never receives 0 when the user
+      // submits before DeliveryMapView finishes its geocode/route request.
+      distance_km: routeDistance || earlyRouteDistance || 0,
+      duration_minutes: routeDuration || earlyRouteDuration || 0,
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
     };
 
-    // Debug: Log order data
-    console.log('📦 Order data being sent:', orderData);
-    console.log('💰 Pricing data:', {
-      distance_km: orderData.distance_km,
-      duration_minutes: orderData.duration_minutes,
-      vehicle: orderData.vehicle
-    });
-
     if (mode === 'quick') {
-      // Quick Send - single delivery
       orderData.dropoff = dropoffAddress;
       orderData.receiverName = receiverName;
       orderData.receiverPhone = receiverPhone;
       orderData.packageType = drops[0]?.pkg || 'Box';
     } else if (mode === 'multi' || mode === 'bulk') {
-      // Multi-Drop or Bulk Import - multiple deliveries
       orderData.deliveries = deliveries.map(d => ({
         dropoff_address: d.address,
         receiver_name: d.name,
@@ -3074,7 +3066,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       }));
     }
 
-    onPlaceOrder(orderData);
+    setSubmitting(true);
+    try {
+      await onPlaceOrder(orderData);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ─── Saved addresses for quick pick ───
@@ -3088,8 +3085,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const vehicles = [
     { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", comingSoon: true },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", comingSoon: true },
   ];
 
   const modeConfig = [
@@ -3505,20 +3502,30 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
 
                 return (
-                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                    background: isSelected ? S.goldPale : "#f8fafc",
-                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
-                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                    transition: "all 0.2s"
+                  <button key={v.id} onClick={() => !v.comingSoon && setVehicle(v.id)} disabled={v.comingSoon} style={{
+                    background: v.comingSoon ? "#f1f5f9" : isSelected ? S.goldPale : "#f8fafc",
+                    border: isSelected && !v.comingSoon ? `2px solid ${S.gold}` : "2px solid transparent",
+                    borderRadius: 12, padding: "14px 10px", cursor: v.comingSoon ? "not-allowed" : "pointer", textAlign: "center", fontFamily: "inherit",
+                    transition: "all 0.2s",
+                    opacity: v.comingSoon ? 0.55 : 1,
+                    position: "relative"
                   }}>
-                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
-                    <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
-                      {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+                    {v.comingSoon && (
+                      <div style={{
+                        position: "absolute", top: 6, right: 6,
+                        background: "#e2e8f0", color: "#64748b",
+                        fontSize: 9, fontWeight: 700, padding: "2px 6px",
+                        borderRadius: 6, textTransform: "uppercase", letterSpacing: 0.5
+                      }}>Coming Soon</div>
+                    )}
+                    <div style={{ color: v.comingSoon ? "#94a3b8" : isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: v.comingSoon ? "#94a3b8" : S.navy }}>{v.label}</div>
+                    <div style={{ fontSize: 11, color: v.comingSoon ? "#cbd5e1" : S.grayLight }}>{v.desc}</div>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? "#94a3b8" : S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+                      {v.comingSoon ? '—' : isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
                     </div>
-                    <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
-                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                    <div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
+                      {v.comingSoon ? '' : isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
                     </div>
                   </button>
                 );
@@ -3695,12 +3702,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 flex: 1, height: 48, border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600,
                 cursor: "pointer", background: "#fff", color: S.navy, fontFamily: "inherit"
               }}>← Back</button>
-              <button onClick={handleConfirmAll} style={{
-                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              <button onClick={handleConfirmAll} disabled={submitting} style={{
+                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700,
+                cursor: submitting ? "not-allowed" : "pointer",
+                background: submitting ? "#cbd5e1" : `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: submitting ? "#64748b" : S.navy, fontFamily: "inherit",
+                boxShadow: submitting ? "none" : "0 4px 12px rgba(232,168,56,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                transition: "all 0.2s ease"
               }}>
-                {payMethod === 'pay_with_transfer'
+                {submitting ? (
+                  <>
+                    <span style={{ width: 16, height: 16, border: "2px solid #94a3b8", borderTopColor: "#1B2A4A", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                    Processing…
+                  </>
+                ) : payMethod === 'pay_with_transfer'
                   ? `Pay & Create Order — ₦${totalCost.toLocaleString()}`
                   : totalDeliveries === 1
                     ? `Create Order — ₦${totalCost.toLocaleString()}`
@@ -3855,8 +3871,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
               </div>
             ))}
 
-            {/* Cancel Order Button */}
-            {!['Delivered', 'Canceled'].includes(order.status) && (
+            {/* Cancel Order Button — hidden once the order has been picked up or beyond */}
+            {!['Delivered', 'Canceled', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled', 'PickedUp', 'Started', 'Done'].includes(order.status) && (
               <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
                 <button
                   onClick={() => {

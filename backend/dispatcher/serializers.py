@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode
+from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 
@@ -100,6 +100,9 @@ class RiderSerializer(serializers.ModelSerializer):
     # Vehicle fields from Rider model
     vehicle = serializers.SerializerMethodField()
 
+    # Assigned vehicle asset details
+    vehicle_asset_detail = serializers.SerializerMethodField()
+
     # Mock/Computed fields to match frontend interface
     todayOrders = serializers.IntegerField(default=0, read_only=True)
     todayEarnings = serializers.IntegerField(default=0, read_only=True)
@@ -117,6 +120,7 @@ class RiderSerializer(serializers.ModelSerializer):
             "name",
             "phone",
             "vehicle",
+            "vehicle_asset_detail",
             "status",
             "rating",
             "total_deliveries",
@@ -135,6 +139,21 @@ class RiderSerializer(serializers.ModelSerializer):
         if obj.vehicle_type:
             return obj.vehicle_type.name
         return "None"
+
+    def get_vehicle_asset_detail(self, obj):
+        va = obj.vehicle_asset
+        if not va:
+            return None
+        return {
+            "id": str(va.id),
+            "asset_id": va.asset_id,
+            "plate_number": va.plate_number,
+            "make": va.make,
+            "model": va.model,
+            "vehicle_type": va.vehicle_type,
+            "color": va.color,
+            "year": va.year,
+        }
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -277,26 +296,31 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj):
         order_map = {
-            "Pending": "Pending",
-            "Assigned": "Assigned",
-            "Started": "In Transit",
-            "Done": "Delivered",
+            "Pending":          "Pending",
+            "Assigned":         "Assigned",
+            "PickedUp":         "Picked Up",   # rider app can set this directly
+            "Started":          "In Transit",
+            "Arrived":          "At Dropoff",  # rider is at the dropoff location
+            "Done":             "Delivered",
             "CustomerCanceled": "Cancelled",
-            "RiderCanceled": "Cancelled",
-            "Failed": "Failed",
+            "RiderCanceled":    "Cancelled",
+            "Failed":           "Failed",
         }
         order_status = order_map.get(obj.status, "Pending")
 
-        # If the Order-level status hasn't advanced past Assigned, check the
-        # Delivery's own status so changes made there are reflected here too.
-        if order_status in ("Pending", "Assigned"):
+        # Safety fallback: if the Delivery record has advanced further than the
+        # Order (e.g. rider-app update vs dispatcher update out of sync), prefer
+        # the more advanced delivery status.  Covers Pending, Assigned, and
+        # In Transit so a rider-completed delivery surfaces as "Delivered" even
+        # when Order.status is still "Started".
+        if order_status in ("Pending", "Assigned", "In Transit"):
             first = obj.deliveries.first()
             if first:
                 delivery_map = {
                     "InTransit": "In Transit",
                     "Delivered": "Delivered",
-                    "Failed": "Failed",
-                    "Canceled": "Cancelled",
+                    "Failed":    "Failed",
+                    "Canceled":  "Cancelled",
                 }
                 delivery_status = delivery_map.get(first.status)
                 if delivery_status:
@@ -636,6 +660,10 @@ class RiderOnboardingSerializer(serializers.Serializer):
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
+    home_zone = serializers.PrimaryKeyRelatedField(
+        queryset=Zone.objects.all(), required=False, allow_null=True,
+        help_text="Relay network zone to assign this rider to.",
+    )
     driving_license_number = serializers.CharField(required=False, max_length=50)
     national_id = serializers.CharField(required=False, max_length=50)
 
@@ -829,3 +857,49 @@ class RelayNodeSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class VehicleAssetSerializer(serializers.ModelSerializer):
+    assigned_rider = serializers.SerializerMethodField()
+
+    class Meta:
+        model = VehicleAsset
+        fields = [
+            "id",
+            "asset_id",
+            "plate_number",
+            "vehicle_type",
+            "make",
+            "model",
+            "year",
+            "color",
+            "vin",
+            "photo",
+            "insurance_expiry",
+            "registration_expiry",
+            "road_worthiness_expiry",
+            "engine_status",
+            "stop_duration",
+            "moved_timestamp",
+            "latitude",
+            "longitude",
+            "course",
+            "speed",
+            "last_telemetry_at",
+            "is_active",
+            "assigned_rider",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
+
+    def get_assigned_rider(self, obj):
+        rider = obj.riders.select_related("user").first()
+        if rider:
+            return {
+                "id": str(rider.id),
+                "rider_id": rider.rider_id,
+                "name": rider.user.contact_name if rider.user else "Unknown",
+                "phone": rider.user.phone if rider.user else "",
+            }
+        return None

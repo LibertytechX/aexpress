@@ -61,17 +61,58 @@ class Vehicle(models.Model):
     def calculate_fare(self, distance_km, duration_minutes):
         """
         Calculate total fare based on distance and duration.
-        Logic: Use Min Fee as floor for the first 'min_distance_km'.
-        Any distance beyond 'min_distance_km' is added on top of the higher of (MinFee) or (Calculated Price at MinDist).
-        """
-        from decimal import Decimal
 
+        If the vehicle has ``pricing_tiers`` (JSON field), the tiered algorithm
+        is used — this must match the frontend's ``calcTieredPrice`` exactly so
+        the price the user sees during checkout equals the price stored on the
+        order.
+
+        Otherwise falls back to the legacy formula:
+            base_fare + rate_per_km * dist + rate_per_minute * dur
+        with ``min_fee`` as a floor.
+        """
+        from decimal import Decimal, ROUND_HALF_UP
+        import math
+
+        km = float(distance_km)
+
+        # ── Tiered pricing (mirrors frontend calcTieredPrice) ──────────
+        pt = self.pricing_tiers
+        if pt and pt.get("type") == "tiered":
+            floor_km = float(pt.get("floor_km", 0))
+            floor_fee = float(pt.get("floor_fee", 0))
+            tiers = pt.get("tiers") or []
+
+            if km <= floor_km:
+                return Decimal(str(floor_fee)).quantize(Decimal("0.01"))
+
+            # Tier 0: e.g. ≤10 km → km × rate, floored at floor_fee
+            if len(tiers) > 0 and (tiers[0].get("max_km") is None or km <= float(tiers[0]["max_km"])):
+                price = max(round(km * float(tiers[0]["rate"])), floor_fee)
+                return Decimal(str(price)).quantize(Decimal("0.01"))
+
+            # Tier 1: e.g. ≤15 km → km × rate, floored at tier-0 boundary
+            if len(tiers) > 1 and (tiers[1].get("max_km") is None or km <= float(tiers[1]["max_km"])):
+                boundary = float(tiers[0].get("max_km", floor_km)) * float(tiers[0].get("rate", 0))
+                price = max(round(km * float(tiers[1]["rate"])), round(boundary))
+                return Decimal(str(price)).quantize(Decimal("0.01"))
+
+            # Tier 2+: e.g. >15 km → km × rate, floored at tier-1 boundary
+            if len(tiers) > 2:
+                boundary = float(tiers[1].get("max_km", 0)) * float(tiers[1].get("rate", 0))
+                price = max(round(km * float(tiers[2]["rate"])), round(boundary))
+                return Decimal(str(price)).quantize(Decimal("0.01"))
+
+            # Fallback for unexpected tier config
+            last_rate = float(tiers[-1].get("rate", 0)) if tiers else 0
+            price = round(km * last_rate)
+            return Decimal(str(price)).quantize(Decimal("0.01"))
+
+        # ── Legacy formula ─────────────────────────────────────────────
         dist = Decimal(str(distance_km))
         min_dist = self.min_distance_km
         duration = Decimal(str(duration_minutes))
 
-        # 1. Calculate the price for the minimum distance (keeping duration constant as it's the trip duration)
-        # Note: We use the actual duration for the base calculation, assuming the min fee covers "up to X km" of the trip.
         base_calc_at_min = (
             self.base_fare
             + (min_dist * self.rate_per_km)
@@ -79,7 +120,6 @@ class Vehicle(models.Model):
         )
         effective_base = max(base_calc_at_min, self.min_fee)
 
-        # 2. Add cost for excess distance
         if dist > min_dist:
             excess_dist = dist - min_dist
             total = effective_base + (excess_dist * self.rate_per_km)

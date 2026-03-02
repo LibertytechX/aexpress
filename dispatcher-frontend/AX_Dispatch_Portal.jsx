@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── ICONS ──────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ const I = {
   x: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
   check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>,
   teams: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
+  vehicles: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10H1v7h2" /><circle cx="7" cy="17" r="2" /><path d="M9 17h6" /><circle cx="17" cy="17" r="2" /><path d="M5 10V6a1 1 0 0 1 1-1h4l3 5" /></svg>,
 };
 
 const S = {
@@ -295,7 +296,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
+const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -963,6 +964,7 @@ export default function AXDispatchPortal() {
   const [orders, setOrders] = useState([]);
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
   const ablyRef = useRef(null);
@@ -1000,17 +1002,19 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => []),
-          DispatchersAPI.getAll().catch(() => [])
+          DispatchersAPI.getAll().catch(() => []),
+          VehicleAssetsAPI.getAll().catch(() => [])
         ]);
         if (cancelled) return;
         setRiders(ridersData);
         setOrders(ordersData);
         setMerchants(merchantsData);
         setDispatchers(dispatchersData);
+        setVehicleAssets(vehicleAssetsData);
         setEventLogs(initEventLogs(ordersData));
       } catch (error) {
         console.error('Failed to fetch data:', error);
@@ -1094,6 +1098,22 @@ export default function AXDispatchPortal() {
           }
         });
         console.log('[Ably] Subscribed to dispatch-feed ✅');
+
+        // Vehicle telemetry — live map updates from sync_bike_telemetry cron
+        const vch = ably.channels.get("vehicle-telemetry");
+        await vch.subscribe("telemetry_update", (msg) => {
+          const incoming = msg.data;
+          if (!Array.isArray(incoming) || incoming.length === 0) return;
+          console.log(`[Ably] 🏍️ Received telemetry for ${incoming.length} vehicle(s)`);
+          setVehicleAssets(prev => {
+            const map = {};
+            prev.forEach(v => { map[v.id] = v; });
+            incoming.forEach(v => { map[v.id] = v; });
+            return Object.values(map);
+          });
+        });
+        console.log('[Ably] Subscribed to vehicle-telemetry ✅');
+
         ablyActive = true;
       } catch (err) {
         console.error('[Ably] Setup failed, falling back to polling:', err);
@@ -1181,10 +1201,17 @@ export default function AXDispatchPortal() {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
       await OrdersAPI.updateStatus(oid, ns);
-      updateOrder(oid, { status: ns });
-      addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
-      if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-      if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+      // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
+      if (ns === "Picked Up") {
+        await OrdersAPI.updateStatus(oid, "In Transit");
+        updateOrder(oid, { status: "In Transit" });
+        addLog(oid, "Picked up → In Transit", "Dispatch", "status");
+      } else {
+        updateOrder(oid, { status: ns });
+        addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
+        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+      }
     } catch (err) {
       console.error("Failed to update status:", err);
       alert("Failed to update status. Please try again.");
@@ -1196,6 +1223,7 @@ export default function AXDispatchPortal() {
     { id: "dashboard", label: "Dashboard", icon: I.dashboard },
     { id: "orders", label: "Orders", icon: I.orders, count: orders.filter(o => o.status === "Pending").length },
     { id: "riders", label: "Riders", icon: I.riders, count: riders.filter(r => r.status === "online").length },
+    { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
     { id: "messaging", label: "Messaging", icon: I.messaging, count: MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) },
@@ -1217,7 +1245,7 @@ export default function AXDispatchPortal() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
-          {[{ v: orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
@@ -1236,13 +1264,14 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
+          {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "messaging" && <MessagingScreen />}
@@ -1289,7 +1318,7 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   });
   // Fall back to all orders if today filter returns nothing (e.g. older data)
   const displayOrders = today.length > 0 ? today : orders;
-  const active = orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status));
+  const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
   const delivered = displayOrders.filter(o => o.status === "Delivered");
   const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
   const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
@@ -1403,7 +1432,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} />;
   }
 
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "Delivered", "Cancelled", "Failed"];
+  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
   const filtered = orders.filter(o => {
     if (statusFilter !== "All" && o.status !== statusFilter) return false;
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
@@ -1473,7 +1502,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   // Status flow for progression
   const nextStatuses = () => {
-    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"];
+    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
     const idx = flow.indexOf(order.status);
     const opts = [];
     if (idx >= 0 && idx < flow.length - 1) opts.push(flow[idx + 1]);
@@ -1548,8 +1577,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            {["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"].map((st, i, arr) => {
-              const idx = arr.indexOf(order.status);
+            {["Pending", "Assigned", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
+              // "Picked Up" is a transient state — treat it as "In Transit" on the bar
+              const barStatus = order.status === "Picked Up" ? "In Transit" : order.status;
+              const idx = arr.indexOf(barStatus);
               const done = i <= idx;
               const current = i === idx;
               return (
@@ -1990,15 +2021,217 @@ function RidersLocationMap({ riders }) {
   );
 }
 
+// ─── RESET RIDER PASSWORD MODAL ─────────────────────────────────
+function ResetRiderPasswordModal({ rider, onClose }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    try {
+      await RidersAPI.resetPassword(rider._uuid || rider.id, newPassword);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reset Password</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Password Updated</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's password has been changed successfully.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>New Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showNew ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" style={{ ...iSt, paddingRight: 48 }} required minLength={6} />
+                <button type="button" onClick={() => setShowNew(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showNew ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 22 }}>
+              <label style={lSt}>Confirm Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showConfirm ? "text" : "password"} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" style={{ ...iSt, paddingRight: 48 }} required />
+                <button type="button" onClick={() => setShowConfirm(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showConfirm ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Set New Password"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── REASSIGN VEHICLE MODAL ──────────────────────────────────────
+function ReassignVehicleModal({ rider, onClose }) {
+  const [vehicles, setVehicles] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState(rider.vehicle_asset?.id || "");
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    VehicleAssetsAPI.getAll()
+      .then(data => setVehicles(data))
+      .catch(() => setError("Failed to load vehicles."))
+      .finally(() => setFetching(false));
+  }, []);
+
+  const filtered = vehicles.filter(v => {
+    if (!v.is_active) return false;
+    const q = search.toLowerCase();
+    if (!q) return true;
+    return (
+      (v.asset_id || "").toLowerCase().includes(q) ||
+      (v.plate_number || "").toLowerCase().includes(q) ||
+      (v.make || "").toLowerCase().includes(q) ||
+      (v.model || "").toLowerCase().includes(q)
+    );
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await RidersAPI.assignVehicle(rider._uuid || rider.id, selectedVehicleId || null);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to assign vehicle.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iSt = { width: "100%", padding: "8px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reassign Vehicle</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {rider.vehicle_asset && (
+          <div style={{ padding: "10px 14px", background: S.borderLight, borderRadius: 8, marginBottom: 16, fontSize: 12 }}>
+            <span style={{ color: S.textMuted }}>Current: </span>
+            <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{rider.vehicle_asset.asset_id}</span>
+            <span style={{ color: S.textMuted }}> · {rider.vehicle_asset.plate_number} — {rider.vehicle_asset.make} {rider.vehicle_asset.model} ({(rider.vehicle_asset.vehicle_type || "").toUpperCase()})</span>
+          </div>
+        )}
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Vehicle Assigned</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's vehicle has been updated. Refresh to see changes.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by asset ID, plate, make, model…" style={{ ...iSt, marginBottom: 10 }} />
+            {fetching ? (
+              <div style={{ textAlign: "center", padding: 24, color: S.textMuted, fontSize: 13 }}>Loading vehicles…</div>
+            ) : (
+              <div style={{ flex: 1, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 8, marginBottom: 14 }}>
+                <div
+                  onClick={() => setSelectedVehicleId("")}
+                  style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: selectedVehicleId === "" ? S.goldPale : "transparent", display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span style={{ fontSize: 18 }}>🚫</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Unassign (remove vehicle)</span>
+                </div>
+                {filtered.map(v => {
+                  const isSelected = selectedVehicleId === v.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: isSelected ? S.goldPale : "transparent", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = S.borderLight; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold }}>{v.asset_id}</span>
+                        <span style={{ fontSize: 12, color: S.textMuted }}> · {v.plate_number}</span>
+                        <div style={{ fontSize: 11, color: S.textDim, marginTop: 2 }}>{v.make} {v.model} · <span style={{ textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>{v.vehicle_type}</span></div>
+                      </div>
+                      {isSelected && <span style={{ color: S.gold, fontSize: 16 }}>✓</span>}
+                    </div>
+                  );
+                })}
+                {filtered.length === 0 && !fetching && <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles match your search.</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading || fetching} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Confirm Assignment"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── CREATE RIDER MODAL ─────────────────────────────────────────
 function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "",
     password: "", vehicle_type: "", city: "", is_verified: false,
+    home_zone: "", vehicle_asset: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [relayNodes, setRelayNodes] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
+
+  useEffect(() => {
+    RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => {});
+    VehicleAssetsAPI.getAll().then(assets => setVehicleAssets(assets || [])).catch(() => {});
+  }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -2010,6 +2243,8 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
       const payload = { ...form };
       if (!payload.vehicle_type) delete payload.vehicle_type;
       if (!payload.city) delete payload.city;
+      if (!payload.home_zone) delete payload.home_zone;
+      if (!payload.vehicle_asset) delete payload.vehicle_asset;
       await RidersAPI.createRider(payload);
       onRiderCreated();
       onClose();
@@ -2092,6 +2327,34 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
             </div>
           </div>
 
+          {/* Vehicle Asset */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Assign Vehicle Asset</label>
+            <select value={form.vehicle_asset} onChange={e => set("vehicle_asset", e.target.value)} style={iSt}>
+              <option value="">— No Vehicle —</option>
+              {vehicleAssets.filter(v => v.is_active).map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.asset_id} · {v.plate_number}{v.make ? ` — ${v.make}${v.model ? ' ' + v.model : ''}` : ''} ({(v.vehicle_type || 'vehicle').toUpperCase()})
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Only active vehicle assets are shown. Optional — can be assigned later.</div>
+          </div>
+
+          {/* Relay Node */}
+          {relayNodes.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>Relay Network Node</label>
+              <select value={form.home_zone} onChange={e => set("home_zone", e.target.value)} style={iSt}>
+                <option value="">— None (no relay assignment) —</option>
+                {relayNodes.map(n => (
+                  <option key={n.id} value={n.zone}>{n.name}{n.zone_name ? ` (${n.zone_name})` : ''}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Assigns the rider to the relay node's zone for relay dispatch.</div>
+            </div>
+          )}
+
           {/* Verified checkbox */}
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22, padding: "12px 14px", background: S.borderLight, borderRadius: 10, border: `1px solid ${S.border}` }}>
             <input id="verified-cb" type="checkbox" checked={form.is_verified} onChange={e => set("is_verified", e.target.checked)} style={{ width: 16, height: 16, accentColor: S.gold, cursor: "pointer" }} />
@@ -2120,12 +2383,15 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showCreateRider, setShowCreateRider] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showReassignVehicle, setShowReassignVehicle] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
     if (!rider) return <div style={{ color: S.textMuted }}>Rider not found</div>;
     const rOrders = orders.filter(o => o.riderId === rider.id);
     return (
+      <>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
         <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
@@ -2140,10 +2406,29 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                 <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
                 <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
               </div>
+              <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
+              <button onClick={() => setShowReassignVehicle(true)} style={{ width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🚗 Reassign Vehicle</button>
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
-                {[{ l: "Vehicle", v: rider.vehicle }, { l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
+                {[{ l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
                   <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
                 ))}
+                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${S.borderLight}` }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Assigned Vehicle</div>
+                  {rider.vehicle_asset ? (
+                    <>
+                      {[
+                        { l: "Asset ID", v: rider.vehicle_asset.asset_id },
+                        { l: "Plate", v: rider.vehicle_asset.plate_number },
+                        { l: "Make/Model", v: `${rider.vehicle_asset.make} ${rider.vehicle_asset.model}` },
+                        { l: "Type", v: (rider.vehicle_asset.vehicle_type || "").toUpperCase() },
+                      ].map(f => (
+                        <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}><span style={{ fontSize: 11, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>{f.v}</span></div>
+                      ))}
+                    </>
+                  ) : (
+                    <div style={{ fontSize: 12, color: S.textMuted, fontStyle: "italic" }}>No vehicle assigned</div>
+                  )}
+                </div>
               </div>
             </div>
             <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
@@ -2175,6 +2460,19 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           </div>
         </div>
       </div>
+      {showResetPassword && (
+        <ResetRiderPasswordModal
+          rider={rider}
+          onClose={() => setShowResetPassword(false)}
+        />
+      )}
+      {showReassignVehicle && (
+        <ReassignVehicleModal
+          rider={rider}
+          onClose={() => setShowReassignVehicle(false)}
+        />
+      )}
+      </>
     );
   }
 
@@ -2246,6 +2544,473 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           onRiderCreated={() => { if (onRiderCreated) onRiderCreated(); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── VEHICLES LOCATION MAP ──────────────────────────────────────
+function VehiclesLocationMap({ vehicles }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasPoints = false;
+
+    // Helper: build a rotated emoji icon as a canvas-based marker image
+    const buildVehicleIcon = (emoji, rotation, borderColor) => {
+      const size = 40;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // Rotate around center
+      ctx.translate(size / 2, size / 2);
+      ctx.rotate((Math.PI / 180) * (rotation || 0));
+      // Status-colored ring
+      ctx.beginPath();
+      ctx.arc(0, 0, size / 2 - 2, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = borderColor;
+      ctx.stroke();
+      // Emoji
+      ctx.font = '20px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.fillText(emoji, 0, 1);
+      return { url: canvas.toDataURL(), scaledSize: new window.google.maps.Size(size, size), anchor: new window.google.maps.Point(size / 2, size / 2) };
+    };
+
+    vehicles.forEach(v => {
+      if (!v.latitude || !v.longitude) return;
+      const lat = parseFloat(v.latitude);
+      const lng = parseFloat(v.longitude);
+      if (isNaN(lat) || isNaN(lng)) return;
+
+      const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
+      const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+      const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
+      const rotation = parseFloat(v.course) || 0;
+
+      const marker = new window.google.maps.Marker({
+        position: { lat, lng }, map, title: v.plate_number,
+        icon: buildVehicleIcon(typeIcon, rotation, color),
+        zIndex: v.engine_status === 'on' ? 10 : 5,
+      });
+
+      // Floating label: plate | rider | speed
+      const riderName = v.assigned_rider ? v.assigned_rider.name : '';
+      const speedStr = v.speed > 0 ? `${v.speed} km/h` : '';
+      const labelParts = [v.plate_number, riderName, speedStr].filter(Boolean);
+      const labelDiv = document.createElement('div');
+      labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
+        'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
+        'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
+        'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+      labelDiv.textContent = labelParts.join(' · ');
+
+      // Use OverlayView for the label
+      const LabelOverlay = class extends window.google.maps.OverlayView {
+        onAdd() { (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(labelDiv); }
+        draw() {
+          const proj = this.getProjection(); if (!proj) return;
+          const pos = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(lat, lng));
+          if (pos) { labelDiv.style.left = (pos.x - labelDiv.offsetWidth / 2) + 'px'; labelDiv.style.top = (pos.y - 32) + 'px'; }
+        }
+        onRemove() { if (labelDiv.parentNode) labelDiv.parentNode.removeChild(labelDiv); }
+      };
+      const overlay = new LabelOverlay();
+      overlay.setMap(map);
+
+      marker.addListener('click', () => {
+        infoWindowRef.current.setContent(
+          `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
+          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${typeIcon} ${v.plate_number}</div>` +
+          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
+          `<div style="color:#555;font-size:11px;margin-top:4px;">${v.asset_id} • ${(v.vehicle_type || '').toUpperCase()}</div>` +
+          (v.make || v.model ? `<div style="color:#888;font-size:10px;">${v.make || ''} ${v.model || ''}</div>` : '') +
+          (v.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${v.speed} km/h</div>` : '') +
+          (v.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${v.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
+          `</div>`
+        );
+        infoWindowRef.current.open(map, marker);
+      });
+
+      markersRef.current.push(marker);
+      // Store overlay reference for cleanup
+      marker._labelOverlay = overlay;
+      bounds.extend({ lat, lng });
+      hasPoints = true;
+    });
+
+    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+  }, [mapReady, vehicles]);
+
+  const withLocation = vehicles.filter(v => v.latitude && v.longitude).length;
+
+  return (
+    <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <span>🗺️ Vehicle Locations</span>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {vehicles.length} vehicles with GPS</span>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+        {withLocation === 0 && mapReady && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.03)' }}>
+            <div style={{ textAlign: 'center', color: S.textMuted }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>No GPS data available</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Vehicles will appear here when telemetry is received</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
+        <span>🏍️ Bike  🚗 Car  🚐 Van</span>
+        <span style={{ marginLeft: 4 }}>|</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22c55e', marginRight: 3, verticalAlign: 'middle' }} /> Engine On</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', marginRight: 3, verticalAlign: 'middle' }} /> Idle</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#EF4444', marginRight: 3, verticalAlign: 'middle' }} /> Engine Off</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#6b7280', marginRight: 3, verticalAlign: 'middle' }} /> Unknown</span>
+        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── VEHICLES SCREEN ────────────────────────────────────────────
+function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
+  const [filter, setFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [showCreateVehicle, setShowCreateVehicle] = useState(false);
+  const [detailVehicleId, setDetailVehicleId] = useState(null);
+
+  const detailVehicle = detailVehicleId ? vehicles.find(v => v.id === detailVehicleId) : null;
+
+  const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
+  const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
+  const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Vehicles" value={vehicles.length} />
+        <StatCard label="Active" value={vehicles.filter(v => v.is_active).length} color={S.green} />
+        <StatCard label="Engine On" value={vehicles.filter(v => v.engine_status === "on").length} color={S.green} />
+        <StatCard label="With GPS" value={vehicles.filter(v => v.latitude && v.longitude).length} color={S.gold} />
+      </div>
+
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["All", "Active", "Inactive", "Bike", "Car", "Van"].map(f => (<button key={f} onClick={() => setFilter(f)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${filter === f ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: filter === f ? S.goldPale : S.card, color: filter === f ? S.gold : S.textMuted }}>{f}</button>))}
+            </div>
+            <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
+              <span style={{ opacity: 0.4 }}>{I.search}</span>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicles..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
+            </div>
+            <button onClick={() => setShowCreateVehicle(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, whiteSpace: "nowrap", flexShrink: 0 }}>
+              {I.plus} Add Vehicle
+            </button>
+          </div>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Engine</span><span>Speed</span><span>Rider</span><span>Status</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {filtered.map(v => (
+                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.make || '—'}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.model || '—'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${ec(v.engine_status)}18`, color: ec(v.engine_status) }}>{(v.engine_status || 'unknown').toUpperCase()}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
+                  <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
+          <VehiclesLocationMap vehicles={vehicles} />
+        </div>
+      </div>
+
+      {showCreateVehicle && (
+        <CreateVehicleModal
+          onClose={() => setShowCreateVehicle(false)}
+          onVehicleCreated={() => { if (onVehicleCreated) onVehicleCreated(); setShowCreateVehicle(false); }}
+        />
+      )}
+      {detailVehicle && (
+        <VehicleDetailModal
+          vehicle={detailVehicle}
+          onClose={() => setDetailVehicleId(null)}
+          onVehicleUpdated={() => { if (onVehicleUpdated) onVehicleUpdated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── VEHICLE DETAIL MODAL ───────────────────────────────────────
+function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    plate_number: vehicle.plate_number || "",
+    vehicle_type: vehicle.vehicle_type || "bike",
+    make: vehicle.make || "",
+    model: vehicle.model || "",
+    year: vehicle.year ? String(vehicle.year) : "",
+    color: vehicle.color || "",
+    vin: vehicle.vin || "",
+    insurance_expiry: vehicle.insurance_expiry || "",
+    registration_expiry: vehicle.registration_expiry || "",
+    road_worthiness_expiry: vehicle.road_worthiness_expiry || "",
+    is_active: vehicle.is_active,
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const cancelEdit = () => {
+    setEditing(false); setError(null);
+    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active });
+  };
+
+  const handleSave = async () => {
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10); else delete payload.year;
+      Object.keys(payload).forEach(k => { if (payload[k] === "" && k !== "plate_number" && k !== "vehicle_type" && k !== "is_active") delete payload[k]; });
+      await VehicleAssetsAPI.update(vehicle.id, payload);
+      if (onVehicleUpdated) onVehicleUpdated();
+      setEditing(false);
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to save changes.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const typeIcon = vehicle.vehicle_type === 'bike' ? '🏍️' : vehicle.vehicle_type === 'car' ? '🚗' : '🚐';
+  const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
+  const iSt = { width: "100%", padding: "8px 10px", border: `1px solid ${S.border}`, borderRadius: 6, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>{typeIcon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>{vehicle.plate_number}</div>
+            <div style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{vehicle.asset_id}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <>
+                <button onClick={cancelEdit} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.textDim }}>Cancel</button>
+                <button onClick={handleSave} disabled={loading} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Save Changes"}</button>
+              </>
+            ) : (
+              <button onClick={() => setEditing(true)} style={{ padding: "7px 16px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.text, display: "flex", alignItems: "center", gap: 6 }}>✏️ Edit</button>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 4 }}>{I.x}</button>
+          </div>
+        </div>
+
+        {error && <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{error}</div>}
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 22 }}>
+
+          {/* ── Status badges / is_active toggle ── */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Status:</label>
+                <select value={form.is_active ? "active" : "inactive"} onChange={e => set("is_active", e.target.value === "active")} style={{ ...iSt, width: "auto", padding: "6px 10px" }}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            ) : (
+              <>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: vehicle.is_active ? S.greenBg : S.redBg, color: vehicle.is_active ? S.green : S.red }}>{vehicle.is_active ? "ACTIVE" : "INACTIVE"}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: `${ec}18`, color: ec }}>{(vehicle.engine_status || 'unknown').toUpperCase()}</span>
+              </>
+            )}
+          </div>
+
+          {/* ── Vehicle Info ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Vehicle Info</div>
+            {editing ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div><label style={lSt}>Plate Number *</label><input value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Type</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+                <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+                <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+                <div><label style={lSt}>Year</label><input type="number" value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" /></div>
+                <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={lSt}>VIN</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+                {[{ l: "Asset ID", v: vehicle.asset_id }, { l: "Plate Number", v: vehicle.plate_number }, { l: "Type", v: (vehicle.vehicle_type || '').toUpperCase() }, { l: "Make", v: vehicle.make || '—' }, { l: "Model", v: vehicle.model || '—' }, { l: "Year", v: vehicle.year || '—' }, { l: "Color", v: vehicle.color || '—' }, { l: "VIN", v: vehicle.vin || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Telemetry (always read-only) ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Telemetry <span style={{ fontWeight: 400, fontSize: 9 }}>(read-only)</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
+                <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+              ))}
+            </div>
+            {vehicle.latitude && vehicle.longitude && (
+              <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+                📍 {parseFloat(vehicle.latitude).toFixed(6)}, {parseFloat(vehicle.longitude).toFixed(6)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Documents ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Documents</div>
+            {editing ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div><label style={lSt}>Insurance Expiry</label><input type="date" value={form.insurance_expiry} onChange={e => set("insurance_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Registration Expiry</label><input type="date" value={form.registration_expiry} onChange={e => set("registration_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Road Worthiness Expiry</label><input type="date" value={form.road_worthiness_expiry} onChange={e => set("road_worthiness_expiry", e.target.value)} style={iSt} /></div>
+              </div>
+            ) : (
+              <div>
+                {[{ l: "Insurance Expiry", v: vehicle.insurance_expiry || '—' }, { l: "Registration Expiry", v: vehicle.registration_expiry || '—' }, { l: "Road Worthiness Expiry", v: vehicle.road_worthiness_expiry || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Assigned Rider ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Assigned Rider</div>
+            {vehicle.assigned_rider ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: S.borderLight, borderRadius: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: S.gold }}>{vehicle.assigned_rider.name.split(" ").map(n => n[0]).join("")}</div>
+                <div><div style={{ fontSize: 14, fontWeight: 700 }}>{vehicle.assigned_rider.name}</div><div style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{vehicle.assigned_rider.rider_id} • {vehicle.assigned_rider.phone}</div></div>
+              </div>
+            ) : (
+              <div style={{ color: S.textMuted, fontSize: 12, padding: "6px 0" }}>No rider assigned to this vehicle</div>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CREATE VEHICLE MODAL ───────────────────────────────────────
+function CreateVehicleModal({ onClose, onVehicleCreated }) {
+  const [form, setForm] = useState({ plate_number: "", vehicle_type: "bike", make: "", model: "", year: "", color: "", vin: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10);
+      else delete payload.year;
+      Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+      payload.plate_number = form.plate_number; // always required
+      payload.vehicle_type = form.vehicle_type;
+      await VehicleAssetsAPI.create(payload);
+      onVehicleCreated();
+      onClose();
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to create vehicle.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+  const row = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+          <div><div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Add New Vehicle</div><div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Register a new vehicle asset</div></div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600, marginBottom: 14 }}>{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div style={row}>
+            <div><label style={lSt}>Plate Number *</label><input required value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} placeholder="LAG-123-AB" /></div>
+            <div><label style={lSt}>Type *</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+            <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Year</label><input value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" type="number" /></div>
+            <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+          </div>
+          <div style={{ marginBottom: 14 }}><label style={lSt}>VIN (Optional)</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: 14, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Creating…" : "Create Vehicle"}</button>
+        </form>
+      </div>
     </div>
   );
 }

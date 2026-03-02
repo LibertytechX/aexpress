@@ -79,6 +79,7 @@ export const RidersAPI = {
             name: r.name || 'Unknown',
             phone: r.phone || '',
             vehicle: r.vehicle || 'Bike',
+            vehicle_asset: r.vehicle_asset_detail || null,
             status: r.status || 'offline',
             currentOrder: r.current_order || null,
             todayOrders: r.todayOrders || 0,
@@ -116,6 +117,28 @@ export const RidersAPI = {
             method: 'POST',
             headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             body: form
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async resetPassword(riderUuid, newPassword) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/reset_password/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async assignVehicle(riderUuid, vehicleAssetId) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/assign_vehicle/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ vehicle_asset_id: vehicleAssetId || null }),
         });
         const data = await res.json();
         if (!res.ok) throw data;
@@ -267,6 +290,56 @@ export const VehiclesAPI = {
         });
         if (!res.ok) throw new Error('Failed to update vehicle');
         return await res.json();
+    }
+};
+
+// ─── VEHICLE ASSETS ─────────────────────────────────────────────
+export const VehicleAssetsAPI = {
+    async getAll() {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch vehicle assets');
+        return await res.json();
+    },
+
+    async get(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to fetch vehicle asset');
+        return await res.json();
+    },
+
+    async create(data) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw err;
+        }
+        return await res.json();
+    },
+
+    async update(id, data) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to update vehicle asset');
+        return await res.json();
+    },
+
+    async delete(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) throw new Error('Failed to delete vehicle asset');
     }
 };
 
