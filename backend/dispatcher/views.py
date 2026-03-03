@@ -520,7 +520,7 @@ class AblyTokenView(views.APIView):
                 client = AblyRest(api_key)
                 params = {
                     "capability": json.dumps(capability),
-                    "ttl": 3 * 30 * 24 * 60 * 60 * 1000,  # ~3 months in ms
+                    "ttl": 24 * 60 * 60 * 1000,  # 24 hours in ms (Ably max)
                 }
                 token_details = await client.auth.request_token(params)
                 token_request = await client.auth.create_token_request(params)
