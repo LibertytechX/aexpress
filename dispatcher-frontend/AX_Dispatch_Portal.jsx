@@ -2,16 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
-// ─── NEW ORDER CHIME (Web Audio API) ─────────────────────────────
-const playNewOrderChime = () => {
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+const playChime = (notes) => {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const now = ctx.currentTime;
-    const notes = [
-      { freq: 784, start: 0, dur: 0.15 },    // G5
-      { freq: 988, start: 0.15, dur: 0.15 },  // B5
-      { freq: 1175, start: 0.3, dur: 0.25 },  // D6
-    ];
     notes.forEach(({ freq, start, dur }) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -26,6 +21,20 @@ const playNewOrderChime = () => {
     setTimeout(() => ctx.close(), 1500);
   } catch (e) { console.warn('[Chime] Could not play:', e); }
 };
+const playNewOrderChime = () => playChime([
+  { freq: 784, start: 0, dur: 0.15 },    // G5
+  { freq: 988, start: 0.15, dur: 0.15 },  // B5
+  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+]);
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
@@ -1111,7 +1120,7 @@ export default function AXDispatchPortal() {
             if (newStatus) {
               setOrders(prev => prev.map(o => o.id === d.order_id ? { ...o, status: newStatus } : o));
             }
-            // If a new_order event arrives for an order not yet in the list, refresh
+            // Play chime for key events
             if (d.event_type === "new_order") {
               playNewOrderChime();
               setOrders(prev => {
@@ -1120,6 +1129,10 @@ export default function AXDispatchPortal() {
                 }
                 return prev;
               });
+            } else if (d.event_type === "in_transit") {
+              playStartedChime();
+            } else if (d.event_type === "delivered") {
+              playDeliveredChime();
             }
           }
         });

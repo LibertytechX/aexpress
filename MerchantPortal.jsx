@@ -1,16 +1,11 @@
 // React hooks will be available from the global React object
 const { useState, useEffect, useRef } = React;
 
-// ─── NEW ORDER CHIME (Web Audio API) ─────────────────────────────
-const playNewOrderChime = () => {
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+const playChime = (notes) => {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const now = ctx.currentTime;
-    const notes = [
-      { freq: 784, start: 0, dur: 0.15 },    // G5
-      { freq: 988, start: 0.15, dur: 0.15 },  // B5
-      { freq: 1175, start: 0.3, dur: 0.25 },  // D6
-    ];
     notes.forEach(({ freq, start, dur }) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -25,6 +20,20 @@ const playNewOrderChime = () => {
     setTimeout(() => ctx.close(), 1500);
   } catch (e) { console.warn('[Chime] Could not play:', e); }
 };
+const playNewOrderChime = () => playChime([
+  { freq: 784, start: 0, dur: 0.15 },    // G5
+  { freq: 988, start: 0.15, dur: 0.15 },  // B5
+  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+]);
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
 
 // ─── ICONS (inline SVG components) ──────────────────────────────
 const Icons = {
@@ -341,6 +350,10 @@ function MerchantPortal() {
           const d = msg.data;
           if (d && d.event_type === 'new_order') {
             playNewOrderChime();
+          } else if (d && d.event_type === 'in_transit') {
+            playStartedChime();
+          } else if (d && d.event_type === 'delivered') {
+            playDeliveredChime();
           }
           loadOrders();
         });
