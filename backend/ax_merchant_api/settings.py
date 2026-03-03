@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Load environment variables
 load_dotenv()
@@ -176,7 +177,7 @@ REST_FRAMEWORK = {
 # Simple JWT Settings
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(
-        hours=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME", 24))
+        hours=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME", 72))
     ),
     "REFRESH_TOKEN_LIFETIME": timedelta(
         hours=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME", 168))
@@ -307,7 +308,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule
-from celery.schedules import crontab
+
 
 CELERY_BEAT_SCHEDULE = {
     "publish-random-order-offer-every-minute": {
