@@ -1,5 +1,6 @@
 from dispatcher.models import SystemSettings
 import logging
+import threading
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -129,24 +130,28 @@ class QuickSendView(APIView):
             sequence=1,
         )
 
-        # Emit activity event for live feed
+        # Emit activity event for live feed (fire-and-forget in background thread)
         merchant_name = (
             getattr(request.user, "business_name", None)
             or getattr(request.user, "contact_name", None)
             or "Unknown"
         )
-        emit_activity(
-            event_type="new_order",
-            order_id=order.order_number,
-            text=f"New order {order.order_number} from {merchant_name}",
-            color="gold",
-            metadata={
-                "merchant": merchant_name,
-                "amount": str(total_amount),
-                "pickup": data["pickup_address"],
-                "dropoff": data["dropoff_address"],
+        threading.Thread(
+            target=emit_activity,
+            kwargs={
+                "event_type": "new_order",
+                "order_id": order.order_number,
+                "text": f"New order {order.order_number} from {merchant_name}",
+                "color": "gold",
+                "metadata": {
+                    "merchant": merchant_name,
+                    "amount": str(total_amount),
+                    "pickup": data["pickup_address"],
+                    "dropoff": data["dropoff_address"],
+                },
             },
-        )
+            daemon=True,
+        ).start()
 
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
@@ -190,20 +195,22 @@ class QuickSendView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # Notify all online riders about the new order
-        try:
-            online_riders = Rider.objects.filter(
-                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
-            )
-            for rider in online_riders:
-                notify_rider(
-                    rider=rider,
-                    title="New Order Available",
-                    body=f"Quick Send pickup from {order.pickup_address}",
-                    data={"order_number": order.order_number, "mode": "quick"},
+        # Notify all online riders about the new order (fire-and-forget in background)
+        def _notify_riders():
+            try:
+                online_riders = Rider.objects.filter(
+                    status=Rider.Status.ONLINE, is_active=True, is_authorized=True
                 )
-        except Exception as e:
-            logger.warning(f"Failed to send new-order notifications: {e}")
+                for rider in online_riders:
+                    notify_rider(
+                        rider=rider,
+                        title="New Order Available",
+                        body=f"Quick Send pickup from {order.pickup_address}",
+                        data={"order_number": order.order_number, "mode": "quick"},
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send new-order notifications: {e}")
+        threading.Thread(target=_notify_riders, daemon=True).start()
 
         # Return created order
         order_serializer = OrderSerializer(order)
@@ -322,20 +329,22 @@ class MultiDropView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # Notify all online riders about the new order
-        try:
-            online_riders = Rider.objects.filter(
-                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
-            )
-            for rider in online_riders:
-                notify_rider(
-                    rider=rider,
-                    title="New Order Available",
-                    body=f"Multi-Drop ({num_deliveries} stops) pickup from {order.pickup_address}",
-                    data={"order_number": order.order_number, "mode": "multi"},
+        # Notify all online riders about the new order (fire-and-forget in background)
+        def _notify_riders_multi():
+            try:
+                online_riders = Rider.objects.filter(
+                    status=Rider.Status.ONLINE, is_active=True, is_authorized=True
                 )
-        except Exception as e:
-            logger.warning(f"Failed to send new-order notifications: {e}")
+                for rider in online_riders:
+                    notify_rider(
+                        rider=rider,
+                        title="New Order Available",
+                        body=f"Multi-Drop ({num_deliveries} stops) pickup from {order.pickup_address}",
+                        data={"order_number": order.order_number, "mode": "multi"},
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send new-order notifications: {e}")
+        threading.Thread(target=_notify_riders_multi, daemon=True).start()
 
         # Return created order
         order_serializer = OrderSerializer(order)
@@ -454,20 +463,22 @@ class BulkImportView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # Notify all online riders about the new order
-        try:
-            online_riders = Rider.objects.filter(
-                status=Rider.Status.ONLINE, is_active=True, is_authorized=True
-            )
-            for rider in online_riders:
-                notify_rider(
-                    rider=rider,
-                    title="New Order Available",
-                    body=f"Bulk Import ({num_deliveries} stops) pickup from {order.pickup_address}",
-                    data={"order_number": order.order_number, "mode": "bulk"},
+        # Notify all online riders about the new order (fire-and-forget in background)
+        def _notify_riders_bulk():
+            try:
+                online_riders = Rider.objects.filter(
+                    status=Rider.Status.ONLINE, is_active=True, is_authorized=True
                 )
-        except Exception as e:
-            logger.warning(f"Failed to send new-order notifications: {e}")
+                for rider in online_riders:
+                    notify_rider(
+                        rider=rider,
+                        title="New Order Available",
+                        body=f"Bulk Import ({num_deliveries} stops) pickup from {order.pickup_address}",
+                        data={"order_number": order.order_number, "mode": "bulk"},
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send new-order notifications: {e}")
+        threading.Thread(target=_notify_riders_bulk, daemon=True).start()
 
         # Return created order
         order_serializer = OrderSerializer(order)

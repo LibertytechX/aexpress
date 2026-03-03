@@ -2,6 +2,40 @@ import { useState, useRef, useEffect } from "react";
 import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+const playChime = (notes) => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    notes.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.05);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) { console.warn('[Chime] Could not play:', e); }
+};
+const playNewOrderChime = () => playChime([
+  { freq: 784, start: 0, dur: 0.15 },    // G5
+  { freq: 988, start: 0.15, dur: 0.15 },  // B5
+  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+]);
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
+
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
   dashboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>,
@@ -1086,14 +1120,19 @@ export default function AXDispatchPortal() {
             if (newStatus) {
               setOrders(prev => prev.map(o => o.id === d.order_id ? { ...o, status: newStatus } : o));
             }
-            // If a new_order event arrives for an order not yet in the list, refresh
+            // Play chime for key events
             if (d.event_type === "new_order") {
+              playNewOrderChime();
               setOrders(prev => {
                 if (!prev.find(o => o.id === d.order_id)) {
                   OrdersAPI.getAll().then(data => setOrders(cur => mergeOrders(data, cur))).catch(() => { });
                 }
                 return prev;
               });
+            } else if (d.event_type === "in_transit") {
+              playStartedChime();
+            } else if (d.event_type === "delivered") {
+              playDeliveredChime();
             }
           }
         });
@@ -2391,7 +2430,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
     const rider = riders.find(r => r.id === selectedId);
     if (!rider) return <div style={{ color: S.textMuted }}>Rider not found</div>;
     const rOrders = orders.filter(o => o.riderId === rider.id);
-    
+
     const handleToggleDuty = async () => {
       const targetStatus = rider.status === "offline" ? "online" : "offline";
       setIsTogglingDuty(true);
@@ -2418,16 +2457,16 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
               <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
               {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
-              
+
               <div style={{ marginTop: 14 }}>
-                <button 
-                  onClick={handleToggleDuty} 
+                <button
+                  onClick={handleToggleDuty}
                   disabled={isTogglingDuty || rider.status === "on_delivery"}
-                  style={{ 
-                    width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer", 
-                    fontFamily: "inherit", fontSize: 12, fontWeight: 800, 
-                    background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`, 
-                    color: "#fff", 
+                  style={{
+                    width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer",
+                    fontFamily: "inherit", fontSize: 12, fontWeight: 800,
+                    background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`,
+                    color: "#fff",
                     opacity: (isTogglingDuty || rider.status === "on_delivery") ? 0.6 : 1,
                     display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                     boxShadow: "0 4px 10px rgba(0,0,0,0.15)"

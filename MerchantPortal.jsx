@@ -1,6 +1,40 @@
 // React hooks will be available from the global React object
 const { useState, useEffect, useRef } = React;
 
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+const playChime = (notes) => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    notes.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.05);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) { console.warn('[Chime] Could not play:', e); }
+};
+const playNewOrderChime = () => playChime([
+  { freq: 784, start: 0, dur: 0.15 },    // G5
+  { freq: 988, start: 0.15, dur: 0.15 },  // B5
+  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+]);
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
+
 // ─── ICONS (inline SVG components) ──────────────────────────────
 const Icons = {
   dashboard: (
@@ -312,7 +346,15 @@ function MerchantPortal() {
 
         const ch = ably.channels.get('dispatch-feed');
         // In Ably v2, ch.subscribe() returns a Promise — must be awaited
-        await ch.subscribe('activity', () => {
+        await ch.subscribe('activity', (msg) => {
+          const d = msg.data;
+          if (d && d.event_type === 'new_order') {
+            playNewOrderChime();
+          } else if (d && d.event_type === 'in_transit') {
+            playStartedChime();
+          } else if (d && d.event_type === 'delivered') {
+            playDeliveredChime();
+          }
           loadOrders();
         });
         ablyActive = true;
@@ -2658,6 +2700,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [routeError, setRouteError] = useState(null);
 
+	  // Tick when Google Maps finishes loading so route effects can re-run
+	  // (otherwise they may run once, see Maps missing, and never retry).
+	  const [mapsLoadedTick, setMapsLoadedTick] = useState(0);
+	  useEffect(() => {
+	    if (typeof window === 'undefined') return;
+	    const handler = () => setMapsLoadedTick(t => t + 1);
+	    window.addEventListener('google-maps-loaded', handler);
+	    if (window.google && window.google.maps) handler();
+	    return () => window.removeEventListener('google-maps-loaded', handler);
+	  }, []);
+
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
@@ -2704,7 +2757,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   }, []);
 
   // ─── Calculate route for early price estimation ───
-  useEffect(() => {
+	  useEffect(() => {
     console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
 
     // Only calculate for Quick Send mode when both addresses are available
@@ -2733,9 +2786,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
       setRouteError(null);
 
-      try {
-        // Check if Google Maps is loaded
-        if (typeof google === 'undefined' || !google.maps) {
+	      try {
+	        const g = window.google;
+	        // Check if Google Maps is loaded
+	        if (!g || !g.maps) {
           console.error('❌ Google Maps not loaded yet');
           setRouteError('Maps not loaded');
           setCalculatingRoute(false);
@@ -2743,24 +2797,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         }
 
         // Use Google Maps Directions API to calculate route
-        const directionsService = new google.maps.DirectionsService();
+	        const directionsService = new g.maps.DirectionsService();
 
         const request = {
           origin: pickupAddress,
           destination: dropoffAddress,
-          travelMode: google.maps.TravelMode.DRIVING,
+	          travelMode: g.maps.TravelMode.DRIVING,
           drivingOptions: {
             departureTime: new Date(),
-            trafficModel: google.maps.TrafficModel.BEST_GUESS
+	            trafficModel: g.maps.TrafficModel.BEST_GUESS
           }
         };
 
         console.log('📡 Sending directions request...', request);
 
-        directionsService.route(request, (result, status) => {
+	        directionsService.route(request, (result, status) => {
           console.log('📥 Directions response:', { status, result });
 
-          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+	          if (status === g.maps.DirectionsStatus.OK && result.routes[0]) {
             const route = result.routes[0];
             let totalDistance = 0;
             let totalDuration = 0;
@@ -2795,9 +2849,203 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     // Debounce the calculation to avoid too many API calls
     const timeoutId = setTimeout(calculateEarlyRoute, 1000);
     return () => clearTimeout(timeoutId);
-  }, [mode, pickupAddress, dropoffAddress]);
+	  }, [mode, pickupAddress, dropoffAddress, mapsLoadedTick]);
 
-  // ─── Load default address on mount ───
+	  // ─── Multi-Drop state ───
+	  const [drops, setDrops] = useState([
+	    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
+	  ]);
+	  const nextDropId = useRef(2);
+
+	  const addDrop = () => {
+	    const newId = nextDropId.current++;
+	    setDrops(prev => [...prev, { id: newId, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+	  };
+	  const removeDrop = (id) => {
+	    setDrops(prev => prev.length > 1 ? prev.filter(d => d.id !== id) : prev);
+	  };
+	  const updateDrop = (id, field, value) => {
+	    setDrops(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d));
+	  };
+
+	  // ─── Calculate per-drop routes for Multi-Drop mode ───
+	  // Only depend on address changes (not name/phone/pkg edits) to avoid resetting the debounce
+	  const multiDropRouteReqId = useRef(0);
+	  const dropAddressKey = (drops || []).map(d => `${d.id}:${d.address}`).join('|');
+	  useEffect(() => {
+    if (mode !== 'multi' || !pickupAddress) return;
+
+    const dropsArr = (drops || []);
+    const dropsWithAddress = dropsArr.filter(d => d.address.trim());
+    if (dropsWithAddress.length === 0) return;
+
+    // Only recalculate drops that don't yet have a route for their current pickup+drop pair
+    const routedKeyFor = (d) => `${pickupAddress}||${d.address}`;
+    const dropsNeedingRoute = dropsWithAddress.filter(d => d._routedKey !== routedKeyFor(d));
+    if (dropsNeedingRoute.length === 0) return;
+
+	    const g = window.google;
+	    if (!g || !g.maps) return;
+
+    const reqId = ++multiDropRouteReqId.current;
+
+    const timeoutId = setTimeout(async () => {
+	      console.log('[MultiDrop] Routing needed:', {
+	        pickup: pickupAddress,
+	        drops: dropsNeedingRoute.map(d => ({ id: d.id, address: d.address }))
+	      });
+
+      // Mark these drops as pending and clear any stale route values
+      setDrops(prev => prev.map(d => {
+        if (!dropsNeedingRoute.some(x => x.id === d.id)) return d;
+        return { ...d, distance_km: null, duration_minutes: null, _route_status: 'pending', _route_error: null };
+      }));
+
+	      const routeViaDirections = async (fallbackDrops, reason) => {
+	        try {
+		          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+	          const directionsService = new g.maps.DirectionsService();
+		          const calcOneAttempt = (drop) => new Promise((resolve) => {
+	            directionsService.route({
+	              origin: pickupAddress,
+	              destination: drop.address,
+	              travelMode: g.maps.TravelMode.DRIVING,
+	              drivingOptions: { departureTime: new Date(), trafficModel: g.maps.TrafficModel.BEST_GUESS }
+	            }, (result, status) => {
+	              if (status === g.maps.DirectionsStatus.OK && result?.routes?.[0]) {
+	                const route = result.routes[0];
+	                let totalDistance = 0, totalDuration = 0;
+	                route.legs.forEach(leg => {
+	                  totalDistance += leg.distance.value;
+	                  totalDuration += leg.duration_in_traffic?.value || leg.duration.value;
+	                });
+	                resolve({
+	                  id: drop.id,
+	                  ok: true,
+	                  distance_km: parseFloat((totalDistance / 1000).toFixed(1)),
+	                  duration_minutes: Math.ceil(totalDuration / 60),
+	                });
+	              } else {
+	                resolve({ id: drop.id, ok: false, error: status || 'UNKNOWN_ERROR' });
+	              }
+	            });
+	          });
+
+		          const calcOneWithRetry = async (drop) => {
+		            let last = null;
+		            for (let attempt = 0; attempt < 3; attempt++) {
+		              last = await calcOneAttempt(drop);
+		              if (last?.ok) return last;
+		              if (last?.error === 'OVER_QUERY_LIMIT') {
+		                await sleep(750 * (attempt + 1));
+		                continue;
+		              }
+		              return last;
+		            }
+		            return last || { id: drop.id, ok: false, error: 'UNKNOWN_ERROR' };
+		          };
+
+	          const results = [];
+	          for (const drop of fallbackDrops) {
+	            if (reqId !== multiDropRouteReqId.current) return;
+		            results.push(await calcOneWithRetry(drop));
+		            // tiny pacing to reduce rate-limit bursts
+		            await sleep(150);
+	          }
+	          if (reqId !== multiDropRouteReqId.current) return;
+
+	          setDrops(prev => prev.map(d => {
+	            const r = results.find(x => x.id === d.id);
+	            if (!r) return d;
+	            if (r.ok) {
+	              return {
+	                ...d,
+	                distance_km: r.distance_km,
+	                duration_minutes: r.duration_minutes,
+	                _routedKey: routedKeyFor(d),
+	                _route_status: 'ok',
+	                _route_error: null,
+	              };
+	            }
+	            return { ...d, distance_km: null, duration_minutes: null, _route_status: 'error', _route_error: `${reason}:${r.error}` };
+	          }));
+	        } catch (e) {
+	          console.error('[MultiDrop] Directions fallback exception:', e);
+	          setDrops(prev => prev.map(d => {
+	            if (!fallbackDrops.some(x => x.id === d.id)) return d;
+	            return { ...d, _route_status: 'error', _route_error: `${reason}:EXCEPTION` };
+	          }));
+	        }
+	      };
+
+	      // Prefer Distance Matrix: single request for N destinations from the same origin.
+	      // If the API is not enabled (REQUEST_DENIED), fall back to DirectionsService per-drop.
+	      if (!g.maps.DistanceMatrixService) {
+	        await routeViaDirections(dropsNeedingRoute, 'NO_DISTANCE_MATRIX');
+	        return;
+	      }
+	      const distanceMatrix = new g.maps.DistanceMatrixService();
+	      const destinations = dropsNeedingRoute.map(d => d.address);
+	      const request = {
+	        origins: [pickupAddress],
+	        destinations,
+	        travelMode: g.maps.TravelMode.DRIVING,
+	        drivingOptions: { departureTime: new Date(), trafficModel: g.maps.TrafficModel.BEST_GUESS },
+	        unitSystem: g.maps.UnitSystem.METRIC,
+	      };
+
+	      distanceMatrix.getDistanceMatrix(request, (response, status) => {
+	        // Ignore stale responses (user changed addresses again)
+	        if (reqId !== multiDropRouteReqId.current) return;
+
+	        if (status !== 'OK') {
+	          console.error('[MultiDrop] DistanceMatrix failed:', status);
+	          routeViaDirections(dropsNeedingRoute, status);
+	          return;
+	        }
+
+	        const elements = response?.rows?.[0]?.elements || [];
+	        const dmOk = dropsNeedingRoute.map((drop, idx) => {
+	          const el = elements[idx];
+	          if (!el || el.status !== 'OK' || !el.distance || !el.duration) {
+	            return { id: drop.id, ok: false, error: el?.status || 'UNKNOWN_ERROR' };
+	          }
+	          const distKm = parseFloat((el.distance.value / 1000).toFixed(1));
+	          const durSec = el.duration_in_traffic?.value || el.duration.value;
+	          const durMin = Math.ceil(durSec / 60);
+	          return { id: drop.id, ok: true, distance_km: distKm, duration_minutes: durMin };
+	        });
+
+	        setDrops(prev => prev.map(d => {
+	          const r = dmOk.find(x => x.id === d.id);
+	          if (!r) return d;
+	          if (r.ok) {
+	            return {
+	              ...d,
+	              distance_km: r.distance_km,
+	              duration_minutes: r.duration_minutes,
+	              _routedKey: routedKeyFor(d),
+	              _route_status: 'ok',
+	              _route_error: null,
+	            };
+	          }
+	          return { ...d, distance_km: null, duration_minutes: null, _route_status: 'error', _route_error: r.error };
+	        }));
+
+	        const failedDrops = dropsNeedingRoute.filter(dr => {
+	          const r = dmOk.find(x => x.id === dr.id);
+	          return r && !r.ok;
+	        });
+	        if (failedDrops.length > 0) {
+	          routeViaDirections(failedDrops, 'DM_ELEMENT');
+	        }
+	      });
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+	  }, [mode, pickupAddress, dropAddressKey, mapsLoadedTick]);
+
+	  // ─── Load default address on mount ───
   useEffect(() => {
     const loadDefaultAddress = async () => {
       try {
@@ -2819,13 +3067,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     }
   }, [currentUser]);
 
-  // ─── Multi-Drop state ───
-  const [drops, setDrops] = useState([
-    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
-  ]);
-  const nextDropId = useRef(2);
-
-  // ─── Route information state (for pricing) ───
+	  // ─── Route information state (for pricing) ───
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
 
@@ -2837,16 +3079,6 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       setRouteDuration(null);
     }
   }, [step]);
-
-  const addDrop = () => {
-    setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
-  };
-  const removeDrop = (id) => {
-    if (drops.length > 1) setDrops(drops.filter(d => d.id !== id));
-  };
-  const updateDrop = (id, field, value) => {
-    setDrops(drops.map(d => d.id === id ? { ...d, [field]: value } : d));
-  };
 
   // ─── Bulk Import state ───
   const [bulkText, setBulkText] = useState("");
@@ -2946,6 +3178,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     return Math.round(km * (t[t.length - 1]?.rate || 0));
   };
 
+  // ─── Compute per-drop fare for Multi-Drop ───
+  const calcDropFare = (drop, vehicleName) => {
+	    if (typeof drop?.distance_km !== 'number' || typeof drop?.duration_minutes !== 'number') return null;
+    const pricing = vehiclePricing[vehicleName || vehicle];
+    if (!pricing) return null;
+    const tiered = calcTieredPrice(drop.distance_km, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+    return Math.round(pricing.base_fare + drop.distance_km * pricing.rate_per_km + drop.duration_minutes * pricing.rate_per_minute);
+  };
+
   // ─── Price calculation ───
   // Calculate price for a specific vehicle using early route data
   const calculateEarlyPrice = (vehicleName) => {
@@ -2972,13 +3214,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const totalDeliveries = getActiveDropoffs().length;
 
-  // Calculate dynamic cost based on route distance and duration
+  // Calculate dynamic cost based on route distance and duration (for Quick Send / single-route)
   const calculateCost = () => {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation.
-    if (step === 2 && routeDistance && routeDuration) {
+    // Step 2 uses the full route (map) calculation — Quick Send only
+    if (step === 2 && routeDistance && routeDuration && mode === 'quick') {
       const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
       if (tiered !== null) return tiered;
       return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
@@ -2997,7 +3239,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   const unitCost = calculateCost();
-  const totalCost = totalDeliveries * unitCost;
+
+	  // For multi-drop: compute per-drop fares ONLY when all routes are ready.
+	  const activeMultiDrops = (mode === 'multi') ? drops.filter(d => d.address.trim()) : [];
+	  const multiDropPricingReady = (mode === 'multi') && activeMultiDrops.length > 0 &&
+	    activeMultiDrops.every(d => typeof d.distance_km === 'number' && typeof d.duration_minutes === 'number');
+	  const multiDropFares = (mode === 'multi' && multiDropPricingReady)
+	    ? activeMultiDrops.map(d => calcDropFare(d)).filter(f => typeof f === 'number')
+	    : [];
+	  const totalCost = (mode === 'multi' && multiDropPricingReady && multiDropFares.length === activeMultiDrops.length)
+	    ? multiDropFares.reduce((sum, f) => sum + f, 0)
+	    : totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
 	const isBlank = (v) => !v || !String(v).trim();
@@ -3016,6 +3268,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 		const active = getActiveDropoffs();
 		const missingReceiver = active.some(d => isBlank(d.name) || isBlank(d.phone));
 		if (missingReceiver) proceedErrors.push('Receiver name and phone are required for all deliveries.');
+
+			// Multi-drop must have route estimates ready, otherwise pricing defaults to the floor fee.
+			if (mode === 'multi') {
+				const anyRoutingError = activeMultiDrops.some(d => d._route_status === 'error');
+				const anyPending = activeMultiDrops.some(d =>
+					d.address?.trim() &&
+					(typeof d.distance_km !== 'number' || typeof d.duration_minutes !== 'number') &&
+					d._route_status !== 'error'
+				);
+				if (anyPending) proceedErrors.push('Please wait while we calculate route estimates for all deliveries.');
+				if (anyRoutingError) proceedErrors.push('One or more delivery addresses could not be estimated. Please re-select the address from suggestions.');
+			}
 	}
 
 	const canProceed = proceedErrors.length === 0;
@@ -3042,11 +3306,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       payMethod: payMethod,
       notes: notes,
       // Include route information for pricing calculation.
-      // Prefer the map-calculated distance (Step 2); fall back to the early
-      // estimate (Step 1) so the backend never receives 0 when the user
-      // submits before DeliveryMapView finishes its geocode/route request.
-      distance_km: routeDistance || earlyRouteDistance || 0,
-      duration_minutes: routeDuration || earlyRouteDuration || 0,
+      // For multi-drop, send average distance so backend per-unit pricing is roughly correct.
+      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
+        ? parseFloat((drops.filter(d => d.address.trim() && d.distance_km).reduce((s, d) => s + d.distance_km, 0) / drops.filter(d => d.address.trim() && d.distance_km).length).toFixed(1))
+        : (routeDistance || earlyRouteDistance || 0),
+      duration_minutes: (mode === 'multi' && drops.filter(d => d.address.trim() && d.duration_minutes).length > 0)
+        ? Math.ceil(drops.filter(d => d.address.trim() && d.duration_minutes).reduce((s, d) => s + d.duration_minutes, 0) / drops.filter(d => d.address.trim() && d.duration_minutes).length)
+        : (routeDuration || earlyRouteDuration || 0),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
     };
@@ -3334,6 +3600,32 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                           {pkgTypes.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </div>
+						{drop.address?.trim() && (() => {
+							if (drop._route_status === 'pending') {
+								return (
+									<div style={{ marginTop: 6, padding: "4px 8px", background: "#fef3c7", borderRadius: 6, fontSize: 10, color: S.grayLight }}>
+										Calculating route…
+									</div>
+								);
+							}
+							if (drop._route_status === 'error') {
+								return (
+									<div style={{ marginTop: 6, padding: "4px 8px", background: "#fef2f2", borderRadius: 6, fontSize: 10, color: "#991b1b" }}>
+										⚠️ Unable to estimate route{drop._route_error ? ` (${drop._route_error})` : ''}
+									</div>
+								);
+							}
+							if (typeof drop.distance_km === 'number') {
+								const fare = calcDropFare(drop);
+								return (fare != null) ? (
+									<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, padding: "4px 8px", background: "#fef3c7", borderRadius: 6 }}>
+										<span style={{ fontSize: 10, color: S.grayLight }}>{drop.distance_km} km • {drop.duration_minutes} min</span>
+										<span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono', monospace" }}>₦{fare.toLocaleString()}</span>
+									</div>
+								) : null;
+							}
+							return null;
+						})()}
                     </div>
                   </div>
                 ))}
@@ -3497,9 +3789,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
                 const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
 
+                // For multi-drop: sum per-drop fares for this vehicle type
+							const multiDropTotal = (mode === 'multi' && multiDropPricingReady) ? (() => {
+							  const fares = activeMultiDrops.map(d => calcDropFare(d, v.id));
+							  if (fares.some(f => f == null)) return null;
+							  return fares.reduce((sum, f) => sum + f, 0);
+							})() : null;
+                const hasMultiDropPricing = mode === 'multi' && multiDropTotal !== null;
+							const isMultiCalculating = mode === 'multi' && activeMultiDrops.length > 0 && !multiDropPricingReady;
+
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
                 const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
-                const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
+							const displayPrice = hasMultiDropPricing ? multiDropTotal : (mode === 'multi' ? null : (earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null)));
 
                 return (
                   <button key={v.id} onClick={() => !v.comingSoon && setVehicle(v.id)} disabled={v.comingSoon} style={{
@@ -3521,12 +3822,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     <div style={{ color: v.comingSoon ? "#94a3b8" : isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: v.comingSoon ? "#94a3b8" : S.navy }}>{v.label}</div>
                     <div style={{ fontSize: 11, color: v.comingSoon ? "#cbd5e1" : S.grayLight }}>{v.desc}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? "#94a3b8" : S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
-                      {v.comingSoon ? '—' : isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
-                    </div>
-                    <div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
-                      {v.comingSoon ? '' : isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
-                    </div>
+							<div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? "#94a3b8" : S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+							  {v.comingSoon ? '—' : (isCalculating || isMultiCalculating) ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+							</div>
+							<div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
+							  {v.comingSoon ? '' : (isCalculating || isMultiCalculating) ? '' : (hasEarly || hasMultiDropPricing ? 'Estimated' : 'Base fare')}
+							</div>
                   </button>
                 );
               })}
@@ -3551,15 +3852,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 {totalDeliveries > 0 && (
                   <div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
-                      ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
-                    </div>
+							<div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
+							  ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance)
+								? '—'
+								: (mode === 'multi' && activeMultiDrops.length > 0 && !multiDropPricingReady)
+									? '—'
+									: totalCost.toLocaleString()}
+							</div>
                   </div>
                 )}
               </div>
-              {totalDeliveries > 1 && (
+              {totalDeliveries > 1 && mode !== 'multi' && (
                 <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
                   ₦{unitCost.toLocaleString()} × {totalDeliveries} deliveries
+                </div>
+              )}
+              {totalDeliveries > 1 && mode === 'multi' && (
+                <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
+                  {totalDeliveries} deliveries (per-drop pricing)
                 </div>
               )}
             </div>
@@ -3623,11 +3933,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     {totalDeliveries} {totalDeliveries === 1 ? "Delivery" : "Deliveries"}
                   </span>
                 </div>
-                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle} • ₦{unitCost.toLocaleString()} each</span>
+                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle}{mode !== 'multi' ? ` • ₦${unitCost.toLocaleString()} each` : ''}</span>
               </div>
 
-              <div style={{ maxHeight: 300, overflowY: "auto" }}>
-                {getActiveDropoffs().map((d, idx) => (
+	              <div style={{ maxHeight: 300, overflowY: "auto" }}>
+	                {getActiveDropoffs().map((d, idx) => {
+	                  const dropFare = (mode === 'multi') ? calcDropFare(d) : unitCost;
+	                  return (
                   <div key={idx} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
                     borderBottom: idx < totalDeliveries - 1 ? "1px solid #f1f5f9" : "none"
@@ -3640,12 +3952,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.address}</div>
                       <div style={{ fontSize: 11, color: S.grayLight }}>{d.name}{d.phone ? ` • ${d.phone}` : ""}</div>
+	                      {mode === 'multi' && typeof d.distance_km === 'number' && (
+                        <div style={{ fontSize: 10, color: S.grayLight }}>{d.distance_km} km • {d.duration_minutes} min</div>
+                      )}
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
-                      ₦{unitCost.toLocaleString()}
+	                      {dropFare != null ? `₦${dropFare.toLocaleString()}` : '—'}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total */}
