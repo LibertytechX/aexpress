@@ -2945,13 +2945,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   }, [step]);
 
   const addDrop = () => {
-    setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+    const newId = nextDropId.current++;
+    setDrops(prev => [...prev, { id: newId, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
   };
   const removeDrop = (id) => {
-    if (drops.length > 1) setDrops(drops.filter(d => d.id !== id));
+    setDrops(prev => prev.length > 1 ? prev.filter(d => d.id !== id) : prev);
   };
   const updateDrop = (id, field, value) => {
-    setDrops(drops.map(d => d.id === id ? { ...d, [field]: value } : d));
+    setDrops(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d));
   };
 
   // ─── Bulk Import state ───
