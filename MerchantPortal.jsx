@@ -1,6 +1,31 @@
 // React hooks will be available from the global React object
 const { useState, useEffect, useRef } = React;
 
+// ─── NEW ORDER CHIME (Web Audio API) ─────────────────────────────
+const playNewOrderChime = () => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    const notes = [
+      { freq: 784, start: 0, dur: 0.15 },    // G5
+      { freq: 988, start: 0.15, dur: 0.15 },  // B5
+      { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+    ];
+    notes.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.05);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) { console.warn('[Chime] Could not play:', e); }
+};
+
 // ─── ICONS (inline SVG components) ──────────────────────────────
 const Icons = {
   dashboard: (
@@ -312,7 +337,11 @@ function MerchantPortal() {
 
         const ch = ably.channels.get('dispatch-feed');
         // In Ably v2, ch.subscribe() returns a Promise — must be awaited
-        await ch.subscribe('activity', () => {
+        await ch.subscribe('activity', (msg) => {
+          const d = msg.data;
+          if (d && d.event_type === 'new_order') {
+            playNewOrderChime();
+          }
           loadOrders();
         });
         ablyActive = true;
