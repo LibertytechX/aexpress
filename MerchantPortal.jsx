@@ -2841,7 +2841,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Calculate per-drop routes for Multi-Drop mode ───
   // Only depend on address changes (not name/phone/pkg edits) to avoid resetting the debounce
-  const dropAddressKey = drops.map(d => `${d.id}:${d.address}`).join('|');
+  const dropAddressKey = (drops || []).map(d => `${d.id}:${d.address}`).join('|');
   useEffect(() => {
     if (mode !== 'multi' || !pickupAddress) return;
 
