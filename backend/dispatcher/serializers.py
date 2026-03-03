@@ -429,6 +429,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         from .models import Rider
         from authentication.models import User
         from orders.utils import geocode_address
+        import uuid
 
         # Extract non-model fields
         pickup = validated_data.pop("pickup")
@@ -446,8 +447,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         package_type = validated_data.pop("packageType")
         price = validated_data.get("price")
         # cod = validated_data.get("cod") # Unused
-        rider_id = validated_data.get("riderId")
-        merchant_id = validated_data.get("merchantId")
+        # riderId/merchantId are frontend-only fields (not model fields)
+        rider_id = (validated_data.pop("riderId", "") or "").strip()
+        merchant_id = (validated_data.pop("merchantId", "") or "").strip()
         distance_km = validated_data.get("distance_km")
         duration_minutes = validated_data.get("duration_minutes")
 
@@ -499,7 +501,23 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         # Resolve Rider
         rider_obj = None
         if rider_id:
-            rider_obj = Rider.objects.filter(id=rider_id).first()
+            # Frontend historically sends Rider.rider_id (6-digit string), but
+            # some clients may send the Rider UUID. Filtering a UUIDField with
+            # a non-UUID string raises ValidationError, so we must guard.
+            def _is_uuid(val: str) -> bool:
+                try:
+                    uuid.UUID(str(val))
+                    return True
+                except (ValueError, AttributeError, TypeError):
+                    return False
+
+            if _is_uuid(rider_id):
+                rider_obj = Rider.objects.filter(id=rider_id).first()
+                # Fallback in case an upstream client accidentally sends rider_id
+                if not rider_obj:
+                    rider_obj = Rider.objects.filter(rider_id=rider_id).first()
+            else:
+                rider_obj = Rider.objects.filter(rider_id=rider_id).first()
 
         # Resolve User (Merchant or Request User)
         order_user = self.context["request"].user

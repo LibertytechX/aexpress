@@ -108,3 +108,49 @@ class OrderCreateSerializerGeocodingTests(TestCase):
         self.assertTrue(ser.is_valid(), ser.errors)
         with self.assertRaises(serializers.ValidationError):
             ser.save()
+
+    def test_create_accepts_short_rider_id(self):
+        """Regression: frontend sends Rider.rider_id (e.g. '168817'), not UUID."""
+        from authentication.models import User
+        from .models import Rider
+        from .serializers import OrderCreateSerializer
+
+        rider_user = User.objects.create_user(
+            phone="08088887777",
+            email="rider168817@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider 168817",
+        )
+        Rider.objects.create(user=rider_user, rider_id="168817")
+
+        payload = {
+            "pickup": "Some Pickup Address, Lagos",
+            "dropoff": "Some Dropoff Address, Lagos",
+            "senderName": "Sender",
+            "senderPhone": "08011112222",
+            "receiverName": "Receiver",
+            "receiverPhone": "08033334444",
+            "vehicle": "Bike",
+            "packageType": "Box",
+            "price": 1000,
+            "cod": 0,
+            "distance_km": 1.2,
+            "duration_minutes": 10,
+            "is_relay_order": False,
+            # Provide coords to avoid any external geocoding calls
+            "pickup_lat": 6.50,
+            "pickup_lng": 3.30,
+            "dropoff_lat": 6.60,
+            "dropoff_lng": 3.40,
+            "riderId": "168817",
+        }
+
+        ser = OrderCreateSerializer(
+            data=payload, context={"request": _Req(self.dispatcher_user)}
+        )
+        self.assertTrue(ser.is_valid(), ser.errors)
+        order = ser.save()
+        self.assertIsNotNone(order.rider)
+        self.assertEqual(order.rider.rider_id, "168817")
+        self.assertEqual(order.status, "Assigned")
