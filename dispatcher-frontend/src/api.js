@@ -143,6 +143,17 @@ export const RidersAPI = {
         const data = await res.json();
         if (!res.ok) throw data;
         return data;
+    },
+
+    async toggleDuty(riderUuid, status) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/toggle_duty/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ status }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     }
 };
 

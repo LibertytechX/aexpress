@@ -4,7 +4,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset
-from .serializers import RiderSerializer, ZoneSerializer, RelayNodeSerializer, VehicleAssetSerializer
+from .serializers import (
+    RiderSerializer,
+    ZoneSerializer,
+    RelayNodeSerializer,
+    VehicleAssetSerializer,
+)
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
@@ -17,12 +22,16 @@ User = get_user_model()
 
 
 class RiderViewSet(viewsets.ModelViewSet):
-    queryset = Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
+    queryset = Rider.objects.all().select_related(
+        "user", "vehicle_type", "vehicle_asset"
+    )
     serializer_class = RiderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Rider.objects.all().select_related("user", "vehicle_type", "vehicle_asset")
+        return Rider.objects.all().select_related(
+            "user", "vehicle_type", "vehicle_asset"
+        )
 
     @action(detail=True, methods=["post"], url_path="reset_password")
     def reset_password(self, request, pk=None):
@@ -46,6 +55,7 @@ class RiderViewSet(viewsets.ModelViewSet):
 
         if vehicle_asset_id:
             from .models import VehicleAsset
+
             try:
                 vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
             except VehicleAsset.DoesNotExist:
@@ -60,6 +70,26 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.save(update_fields=["vehicle_asset"])
         serializer = self.get_serializer(rider)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="toggle_duty")
+    def toggle_duty(self, request, pk=None):
+        """Toggle a rider's duty status (online/offline)."""
+        rider = self.get_object()
+        status_val = request.data.get("status")
+
+        if status_val == Rider.Status.ONLINE:
+            if rider.status != Rider.Status.ONLINE:
+                rider.go_online()
+            return Response({"status": "success", "message": "Rider is now online"})
+        elif status_val == Rider.Status.OFFLINE:
+            if rider.status != Rider.Status.OFFLINE:
+                rider.go_offline()
+            return Response({"status": "success", "message": "Rider is now offline"})
+        else:
+            return Response(
+                {"error": "Invalid status. Must be 'online' or 'offline'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     @action(detail=True, methods=["patch"], url_path="update_location")
     def update_location(self, request, pk=None):
@@ -249,24 +279,24 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
-            "In Transit":  "Started",
-            "At Dropoff":  "Arrived",   # rider is at the dropoff location
-            "Delivered":   "Done",
-            "Cancelled":   "CustomerCanceled",
-            "Picked Up":   "PickedUp",  # distinct stage; rider app uses this too
+            "In Transit": "Started",
+            "At Dropoff": "Arrived",  # rider is at the dropoff location
+            "Delivered": "Done",
+            "Cancelled": "CustomerCanceled",
+            "Picked Up": "PickedUp",  # distinct stage; rider app uses this too
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
         STATUS_MAP = {
-            "Pending":          ("new_order",  "gold"),
-            "Assigned":         ("assigned",   "blue"),
-            "PickedUp":         ("picked_up",  "blue"),
-            "Started":          ("in_transit", "gold"),
-            "Arrived":          ("at_dropoff", "orange"),
-            "Done":             ("delivered",  "green"),
-            "CustomerCanceled": ("cancelled",  "red"),
-            "RiderCanceled":    ("cancelled",  "red"),
-            "Failed":           ("failed",     "red"),
+            "Pending": ("new_order", "gold"),
+            "Assigned": ("assigned", "blue"),
+            "PickedUp": ("picked_up", "blue"),
+            "Started": ("in_transit", "gold"),
+            "Arrived": ("at_dropoff", "orange"),
+            "Done": ("delivered", "green"),
+            "CustomerCanceled": ("cancelled", "red"),
+            "RiderCanceled": ("cancelled", "red"),
+            "Failed": ("failed", "red"),
         }
 
         if new_status not in STATUS_MAP:
@@ -281,13 +311,13 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Keep Delivery records in sync so the serializer fallback stays consistent.
         ORDER_TO_DELIVERY_STATUS = {
-            "PickedUp":         "InTransit",   # rider has picked up → delivery in transit
-            "Started":          "InTransit",
-            "Arrived":          "InTransit",   # rider at dropoff; delivery still in progress
-            "Done":             "Delivered",
+            "PickedUp": "InTransit",  # rider has picked up → delivery in transit
+            "Started": "InTransit",
+            "Arrived": "InTransit",  # rider at dropoff; delivery still in progress
+            "Done": "Delivered",
             "CustomerCanceled": "Canceled",
-            "RiderCanceled":    "Canceled",
-            "Failed":           "Failed",
+            "RiderCanceled": "Canceled",
+            "Failed": "Failed",
         }
         delivery_sync_status = ORDER_TO_DELIVERY_STATUS.get(new_status)
         if delivery_sync_status:
@@ -479,6 +509,7 @@ class AblyTokenView(views.APIView):
             f"for-you-{rider_id}": ["subscribe"],
             "assigned*": ["subscribe"],
             "order*": ["subscribe"],
+            "location-update": ["publish"],
         }
 
         try:
@@ -616,6 +647,8 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
         if zone_id:
             qs = qs.filter(zone__id=zone_id)
         return qs
+
+
 
 
 class DispatcherViewSet(viewsets.ViewSet):

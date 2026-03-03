@@ -22,6 +22,7 @@ share/python-wheels/
 MANIFEST
 migrations/
 firebase_key.json
+0008_vehicleasset_provider_id_sync_meta.py
 
 # Virtual Environment
 venv/
