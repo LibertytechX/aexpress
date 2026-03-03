@@ -870,7 +870,7 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     old_status = order.status
     order.status = new_status
-    if new_status == "PickedUp" and not order.picked_up_at:
+    if new_status in ["PickedUp", "Fulfilling"] and not order.picked_up_at:
         order.picked_up_at = timezone.now()
     elif new_status == "Arrived" and not order.arrived_at:
         order.arrived_at = timezone.now()
@@ -987,6 +987,57 @@ class OrderArrivedView(APIView):
 
         return _advance_order(
             request, order_number, "Arrived", "Rider Arrived at Pickup"
+        )
+
+
+class OrderStatusChangeView(APIView):
+    """
+    Consolidated endpoint for riders to change order status.
+    POST /api/orders/status/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request):
+        order_number = request.data.get("order_number")
+        action = request.data.get("action")
+
+        if not order_number or not action:
+            return Response(
+                {"error": "order_number and action are required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        action = str(action).lower()
+
+        if action == "start":
+            response = _advance_order(request, order_number, "Started", "Order Started")
+            try:
+                rider = getattr(request.user, "rider_profile", None)
+                if rider:
+                    notify_rider(
+                        rider=rider,
+                        title="Trip Started 🚀",
+                        body=f"You're on your way to pick up order #{order_number}.",
+                        data={"order_number": order_number, "status": "Started"},
+                    )
+            except Exception as exc:
+                logger.warning(f"Start notification failed: {exc}")
+            return response
+
+        elif action == "pickup":
+            return _advance_order(
+                request, order_number, "Fulfilling", "Order Picked Up"
+            )
+
+        elif action == "arrived":
+            return _advance_order(
+                request, order_number, "Arrived", "Rider Arrived at Pickup"
+            )
+
+        return Response(
+            {"error": "Invalid action. Use start, pickup, or arrived."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
 

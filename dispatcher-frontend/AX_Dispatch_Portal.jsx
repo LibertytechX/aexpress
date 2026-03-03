@@ -2385,11 +2385,27 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [showCreateRider, setShowCreateRider] = useState(false);
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showReassignVehicle, setShowReassignVehicle] = useState(false);
+  const [isTogglingDuty, setIsTogglingDuty] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
     if (!rider) return <div style={{ color: S.textMuted }}>Rider not found</div>;
     const rOrders = orders.filter(o => o.riderId === rider.id);
+    
+    const handleToggleDuty = async () => {
+      const targetStatus = rider.status === "offline" ? "online" : "offline";
+      setIsTogglingDuty(true);
+      try {
+        await RidersAPI.toggleDuty(rider._uuid || rider.id, targetStatus);
+        // Fire callback if exist to refresh list or just mutate locally (hacky but faster)
+        rider.status = targetStatus;
+      } catch (err) {
+        alert(err.error || "Failed to toggle duty. Please try again.");
+      } finally {
+        setIsTogglingDuty(false);
+      }
+    };
+
     return (
       <>
       <div>
@@ -2402,6 +2418,26 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
               <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
               {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
+              
+              <div style={{ marginTop: 14 }}>
+                <button 
+                  onClick={handleToggleDuty} 
+                  disabled={isTogglingDuty || rider.status === "on_delivery"}
+                  style={{ 
+                    width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer", 
+                    fontFamily: "inherit", fontSize: 12, fontWeight: 800, 
+                    background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`, 
+                    color: "#fff", 
+                    opacity: (isTogglingDuty || rider.status === "on_delivery") ? 0.6 : 1,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    boxShadow: "0 4px 10px rgba(0,0,0,0.15)"
+                  }}
+                >
+                  {isTogglingDuty ? "⏳ Toggling..." : rider.status === "offline" ? "🟢 Go Online" : "🔴 Go Offline"}
+                </button>
+                {rider.status === "on_delivery" && <div style={{ fontSize: 10, color: S.textMuted, marginTop: 6, textAlign: "center" }}>Cannot change status while on a delivery.</div>}
+              </div>
+
               <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
                 <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
                 <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
