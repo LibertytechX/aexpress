@@ -518,7 +518,10 @@ class AblyTokenView(views.APIView):
 
             async def _create_both():
                 client = AblyRest(api_key)
-                params = {"capability": json.dumps(capability)}
+                params = {
+                    "capability": json.dumps(capability),
+                    "ttl": 3 * 30 * 24 * 60 * 60 * 1000,  # ~3 months in ms
+                }
                 token_details = await client.auth.request_token(params)
                 token_request = await client.auth.create_token_request(params)
                 return token_details, token_request
