@@ -2839,6 +2839,61 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     return () => clearTimeout(timeoutId);
   }, [mode, pickupAddress, dropoffAddress]);
 
+  // ─── Calculate per-drop routes for Multi-Drop mode ───
+  useEffect(() => {
+    if (mode !== 'multi' || !pickupAddress) return;
+
+    const dropsWithAddress = drops.filter(d => d.address.trim());
+    if (dropsWithAddress.length === 0) return;
+
+    // Only recalculate drops that don't yet have a route for their current address
+    const dropsNeedingRoute = dropsWithAddress.filter(d => d._routedAddress !== d.address);
+    if (dropsNeedingRoute.length === 0) return;
+
+    if (typeof google === 'undefined' || !google.maps) return;
+
+    const directionsService = new google.maps.DirectionsService();
+
+    const calculateDropRoute = (drop) => {
+      return new Promise((resolve) => {
+        directionsService.route({
+          origin: pickupAddress,
+          destination: drop.address,
+          travelMode: google.maps.TravelMode.DRIVING,
+          drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS }
+        }, (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+            const route = result.routes[0];
+            let totalDistance = 0, totalDuration = 0;
+            route.legs.forEach(leg => {
+              totalDistance += leg.distance.value;
+              totalDuration += leg.duration_in_traffic?.value || leg.duration.value;
+            });
+            resolve({
+              id: drop.id,
+              distance_km: parseFloat((totalDistance / 1000).toFixed(1)),
+              duration_minutes: Math.ceil(totalDuration / 60),
+              _routedAddress: drop.address,
+            });
+          } else {
+            resolve({ id: drop.id, distance_km: null, duration_minutes: null, _routedAddress: drop.address });
+          }
+        });
+      });
+    };
+
+    const timeoutId = setTimeout(async () => {
+      const results = await Promise.all(dropsNeedingRoute.map(calculateDropRoute));
+      setDrops(prev => prev.map(d => {
+        const r = results.find(res => res.id === d.id);
+        if (!r) return d;
+        return { ...d, distance_km: r.distance_km, duration_minutes: r.duration_minutes, _routedAddress: r._routedAddress };
+      }));
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, drops]);
+
   // ─── Load default address on mount ───
   useEffect(() => {
     const loadDefaultAddress = async () => {
@@ -2988,6 +3043,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     return Math.round(km * (t[t.length - 1]?.rate || 0));
   };
 
+  // ─── Compute per-drop fare for Multi-Drop ───
+  const calcDropFare = (drop, vehicleName) => {
+    if (!drop.distance_km || !drop.duration_minutes) return null;
+    const pricing = vehiclePricing[vehicleName || vehicle];
+    if (!pricing) return null;
+    const tiered = calcTieredPrice(drop.distance_km, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+    return Math.round(pricing.base_fare + drop.distance_km * pricing.rate_per_km + drop.duration_minutes * pricing.rate_per_minute);
+  };
+
   // ─── Price calculation ───
   // Calculate price for a specific vehicle using early route data
   const calculateEarlyPrice = (vehicleName) => {
@@ -3014,13 +3079,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const totalDeliveries = getActiveDropoffs().length;
 
-  // Calculate dynamic cost based on route distance and duration
+  // Calculate dynamic cost based on route distance and duration (for Quick Send / single-route)
   const calculateCost = () => {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation.
-    if (step === 2 && routeDistance && routeDuration) {
+    // Step 2 uses the full route (map) calculation — Quick Send only
+    if (step === 2 && routeDistance && routeDuration && mode === 'quick') {
       const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
       if (tiered !== null) return tiered;
       return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
@@ -3039,7 +3104,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   const unitCost = calculateCost();
-  const totalCost = totalDeliveries * unitCost;
+
+  // For multi-drop: sum per-drop fares; for quick send: single unitCost
+  const multiDropFares = (mode === 'multi') ? drops.filter(d => d.address.trim()).map(d => calcDropFare(d) ?? unitCost) : [];
+  const totalCost = (mode === 'multi' && multiDropFares.length > 0)
+    ? multiDropFares.reduce((sum, f) => sum + f, 0)
+    : totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
 	const isBlank = (v) => !v || !String(v).trim();
@@ -3084,11 +3154,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       payMethod: payMethod,
       notes: notes,
       // Include route information for pricing calculation.
-      // Prefer the map-calculated distance (Step 2); fall back to the early
-      // estimate (Step 1) so the backend never receives 0 when the user
-      // submits before DeliveryMapView finishes its geocode/route request.
-      distance_km: routeDistance || earlyRouteDistance || 0,
-      duration_minutes: routeDuration || earlyRouteDuration || 0,
+      // For multi-drop, send average distance so backend per-unit pricing is roughly correct.
+      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
+        ? parseFloat((drops.filter(d => d.address.trim() && d.distance_km).reduce((s, d) => s + d.distance_km, 0) / drops.filter(d => d.address.trim() && d.distance_km).length).toFixed(1))
+        : (routeDistance || earlyRouteDistance || 0),
+      duration_minutes: (mode === 'multi' && drops.filter(d => d.address.trim() && d.duration_minutes).length > 0)
+        ? Math.ceil(drops.filter(d => d.address.trim() && d.duration_minutes).reduce((s, d) => s + d.duration_minutes, 0) / drops.filter(d => d.address.trim() && d.duration_minutes).length)
+        : (routeDuration || earlyRouteDuration || 0),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
     };
@@ -3376,6 +3448,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                           {pkgTypes.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </div>
+                      {drop.distance_km && (() => {
+                        const fare = calcDropFare(drop);
+                        return fare ? (
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, padding: "4px 8px", background: "#fef3c7", borderRadius: 6 }}>
+                            <span style={{ fontSize: 10, color: S.grayLight }}>{drop.distance_km} km • {drop.duration_minutes} min</span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono', monospace" }}>₦{fare.toLocaleString()}</span>
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   </div>
                 ))}
@@ -3539,9 +3620,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
                 const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
 
+                // For multi-drop: sum per-drop fares for this vehicle type
+                const multiDropTotal = (mode === 'multi') ? (() => {
+                  const activeDrops = drops.filter(d => d.address.trim() && d.distance_km);
+                  if (activeDrops.length === 0) return null;
+                  const fares = activeDrops.map(d => calcDropFare(d, v.id));
+                  if (fares.some(f => f === null)) return null;
+                  return fares.reduce((sum, f) => sum + f, 0);
+                })() : null;
+                const hasMultiDropPricing = mode === 'multi' && multiDropTotal !== null;
+
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
                 const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
-                const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
+                const displayPrice = hasMultiDropPricing ? multiDropTotal : (earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null));
 
                 return (
                   <button key={v.id} onClick={() => !v.comingSoon && setVehicle(v.id)} disabled={v.comingSoon} style={{
@@ -3567,7 +3658,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                       {v.comingSoon ? '—' : isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
                     </div>
                     <div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
-                      {v.comingSoon ? '' : isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                      {v.comingSoon ? '' : isCalculating ? '' : (hasEarly || hasMultiDropPricing ? 'Estimated' : 'Base fare')}
                     </div>
                   </button>
                 );
@@ -3599,9 +3690,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   </div>
                 )}
               </div>
-              {totalDeliveries > 1 && (
+              {totalDeliveries > 1 && mode !== 'multi' && (
                 <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
                   ₦{unitCost.toLocaleString()} × {totalDeliveries} deliveries
+                </div>
+              )}
+              {totalDeliveries > 1 && mode === 'multi' && (
+                <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
+                  {totalDeliveries} deliveries (per-drop pricing)
                 </div>
               )}
             </div>
@@ -3665,11 +3761,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     {totalDeliveries} {totalDeliveries === 1 ? "Delivery" : "Deliveries"}
                   </span>
                 </div>
-                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle} • ₦{unitCost.toLocaleString()} each</span>
+                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle}{mode !== 'multi' ? ` • ₦${unitCost.toLocaleString()} each` : ''}</span>
               </div>
 
               <div style={{ maxHeight: 300, overflowY: "auto" }}>
-                {getActiveDropoffs().map((d, idx) => (
+                {getActiveDropoffs().map((d, idx) => {
+                  const dropFare = (mode === 'multi') ? (calcDropFare(d) ?? unitCost) : unitCost;
+                  return (
                   <div key={idx} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
                     borderBottom: idx < totalDeliveries - 1 ? "1px solid #f1f5f9" : "none"
@@ -3682,12 +3780,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.address}</div>
                       <div style={{ fontSize: 11, color: S.grayLight }}>{d.name}{d.phone ? ` • ${d.phone}` : ""}</div>
+                      {mode === 'multi' && d.distance_km && (
+                        <div style={{ fontSize: 10, color: S.grayLight }}>{d.distance_km} km • {d.duration_minutes} min</div>
+                      )}
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
-                      ₦{unitCost.toLocaleString()}
+                      ₦{dropFare.toLocaleString()}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total */}
