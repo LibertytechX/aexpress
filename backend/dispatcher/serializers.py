@@ -428,6 +428,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         from orders.models import Order, Delivery, Vehicle
         from .models import Rider
         from authentication.models import User
+        from orders.utils import geocode_address
 
         # Extract non-model fields
         pickup = validated_data.pop("pickup")
@@ -449,6 +450,46 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         merchant_id = validated_data.get("merchantId")
         distance_km = validated_data.get("distance_km")
         duration_minutes = validated_data.get("duration_minutes")
+
+        def _coords_missing(lat, lng):
+            return lat is None or lng is None
+
+        # Best-effort geocoding fallback: frontend may send addresses without selecting a Places suggestion.
+        # For relay orders, coordinates are required (routing depends on them).
+        if _coords_missing(pickup_lat, pickup_lng) and pickup:
+            try:
+                geo = geocode_address(pickup)
+            except Exception:
+                geo = None
+            if geo:
+                pickup_lat = geo.get("lat")
+                pickup_lng = geo.get("lng")
+
+        if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
+            try:
+                geo = geocode_address(dropoff)
+            except Exception:
+                geo = None
+            if geo:
+                dropoff_lat = geo.get("lat")
+                dropoff_lng = geo.get("lng")
+
+        if is_relay_order:
+            missing = []
+            if _coords_missing(pickup_lat, pickup_lng):
+                missing.append("pickup")
+            if _coords_missing(dropoff_lat, dropoff_lng):
+                missing.append("dropoff")
+            if missing:
+                raise serializers.ValidationError(
+                    {
+                        "detail": (
+                            "Could not geocode "
+                            + " and ".join(missing)
+                            + " address. Please select from suggestions or enter a more specific address."
+                        )
+                    }
+                )
 
         # Resolve Vehicle
         vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()

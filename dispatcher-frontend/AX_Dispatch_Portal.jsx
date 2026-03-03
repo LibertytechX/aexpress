@@ -3973,7 +3973,7 @@ function SettingsScreen() {
 }
 // ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
 // onPlaceSelected(place) is called with { address, lat, lng } when a suggestion is picked
-function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style }) {
+function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style, onBlur }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -4023,18 +4023,10 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
       autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
-          const lagosOnly = predictions.filter(p =>
-            p.terms?.some(t => /lagos/i.test(t.value)) ||
-            /lagos/i.test(p.description)
-          );
-          if (lagosOnly.length > 0) {
-            setSuggestions(lagosOnly.slice(0, 8));
-            setShowDropdown(true);
-          } else {
-            setSuggestions([]);
-            setShowDropdown(false);
-          }
+          // Do not hard-filter by the word "Lagos" (valid Lagos addresses often resolve to e.g. Ikeja/Eti-Osa).
+          // We validate service area AFTER geocoding the selected place.
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
         } else {
           setSuggestions([]);
           setShowDropdown(false);
@@ -4045,7 +4037,7 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }}
+      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }} onBlur={onBlur}
         placeholder={placeholder} style={style} />
       {loading && <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#94a3b8' }}>⏳</div>}
       {showDropdown && suggestions.length > 0 && (
@@ -4068,6 +4060,8 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
                     } else {
                       onPlaceSelected({ address: s.description, lat, lng });
                     }
+                  } else {
+                    onPlaceSelected({ error: status || 'GEOCODE_FAILED', address: s.description });
                   }
                 });
               }
@@ -4187,6 +4181,40 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   const displayPrice = priceOverride ? parseInt(priceOverride) : (calcPrice(vehicle) || 0);
 
+  // Local helpers for reliable coordinate capture
+  const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
+  const geocodeFreeText = (address) => {
+    return new Promise((resolve) => {
+      try {
+        if (!address || address.length < 3) return resolve(null);
+        if (!window.google || !window.google.maps) return resolve(null);
+        const gc = new window.google.maps.Geocoder();
+        gc.geocode({ address }, (results, status) => {
+          if (status === 'OK' && results && results[0] && results[0].geometry) {
+            const loc = results[0].geometry.location;
+            const lat = loc.lat(), lng = loc.lng();
+            return resolve({ lat, lng });
+          }
+          return resolve(null);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  };
+
+  const handlePickupChange = (v) => {
+    setPickup(v);
+    // If user edits text after selecting a suggestion, coords are no longer trustworthy.
+    setPickupLat(null);
+    setPickupLng(null);
+  };
+  const handleDropoffChange = (v) => {
+    setDropoff(v);
+    setDropoffLat(null);
+    setDropoffLng(null);
+  };
+
   const handleSubmit = async () => {
     setError(null);
     if (!pickup) { setError("Pickup address is required"); return; }
@@ -4195,6 +4223,38 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (!receiverName) { setError("Receiver name is required"); return; }
     setSubmitting(true);
     try {
+      // Ensure relay orders always have coordinates (either from Places selection or fallback geocode)
+      let finalPickupLat = pickupLat, finalPickupLng = pickupLng;
+      let finalDropoffLat = dropoffLat, finalDropoffLng = dropoffLng;
+
+      const pickupMissing = (finalPickupLat == null || finalPickupLng == null);
+      const dropoffMissing = (finalDropoffLat == null || finalDropoffLng == null);
+
+      if (pickupMissing) {
+        const g = await geocodeFreeText(pickup);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalPickupLat = g.lat; finalPickupLng = g.lng;
+          setPickupLat(g.lat); setPickupLng(g.lng);
+        }
+      }
+      if (dropoffMissing) {
+        const g = await geocodeFreeText(dropoff);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalDropoffLat = g.lat; finalDropoffLng = g.lng;
+          setDropoffLat(g.lat); setDropoffLng(g.lng);
+        }
+      }
+
+      if (isRelayOrder) {
+        const pOk = (finalPickupLat != null && finalPickupLng != null);
+        const dOk = (finalDropoffLat != null && finalDropoffLng != null);
+        if (!pOk || !dOk) {
+          setError("Relay Delivery requires geocoded pickup & dropoff. Please select both addresses from suggestions (or use a more specific address).");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const payload = {
         pickup, dropoff,
         senderName, senderPhone: senderPhone || "N/A",
@@ -4207,10 +4267,10 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         distance_km: routeDistance || 0,
         duration_minutes: routeDuration || 0,
         is_relay_order: isRelayOrder,
-        pickup_lat: pickupLat,
-        pickup_lng: pickupLng,
-        dropoff_lat: dropoffLat,
-        dropoff_lng: dropoffLng,
+        pickup_lat: finalPickupLat,
+        pickup_lng: finalPickupLng,
+        dropoff_lat: finalDropoffLat,
+        dropoff_lng: finalDropoffLng,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -4256,8 +4316,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p => {
+            <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
               if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
               setPickupLat(p.lat); setPickupLng(p.lng);
             }} placeholder="Enter pickup address..." style={iSt} />
           </div>
@@ -4265,8 +4326,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Dropoff */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p => {
+            <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
               if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
               setDropoffLat(p.lat); setDropoffLng(p.lng);
             }} placeholder="Enter delivery address..." style={iSt} />
           </div>
