@@ -2840,6 +2840,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   }, [mode, pickupAddress, dropoffAddress]);
 
   // ─── Calculate per-drop routes for Multi-Drop mode ───
+  // Only depend on address changes (not name/phone/pkg edits) to avoid resetting the debounce
+  const dropAddressKey = drops.map(d => `${d.id}:${d.address}`).join('|');
   useEffect(() => {
     if (mode !== 'multi' || !pickupAddress) return;
 
@@ -2876,23 +2878,30 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               _routedAddress: drop.address,
             });
           } else {
-            resolve({ id: drop.id, distance_km: null, duration_minutes: null, _routedAddress: drop.address });
+            // Don't set _routedAddress on failure so it retries on next trigger
+            resolve(null);
           }
         });
       });
     };
 
     const timeoutId = setTimeout(async () => {
-      const results = await Promise.all(dropsNeedingRoute.map(calculateDropRoute));
+      // Calculate sequentially to avoid Google Maps rate-limiting
+      const results = [];
+      for (const drop of dropsNeedingRoute) {
+        const result = await calculateDropRoute(drop);
+        if (result) results.push(result);
+      }
+      if (results.length === 0) return;
       setDrops(prev => prev.map(d => {
         const r = results.find(res => res.id === d.id);
         if (!r) return d;
         return { ...d, distance_km: r.distance_km, duration_minutes: r.duration_minutes, _routedAddress: r._routedAddress };
       }));
-    }, 1000);
+    }, 1500);
 
     return () => clearTimeout(timeoutId);
-  }, [mode, pickupAddress, drops]);
+  }, [mode, pickupAddress, dropAddressKey]);
 
   // ─── Load default address on mount ───
   useEffect(() => {
