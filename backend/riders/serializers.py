@@ -212,7 +212,7 @@ class RiderOrderSerializer(AssignedOrderSerializer):
     Matches the specific format requested by the user.
     """
 
-    id = serializers.CharField(source="order_number", read_only=True)
+    # id = serializers.CharField(source="order_number", read_only=True)
     status = serializers.SerializerMethodField()
     payment_method = serializers.SerializerMethodField()
 
@@ -220,6 +220,7 @@ class RiderOrderSerializer(AssignedOrderSerializer):
         model = Order
         fields = [
             "id",
+            "order_number",
             "status",
             "pickup_address",
             "pickup_latitude",
