@@ -14,6 +14,7 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Load environment variables
 load_dotenv()
@@ -307,7 +308,7 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule
-from celery.schedules import crontab
+
 
 CELERY_BEAT_SCHEDULE = {
     "publish-random-order-offer-every-minute": {

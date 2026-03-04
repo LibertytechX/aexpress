@@ -55,6 +55,7 @@ class Command(BaseCommand):
         if timeout:
             self.stdout.write(f"Will auto-stop after {timeout} seconds.")
         self.stdout.write("Press Ctrl+C to stop.\n")
+        self.stdout.flush()
 
         asyncio.run(self._listen(api_key, channel_name, event_name, timeout))
 
@@ -105,6 +106,7 @@ class Command(BaseCommand):
                     )
                     self.stdout.write(str(message.data))
                 self.stdout.write("")  # blank line separator
+                self.stdout.flush()
 
             if event_name == "*":
                 await channel.subscribe(on_message)
@@ -112,6 +114,7 @@ class Command(BaseCommand):
                 await channel.subscribe(event_name, on_message)
 
             self.stdout.write("Connected. Waiting for messages …\n")
+            self.stdout.flush()
 
             try:
                 if timeout:
@@ -129,6 +132,7 @@ class Command(BaseCommand):
 
                     loop = asyncio.get_running_loop()
                     loop.add_signal_handler(_signal.SIGINT, _handle_sigint)
+                    loop.add_signal_handler(_signal.SIGTERM, _handle_sigint)
 
                     await stop_event.wait()
                     self.stdout.write(
