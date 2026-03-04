@@ -1227,7 +1227,16 @@ export default function AXDispatchPortal() {
     try {
       await OrdersAPI.assignRider(oid, rid);
       updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned" });
-      setRiders(p => p.map(x => x.id === rid ? { ...x, currentOrder: oid, status: "on_delivery" } : x));
+	      // Allow assigning even if rider is already fulfilling another ride.
+	      // Don't overwrite an existing currentOrder (it represents the *active* ride).
+	      setRiders(p => p.map(x => {
+	        if (x.id !== rid) return x;
+	        const next = { ...x };
+	        if (!next.currentOrder) next.currentOrder = oid;
+	        // Keep status if already on_delivery; otherwise mark as on_delivery for visibility.
+	        if (next.status === "online") next.status = "on_delivery";
+	        return next;
+	      }));
       addLog(oid, `Assigned to ${r.name}`, "Dispatch", "assign");
       addLog(oid, "Status → Assigned", "System", "status");
     } catch (error) {
@@ -1249,7 +1258,14 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: ns });
         addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+	        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
+	        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
+	          setRiders(p => p.map(r => {
+	            if (r.id !== o.riderId) return r;
+	            if (r.currentOrder && r.currentOrder !== oid) return r;
+	            return { ...r, currentOrder: null, status: "online" };
+	          }));
+	        }
       }
     } catch (err) {
       console.error("Failed to update status:", err);
@@ -1765,26 +1781,38 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <div style={{ marginTop: 12, borderTop: `1px solid ${S.border}`, paddingTop: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>SELECT RIDER</div>
                 {riders.filter(r => r.status !== "offline").map(r => {
-                  const busy = !!r.currentOrder && r.currentOrder !== order.id;
-                  const available = !r.currentOrder || r.currentOrder === order.id;
+	                  // A rider can be assigned even if they are currently fulfilling another order.
+	                  // We still *indicate* busyness, but we do not block assignment.
+	                  const busy = (r.status === "on_delivery" && (!r.currentOrder || r.currentOrder !== order.id)) || (!!r.currentOrder && r.currentOrder !== order.id);
+	                  const available = !busy;
                   return (
-                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.5 : 1 }}>
+	                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.75 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ width: 8, height: 8, borderRadius: "50%", background: r.status === "on_delivery" ? S.purple : S.green }} />
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name} <span style={{ fontSize: 10, color: S.textMuted }}>({r.vehicle})</span></div>
                           <div style={{ fontSize: 10, color: S.textMuted }}>
                             ⭐ {r.rating} • {r.todayOrders} today
-                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 Fulfilling {r.currentOrder}</span>}
+	                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 {r.currentOrder ? `Fulfilling ${r.currentOrder}` : "On delivery"}</span>}
                             {available && r.status === "online" && <span style={{ color: S.green, fontWeight: 700, marginLeft: 6 }}>✓ Available</span>}
                           </div>
                         </div>
                       </div>
-                      {available ? (
-                        <button onClick={() => { onAssign(order.id, r.id); setShowAssign(false); }} style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}>Assign</button>
-                      ) : (
-                        <span style={{ fontSize: 10, color: S.textMuted, fontStyle: "italic" }}>Busy</span>
-                      )}
+	                      <button
+	                        onClick={() => {
+	                          if (busy) {
+	                            const msg = r.currentOrder
+	                              ? `${r.name} is currently fulfilling order ${r.currentOrder}. Assign this order anyway?`
+	                              : `${r.name} is currently on delivery. Assign this order anyway?`;
+	                            if (!confirm(msg)) return;
+	                          }
+	                          onAssign(order.id, r.id);
+	                          setShowAssign(false);
+	                        }}
+	                        style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}
+	                      >
+	                        {busy ? "Assign anyway" : "Assign"}
+	                      </button>
                     </div>
                   );
                 })}
@@ -4409,8 +4437,16 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
             <label style={lSt}>Assign Rider (Optional)</label>
             <select value={riderId} onChange={e => setRiderId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Auto-assign nearest rider</option>
-              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (<option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>))}
-              {riders.filter(r => r.status === "on_delivery").map(r => (<option key={r.id} value={r.id} disabled>{r.name} — 📦 Busy</option>))}
+	              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (
+	                <option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>
+	              ))}
+	              {riders
+	                .filter(r => r.status !== "offline" && (r.status === "on_delivery" || !!r.currentOrder))
+	                .map(r => (
+	                  <option key={r.id} value={r.id}>
+	                    {r.name} — 📦 Busy{r.currentOrder ? ` (${r.currentOrder})` : ""}
+	                  </option>
+	                ))}
             </select>
           </div>
 
