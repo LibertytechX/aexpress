@@ -72,12 +72,20 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     delivery_count = serializers.SerializerMethodField()
 
+    # Rider contact (merchant-facing)
+    rider_code = serializers.SerializerMethodField()
+    rider_name = serializers.SerializerMethodField()
+    rider_phone = serializers.SerializerMethodField()
+
     class Meta:
         model = Order
         fields = [
             "id",
             "order_number",
             "user_business_name",
+            "rider_code",
+            "rider_name",
+            "rider_phone",
             "mode",
             "vehicle_name",
             "vehicle_price",
@@ -105,6 +113,23 @@ class OrderSerializer(serializers.ModelSerializer):
     def get_delivery_count(self, obj):
         """Get the number of deliveries for this order."""
         return obj.deliveries.count()
+
+    def _get_rider(self, obj):
+        return getattr(obj, "rider", None)
+
+    def get_rider_code(self, obj):
+        rider = self._get_rider(obj)
+        return getattr(rider, "rider_id", None) if rider else None
+
+    def get_rider_name(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "contact_name", None) if user else None
+
+    def get_rider_phone(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "phone", None) if user else None
 
 
 class QuickSendSerializer(serializers.Serializer):

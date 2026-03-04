@@ -508,7 +508,7 @@ class OrderListView(APIView):
         # Base queryset
         orders = (
             Order.objects.filter(user=request.user)
-            .select_related("vehicle")
+            .select_related("vehicle", "rider", "rider__user")
             .prefetch_related("deliveries")
         )
 
@@ -544,9 +544,9 @@ class OrderDetailView(APIView):
         """Get order details by order number."""
         try:
             order = (
-                Order.objects.select_related("vehicle")
+                Order.objects.select_related("vehicle", "rider", "rider__user")
                 .prefetch_related("deliveries")
-                .get(order_number=order_number)
+                .get(order_number=order_number, user=request.user)
             )
         except Order.DoesNotExist:
             return Response(

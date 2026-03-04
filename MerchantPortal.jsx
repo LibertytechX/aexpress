@@ -444,6 +444,9 @@ function MerchantPortal() {
       id: order.order_number,
       order_number: order.order_number,
       status: order.status,
+			rider_code: order.rider_code,
+			rider_name: order.rider_name,
+			rider_phone: order.rider_phone,
       pickup: order.pickup_address,
       dropoff: order.deliveries[0]?.dropoff_address || '',
       amount: parseFloat(order.total_amount),
@@ -4116,7 +4119,45 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
             <span style={{ padding: "6px 14px", borderRadius: 8, background: st.bg, color: st.text, fontSize: 13, fontWeight: 700 }}>{st.label}</span>
           </div>
 
-          <div style={{ padding: 24 }}>
+			  <div style={{ padding: 24 }}>
+				{/* Rider */}
+				<div style={{
+					marginBottom: 24,
+					padding: 14,
+					borderRadius: 12,
+					background: "#f8fafc",
+					border: "1px solid #e2e8f0",
+				}}>
+					<div style={{ fontSize: 11, color: S.grayLight, fontWeight: 700, marginBottom: 8 }}>RIDER</div>
+					{order.rider_phone ? (
+						<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+							<div style={{ minWidth: 0 }}>
+								<div style={{ fontSize: 14, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+									{order.rider_name || "Rider"}{order.rider_code ? ` (${order.rider_code})` : ""}
+								</div>
+								<div style={{ fontSize: 12, color: S.gray }}>Assigned to your order</div>
+							</div>
+							<a
+								href={`tel:${order.rider_phone}`}
+								style={{
+									flexShrink: 0,
+									padding: "8px 12px",
+									borderRadius: 10,
+									border: "1px solid #dbeafe",
+									background: "#eff6ff",
+									color: "#1e40af",
+									fontSize: 13,
+									fontWeight: 700,
+									textDecoration: "none",
+								}}
+							>
+								📞 {order.rider_phone}
+							</a>
+						</div>
+					) : (
+						<div style={{ fontSize: 13, color: S.gray }}>Not assigned yet</div>
+					)}
+				</div>
             {/* Pickup Address */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ display: "flex", gap: 12 }}>
