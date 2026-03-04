@@ -2832,9 +2832,113 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 function VehiclesLocationMap({ vehicles }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const markersRef = useRef([]);
+  const markersByIdRef = useRef({});
+  const overlaysByIdRef = useRef({});
+  const latestVehiclesByIdRef = useRef({});
+  const vehiclesRef = useRef([]);
   const infoWindowRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
+
+  // Camera control
+  const didInitialFitRef = useRef(false);
+  const userInteractedRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+
+  const safeVehicleKey = (v) => {
+    // Prefer stable backend id; fall back to other identifiers.
+    return (v && (v.id ?? v.asset_id ?? v.plate_number)) ?? null;
+  };
+
+  const parseVehicleLatLng = (v) => {
+    if (!v || v.latitude == null || v.longitude == null) return null;
+    const lat = parseFloat(v.latitude);
+    const lng = parseFloat(v.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    // Treat (0,0) as bad telemetry for this app (prevents world-zoom).
+    if (Math.abs(lat) < 1e-9 && Math.abs(lng) < 1e-9) return null;
+    return { lat, lng };
+  };
+
+  const median = (arr) => {
+    if (!arr || arr.length === 0) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return (s.length % 2 === 1) ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+
+  // Haversine distance in km
+  const haversineKm = (a, b) => {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const sin1 = Math.sin(dLat / 2);
+    const sin2 = Math.sin(dLng / 2);
+    const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  };
+
+  const computeClusterInliers = (points, { keepPercentile = 0.9, madFactor = 6 } = {}) => {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+
+    const medLat = median(points.map(p => p.lat));
+    const medLng = median(points.map(p => p.lng));
+    if (medLat == null || medLng == null) return points;
+    const center = { lat: medLat, lng: medLng };
+
+    const withD = points.map(p => ({ p, d: haversineKm(center, p) }));
+    const dists = withD.map(x => x.d);
+    const medD = median(dists);
+    if (medD == null) return points;
+    const absDev = dists.map(d => Math.abs(d - medD));
+    const mad = median(absDev) ?? 0;
+
+    const sorted = [...withD].sort((a, b) => a.d - b.d);
+    const pctIdx = Math.max(0, Math.min(sorted.length - 1, Math.floor(keepPercentile * (sorted.length - 1))));
+    const pctCutoff = sorted[pctIdx]?.d ?? sorted[sorted.length - 1]?.d ?? 0;
+
+    // Combine a percentile cutoff with a MAD cutoff; choose the more "zoomed-in" (smaller) cutoff,
+    // but never so strict that we drop to <3 points when we have more.
+    const madCutoff = (mad > 0) ? (medD + madFactor * mad) : pctCutoff;
+    let cutoff = Math.min(pctCutoff, madCutoff);
+    if (!Number.isFinite(cutoff) || cutoff <= 0) cutoff = pctCutoff;
+
+    let inliers = withD.filter(x => x.d <= cutoff).map(x => x.p);
+    if (inliers.length < Math.min(3, points.length)) inliers = points;
+    return inliers;
+  };
+
+  const fitMapToVehicles = (vehiclesList) => {
+    const map = mapInstanceRef.current;
+    if (!map || !window.google || !window.google.maps) return false;
+
+    const pts = (vehiclesList || [])
+      .map(v => parseVehicleLatLng(v))
+      .filter(Boolean);
+
+    if (pts.length === 0) return false;
+
+    const inliers = computeClusterInliers(pts, { keepPercentile: 0.9, madFactor: 6 });
+
+    programmaticMoveRef.current = true;
+
+    if (inliers.length === 1) {
+      map.setCenter(inliers[0]);
+      map.setZoom(15);
+    } else {
+      const bounds = new window.google.maps.LatLngBounds();
+      inliers.forEach(p => bounds.extend(p));
+      map.fitBounds(bounds, { padding: 60 });
+      const z = map.getZoom?.();
+      if (typeof z === 'number' && z > 16) map.setZoom(16);
+    }
+
+    didInitialFitRef.current = true;
+    return true;
+  };
 
   useEffect(() => {
     const init = () => {
@@ -2847,6 +2951,17 @@ function VehiclesLocationMap({ vehicles }) {
       });
       mapInstanceRef.current = map;
       infoWindowRef.current = new window.google.maps.InfoWindow();
+
+      // Track user interaction so we don't unexpectedly override their camera.
+      map.addListener('dragstart', () => { userInteractedRef.current = true; });
+      map.addListener('zoom_changed', () => {
+        if (!programmaticMoveRef.current) userInteractedRef.current = true;
+      });
+      map.addListener('idle', () => {
+        // Clear programmatic guard after a fit/center/zoom.
+        if (programmaticMoveRef.current) programmaticMoveRef.current = false;
+      });
+
       setMapReady(true);
     };
     let unsub = null;
@@ -2854,7 +2969,14 @@ function VehiclesLocationMap({ vehicles }) {
     else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
     return () => {
       if (unsub) unsub();
-      markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
+      Object.values(markersByIdRef.current).forEach(m => {
+        try {
+          if (m?._labelOverlay) m._labelOverlay.setMap(null);
+          m?.setMap?.(null);
+        } catch { }
+      });
+      markersByIdRef.current = {};
+      overlaysByIdRef.current = {};
       if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
       mapInstanceRef.current = null;
     };
@@ -2863,9 +2985,7 @@ function VehiclesLocationMap({ vehicles }) {
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current || !window.google) return;
     const map = mapInstanceRef.current;
-    markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
-    const bounds = new window.google.maps.LatLngBounds();
-    let hasPoints = false;
+    vehiclesRef.current = vehicles || [];
 
     // Helper: build a rotated emoji icon as a canvas-based marker image
     const buildVehicleIcon = (emoji, rotation, borderColor) => {
@@ -2893,78 +3013,158 @@ function VehiclesLocationMap({ vehicles }) {
       return { url: canvas.toDataURL(), scaledSize: new window.google.maps.Size(size, size), anchor: new window.google.maps.Point(size / 2, size / 2) };
     };
 
-    vehicles.forEach(v => {
-      if (!v.latitude || !v.longitude) return;
-      const lat = parseFloat(v.latitude);
-      const lng = parseFloat(v.longitude);
-      if (isNaN(lat) || isNaN(lng)) return;
+    const LabelOverlayCtor = class extends window.google.maps.OverlayView {
+      constructor(latLng, div) {
+        super();
+        this.latLng = latLng;
+        this.div = div;
+      }
+      onAdd() {
+        (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(this.div);
+      }
+      draw() {
+        const proj = this.getProjection();
+        if (!proj || !this.latLng) return;
+        const pos = proj.fromLatLngToDivPixel(this.latLng);
+        if (!pos) return;
+        this.div.style.left = (pos.x - this.div.offsetWidth / 2) + 'px';
+        this.div.style.top = (pos.y - 32) + 'px';
+      }
+      onRemove() {
+        if (this.div?.parentNode) this.div.parentNode.removeChild(this.div);
+      }
+      setPosition(latLng) {
+        this.latLng = latLng;
+        this.draw();
+      }
+    };
+
+    const nextKeys = new Set();
+
+    (vehicles || []).forEach(v => {
+      const key = safeVehicleKey(v);
+      if (!key) return;
+      const ll = parseVehicleLatLng(v);
+      if (!ll) return;
+      nextKeys.add(String(key));
+      latestVehiclesByIdRef.current[String(key)] = v;
 
       const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
       const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
       const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
       const rotation = parseFloat(v.course) || 0;
 
-      const marker = new window.google.maps.Marker({
-        position: { lat, lng }, map, title: v.plate_number,
-        icon: buildVehicleIcon(typeIcon, rotation, color),
-        zIndex: v.engine_status === 'on' ? 10 : 5,
-      });
-
       // Floating label: plate | rider | speed
       const riderName = v.assigned_rider ? v.assigned_rider.name : '';
       const speedStr = v.speed > 0 ? `${v.speed} km/h` : '';
       const labelParts = [v.plate_number, riderName, speedStr].filter(Boolean);
-      const labelDiv = document.createElement('div');
-      labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
-        'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
-        'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
-        'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
-      labelDiv.textContent = labelParts.join(' · ');
 
-      // Use OverlayView for the label
-      const LabelOverlay = class extends window.google.maps.OverlayView {
-        onAdd() { (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(labelDiv); }
-        draw() {
-          const proj = this.getProjection(); if (!proj) return;
-          const pos = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(lat, lng));
-          if (pos) { labelDiv.style.left = (pos.x - labelDiv.offsetWidth / 2) + 'px'; labelDiv.style.top = (pos.y - 32) + 'px'; }
+      // Create or update marker
+      let marker = markersByIdRef.current[String(key)];
+      if (!marker) {
+        marker = new window.google.maps.Marker({
+          position: ll,
+          map,
+          title: v.plate_number,
+          icon: buildVehicleIcon(typeIcon, rotation, color),
+          zIndex: v.engine_status === 'on' ? 10 : 5,
+        });
+        markersByIdRef.current[String(key)] = marker;
+
+        marker.addListener('click', () => {
+          const latest = latestVehiclesByIdRef.current[String(key)] || v;
+          const latestColor = latest.engine_status === 'on' ? '#22c55e' : latest.engine_status === 'idle' ? '#F59E0B' : latest.engine_status === 'off' ? '#EF4444' : '#6b7280';
+          const latestStatus = latest.engine_status === 'on' ? 'Engine On' : latest.engine_status === 'idle' ? 'Idle' : latest.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+          const latestIcon = latest.vehicle_type === 'bike' ? '🏍️' : latest.vehicle_type === 'car' ? '🚗' : '🚐';
+          infoWindowRef.current.setContent(
+            `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
+            `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
+            `<div style="color:${latestColor};font-weight:600;font-size:11px;">${latestStatus}</div>` +
+            `<div style="color:#555;font-size:11px;margin-top:4px;">${latest.asset_id} • ${(latest.vehicle_type || '').toUpperCase()}</div>` +
+            (latest.make || latest.model ? `<div style="color:#888;font-size:10px;">${latest.make || ''} ${latest.model || ''}</div>` : '') +
+            (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
+            (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
+            `</div>`
+          );
+          infoWindowRef.current.open(map, marker);
+        });
+
+        // Label overlay
+        const labelDiv = document.createElement('div');
+        labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
+          'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
+          'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
+          'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+        labelDiv.textContent = labelParts.join(' · ');
+        const overlay = new LabelOverlayCtor(new window.google.maps.LatLng(ll.lat, ll.lng), labelDiv);
+        overlay.setMap(map);
+        overlaysByIdRef.current[String(key)] = overlay;
+        marker._labelOverlay = overlay;
+      } else {
+        marker.setPosition(ll);
+        marker.setIcon(buildVehicleIcon(typeIcon, rotation, color));
+        marker.setZIndex(v.engine_status === 'on' ? 10 : 5);
+
+        const overlay = overlaysByIdRef.current[String(key)];
+        if (overlay) overlay.setPosition(new window.google.maps.LatLng(ll.lat, ll.lng));
+        // Update label text if overlay div exists
+        const div = overlay?.div;
+        if (div) {
+          const nextText = labelParts.join(' · ');
+          if (div.textContent !== nextText) div.textContent = nextText;
+          overlay?.draw?.();
         }
-        onRemove() { if (labelDiv.parentNode) labelDiv.parentNode.removeChild(labelDiv); }
-      };
-      const overlay = new LabelOverlay();
-      overlay.setMap(map);
-
-      marker.addListener('click', () => {
-        infoWindowRef.current.setContent(
-          `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
-          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${typeIcon} ${v.plate_number}</div>` +
-          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
-          `<div style="color:#555;font-size:11px;margin-top:4px;">${v.asset_id} • ${(v.vehicle_type || '').toUpperCase()}</div>` +
-          (v.make || v.model ? `<div style="color:#888;font-size:10px;">${v.make || ''} ${v.model || ''}</div>` : '') +
-          (v.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${v.speed} km/h</div>` : '') +
-          (v.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${v.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
-          `</div>`
-        );
-        infoWindowRef.current.open(map, marker);
-      });
-
-      markersRef.current.push(marker);
-      // Store overlay reference for cleanup
-      marker._labelOverlay = overlay;
-      bounds.extend({ lat, lng });
-      hasPoints = true;
+      }
     });
 
-    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+    // Remove markers for vehicles no longer present / no longer valid
+    Object.keys(markersByIdRef.current).forEach(k => {
+      if (nextKeys.has(k)) return;
+      const m = markersByIdRef.current[k];
+      try {
+        if (m?._labelOverlay) m._labelOverlay.setMap(null);
+        m?.setMap?.(null);
+      } catch { }
+      delete markersByIdRef.current[k];
+      delete overlaysByIdRef.current[k];
+      delete latestVehiclesByIdRef.current[k];
+    });
+
+    // Initial fit ONCE: only if user hasn't already taken control.
+    if (!didInitialFitRef.current && !userInteractedRef.current) {
+      fitMapToVehicles(vehicles);
+    }
+
   }, [mapReady, vehicles]);
 
-  const withLocation = vehicles.filter(v => v.latitude && v.longitude).length;
+  const withLocation = (vehicles || []).map(v => parseVehicleLatLng(v)).filter(Boolean).length;
 
   return (
     <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <span>🗺️ Vehicle Locations</span>
-        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {vehicles.length} vehicles with GPS</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span>🗺️ Vehicle Locations</span>
+          <button
+            type="button"
+            onClick={() => fitMapToVehicles(vehiclesRef.current)}
+            disabled={!mapReady || withLocation === 0}
+            title="Recenter to the main cluster (ignores outliers like 0,0)"
+            style={{
+              padding: '5px 9px',
+              borderRadius: 10,
+              border: `1px solid ${S.border}`,
+              background: S.borderLight,
+              color: S.navy,
+              fontSize: 10,
+              fontWeight: 800,
+              cursor: (!mapReady || withLocation === 0) ? 'not-allowed' : 'pointer',
+              opacity: (!mapReady || withLocation === 0) ? 0.6 : 1,
+            }}
+          >
+            Recenter / Fit
+          </button>
+        </div>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {(vehicles || []).length} vehicles with GPS</span>
       </div>
       <div style={{ flex: 1, position: 'relative' }}>
         <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
