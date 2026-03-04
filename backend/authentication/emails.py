@@ -151,7 +151,13 @@ def send_password_reset_email(user):
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
-        frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
+
+        if user.usertype == "Dispatcher":
+            frontend_url = os.getenv("DISPATCHER_FRONTEND_URL", "http://localhost:5174")
+            portal_name = "DISPATCHER PORTAL"
+        else:
+            frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
+            portal_name = "MERCHANT PORTAL"
 
         if not api_key or not domain:
             logger.error("Mailgun credentials not configured")
@@ -172,9 +178,10 @@ def send_password_reset_email(user):
 
         # Create HTML email template
         html_content = get_password_reset_email_template(
-            business_name=user.business_name,
-            contact_name=user.contact_name,
+            business_name=user.business_name or "Assured Express",
+            contact_name=user.contact_name or user.get_full_name(),
             reset_link=reset_link,
+            portal_name=portal_name,
         )
 
         # Send email via Mailgun
@@ -202,7 +209,9 @@ def send_password_reset_email(user):
         return False
 
 
-def get_password_reset_email_template(business_name, contact_name, reset_link):
+def get_password_reset_email_template(
+    business_name, contact_name, reset_link, portal_name="MERCHANT PORTAL"
+):
     return f"""
 <!DOCTYPE html>
 <html>
@@ -222,14 +231,14 @@ def get_password_reset_email_template(business_name, contact_name, reset_link):
                                 <span style="font-size: 32px; font-weight: 800; color: #1B2A4A;">AX</span>
                             </div>
                             <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">ASSURED EXPRESS</h1>
-                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500; letter-spacing: 1px;">MERCHANT PORTAL</p>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500; letter-spacing: 1px;">{portal_name}</p>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding: 40px 32px;">
                             <h2 style="margin: 0 0 16px; color: #1B2A4A; font-size: 22px; font-weight: 700;">Reset Your Password</h2>
                             <p style="margin: 0 0 8px; color: #64748b; font-size: 15px; line-height: 1.6;">Hi <strong style="color: #1B2A4A;">{contact_name}</strong>,</p>
-                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> merchant account. Click the button below to create a new password:</p>
+                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> account. Click the button below to create a new password:</p>
                             <table role="presentation" style="margin: 0 0 24px;">
                                 <tr>
                                     <td style="border-radius: 10px; background: linear-gradient(135deg, #E8A838 0%, #F5C563 100%); box-shadow: 0 4px 12px rgba(232,168,56,0.3);">
