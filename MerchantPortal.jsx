@@ -4096,6 +4096,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
     const order = orders.find(o => o.id === detailId);
     if (!order) return null;
     const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
+			const hasRider = Boolean(order.rider_phone || order.rider_name || order.rider_code);
+			const isLikelyAssigned = ["Assigned", "Started", "PickedUp", "Arrived", "Done"].includes(order.status);
 
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
@@ -4120,7 +4122,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
           </div>
 
 			  <div style={{ padding: 24 }}>
-				{/* Rider */}
+					{/* Rider */}
 				<div style={{
 					marginBottom: 24,
 					padding: 14,
@@ -4129,7 +4131,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
 					border: "1px solid #e2e8f0",
 				}}>
 					<div style={{ fontSize: 11, color: S.grayLight, fontWeight: 700, marginBottom: 8 }}>RIDER</div>
-					{order.rider_phone ? (
+						{hasRider ? (
 						<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
 							<div style={{ minWidth: 0 }}>
 								<div style={{ fontSize: 14, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -4137,25 +4139,29 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
 								</div>
 								<div style={{ fontSize: 12, color: S.gray }}>Assigned to your order</div>
 							</div>
-							<a
-								href={`tel:${order.rider_phone}`}
-								style={{
-									flexShrink: 0,
-									padding: "8px 12px",
-									borderRadius: 10,
-									border: "1px solid #dbeafe",
-									background: "#eff6ff",
-									color: "#1e40af",
-									fontSize: 13,
-									fontWeight: 700,
-									textDecoration: "none",
-								}}
-							>
-								📞 {order.rider_phone}
-							</a>
+								{order.rider_phone ? (
+									<a
+										href={`tel:${order.rider_phone}`}
+										style={{
+											flexShrink: 0,
+											padding: "8px 12px",
+											borderRadius: 10,
+											border: "1px solid #dbeafe",
+											background: "#eff6ff",
+											color: "#1e40af",
+											fontSize: 13,
+											fontWeight: 700,
+											textDecoration: "none",
+										}}
+									>
+										📞 {order.rider_phone}
+									</a>
+								) : (
+									<div style={{ flexShrink: 0, fontSize: 12, color: S.grayLight, fontWeight: 700 }}>Phone not available</div>
+								)}
 						</div>
 					) : (
-						<div style={{ fontSize: 13, color: S.gray }}>Not assigned yet</div>
+							<div style={{ fontSize: 13, color: S.gray }}>{isLikelyAssigned ? "Assigned — rider details unavailable" : "Not assigned yet"}</div>
 					)}
 				</div>
             {/* Pickup Address */}

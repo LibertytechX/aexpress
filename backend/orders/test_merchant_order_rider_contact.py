@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from authentication.models import User
 from dispatcher.models import Rider
-from orders.models import Delivery, Order, Vehicle
+from orders.models import Delivery, Order, OrderLeg, Vehicle
 
 
 class MerchantOrderRiderContactTests(APITestCase):
@@ -100,3 +100,56 @@ class MerchantOrderRiderContactTests(APITestCase):
         url = reverse("orders:order_detail", kwargs={"order_number": self.order.order_number})
         res = self.client.get(url)
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_relay_order_falls_back_to_leg_rider_contact(self):
+        """Relay orders may not have Order.rider set; merchant should still see leg rider contact."""
+        relay_order = Order.objects.create(
+            order_number="6158030",
+            user=self.merchant,
+            rider=None,
+            vehicle=self.vehicle,
+            pickup_address="Relay Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1200.00"),
+            status="Assigned",
+            is_relay_order=True,
+            relay_legs_count=2,
+        )
+        Delivery.objects.create(
+            order=relay_order,
+            dropoff_address="Relay Dropoff",
+            receiver_name="Receiver",
+            receiver_phone="08055556666",
+            sequence=1,
+            status="Pending",
+        )
+        OrderLeg.objects.create(
+            order=relay_order,
+            leg_number=1,
+            rider=self.rider_profile,
+            status="Assigned",
+            distance_km=1.0,
+            duration_minutes=5,
+        )
+
+        self.client.force_authenticate(user=self.merchant)
+
+        # List
+        url = reverse("orders:order_list")
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        orders = res.data.get("orders")
+        relay_payload = next(o for o in orders if o.get("order_number") == relay_order.order_number)
+        self.assertEqual(relay_payload.get("rider_code"), "168817")
+        self.assertEqual(relay_payload.get("rider_name"), "Test Rider")
+        self.assertEqual(relay_payload.get("rider_phone"), "08033334444")
+
+        # Detail
+        url = reverse("orders:order_detail", kwargs={"order_number": relay_order.order_number})
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        order = res.data.get("order")
+        self.assertEqual(order.get("rider_code"), "168817")
+        self.assertEqual(order.get("rider_name"), "Test Rider")
+        self.assertEqual(order.get("rider_phone"), "08033334444")

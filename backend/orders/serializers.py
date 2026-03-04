@@ -115,7 +115,33 @@ class OrderSerializer(serializers.ModelSerializer):
         return obj.deliveries.count()
 
     def _get_rider(self, obj):
-        return getattr(obj, "rider", None)
+        """Return the best rider object for merchant-facing 'assigned rider' display.
+
+        For standard (non-relay) orders we use Order.rider.
+        For relay orders, Order.rider may be null while each OrderLeg has its own rider.
+        In that case we fall back to the most relevant leg rider.
+        """
+        rider = getattr(obj, "rider", None)
+        if rider:
+            return rider
+
+        # Relay fallback: pick an active leg rider if present.
+        if getattr(obj, "is_relay_order", False):
+            legs = (
+                obj.legs.filter(rider__isnull=False)
+                .select_related("rider__user")
+                .order_by("leg_number")
+            )
+            # Prefer an 'active' leg first.
+            for st in ["InTransit", "PickedUp", "Assigned"]:
+                leg = legs.filter(status=st).first()
+                if leg and getattr(leg, "rider", None):
+                    return leg.rider
+            # Otherwise fall back to the first leg that has a rider.
+            leg = legs.first()
+            return getattr(leg, "rider", None) if leg else None
+
+        return None
 
     def get_rider_code(self, obj):
         rider = self._get_rider(obj)
