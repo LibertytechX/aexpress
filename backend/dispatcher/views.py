@@ -550,6 +550,35 @@ class MerchantViewSet(viewsets.ModelViewSet):
         return super().get_queryset().order_by("-created_at")
 
 
+class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
+    """CRUD (POST-upsert) for per-merchant/per-vehicle pricing overrides."""
+
+    from orders.models import MerchantPricingOverride
+    from .serializers import MerchantPricingOverrideSerializer
+
+    queryset = MerchantPricingOverride.objects.select_related(
+        "merchant", "vehicle"
+    ).all()
+    serializer_class = MerchantPricingOverrideSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset().order_by("-updated_at")
+
+        merchant = self.request.query_params.get("merchant")
+        vehicle = self.request.query_params.get("vehicle")
+        active = self.request.query_params.get("active")
+
+        if merchant:
+            qs = qs.filter(merchant_id=merchant)
+        if vehicle:
+            qs = qs.filter(vehicle_id=vehicle)
+        if active is not None:
+            qs = qs.filter(is_active=str(active).lower() in ("true", "1", "yes"))
+
+        return qs
+
+
 class SystemSettingsView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
 

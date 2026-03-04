@@ -137,6 +137,59 @@ class Vehicle(models.Model):
         return total.quantize(Decimal("0.01"))
 
 
+class MerchantPricingOverride(models.Model):
+    """Optional per-merchant pricing override for a specific vehicle.
+
+    Precedence (when is_active=True):
+      1) flat_fee (if set)
+      2) pricing_tiers (if set)
+      3) fallback to Vehicle.calculate_fare()
+    """
+
+    merchant = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="merchant_pricing_overrides",
+        help_text="Merchant user this override applies to",
+    )
+    vehicle = models.ForeignKey(
+        Vehicle,
+        on_delete=models.CASCADE,
+        related_name="merchant_pricing_overrides",
+    )
+
+    # If set, this becomes the full delivery fee (ignores distance/duration/tiers)
+    flat_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Flat per-ride fee (if set, ignores tiered pricing)",
+    )
+
+    # If set (and flat_fee is null), used instead of Vehicle.pricing_tiers
+    pricing_tiers = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Tiered pricing config (same shape as Vehicle.pricing_tiers)",
+    )
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_pricing_overrides"
+        unique_together = [("merchant", "vehicle")]
+        indexes = [
+            models.Index(fields=["merchant", "vehicle"]),
+            models.Index(fields=["merchant", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Override: {self.merchant_id} × {self.vehicle.name}"
+
+
 class Order(models.Model):
     """Main order model for delivery requests."""
 

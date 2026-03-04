@@ -4,6 +4,7 @@ from .views import (
     RiderViewSet,
     OrderViewSet,
     MerchantViewSet,
+    MerchantPricingOverrideViewSet,
     SystemSettingsView,
     RiderOnboardingView,
     S3PresignedUrlView,
@@ -19,6 +20,11 @@ router = DefaultRouter()
 router.register(r"riders", RiderViewSet)
 router.register(r"orders", OrderViewSet)
 router.register(r"merchants", MerchantViewSet)
+router.register(
+    r"merchant-pricing-overrides",
+    MerchantPricingOverrideViewSet,
+    basename="merchant-pricing-override",
+)
 router.register(r"zones", ZoneViewSet)
 router.register(r"relay-nodes", RelayNodeViewSet)
 router.register(r"dispatchers", DispatcherViewSet, basename="dispatcher")

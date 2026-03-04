@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -3121,6 +3121,8 @@ function CreateVehicleModal({ onClose, onVehicleCreated }) {
 // ─── MERCHANTS ──────────────────────────────────────────────────
 function MerchantsScreen({ data }) {
   const [search, setSearch] = useState("");
+  const [pricingMerchant, setPricingMerchant] = useState(null);
+  const [pricingError, setPricingError] = useState(null);
   const f = data.filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.contact.toLowerCase().includes(search.toLowerCase()));
   return (
     <div>
@@ -3134,11 +3136,19 @@ function MerchantsScreen({ data }) {
         <span style={{ opacity: 0.4 }}>{I.search}</span>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search merchants..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
       </div>
+      {pricingError && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, color: S.red, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>⚠️ {pricingError}</div>}
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
           <span>ID</span><span>Business</span><span>Contact</span><span>Category</span><span>Total</span><span>Month</span><span>Wallet</span><span>Status</span><span>Joined</span>
         </div>
-        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"} onClick={() => {
+          setPricingError(null);
+          if (!m.userId) {
+            setPricingError("Pricing overrides require real merchant records (missing merchant userId in this row).");
+            return;
+          }
+          setPricingMerchant(m);
+        }}>
           <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.id}</span>
           <span style={{ fontSize: 12, fontWeight: 700 }}>{m.name}</span>
           <div><div style={{ fontSize: 12 }}>{m.contact}</div><div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.phone}</div></div>
@@ -3150,6 +3160,8 @@ function MerchantsScreen({ data }) {
           <span style={{ fontSize: 11, color: S.textMuted }}>{m.joined}</span>
         </div>))}
       </div>
+
+      {pricingMerchant && <MerchantPricingOverridesModal merchant={pricingMerchant} onClose={() => setPricingMerchant(null)} />}
     </div>
   );
 }
@@ -3241,6 +3253,252 @@ const inputStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRad
 const labelStyle = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.3px" };
 const Toggle = ({ on, setOn, size }) => { const w = size === "sm" ? 36 : 44; const d = size === "sm" ? 16 : 20; return (<div onClick={() => setOn(!on)} style={{ width: w, height: Math.round(w / 1.83), borderRadius: w / 2, cursor: "pointer", background: on ? S.green : S.border, position: "relative", transition: "background 0.2s", flexShrink: 0 }}><div style={{ width: d, height: d, borderRadius: "50%", background: "#fff", position: "absolute", top: Math.round((w / 1.83 - d) / 2), left: on ? w - d - Math.round((w / 1.83 - d) / 2) : Math.round((w / 1.83 - d) / 2), transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} /></div>) };
 const SC = ({ children, title, icon, desc, right }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}><div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>{icon}</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{title}</div>{desc && <div style={{ fontSize: 11, color: S.textMuted }}>{desc}</div>}</div></div>{right}</div><div style={{ padding: 20 }}>{children}</div></div>);
+
+//     MERCHANT PRICING OVERRIDES MODAL    
+function MerchantPricingOverridesModal({ merchant, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [vehicles, setVehicles] = useState([]);
+  const [forms, setForms] = useState({});
+
+  const DEFAULTS = {
+    bike: { floorKm: 6, floorFee: 1700, t1MaxKm: 10, t1Rate: 275, t2Rate: 235, t3Rate: 200, t4Rate: 200 },
+    car: { floorKm: 3, floorFee: 2500, t1MaxKm: 8, t1Rate: 350, t2Rate: 300, t3Rate: 250, t4Rate: 250 },
+    van: { floorKm: 3, floorFee: 5000, t1MaxKm: 8, t1Rate: 500, t2Rate: 450, t3Rate: 400, t4Rate: 400 },
+  };
+
+  const parseTierFields = (pt, vehicleKey) => {
+    const d = DEFAULTS[vehicleKey] || DEFAULTS.bike;
+    if (!pt || pt.type !== 'tiered') return { ...d };
+    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+    const floorKm = pt.floor_km ?? d.floorKm;
+    const floorFee = pt.floor_fee ?? d.floorFee;
+    const t1MaxKm = tiers?.[0]?.max_km ?? d.t1MaxKm;
+    const t1Rate = tiers?.[0]?.rate ?? d.t1Rate;
+    const t2Rate = tiers?.[1]?.rate ?? d.t2Rate;
+    // 4-tier config: tiers[2] = <=25, tiers[3] = 25+
+    // Legacy 3-tier config: tiers[2] is treated as both <=25 and 25+
+    const legacyLast = tiers?.[2]?.rate ?? d.t3Rate;
+    const t3Rate = (tiers.length >= 4 ? (tiers?.[2]?.rate ?? d.t3Rate) : legacyLast);
+    const t4Rate = (tiers.length >= 4 ? (tiers?.[3]?.rate ?? t3Rate) : legacyLast);
+    return { floorKm, floorFee, t1MaxKm, t1Rate, t2Rate, t3Rate, t4Rate };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        if (!merchant?.userId) throw new Error('Missing merchant userId (UUID).');
+        const [vs, ovs] = await Promise.all([
+          VehiclesAPI.getAll(),
+          MerchantPricingOverridesAPI.list({ merchant: merchant.userId }).catch(() => [])
+        ]);
+        if (cancelled) return;
+        setVehicles(vs);
+
+        const next = {};
+        (vs || []).forEach(v => {
+          const key = String(v.name || '').toLowerCase();
+          const vehicleKey = key === 'bike' ? 'bike' : key === 'car' ? 'car' : 'van';
+          const existing = (ovs || []).find(o => String(o.vehicle) === String(v.id));
+          const srcPt = existing?.pricing_tiers ?? v.pricing_tiers ?? null;
+          const tf = parseTierFields(srcPt, vehicleKey);
+          next[v.id] = {
+            overrideId: existing?.id || null,
+            vehicleId: v.id,
+            vehicleName: v.name,
+            vehicleKey,
+            is_active: existing?.is_active ?? false,
+            flatFeeText: (existing?.flat_fee === 0 || existing?.flat_fee) ? String(existing.flat_fee) : '',
+            ...tf,
+          };
+        });
+        setForms(next);
+      } catch (e) {
+        if (!cancelled) setError(e?.detail || e?.message || 'Failed to load merchant pricing overrides.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [merchant?.userId]);
+
+  const setForm = (vehicleId, patch) => {
+    setForms(prev => ({
+      ...prev,
+      [vehicleId]: { ...prev[vehicleId], ...patch }
+    }));
+  };
+
+  const buildPricingTiers = (f) => ({
+    type: 'tiered',
+    floor_km: Number(f.floorKm) || 0,
+    floor_fee: Number(f.floorFee) || 0,
+    tiers: [
+      { max_km: Number(f.t1MaxKm) || 0, rate: Number(f.t1Rate) || 0 },
+      { max_km: 15, rate: Number(f.t2Rate) || 0 },
+      { max_km: 25, rate: Number(f.t3Rate) || 0 },
+      { rate: Number(f.t4Rate) || 0 },
+    ]
+  });
+
+  const parseFlatFee = (txt) => {
+    if (txt === null || txt === undefined) return null;
+    const t = String(txt).trim();
+    if (t === '') return null;
+    const n = parseFloat(t);
+    return isNaN(n) ? null : n;
+  };
+
+  const saveAll = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const vehicleIds = Object.keys(forms);
+      await Promise.all(vehicleIds.map(async (vid) => {
+        const f = forms[vid];
+        if (!f) return;
+        // Only create a new record when enabling; otherwise we update existing records.
+        if (!f.overrideId && !f.is_active) return;
+        const payload = {
+          merchant: merchant.userId,
+          vehicle: f.vehicleId,
+          is_active: !!f.is_active,
+          flat_fee: parseFlatFee(f.flatFeeText),
+          pricing_tiers: buildPricingTiers(f),
+        };
+        const saved = await MerchantPricingOverridesAPI.upsert(payload);
+        // Capture returned id so subsequent disables/enables update instead of creating.
+        if (saved?.id && !f.overrideId) {
+          setForms(prev => ({ ...prev, [vid]: { ...prev[vid], overrideId: saved.id } }));
+        }
+      }));
+      onClose();
+    } catch (e) {
+      const msg = e?.detail || e?.non_field_errors?.[0] || e?.merchant?.[0] || e?.vehicle?.[0] || e?.message || 'Failed to save overrides.';
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const vehicleOrder = ['bike', 'car', 'van'];
+  const sortedVehicles = [...(vehicles || [])].sort((a, b) => vehicleOrder.indexOf(String(a.name || '').toLowerCase()) - vehicleOrder.indexOf(String(b.name || '').toLowerCase()));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 760, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", border: `1px solid ${S.border}` }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: S.navy }}>Merchant Pricing Overrides</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 3 }}><span style={{ fontWeight: 700, color: S.text }}>{merchant?.name || 'Merchant'}</span>  —  <span style={{ fontFamily: "'Space Mono',monospace" }}>{merchant?.id || ''}</span></div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 6 }}>{I.x}</button>
+        </div>
+
+        <div style={{ padding: 22 }}>
+          {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 14 }}>⚠️ {error}</div>}
+
+          {loading ? (
+            <div style={{ padding: 26, textAlign: "center", color: S.textMuted, fontSize: 13 }}>Loading pricing overrides…</div>
+          ) : (
+            <>
+              <div style={{ padding: "12px 14px", background: "rgba(232,168,56,0.08)", border: "1px solid rgba(232,168,56,0.22)", borderRadius: 12, marginBottom: 14, fontSize: 12, color: S.navy, fontWeight: 700 }}>
+                Flat fee (if set) fully overrides distance/tier pricing for that vehicle.
+              </div>
+
+              {sortedVehicles.map(v => {
+                const f = forms?.[v.id];
+                if (!f) return null;
+                const icon = f.vehicleKey === 'bike' ? '🏍️' : f.vehicleKey === 'car' ? '🚗' : '🚐';
+                return (
+                  <div key={v.id} style={{ border: `1px solid ${S.border}`, borderRadius: 14, overflow: "hidden", marginBottom: 14 }}>
+                    <div style={{ padding: "14px 16px", background: S.borderLight, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{icon}</div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 900, color: S.navy }}>{v.name}</div>
+                          <div style={{ fontSize: 11, color: S.textMuted }}>Enable override + set flat fee or tiers</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Override Active</span>
+                        <Toggle on={!!f.is_active} setOn={(on) => setForm(v.id, { is_active: on })} size="sm" />
+                      </div>
+                    </div>
+
+                    <div style={{ padding: 16 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                        <div>
+                          <label style={labelStyle}>Flat fee (₦)</label>
+                          <input value={f.flatFeeText} onChange={e => setForm(v.id, { flatFeeText: e.target.value })} placeholder="Leave blank to use tiers" style={inputStyle} inputMode="numeric" />
+                          <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>If set, distance is ignored.</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "flex-end", gap: 10 }}>
+                          <button onClick={() => {
+                            const tf = parseTierFields(v.pricing_tiers || null, f.vehicleKey);
+                            setForm(v.id, { ...tf });
+                          }} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim, display: "flex", alignItems: "center", gap: 6 }}>{I.copy} Copy Global Tiers</button>
+                          <button onClick={() => setForm(v.id, { flatFeeText: '' })} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim }}>Clear Flat</button>
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", borderRadius: 12, padding: 14, border: `1px solid ${S.border}` }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: S.navy, marginBottom: 12 }}>Tiered Pricing</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Floor km</label>
+                            <input value={f.floorKm} onChange={e => setForm(v.id, { floorKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Floor fee (₦)</label>
+                            <input value={f.floorFee} onChange={e => setForm(v.id, { floorFee: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 max km</label>
+                            <input value={f.t1MaxKm} onChange={e => setForm(v.id, { t1MaxKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 rate</label>
+                            <input value={f.t1Rate} onChange={e => setForm(v.id, { t1Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Tier2 rate (≤ 15km)</label>
+                            <input value={f.t2Rate} onChange={e => setForm(v.id, { t2Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier3 rate (≤ 25km)</label>
+                            <input value={f.t3Rate} onChange={e => setForm(v.id, { t3Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier4 rate (25+)</label>
+                            <input value={f.t4Rate} onChange={e => setForm(v.id, { t4Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={onClose} disabled={saving} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: S.textDim }}>Cancel</button>
+                <button onClick={saveAll} disabled={saving} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: saving ? 0.75 : 1 }}>{saving ? "Saving…" : "Save Overrides"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {

@@ -268,6 +268,8 @@ export const MerchantsAPI = {
         const data = await res.json();
         return data.map(m => ({
             id: m.id || 'N/A',
+            // Backend exposes the merchant's UUID as userId; we need it for per-merchant override endpoints.
+            userId: m.userId || m.user_id || m.user || null,
             name: m.name || 'Unknown',
             contact: m.contact || '',
             phone: m.phone || '',
@@ -278,6 +280,47 @@ export const MerchantsAPI = {
             status: m.status || 'Active',
             joined: m.joined || 'N/A'
         }));
+    }
+};
+
+// ─── MERCHANT PRICING OVERRIDES ─────────────────────────────────
+export const MerchantPricingOverridesAPI = {
+    async list({ merchant, vehicle, active } = {}) {
+        const qs = new URLSearchParams();
+        if (merchant) qs.set('merchant', merchant);
+        if (vehicle) qs.set('vehicle', vehicle);
+        if (active !== undefined && active !== null) qs.set('active', String(active));
+        const url = `${API_BASE_URL}/dispatch/merchant-pricing-overrides/${qs.toString() ? `?${qs.toString()}` : ''}`;
+        const res = await fetch(url, { headers: authHeaders() });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to fetch merchant pricing overrides'));
+        return Array.isArray(data) ? data : (data?.results || []);
+    },
+
+    async upsert(payload) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to save merchant pricing override'));
+        return data;
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) {
+            let data;
+            try { data = await res.json(); } catch (_) { data = null; }
+            throw (data || new Error('Failed to delete merchant pricing override'));
+        }
+        return true;
     }
 };
 

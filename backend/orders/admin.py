@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Vehicle, Order, Delivery, OrderLeg
+from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride
 
 
 class DeliveryInline(admin.TabularInline):
@@ -31,6 +31,21 @@ class VehicleAdmin(admin.ModelAdmin):
     list_filter = ["is_active"]
     search_fields = ["name"]
     ordering = ["base_price"]
+
+
+@admin.register(MerchantPricingOverride)
+class MerchantPricingOverrideAdmin(admin.ModelAdmin):
+    list_display = [
+        "merchant",
+        "vehicle",
+        "is_active",
+        "flat_fee",
+        "created_at",
+        "updated_at",
+    ]
+    list_filter = ["is_active", "vehicle", "created_at"]
+    search_fields = ["merchant__id", "merchant__business_name", "merchant__phone"]
+    ordering = ["-created_at"]
 
 
 @admin.register(Order)

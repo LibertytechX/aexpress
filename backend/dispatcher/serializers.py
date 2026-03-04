@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
+from decimal import Decimal
 
 User = get_user_model()
 
@@ -365,6 +366,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
     )
+    manual_price = serializers.BooleanField(
+        write_only=True, required=False, default=False
+    )
     cod = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
     )
@@ -416,6 +420,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "vehicle",
             "packageType",
             "price",
+            "manual_price",
             "cod",
             "riderId",
             "merchantId",
@@ -429,6 +434,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         from .models import Rider
         from authentication.models import User
         from orders.utils import geocode_address
+        from orders.pricing import calculate_effective_fare
         import uuid
 
         # Extract non-model fields
@@ -446,6 +452,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         vehicle_name = validated_data.pop("vehicle")
         package_type = validated_data.pop("packageType")
         price = validated_data.get("price")
+        manual_price = bool(validated_data.get("manual_price"))
         # cod = validated_data.get("cod") # Unused
         # riderId/merchantId are frontend-only fields (not model fields)
         rider_id = (validated_data.pop("riderId", "") or "").strip()
@@ -541,7 +548,21 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 pass
 
         # Calculate Price
-        total_amount = price if price else vehicle_obj.base_price
+        if manual_price and price is not None:
+            total_amount = price
+        else:
+            total_amount = calculate_effective_fare(
+                order_user,
+                vehicle_obj,
+                distance_km or 0,
+                duration_minutes or 0,
+            )
+
+        # Ensure decimals serialize consistently
+        try:
+            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
 
         # Create Order
         order = Order.objects.create(
@@ -584,6 +605,45 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         )
 
         return order
+
+
+class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
+    """Upsert serializer for per-merchant/per-vehicle pricing overrides."""
+
+    vehicle_name = serializers.CharField(source="vehicle.name", read_only=True)
+    merchant_user_id = serializers.CharField(source="merchant.id", read_only=True)
+
+    class Meta:
+        from orders.models import MerchantPricingOverride
+
+        model = MerchantPricingOverride
+        fields = [
+            "id",
+            "merchant",
+            "merchant_user_id",
+            "vehicle",
+            "vehicle_name",
+            "flat_fee",
+            "pricing_tiers",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+    def create(self, validated_data):
+        from orders.models import MerchantPricingOverride
+
+        merchant = validated_data["merchant"]
+        vehicle = validated_data["vehicle"]
+        defaults = {
+            k: v
+            for k, v in validated_data.items()
+            if k not in ("merchant", "vehicle")
+        }
+        obj, _ = MerchantPricingOverride.objects.update_or_create(
+            merchant=merchant, vehicle=vehicle, defaults=defaults
+        )
+        return obj
 
 
 class RelayNodeMiniSerializer(serializers.ModelSerializer):
