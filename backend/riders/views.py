@@ -94,7 +94,7 @@ class OrderOfferListView(APIView):
         # now = timezone.now()
         offers = (
             OrderOffer.objects.filter(
-                status="pending", rider__isnull=True, order__status="pending"
+                status="pending", rider__isnull=True, order__status="Pending"
             )
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
