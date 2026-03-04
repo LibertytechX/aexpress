@@ -2757,7 +2757,15 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   }
 
   const sMap = { "Online": "online", "On Delivery": "on_delivery", "Offline": "offline" };
-  const filtered = riders.filter(r => { if (filter !== "All" && r.status !== sMap[filter]) return false; if (search) { const s = search.toLowerCase(); return r.name.toLowerCase().includes(s) || r.phone.includes(s); } return true; });
+	  const filtered = riders.filter(r => {
+	    if (filter !== "All" && r.status !== sMap[filter]) return false;
+	    if (search) {
+	      const s = search.toLowerCase();
+	      const plate = (r.vehicle_asset?.plate_number || "").toLowerCase();
+	      return r.name.toLowerCase().includes(s) || r.phone.includes(s) || plate.includes(s);
+	    }
+	    return true;
+	  });
   const sc = (s) => s === "online" ? S.green : s === "on_delivery" ? S.purple : S.textMuted;
 
   return (
@@ -2787,13 +2795,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               {I.plus} Add Rider
             </button>
           </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
-            </div>
+	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(r => (
-                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+	                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name.split(" ").map(n => n[0]).join("")}</div>
@@ -2801,6 +2809,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                   </div>
                   <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
+	                  <span style={{ fontSize: 11, color: r.vehicle_asset?.plate_number ? S.textDim : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: r.vehicle_asset?.plate_number ? 700 : 400 }}>{r.vehicle_asset?.plate_number || "—"}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
                   <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
                   <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
