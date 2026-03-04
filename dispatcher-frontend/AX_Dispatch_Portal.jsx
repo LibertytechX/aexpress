@@ -3252,7 +3252,9 @@ function SettingsScreen() {
   const [bikeT1Rate, setBikeT1Rate] = useState(275);
   const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
   const [bikeT2Rate, setBikeT2Rate] = useState(235);
-  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+	  const [bikeT3MaxKm, setBikeT3MaxKm] = useState(25);
+	  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+	  const [bikeT4Rate, setBikeT4Rate] = useState(200);
   // Legacy bike state kept for getVC compatibility
   const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
   // Car uses tiered rate-switch pricing
@@ -3262,7 +3264,9 @@ function SettingsScreen() {
   const [carT1Rate, setCarT1Rate] = useState(350);
   const [carT2MaxKm, setCarT2MaxKm] = useState(15);
   const [carT2Rate, setCarT2Rate] = useState(300);
-  const [carT3Rate, setCarT3Rate] = useState(250);
+	  const [carT3MaxKm, setCarT3MaxKm] = useState(25);
+	  const [carT3Rate, setCarT3Rate] = useState(250);
+	  const [carT4Rate, setCarT4Rate] = useState(250);
   const carBase = 0, carPerKm = 0, carMinKm = carFloorKm, carMin = carFloorFee;
   // Van uses tiered rate-switch pricing
   const [vanFloorKm, setVanFloorKm] = useState(3);
@@ -3271,7 +3275,9 @@ function SettingsScreen() {
   const [vanT1Rate, setVanT1Rate] = useState(500);
   const [vanT2MaxKm, setVanT2MaxKm] = useState(15);
   const [vanT2Rate, setVanT2Rate] = useState(450);
-  const [vanT3Rate, setVanT3Rate] = useState(400);
+	  const [vanT3MaxKm, setVanT3MaxKm] = useState(25);
+	  const [vanT3Rate, setVanT3Rate] = useState(400);
+	  const [vanT4Rate, setVanT4Rate] = useState(400);
   const vanBase = 0, vanPerKm = 0, vanMinKm = vanFloorKm, vanMin = vanFloorFee;
   const [codFee, setCodFee] = useState(500);
   const [codPct, setCodPct] = useState(1.5);
@@ -3334,16 +3340,17 @@ function SettingsScreen() {
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
   const [nodeSaving, setNodeSaving] = useState(false);
 
-  // Tiered price: rate-switch with boundary floors
-  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3Rate) => {
-    if (km <= floorKm) return floorFee;
-    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
-    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
-    return Math.max(km * t3Rate, t2MaxKm * t2Rate);
-  };
-  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3Rate);
-  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3Rate);
-  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3Rate);
+	  // Tiered price: rate-switch with boundary floors
+	  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3MaxKm, t3Rate, t4Rate) => {
+	    if (km <= floorKm) return floorFee;
+	    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
+	    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
+	    if (km <= t3MaxKm) return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+	    return Math.max(km * t4Rate, t3MaxKm * t3Rate);
+	  };
+		  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3MaxKm, bikeT3Rate, bikeT4Rate);
+		  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3MaxKm, carT3Rate, carT4Rate);
+		  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3MaxKm, vanT3Rate, vanT4Rate);
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
     if (vehicleType === "bike") { price = calcBikePrice(km); }
@@ -3394,9 +3401,18 @@ function SettingsScreen() {
               setBikeFloorFee(pt.floor_fee ?? 1700);
               setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
               setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
-              setBikeT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setBikeT2MaxKm(15);
               setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
-              setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+	              setBikeT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+	                setBikeT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 200);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 200;
+	                setBikeT3Rate(legacyLast);
+	                setBikeT4Rate(legacyLast);
+	              }
             } else {
               setBikeFloorKm(pf(v.min_distance_km, 6));
               setBikeFloorFee(pf(v.min_fee, 1700));
@@ -3408,9 +3424,18 @@ function SettingsScreen() {
               setCarFloorFee(pt.floor_fee ?? 2500);
               setCarT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setCarT1Rate(pt.tiers?.[0]?.rate ?? 350);
-              setCarT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setCarT2MaxKm(15);
               setCarT2Rate(pt.tiers?.[1]?.rate ?? 300);
-              setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+	              setCarT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+	                setCarT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 250);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 250;
+	                setCarT3Rate(legacyLast);
+	                setCarT4Rate(legacyLast);
+	              }
             } else {
               setCarFloorKm(pf(v.min_distance_km, 3));
               setCarFloorFee(pf(v.min_fee, 2500));
@@ -3422,9 +3447,18 @@ function SettingsScreen() {
               setVanFloorFee(pt.floor_fee ?? 5000);
               setVanT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setVanT1Rate(pt.tiers?.[0]?.rate ?? 500);
-              setVanT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setVanT2MaxKm(15);
               setVanT2Rate(pt.tiers?.[1]?.rate ?? 450);
-              setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+	              setVanT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+	                setVanT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 400);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 400;
+	                setVanT3Rate(legacyLast);
+	                setVanT4Rate(legacyLast);
+	              }
             } else {
               setVanFloorKm(pf(v.min_distance_km, 3));
               setVanFloorFee(pf(v.min_fee, 5000));
@@ -3503,11 +3537,11 @@ function SettingsScreen() {
     try {
       // PATCH each vehicle's pricing
       await Promise.all(
-        [
-          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: bikeT2MaxKm, rate: bikeT2Rate }, { rate: bikeT3Rate }] } } },
-          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: carT2MaxKm, rate: carT2Rate }, { rate: carT3Rate }] } } },
-          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: vanT2MaxKm, rate: vanT2Rate }, { rate: vanT3Rate }] } } },
-        ]
+	        [
+	          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: 15, rate: bikeT2Rate }, { max_km: 25, rate: bikeT3Rate }, { rate: bikeT4Rate }] } } },
+	          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: 15, rate: carT2Rate }, { max_km: 25, rate: carT3Rate }, { rate: carT4Rate }] } } },
+	          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: 15, rate: vanT2Rate }, { max_km: 25, rate: vanT3Rate }, { rate: vanT4Rate }] } } },
+	        ]
           .filter(({ key }) => vehicleIds[key])
           .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
       );
@@ -3534,7 +3568,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
+	  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3MaxKm(25); setBikeT3Rate(200); setBikeT4Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3MaxKm(25); setCarT3Rate(250); setCarT4Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3MaxKm(25); setVanT3Rate(400); setVanT4Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
 
   const tabs = [{ id: "pricing", label: "Pricing & Fees", icon: "💰" }, { id: "zones", label: "Zones & Surcharges", icon: "🗺️" }, { id: "simulator", label: "Price Calculator", icon: "🧮" }, { id: "dispatch", label: "Dispatch Rules", icon: "⚙️" }, { id: "relay", label: "Relay Network", icon: "🔗" }, { id: "notifications", label: "Notifications", icon: "🔔" }, { id: "integrations", label: "API & Integrations", icon: "🔌" }];
 
@@ -3585,21 +3619,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
-                <input value={bikeT2MaxKm} onChange={e => setBikeT2MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	                <input value={bikeT2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={bikeT2Rate} onChange={e => setBikeT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}km+)</span></div>
-                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}–{bikeT3MaxKm}km)</span></div>
+	                <input value={bikeT3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+	                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT3MaxKm}km+)</span></div>
+	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+	                <input value={bikeT4Rate} onChange={e => setBikeT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = calcBikePrice(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= bikeFloorKm ? "#10B98130" : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: "#10B981", fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= bikeFloorKm && <div style={{ fontSize: 8, color: "#10B981", fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}km+ → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}–{bikeT3MaxKm}km → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). {bikeT3MaxKm}km+ → km × ₦{bikeT4Rate} (min ₦{(bikeT3MaxKm * bikeT3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>
@@ -3610,14 +3649,16 @@ function SettingsScreen() {
           floorKm: carFloorKm, setFloorKm: setCarFloorKm, floorFee: carFloorFee, setFloorFee: setCarFloorFee,
           t1MaxKm: carT1MaxKm, setT1MaxKm: setCarT1MaxKm, t1Rate: carT1Rate, setT1Rate: setCarT1Rate,
           t2MaxKm: carT2MaxKm, setT2MaxKm: setCarT2MaxKm, t2Rate: carT2Rate, setT2Rate: setCarT2Rate,
-          t3Rate: carT3Rate, setT3Rate: setCarT3Rate, calcFn: calcCarPrice
+	          t3MaxKm: carT3MaxKm, setT3MaxKm: setCarT3MaxKm, t3Rate: carT3Rate, setT3Rate: setCarT3Rate,
+	          t4Rate: carT4Rate, setT4Rate: setCarT4Rate, calcFn: calcCarPrice
         },
         {
           label: "Van", emoji: "🚐", color: "#8B5CF6", desc: "Bulk orders, furniture, large cargo. Max 500kg.",
           floorKm: vanFloorKm, setFloorKm: setVanFloorKm, floorFee: vanFloorFee, setFloorFee: setVanFloorFee,
           t1MaxKm: vanT1MaxKm, setT1MaxKm: setVanT1MaxKm, t1Rate: vanT1Rate, setT1Rate: setVanT1Rate,
           t2MaxKm: vanT2MaxKm, setT2MaxKm: setVanT2MaxKm, t2Rate: vanT2Rate, setT2Rate: setVanT2Rate,
-          t3Rate: vanT3Rate, setT3Rate: setVanT3Rate, calcFn: calcVanPrice
+	          t3MaxKm: vanT3MaxKm, setT3MaxKm: setVanT3MaxKm, t3Rate: vanT3Rate, setT3Rate: setVanT3Rate,
+	          t4Rate: vanT4Rate, setT4Rate: setVanT4Rate, calcFn: calcVanPrice
         }
         ].map(v => (<div key={v.label} style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -3642,21 +3683,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
-                <input value={v.t2MaxKm} onChange={e => v.setT2MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	                <input value={v.t2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={v.t2Rate} onChange={e => v.setT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}km+)</span></div>
-                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}–{v.t3MaxKm}km)</span></div>
+	                <input value={v.t3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+	                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t3MaxKm}km+)</span></div>
+	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+	                <input value={v.t4Rate} onChange={e => v.setT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = v.calcFn(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= v.floorKm ? `${v.color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: v.color, fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= v.floorKm && <div style={{ fontSize: 8, color: v.color, fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}km+ → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}–{v.t3MaxKm}km → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). {v.t3MaxKm}km+ → km × ₦{v.t4Rate} (min ₦{(v.t3MaxKm * v.t3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>))}
@@ -4193,11 +4239,25 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (pt && pt.type === 'tiered' && routeDistance) {
       const km = routeDistance;
       if (km <= pt.floor_km) return pt.floor_fee;
-      const t = pt.tiers || [];
-      if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-      if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
-      if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
-      return Math.round(km * (t[t.length - 1]?.rate || 0));
+	      // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+	      const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+	      let prevMaxKm = Number(pt.floor_km || 0);
+	      let prevRate = null;
+	      for (let i = 0; i < tiers.length; i++) {
+	        const tier = tiers[i] || {};
+	        const rate = Number(tier.rate || 0);
+	        const maxKm = tier.max_km;
+	        const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	        if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+	          return Math.max(Math.round(km * rate), minFloor);
+	        }
+	        prevMaxKm = Number(maxKm);
+	        prevRate = rate;
+	      }
+	      // Fallback for unexpected tier config
+	      const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+	      const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	      return Math.max(Math.round(km * lastRate), minFloor);
     }
     if (pt && pt.type === 'tiered') return pt.floor_fee;
     // Simple pricing fallback

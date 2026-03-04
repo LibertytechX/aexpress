@@ -86,26 +86,29 @@ class Vehicle(models.Model):
             if km <= floor_km:
                 return Decimal(str(floor_fee)).quantize(Decimal("0.01"))
 
-            # Tier 0: e.g. ≤10 km → km × rate, floored at floor_fee
-            if len(tiers) > 0 and (tiers[0].get("max_km") is None or km <= float(tiers[0]["max_km"])):
-                price = max(round(km * float(tiers[0]["rate"])), floor_fee)
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+            # Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+            prev_max_km = floor_km
+            prev_rate = None
+            for i, tier in enumerate(tiers):
+                if not isinstance(tier, dict):
+                    continue
+                rate = float(tier.get("rate") or 0)
+                max_km = tier.get("max_km")
 
-            # Tier 1: e.g. ≤15 km → km × rate, floored at tier-0 boundary
-            if len(tiers) > 1 and (tiers[1].get("max_km") is None or km <= float(tiers[1]["max_km"])):
-                boundary = float(tiers[0].get("max_km", floor_km)) * float(tiers[0].get("rate", 0))
-                price = max(round(km * float(tiers[1]["rate"])), round(boundary))
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+                min_floor = floor_fee if i == 0 else round(prev_max_km * float(prev_rate or 0))
 
-            # Tier 2+: e.g. >15 km → km × rate, floored at tier-1 boundary
-            if len(tiers) > 2:
-                boundary = float(tiers[1].get("max_km", 0)) * float(tiers[1].get("rate", 0))
-                price = max(round(km * float(tiers[2]["rate"])), round(boundary))
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+                # Unbounded tier (or missing max) applies to any remaining distances
+                if max_km is None or km <= float(max_km):
+                    price = max(round(km * rate), round(min_floor))
+                    return Decimal(str(price)).quantize(Decimal("0.01"))
+
+                prev_max_km = float(max_km)
+                prev_rate = rate
 
             # Fallback for unexpected tier config
-            last_rate = float(tiers[-1].get("rate", 0)) if tiers else 0
-            price = round(km * last_rate)
+            last_rate = float(tiers[-1].get("rate") or 0) if tiers else 0
+            min_floor = floor_fee if prev_rate is None else round(prev_max_km * float(prev_rate or 0))
+            price = max(round(km * last_rate), round(min_floor))
             return Decimal(str(price)).quantize(Decimal("0.01"))
 
         # ── Legacy formula ─────────────────────────────────────────────

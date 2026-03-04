@@ -3174,11 +3174,25 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const calcTieredPrice = (km, pt) => {
     if (!pt || pt.type !== 'tiered') return null;
     if (km <= pt.floor_km) return pt.floor_fee;
-    const t = pt.tiers || [];
-    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
-    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
-    return Math.round(km * (t[t.length - 1]?.rate || 0));
+	    // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+	    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+	    let prevMaxKm = Number(pt.floor_km || 0);
+	    let prevRate = null;
+	    for (let i = 0; i < tiers.length; i++) {
+	      const tier = tiers[i] || {};
+	      const rate = Number(tier.rate || 0);
+	      const maxKm = tier.max_km;
+	      const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	      if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+	        return Math.max(Math.round(km * rate), minFloor);
+	      }
+	      prevMaxKm = Number(maxKm);
+	      prevRate = rate;
+	    }
+	    // Fallback for unexpected tier config
+	    const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+	    const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	    return Math.max(Math.round(km * lastRate), minFloor);
   };
 
   // ─── Compute per-drop fare for Multi-Drop ───
