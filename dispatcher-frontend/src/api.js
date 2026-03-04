@@ -7,13 +7,102 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://www.orders.ax
 const getToken = () => localStorage.getItem('access_token');
 
 // Helper for authenticated requests
-const authHeaders = () => {
+const authHeaders = (customHeaders = {}) => {
     const token = getToken();
     return {
         'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...customHeaders
     };
 };
+
+// ─── AUTO-REFRESH LOGIC ─────────────────────────────────────────
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function onRefreshed(token) {
+    refreshSubscribers.forEach((callback) => callback(token));
+    refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(callback) {
+    refreshSubscribers.push(callback);
+}
+
+// ─── CENTRALIZED AUTH FETCH ─────────────────────────────────────
+export async function fetchWithAuth(endpoint, options = {}) {
+    // Determine headers. If passing FormData, browser sets multipart/form-data boundary automatically, so omit Content-Type.
+    const isFormData = options.body instanceof FormData;
+    const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
+    const baseHeaders = { ...defaultHeaders, ...options.headers };
+
+    // Inject auth token
+    const token = getToken();
+    if (token) baseHeaders['Authorization'] = `Bearer ${token}`;
+
+    const config = { ...options, headers: baseHeaders };
+
+    // Initial fetch
+    let res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+
+    // If 401 Unauthorized, attempt refresh
+    if (!res.ok && res.status === 401) {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+            if (!isRefreshing) {
+                isRefreshing = true;
+                try {
+                    const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh/`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ refresh: refreshToken }),
+                    });
+                    const refreshData = await refreshRes.json();
+
+                    if (refreshRes.ok && refreshData.access) {
+                        localStorage.setItem('access_token', refreshData.access);
+                        if (refreshData.refresh) localStorage.setItem('refresh_token', refreshData.refresh);
+
+                        isRefreshing = false;
+                        onRefreshed(refreshData.access);
+
+                        // Retry original request
+                        config.headers['Authorization'] = `Bearer ${refreshData.access}`;
+                        res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                    } else {
+                        throw new Error('Refresh failed');
+                    }
+                } catch (refreshErr) {
+                    isRefreshing = false;
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    window.dispatchEvent(new Event('auth:unauthorized'));
+                    throw refreshErr;
+                }
+            } else {
+                // Wait for ongoing refresh
+                return new Promise((resolve, reject) => {
+                    addRefreshSubscriber(async (newToken) => {
+                        config.headers['Authorization'] = `Bearer ${newToken}`;
+                        try {
+                            const retryRes = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                            resolve(retryRes);
+                        } catch (err) {
+                            reject(err);
+                        }
+                    });
+                });
+            }
+        } else {
+            // 401 but no refresh token
+            localStorage.clear();
+            sessionStorage.clear();
+            window.dispatchEvent(new Event('auth:unauthorized'));
+        }
+    }
+
+    return res;
+}
 
 // ─── AUTHENTICATION ─────────────────────────────────────────────
 export const AuthAPI = {
@@ -36,14 +125,9 @@ export const AuthAPI = {
         // Blacklist the refresh token on the server (best-effort)
         try {
             const refreshToken = localStorage.getItem('refresh_token');
-            const accessToken = localStorage.getItem('access_token');
             if (refreshToken) {
-                await fetch(`${API_BASE_URL}/auth/logout/`, {
+                await fetchWithAuth(`/auth/logout/`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
-                    },
                     body: JSON.stringify({ refresh_token: refreshToken })
                 });
             }
@@ -90,9 +174,7 @@ export const AuthAPI = {
 // ─── RIDERS ─────────────────────────────────────────────────────
 export const RidersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/riders/`);
         if (!res.ok) throw new Error('Failed to fetch riders');
         const data = await res.json();
         // Transform backend data to match frontend interface
@@ -119,9 +201,8 @@ export const RidersAPI = {
     },
 
     async updateLocation(riderUuid, lat, lng) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/update_location/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/update_location/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ lat, lng })
         });
         if (!res.ok) throw new Error('Failed to update rider location');
@@ -134,10 +215,8 @@ export const RidersAPI = {
         Object.entries(fields).forEach(([k, v]) => {
             if (v !== null && v !== undefined && v !== '') form.append(k, v);
         });
-        const token = localStorage.getItem('access_token');
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/onboarding/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/onboarding/`, {
             method: 'POST',
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             body: form
         });
         const data = await res.json();
@@ -146,9 +225,8 @@ export const RidersAPI = {
     },
 
     async resetPassword(riderUuid, newPassword) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/reset_password/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/reset_password/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ new_password: newPassword }),
         });
         const data = await res.json();
@@ -157,9 +235,8 @@ export const RidersAPI = {
     },
 
     async assignVehicle(riderUuid, vehicleAssetId) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/assign_vehicle/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/assign_vehicle/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ vehicle_asset_id: vehicleAssetId || null }),
         });
         const data = await res.json();
@@ -168,9 +245,8 @@ export const RidersAPI = {
     },
 
     async toggleDuty(riderUuid, status) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/toggle_duty/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/toggle_duty/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ status }),
         });
         const data = await res.json();
@@ -212,27 +288,22 @@ const normalizeOrder = (o) => ({
 
 export const OrdersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/orders/`);
         if (!res.ok) throw new Error('Failed to fetch orders');
         const data = await res.json();
         return data.map(normalizeOrder);
     },
 
     async getOne(orderNumber) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/`);
         if (!res.ok) throw new Error('Failed to fetch order');
         const data = await res.json();
         return normalizeOrder(data);
     },
 
     async create(orderData) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(orderData)
         });
         let data;
@@ -248,9 +319,8 @@ export const OrdersAPI = {
     },
 
     async assignRider(orderNumber, riderId) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/assign_rider/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/assign_rider/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ rider_id: riderId })
         });
         if (!res.ok) throw new Error('Failed to assign rider');
@@ -258,9 +328,8 @@ export const OrdersAPI = {
     },
 
     async updateStatus(orderNumber, newStatus) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/update_status/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ status: newStatus })
         });
         if (!res.ok) throw new Error('Failed to update status');
@@ -268,9 +337,8 @@ export const OrdersAPI = {
     },
 
     async generateRelayRoute(orderNumber, force = false) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/generate-relay-route/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/generate-relay-route/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ force })
         });
         let data;
@@ -283,9 +351,7 @@ export const OrdersAPI = {
 // ─── MERCHANTS ──────────────────────────────────────────────────
 export const MerchantsAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/merchants/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/merchants/`);
         if (!res.ok) throw new Error('Failed to fetch merchants');
         const data = await res.json();
         return data.map(m => ({
@@ -306,9 +372,7 @@ export const MerchantsAPI = {
 // ─── VEHICLES ───────────────────────────────────────────────────
 export const VehiclesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/orders/vehicles/`);
         if (!res.ok) throw new Error('Failed to fetch vehicles');
         const data = await res.json();
         // Response shape is { success: true, vehicles: [...] }
@@ -316,9 +380,8 @@ export const VehiclesAPI = {
     },
 
     async update(id, data) {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/${id}/`, {
+        const res = await fetchWithAuth(`/orders/vehicles/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed to update vehicle');
@@ -329,25 +392,20 @@ export const VehiclesAPI = {
 // ─── VEHICLE ASSETS ─────────────────────────────────────────────
 export const VehicleAssetsAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/`);
         if (!res.ok) throw new Error('Failed to fetch vehicle assets');
         return await res.json();
     },
 
     async get(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`);
         if (!res.ok) throw new Error('Failed to fetch vehicle asset');
         return await res.json();
     },
 
     async create(data) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/`, {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(data)
         });
         if (!res.ok) {
@@ -358,9 +416,8 @@ export const VehicleAssetsAPI = {
     },
 
     async update(id, data) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed to update vehicle asset');
@@ -368,9 +425,8 @@ export const VehicleAssetsAPI = {
     },
 
     async delete(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/vehicle-assets/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete vehicle asset');
     }
@@ -379,17 +435,13 @@ export const VehicleAssetsAPI = {
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/activity/?limit=${limit}`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/activity/?limit=${limit}`);
         if (!res.ok) throw new Error('Failed to fetch activity feed');
         return await res.json();
     },
 
     async getAblyToken() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/ably-token/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/ably-token/`);
         if (!res.ok) throw new Error('Failed to get Ably token');
         return await res.json();
     }
@@ -398,17 +450,14 @@ export const ActivityFeedAPI = {
 // ─── SETTINGS ───────────────────────────────────────────────────
 export const SettingsAPI = {
     async get() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/settings/`);
         if (!res.ok) throw new Error('Failed to fetch settings');
         return await res.json();
     },
 
     async update(settings) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
+        const res = await fetchWithAuth(`/dispatch/settings/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(settings)
         });
         if (!res.ok) throw new Error('Failed to update settings');
@@ -419,18 +468,15 @@ export const SettingsAPI = {
 // ─── ZONES ──────────────────────────────────────────────────────
 export const ZonesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/zones/`);
         if (!res.ok) throw new Error('Failed to fetch zones');
         const data = await res.json();
         return Array.isArray(data) ? data : (data.results || []);
     },
 
     async create(zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+        const res = await fetchWithAuth(`/dispatch/zones/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(zone)
         });
         if (!res.ok) throw new Error('Failed to create zone');
@@ -438,9 +484,8 @@ export const ZonesAPI = {
     },
 
     async update(id, zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+        const res = await fetchWithAuth(`/dispatch/zones/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(zone)
         });
         if (!res.ok) throw new Error('Failed to update zone');
@@ -448,9 +493,8 @@ export const ZonesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/zones/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete zone');
     }
@@ -459,18 +503,15 @@ export const ZonesAPI = {
 // ─── RELAY NODES ─────────────────────────────────────────────────
 export const RelayNodesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/`);
         if (!res.ok) throw new Error('Failed to fetch relay nodes');
         const data = await res.json();
         return Array.isArray(data) ? data : (data.results || []);
     },
 
     async create(node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(node)
         });
         if (!res.ok) throw new Error('Failed to create relay node');
@@ -478,9 +519,8 @@ export const RelayNodesAPI = {
     },
 
     async update(id, node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(node)
         });
         if (!res.ok) throw new Error('Failed to update relay node');
@@ -488,9 +528,8 @@ export const RelayNodesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete relay node');
     }
@@ -499,17 +538,14 @@ export const RelayNodesAPI = {
 // ─── DISPATCHERS ─────────────────────────────────────────────────
 export const DispatchersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/dispatchers/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/dispatchers/`);
         if (!res.ok) throw new Error('Failed to fetch dispatchers');
         return await res.json();
     },
 
     async create(fields) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/dispatchers/`, {
+        const res = await fetchWithAuth(`/dispatch/dispatchers/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(fields)
         });
         const data = await res.json();

@@ -60,6 +60,20 @@ function extractErrorMessage(data) {
   return 'Request failed';
 }
 
+// ─── AUTO-REFRESH LOGIC ─────────────────────────────────────────
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function onRefreshed(token) {
+  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(callback) {
+  refreshSubscribers.push(callback);
+}
+// ────────────────────────────────────────────────────────────────
+
 // API request helper
 async function apiRequest(endpoint, options = {}) {
   const token = TokenManager.getAccessToken();
@@ -79,8 +93,66 @@ async function apiRequest(endpoint, options = {}) {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-    const data = await response.json();
+    let response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    let data = await response.json().catch(() => ({}));
+
+    // If unauthorized and we have a refresh token (and we're not already trying to fetch the refresh endpoint), try to refresh
+    if (!response.ok && response.status === 401 && !options.skipAuth && endpoint !== '/auth/refresh/') {
+      const refreshToken = TokenManager.getRefreshToken();
+      if (refreshToken) {
+        if (!isRefreshing) {
+          isRefreshing = true;
+          try {
+            const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh: refreshToken }),
+            });
+            const refreshData = await refreshRes.json();
+
+            if (refreshRes.ok && refreshData.access) {
+              TokenManager.setTokens(refreshData.access, refreshData.refresh || refreshToken);
+              isRefreshing = false;
+              onRefreshed(refreshData.access);
+
+              // Retry original request
+              config.headers['Authorization'] = `Bearer ${refreshData.access}`;
+              response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+              data = await response.json().catch(() => ({}));
+            } else {
+              throw new Error('Refresh failed');
+            }
+          } catch (refreshErr) {
+            isRefreshing = false;
+            TokenManager.clearTokens();
+            // Optional: trigger a custom event or reload the page to kick the user out visually
+            window.dispatchEvent(new Event('auth:unauthorized'));
+            throw new Error('Session expired. Please log in again.');
+          }
+        } else {
+          // Wait for the ongoing refresh to complete, then retry
+          return new Promise((resolve, reject) => {
+            addRefreshSubscriber(async (newToken) => {
+              config.headers['Authorization'] = `Bearer ${newToken}`;
+              try {
+                const retryRes = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                const retryData = await retryRes.json().catch(() => ({}));
+                if (!retryRes.ok) {
+                  return reject(new Error(extractErrorMessage(retryData) || 'Request failed'));
+                }
+                resolve(retryData);
+              } catch (err) {
+                reject(err);
+              }
+            });
+          });
+        }
+      } else {
+        // 401 but no refresh token
+        TokenManager.clearTokens();
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
+    }
 
     if (!response.ok) {
       const errorMessage = extractErrorMessage(data);
