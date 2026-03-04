@@ -509,7 +509,7 @@ class AblyTokenView(views.APIView):
             f"for-you-{rider_id}": ["subscribe"],
             "assigned*": ["subscribe"],
             "order*": ["subscribe"],
-            "location-update": ["publish"],
+            "location-update": ["publish", "subscribe"],
         }
 
         try:
@@ -650,8 +650,6 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
         if zone_id:
             qs = qs.filter(zone__id=zone_id)
         return qs
-
-
 
 
 class DispatcherViewSet(viewsets.ViewSet):

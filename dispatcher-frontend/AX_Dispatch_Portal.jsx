@@ -941,7 +941,7 @@ const StatCard = ({ label, value, sub, color }) => (<div style={{ background: S.
 const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
 // ─── LOGIN SCREEN ───────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, onForgotPassword }) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -975,9 +975,12 @@ function LoginScreen({ onLogin }) {
             <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Phone Number</label>
             <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+234..." style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
           </div>
-          <div style={{ marginBottom: 24 }}>
+          <div style={{ marginBottom: 16 }}>
             <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Password</label>
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+          </div>
+          <div style={{ textAlign: "right", marginBottom: 24 }}>
+            <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", color: S.gold, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Forgot Password?</button>
           </div>
           {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
           <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1 }}>{loading ? "Signing in..." : "Sign In"}</button>
@@ -987,8 +990,137 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+// ─── FORGOT PASSWORD SCREEN ─────────────────────────────────────
+function ForgotPasswordScreen({ onBack }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!email) return setError("Please enter your email");
+    try {
+      setLoading(true); setError("");
+      await AuthAPI.requestPasswordReset(email);
+      setSubmitted(true);
+    } catch (err) {
+      setError(err.errors?.non_field_errors?.[0] || err.message || "Failed to send reset link.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif" }}>
+      <div style={{ width: 440, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontSize: 24, marginBottom: 16 }}>🔒</div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>Forgot Password?</h2>
+          <p style={{ color: S.textMuted, fontSize: 14, marginTop: 8 }}>
+            {submitted ? "Check your email for reset instructions" : "Enter your email and we'll send a reset link"}
+          </p>
+        </div>
+        {!submitted ? (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Email Address</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1, marginBottom: 16 }}>
+              {loading ? "Sending..." : "Send Reset Link"}
+            </button>
+          </form>
+        ) : (
+          <div style={{ textAlign: "center", padding: "24px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
+            <p style={{ color: S.textMuted, fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+              If an account exists with <strong style={{ color: S.text }}>{email}</strong>, you will receive a link shortly.
+            </p>
+          </div>
+        )}
+        <div style={{ textAlign: "center" }}>
+          <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: S.gold, fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>← Back to Login</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RESET PASSWORD SCREEN ──────────────────────────────────────
+function ResetPasswordScreen({ token, onComplete }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [status, setStatus] = useState("form"); // form, success, error
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) return setMessage("Passwords do not match");
+    if (newPassword.length < 6) return setMessage("Password must be at least 6 characters");
+    try {
+      setLoading(true); setMessage("");
+      await AuthAPI.resetPassword(token, newPassword);
+      setStatus("success");
+      setTimeout(() => onComplete(), 3000);
+    } catch (err) {
+      setStatus("error");
+      setMessage(err.errors?.non_field_errors?.[0] || err.message || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif" }}>
+      <div style={{ width: 440, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: status === "success" ? S.greenBg : status === "error" ? S.redBg : `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontSize: 24, marginBottom: 16 }}>
+            {status === "success" ? "✅" : status === "error" ? "❌" : "🔑"}
+          </div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>
+            {status === "success" ? "Password Reset!" : status === "error" ? "Reset Failed" : "Create New Password"}
+          </h2>
+          <p style={{ color: S.textMuted, fontSize: 14, marginTop: 8 }}>
+            {status === "success" ? "Redirecting to login..." : status === "error" ? "There was a problem" : "Enter your new password below"}
+          </p>
+        </div>
+        {status === "form" && (
+          <form onSubmit={handleSubmit}>
+            {message && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{message}</div>}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>New Password</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 6 characters" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Confirm Password</label>
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Resetting..." : "Reset Password"}
+            </button>
+          </form>
+        )}
+        {status === "success" && (
+          <div style={{ textAlign: "center", padding: "24px 0", color: S.textMuted, fontSize: 14 }}>Your password has been reset!</div>
+        )}
+        {status === "error" && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{message}</div>
+            <button type="button" onClick={onComplete} style={{ background: "none", border: "none", color: S.gold, fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>← Back to Login</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AXDispatchPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(AuthAPI.isAuthenticated());
+  const [authScreen, setAuthScreen] = useState("login");
+  const [resetToken, setResetToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState("dashboard");
   const [dispatchers, setDispatchers] = useState([]);
@@ -1021,6 +1153,17 @@ export default function AXDispatchPortal() {
 
   // Fetch data whenever authenticated becomes true
   useEffect(() => {
+    // Check URL for reset token
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const resetParam = urlParams.get('reset');
+
+    if (token && (resetParam === 'true' || window.location.pathname.includes('reset'))) {
+      setResetToken(token);
+      setAuthScreen("reset-password");
+      setIsAuthenticated(false); // force auth screen
+    }
+
     // In React 18 dev + StrictMode, effects can mount/unmount/mount rapidly.
     // Guard async work so we don't end up with multiple Ably subscriptions.
     let cancelled = false;
@@ -1201,9 +1344,26 @@ export default function AXDispatchPortal() {
     };
   }, [isAuthenticated]); // re-run when user logs in
 
-  // Show login screen if not authenticated
+  // Show auth screens if not authenticated
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => { setIsAuthenticated(true); setLoading(true); }} />;
+    if (authScreen === "login") {
+      return <LoginScreen
+        onLogin={() => { setIsAuthenticated(true); setLoading(true); }}
+        onForgotPassword={() => setAuthScreen("forgot-password")}
+      />;
+    }
+    if (authScreen === "forgot-password") {
+      return <ForgotPasswordScreen onBack={() => setAuthScreen("login")} />;
+    }
+    if (authScreen === "reset-password") {
+      return <ResetPasswordScreen
+        token={resetToken}
+        onComplete={() => {
+          setAuthScreen("login");
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }}
+      />;
+    }
   }
 
   // Show loading screen
@@ -2268,8 +2428,8 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
   const [vehicleAssets, setVehicleAssets] = useState([]);
 
   useEffect(() => {
-    RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => {});
-    VehicleAssetsAPI.getAll().then(assets => setVehicleAssets(assets || [])).catch(() => {});
+    RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => { });
+    VehicleAssetsAPI.getAll().then(assets => setVehicleAssets(assets || [])).catch(() => { });
   }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -2447,106 +2607,106 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 
     return (
       <>
-      <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
-              <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: S.gold }}>{rider.name.split(" ").map(n => n[0]).join("")}</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{rider.name}</div>
-              <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
-              <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
-              {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
+        <div>
+          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
+          <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
+                <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: S.gold }}>{rider.name.split(" ").map(n => n[0]).join("")}</div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>{rider.name}</div>
+                <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
+                <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
+                {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
 
-              <div style={{ marginTop: 14 }}>
-                <button
-                  onClick={handleToggleDuty}
-                  disabled={isTogglingDuty || rider.status === "on_delivery"}
-                  style={{
-                    width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer",
-                    fontFamily: "inherit", fontSize: 12, fontWeight: 800,
-                    background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`,
-                    color: "#fff",
-                    opacity: (isTogglingDuty || rider.status === "on_delivery") ? 0.6 : 1,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                    boxShadow: "0 4px 10px rgba(0,0,0,0.15)"
-                  }}
-                >
-                  {isTogglingDuty ? "⏳ Toggling..." : rider.status === "offline" ? "🟢 Go Online" : "🔴 Go Offline"}
-                </button>
-                {rider.status === "on_delivery" && <div style={{ fontSize: 10, color: S.textMuted, marginTop: 6, textAlign: "center" }}>Cannot change status while on a delivery.</div>}
-              </div>
+                <div style={{ marginTop: 14 }}>
+                  <button
+                    onClick={handleToggleDuty}
+                    disabled={isTogglingDuty || rider.status === "on_delivery"}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer",
+                      fontFamily: "inherit", fontSize: 12, fontWeight: 800,
+                      background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`,
+                      color: "#fff",
+                      opacity: (isTogglingDuty || rider.status === "on_delivery") ? 0.6 : 1,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      boxShadow: "0 4px 10px rgba(0,0,0,0.15)"
+                    }}
+                  >
+                    {isTogglingDuty ? "⏳ Toggling..." : rider.status === "offline" ? "🟢 Go Online" : "🔴 Go Offline"}
+                  </button>
+                  {rider.status === "on_delivery" && <div style={{ fontSize: 10, color: S.textMuted, marginTop: 6, textAlign: "center" }}>Cannot change status while on a delivery.</div>}
+                </div>
 
-              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
-                <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
+                <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                  <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
+                  <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
+                </div>
+                <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
+                <button onClick={() => setShowReassignVehicle(true)} style={{ width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🚗 Reassign Vehicle</button>
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
+                  {[{ l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
+                    <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                  ))}
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${S.borderLight}` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Assigned Vehicle</div>
+                    {rider.vehicle_asset ? (
+                      <>
+                        {[
+                          { l: "Asset ID", v: rider.vehicle_asset.asset_id },
+                          { l: "Plate", v: rider.vehicle_asset.plate_number },
+                          { l: "Make/Model", v: `${rider.vehicle_asset.make} ${rider.vehicle_asset.model}` },
+                          { l: "Type", v: (rider.vehicle_asset.vehicle_type || "").toUpperCase() },
+                        ].map(f => (
+                          <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}><span style={{ fontSize: 11, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>{f.v}</span></div>
+                        ))}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 12, color: S.textMuted, fontStyle: "italic" }}>No vehicle assigned</div>
+                    )}
+                  </div>
+                </div>
               </div>
-              <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
-              <button onClick={() => setShowReassignVehicle(true)} style={{ width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🚗 Reassign Vehicle</button>
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
-                {[{ l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
-                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
-                ))}
-                <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${S.borderLight}` }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Assigned Vehicle</div>
-                  {rider.vehicle_asset ? (
-                    <>
-                      {[
-                        { l: "Asset ID", v: rider.vehicle_asset.asset_id },
-                        { l: "Plate", v: rider.vehicle_asset.plate_number },
-                        { l: "Make/Model", v: `${rider.vehicle_asset.make} ${rider.vehicle_asset.model}` },
-                        { l: "Type", v: (rider.vehicle_asset.vehicle_type || "").toUpperCase() },
-                      ].map(f => (
-                        <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}><span style={{ fontSize: 11, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>{f.v}</span></div>
-                      ))}
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 12, color: S.textMuted, fontStyle: "italic" }}>No vehicle assigned</div>
-                  )}
+              <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[{ l: "Total Deliveries", v: rider.totalDeliveries.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
+                    <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+                  ))}
                 </div>
               </div>
             </div>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[{ l: "Total Deliveries", v: rider.totalDeliveries.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
-                  <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", borderBottom: `1px solid ${S.border}` }}><span style={{ fontSize: 13, fontWeight: 700 }}>Order History ({rOrders.length})</span></div>
+              <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "8px 16px", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+                <span>ID</span><span>Merchant</span><span>Route</span><span>Amount</span><span>COD</span><span>Status</span>
+              </div>
+              <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                {rOrders.map(o => (
+                  <div key={o.id} onClick={() => onViewOrder(o.id)} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "10px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", alignItems: "center", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+                    <span style={{ fontSize: 11, color: S.textDim }}>{o.merchant}</span>
+                    <span style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
+                    <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
+                    <Badge status={o.status} />
+                  </div>
                 ))}
               </div>
-            </div>
-          </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-            <div style={{ padding: "14px 18px", borderBottom: `1px solid ${S.border}` }}><span style={{ fontSize: 13, fontWeight: 700 }}>Order History ({rOrders.length})</span></div>
-            <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "8px 16px", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-              <span>ID</span><span>Merchant</span><span>Route</span><span>Amount</span><span>COD</span><span>Status</span>
-            </div>
-            <div style={{ maxHeight: 400, overflowY: "auto" }}>
-              {rOrders.map(o => (
-                <div key={o.id} onClick={() => onViewOrder(o.id)} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "10px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", alignItems: "center", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                  <span style={{ fontSize: 11, color: S.textDim }}>{o.merchant}</span>
-                  <span style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
-                  <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                  <Badge status={o.status} />
-                </div>
-              ))}
             </div>
           </div>
         </div>
-      </div>
-      {showResetPassword && (
-        <ResetRiderPasswordModal
-          rider={rider}
-          onClose={() => setShowResetPassword(false)}
-        />
-      )}
-      {showReassignVehicle && (
-        <ReassignVehicleModal
-          rider={rider}
-          onClose={() => setShowReassignVehicle(false)}
-        />
-      )}
+        {showResetPassword && (
+          <ResetRiderPasswordModal
+            rider={rider}
+            onClose={() => setShowResetPassword(false)}
+          />
+        )}
+        {showReassignVehicle && (
+          <ReassignVehicleModal
+            rider={rider}
+            onClose={() => setShowReassignVehicle(false)}
+          />
+        )}
       </>
     );
   }

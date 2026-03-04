@@ -210,6 +210,7 @@ class QuickSendView(APIView):
                     )
             except Exception as e:
                 logger.warning(f"Failed to send new-order notifications: {e}")
+
         threading.Thread(target=_notify_riders, daemon=True).start()
 
         # Return created order
@@ -344,6 +345,7 @@ class MultiDropView(APIView):
                     )
             except Exception as e:
                 logger.warning(f"Failed to send new-order notifications: {e}")
+
         threading.Thread(target=_notify_riders_multi, daemon=True).start()
 
         # Return created order
@@ -478,6 +480,7 @@ class BulkImportView(APIView):
                     )
             except Exception as e:
                 logger.warning(f"Failed to send new-order notifications: {e}")
+
         threading.Thread(target=_notify_riders_bulk, daemon=True).start()
 
         # Return created order
@@ -1006,6 +1009,9 @@ class OrderStatusChangeView(APIView):
     Consolidated endpoint for riders to change order status.
     POST /api/orders/status/
     """
+
+    # TODO: Add validation to check if the rider is assigned to this order
+    # TODO: Add validation to check if the order is in the correct status to be updated
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
