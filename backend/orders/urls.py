@@ -10,6 +10,7 @@ from .views import (
     CancelOrderView,
     CancelableOrdersView,
     CalculateFareView,
+    BulkCalculateFareView,
     VehicleUpdateView,
     AssignedOrdersView,
     AssignedOrderDetailView,
@@ -41,6 +42,11 @@ urlpatterns = [
     path("multi-drop/", MultiDropView.as_view(), name="multi_drop"),
     path("bulk-import/", BulkImportView.as_view(), name="bulk_import"),
     path("calculate-fare/", CalculateFareView.as_view(), name="calculate_fare"),
+    path(
+        "bulk-calculate-fare/",
+        BulkCalculateFareView.as_view(),
+        name="bulk_calculate_fare",
+    ),
     # Order management endpoints
     path("", OrderListView.as_view(), name="order_list"),
     path("assigned/", AssignedOrdersView.as_view(), name="assigned_orders"),
