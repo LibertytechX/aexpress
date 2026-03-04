@@ -3,6 +3,26 @@ import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAP
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+// Dispatcher portal event tone (wav)
+const EVENT_TONE_URL = new URL('./car_honk_3s_opt1_cluster.wav', import.meta.url).href;
+let eventToneAudio = null;
+
+const playEventTone = () => {
+  try {
+    if (!eventToneAudio) eventToneAudio = new Audio(EVENT_TONE_URL);
+    // Restart from the beginning for repeated events.
+    eventToneAudio.pause();
+    eventToneAudio.currentTime = 0;
+    eventToneAudio.volume = 0.9;
+    const p = eventToneAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((e) => console.warn('[Tone] Playback blocked or failed:', e));
+    }
+  } catch (e) {
+    console.warn('[Tone] Could not play:', e);
+  }
+};
+
 const playChime = (notes) => {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -21,11 +41,8 @@ const playChime = (notes) => {
     setTimeout(() => ctx.close(), 1500);
   } catch (e) { console.warn('[Chime] Could not play:', e); }
 };
-const playNewOrderChime = () => playChime([
-  { freq: 784, start: 0, dur: 0.15 },    // G5
-  { freq: 988, start: 0.15, dur: 0.15 },  // B5
-  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
-]);
+// New order: use the wav tone. Other events keep the original (subtle) chimes.
+const playNewOrderChime = () => playEventTone();
 const playStartedChime = () => playChime([
   { freq: 523, start: 0, dur: 0.12 },    // C5
   { freq: 659, start: 0.12, dur: 0.2 },  // E5
