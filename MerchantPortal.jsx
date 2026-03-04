@@ -3074,14 +3074,32 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
 
+	  // When transitioning Step 1 → Step 2 (Review & Pay) for Quick Send,
+	  // we *lock* the route stats used for pricing so the displayed price does not
+	  // change later when the map finishes (re)computing directions.
+	  const [lockedQuickDistanceKm, setLockedQuickDistanceKm] = useState(null);
+	  const [lockedQuickDurationMin, setLockedQuickDurationMin] = useState(null);
+
   // When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
   // Step 1 should always reflect the *current* addresses via early-route calculation.
   useEffect(() => {
     if (step === 1) {
       setRouteDistance(null);
       setRouteDuration(null);
+	      setLockedQuickDistanceKm(null);
+	      setLockedQuickDurationMin(null);
     }
   }, [step]);
+
+	  const handleProceedToReview = () => {
+	    // Freeze pricing inputs to whatever Step 1 used (early route) so the
+	    // amount doesn't change on Step 2 when OrderMap reports a route.
+	    if (mode === 'quick') {
+	      if (typeof earlyRouteDistance === 'number') setLockedQuickDistanceKm(earlyRouteDistance);
+	      if (typeof earlyRouteDuration === 'number') setLockedQuickDurationMin(earlyRouteDuration);
+	    }
+	    setStep(2);
+	  };
 
   // ─── Bulk Import state ───
   const [bulkText, setBulkText] = useState("");
@@ -3236,19 +3254,29 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation — Quick Send only
-    if (step === 2 && routeDistance && routeDuration && mode === 'quick') {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
-    }
+	    // Quick Send pricing: use the *locked* route stats on Step 2 so price is stable.
+	    if (mode === 'quick') {
+	      const km = (typeof lockedQuickDistanceKm === 'number')
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number')
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number')
+	            ? routeDistance
+	            : null;
+	      const mins = (typeof lockedQuickDurationMin === 'number')
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number')
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number')
+	            ? routeDuration
+	            : null;
 
-    // Step 1 (Quick Send): if we already calculated an early route, use it
-    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
-    }
+	      if (typeof km === 'number' && typeof mins === 'number') {
+	        const tiered = calcTieredPrice(km, pricing.pricing_tiers);
+	        if (tiered !== null) return tiered;
+	        return Math.round(pricing.base_fare + km * pricing.rate_per_km + mins * pricing.rate_per_minute);
+	      }
+	    }
 
     // Fallback: floor fee for tiered, or base fare for simple
     if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
@@ -3313,6 +3341,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (submitting) return;
     const deliveries = getActiveDropoffs();
 
+	    const effectiveQuickDistanceKm = (mode === 'quick')
+	      ? (typeof lockedQuickDistanceKm === 'number'
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number'
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number' ? routeDistance : 0)))
+	      : null;
+	    const effectiveQuickDurationMin = (mode === 'quick')
+	      ? (typeof lockedQuickDurationMin === 'number'
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number'
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number' ? routeDuration : 0)))
+	      : null;
+
     // Prepare order data based on mode
     const orderData = {
       mode: mode,
@@ -3324,12 +3367,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       notes: notes,
       // Include route information for pricing calculation.
       // For multi-drop, send average distance so backend per-unit pricing is roughly correct.
-      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
+	      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
         ? parseFloat((drops.filter(d => d.address.trim() && d.distance_km).reduce((s, d) => s + d.distance_km, 0) / drops.filter(d => d.address.trim() && d.distance_km).length).toFixed(1))
-        : (routeDistance || earlyRouteDistance || 0),
+	        : (mode === 'quick' ? (effectiveQuickDistanceKm || 0) : (routeDistance || earlyRouteDistance || 0)),
       duration_minutes: (mode === 'multi' && drops.filter(d => d.address.trim() && d.duration_minutes).length > 0)
         ? Math.ceil(drops.filter(d => d.address.trim() && d.duration_minutes).reduce((s, d) => s + d.duration_minutes, 0) / drops.filter(d => d.address.trim() && d.duration_minutes).length)
-        : (routeDuration || earlyRouteDuration || 0),
+	        : (mode === 'quick' ? (effectiveQuickDurationMin || 0) : (routeDuration || earlyRouteDuration || 0)),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
     };
@@ -3892,7 +3935,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             </div>
 
             <button
-              onClick={() => setStep(2)}
+	              onClick={handleProceedToReview}
               disabled={!canProceed}
               style={{
                 padding: "14px 32px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: canProceed ? "pointer" : "default",
