@@ -9,6 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from .models import Order, Delivery, Vehicle, OrderEvent
+from .utils import calculate_route
 from .serializers import (
     OrderSerializer,
     VehicleSerializer,
@@ -27,6 +28,7 @@ from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -669,6 +671,114 @@ class CalculateFareView(APIView):
             return Response(
                 {"success": False, "error": f"Invalid data format: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class BulkCalculateFareView(APIView):
+    """
+    API endpoint to calculate fare based on coordinates and order mode for all vehicles.
+
+    POST /api/orders/bulk-calculate-fare/
+    {
+        "mode": "quick", // quick, multi, or bulk
+        "pickup": {"lat": 3.33, "long": 34.99},
+        "deliveries": [{"lat": 32.32, "long": 23.53}]
+    }
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        mode = request.data.get("mode", "quick")
+        pickup = request.data.get("pickup")
+        deliveries = request.data.get("deliveries", [])
+
+        if not pickup or not deliveries:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Missing required fields: pickup and deliveries",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        vehicles = Vehicle.objects.filter(is_active=True)
+        results = {}
+
+        try:
+            if mode == "quick":
+                route_data = calculate_route(origin=pickup, destinations=deliveries)
+                if not route_data:
+                    return Response(
+                        {"success": False, "error": "Could not calculate route"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                dist_km = route_data["distance_km"]
+                dur_mins = route_data["duration_minutes"]
+
+                for vehicle in vehicles:
+                    fare = vehicle.calculate_fare(dist_km, dur_mins)
+                    results[vehicle.name] = {
+                        "price": fare,
+                        "distance_km": dist_km,
+                        "duration_minutes": dur_mins,
+                    }
+
+            elif mode in ["multi", "bulk"]:
+                total_distances = 0
+                total_durations = 0
+                drop_fares = {v.name: 0 for v in vehicles}
+                drop_details = []
+
+                for drop in deliveries:
+                    route_data = calculate_route(origin=pickup, destinations=[drop])
+                    if not route_data:
+                        continue
+
+                    dist_km = route_data["distance_km"]
+                    dur_mins = route_data["duration_minutes"]
+                    total_distances += dist_km
+                    total_durations += dur_mins
+
+                    drop_info = {
+                        "distance_km": dist_km,
+                        "duration_minutes": dur_mins,
+                        "fares": {},
+                    }
+                    for vehicle in vehicles:
+                        fare = vehicle.calculate_fare(dist_km, dur_mins)
+                        drop_fares[vehicle.name] += fare
+                        drop_info["fares"][vehicle.name] = fare
+                    drop_details.append(drop_info)
+
+                if not drop_details:
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Could not calculate route for any delivery",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+                for vehicle in vehicles:
+                    results[vehicle.name] = {
+                        "price": drop_fares[vehicle.name],
+                        "distance_km": round(total_distances, 2),
+                        "duration_minutes": total_durations,
+                        "drop_details": drop_details,
+                    }
+
+            return Response(
+                {"success": True, "mode": mode, "vehicles": results},
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            
+            return Response(
+                {"success": False, "error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
