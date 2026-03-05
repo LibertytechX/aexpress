@@ -58,7 +58,7 @@ class Command(BaseCommand):
             "--threshold",
             type=float,
             default=0.2,
-            help="Flag when relative diff > threshold (default 0.2 = 20%).",
+            help="Flag when relative diff > threshold (default 0.2 = 20 percent).",
         )
         parser.add_argument(
             "--limit",
