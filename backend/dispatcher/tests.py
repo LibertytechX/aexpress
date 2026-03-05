@@ -431,3 +431,131 @@ class VehicleDistanceTodayCommandTests(TestCase):
         )
         asset_no_data.refresh_from_db()
         self.assertEqual(asset_no_data.distance_today, Decimal("0.00"))
+
+
+class VehicleAssetOrdersTodayEndpointTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+
+        self.user = User.objects.create_user(
+            phone="08088880000",
+            email="dispatcher_vehicle_assets@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_vehicle_assets_list_includes_orders_today(self):
+        from authentication.models import User
+        from dispatcher.models import VehicleAsset, Rider
+        from orders.models import Vehicle, Order
+
+        vehicle = Vehicle.objects.create(
+            name="Bike",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+
+        asset = VehicleAsset.objects.create(
+            plate_number="TP-ORD-TDY-1",
+            vehicle_type="bike",
+            unit_of_distance="km",
+        )
+
+        rider_user = User.objects.create_user(
+            phone="08088880001",
+            email="rider_vehicle_assets@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider",
+        )
+        rider = Rider.objects.create(user=rider_user, vehicle_asset=asset)
+
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.datetime.combine(day, datetime.time.min), tz
+        )
+
+        # 2 completed today
+        Order.objects.create(
+            order_number="6159901",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Done",
+            completed_at=start + datetime.timedelta(hours=1),
+        )
+        Order.objects.create(
+            order_number="6159902",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Done",
+            completed_at=start + datetime.timedelta(hours=2),
+        )
+
+        # completed yesterday (should not count)
+        Order.objects.create(
+            order_number="6159903",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Done",
+            completed_at=start - datetime.timedelta(hours=1),
+        )
+
+        # not done today (should not count)
+        Order.objects.create(
+            order_number="6159904",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Assigned",
+            completed_at=start + datetime.timedelta(hours=3),
+        )
+
+        res = self.client.get("/api/dispatch/vehicle-assets/")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        data = res.data
+        if isinstance(data, dict) and "results" in data:
+            rows = data["results"]
+        else:
+            rows = data
+
+        row = next((r for r in rows if str(r.get("id")) == str(asset.id)), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("orders_today"), 2)
+

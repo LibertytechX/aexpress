@@ -1,4 +1,6 @@
 import logging
+import datetime
+
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,6 +14,7 @@ from .serializers import (
 )
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
+from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
@@ -748,6 +751,32 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+
+        # Today metrics (used by dispatcher Vehicles table)
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.datetime.combine(day, datetime.time.min), tz
+        )
+        end = start + datetime.timedelta(days=1)
+
+        qs = qs.annotate(
+            orders_today=Count(
+                "riders__rider_orders",
+                filter=Q(
+                    riders__rider_orders__status="Done",
+                    riders__rider_orders__completed_at__gte=start,
+                    riders__rider_orders__completed_at__lt=end,
+                ),
+                distinct=True,
+            )
+        ).prefetch_related(
+            Prefetch(
+                "riders",
+                queryset=Rider.objects.select_related("user").order_by("created_at"),
+            )
+        )
+
         vtype = self.request.query_params.get("type")
         if vtype:
             qs = qs.filter(vehicle_type=vtype)

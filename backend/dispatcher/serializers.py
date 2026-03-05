@@ -1033,6 +1033,7 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider = serializers.SerializerMethodField()
+    orders_today = serializers.IntegerField(read_only=True, default=0)
 
     class Meta:
         model = VehicleAsset
@@ -1054,6 +1055,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "total_distance",
             "unit_of_distance",
             "distance_today",
+            "orders_today",
             "stop_duration",
             "moved_timestamp",
             "latitude",
@@ -1069,7 +1071,8 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 
     def get_assigned_rider(self, obj):
-        rider = obj.riders.select_related("user").first()
+        # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
+        rider = obj.riders.all().first()
         if rider:
             return {
                 "id": str(rider.id),
