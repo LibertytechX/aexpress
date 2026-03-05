@@ -214,7 +214,7 @@ class QuickSendView(APIView):
                 logger.warning(f"Failed to send new-order notifications: {e}")
 
         threading.Thread(target=_notify_riders, daemon=True).start()
-
+        order_serializer = OrderSerializer(order)
         # Trigger order-created webhook
         try:
             from webhooks.utils import trigger_webhook
@@ -363,6 +363,7 @@ class MultiDropView(APIView):
         # Trigger order-created webhook
         try:
             from webhooks.utils import trigger_webhook
+            order_serializer = OrderSerializer(order)
 
             payload = {
                 "event": "order-created",
@@ -508,6 +509,7 @@ class BulkImportView(APIView):
         # Trigger order-created webhook
         try:
             from webhooks.utils import trigger_webhook
+            order_serializer = OrderSerializer(order)
 
             payload = {
                 "event": "order-created",
