@@ -1,5 +1,6 @@
 from django.test import TestCase
 from unittest.mock import patch
+from decimal import Decimal
 
 from rest_framework import serializers
 
@@ -154,3 +155,68 @@ class OrderCreateSerializerGeocodingTests(TestCase):
         self.assertIsNotNone(order.rider)
         self.assertEqual(order.rider.rider_id, "168817")
         self.assertEqual(order.status, "Assigned")
+
+
+class VehicleDistanceTelemetryTests(TestCase):
+    def test_extract_total_distance_supports_multiple_keys(self):
+        from .management.commands.sync_bike_telemetry import _extract_total_distance
+
+        self.assertEqual(_extract_total_distance({"total_distance": "12.34"}), Decimal("12.34"))
+        self.assertEqual(_extract_total_distance({"travelled": 56.78}), Decimal("56.78"))
+        self.assertEqual(_extract_total_distance({"odometer": "90"}), Decimal("90"))
+        self.assertIsNone(_extract_total_distance({"nope": 1}))
+
+    def test_build_tracking_row_skips_invalid_coords_and_requires_travelled(self):
+        from .models import VehicleAsset
+        from .management.commands.sync_bike_telemetry import _build_tracking_row
+
+        asset = VehicleAsset.objects.create(
+            asset_id="AXT000001",
+            plate_number="TEST-PLATE-001",
+            vehicle_type="bike",
+            total_distance=Decimal("10.00"),
+            unit_of_distance="km",
+        )
+
+        # Invalid coords (0,0) must be skipped even if distance exists
+        row = _build_tracking_row(asset, {"lat": 0, "lng": 0, "total_distance": "11.00", "unit_of_distance": "km"})
+        self.assertIsNone(row)
+
+        # Valid coords should build a row (travelled falls back to asset.total_distance)
+        row = _build_tracking_row(asset, {"lat": "6.50", "lng": "3.30"})
+        self.assertIsNotNone(row)
+        self.assertEqual(row.travelled, Decimal("10.00"))
+        self.assertEqual(row.unit_of_distance, "km")
+
+    def test_upsert_device_does_not_overwrite_distance_when_provider_omits(self):
+        from .models import VehicleAsset
+        from .management.commands.sync_bike_telemetry import _upsert_device
+
+        VehicleAsset.objects.create(
+            asset_id="AXT000002",
+            plate_number="TEST-PLATE-002",
+            vehicle_type="bike",
+            provider_id="dev-1",
+            total_distance=Decimal("123.45"),
+            unit_of_distance="km",
+        )
+
+        # No total_distance/unit_of_distance in payload => must keep existing DB values
+        result, asset = _upsert_device(
+            {
+                "id": "dev-1",
+                "name": "Device 1",
+                "online": True,
+                "lat": "6.5000000",
+                "lng": "3.3000000",
+                "speed": 10,
+            },
+            status_code=200,
+            snippet="ok",
+            dry_run=False,
+        )
+        self.assertIn(result, ("updated", "created"))
+        self.assertIsNotNone(asset)
+        asset.refresh_from_db()
+        self.assertEqual(asset.total_distance, Decimal("123.45"))
+        self.assertEqual(asset.unit_of_distance, "km")
