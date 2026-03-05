@@ -267,3 +267,108 @@ def get_password_reset_email_template(
 </body>
 </html>
 """
+
+
+def send_mobile_password_reset_email(user, otp):
+    """
+    Send OTP-based password reset email to user via Mailgun for the mobile app.
+    """
+    try:
+        # Get Mailgun credentials from environment
+        api_key = os.getenv("MAILGUN_API_KEY")
+        domain = os.getenv("MAILGUN_DOMAIN")
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+
+        if not api_key or not domain:
+            logger.error("Mailgun credentials not configured")
+            return False
+
+        # Create HTML email template
+        html_content = get_mobile_password_reset_email_template(
+            business_name=user.business_name or "Assured Express",
+            contact_name=user.contact_name or user.get_full_name(),
+            otp=otp,
+            portal_name="MOBILE APP",
+        )
+
+        # Send email via Mailgun
+        response = requests.post(
+            f"https://api.mailgun.net/v3/{domain}/messages",
+            auth=("api", api_key),
+            data={
+                "from": f"{from_name} <{from_email}>",
+                "to": [user.email],
+                "subject": "Your Password Reset Code - Assured Express",
+                "html": html_content,
+                "text": f"Your password reset code is: {otp}\n\nThis code will expire in 10 minutes.",
+            },
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Mobile password reset email sent to {user.email}")
+            return True
+        else:
+            logger.error(f"Failed to send mobile password reset email: {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error sending mobile password reset email: {str(e)}")
+        return False
+
+
+def get_mobile_password_reset_email_template(
+    business_name, contact_name, otp, portal_name="MOBILE APP"
+):
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reset Your Password</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f3f4f6;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #1B2A4A 0%, #243656 100%); padding: 40px 32px; text-align: center; border-radius: 16px 16px 0 0;">
+                            <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, #E8A838 0%, #F5C563 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <span style="font-size: 32px; font-weight: 800; color: #1B2A4A;">AX</span>
+                            </div>
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">ASSURED EXPRESS</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500; letter-spacing: 1px;">{portal_name}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 40px 32px;">
+                            <h2 style="margin: 0 0 16px; color: #1B2A4A; font-size: 22px; font-weight: 700;">Reset Your Password</h2>
+                            <p style="margin: 0 0 8px; color: #64748b; font-size: 15px; line-height: 1.6;">Hi <strong style="color: #1B2A4A;">{contact_name}</strong>,</p>
+                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> account. Please use the following code to reset your password:</p>
+                            
+                            <div style="margin: 30px 0; padding: 24px; background-color: #f8fafc; border-radius: 12px; border: 2px dashed #94a3b8; text-align: center;">
+                                <p style="margin: 0 0 12px 0; color: #64748b; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;">Your Reset Code</p>
+                                <h2 style="margin: 0; color: #1B2A4A; font-size: 42px; letter-spacing: 8px; font-family: 'Courier New', Courier, monospace; font-weight: 800;">{otp}</h2>
+                            </div>
+                            
+                            <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+                                <p style="margin: 0; color: #92400E; font-size: 13px; line-height: 1.5;"><strong>⏰ This code expires in 10 minutes</strong><br>For security reasons, this code will only work for 10 minutes.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 24px 32px; border-radius: 0 0 16px 16px; border-top: 1px solid #e2e8f0;">
+                            <p style="margin: 0 0 12px; color: #64748b; font-size: 13px; line-height: 1.5;">
+                                <strong style="color: #1B2A4A;">Need help?</strong><br>support@axpress.net | +234 809 999 9999
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""

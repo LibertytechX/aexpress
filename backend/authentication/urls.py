@@ -14,6 +14,8 @@ from .views import (
     ResetPasswordView,
     VerifyOTPView,
     ResendOTPView,
+    MobileRequestPasswordResetView,
+    MobileResetPasswordView,
 )
 
 app_name = "authentication"
@@ -40,6 +42,16 @@ urlpatterns = [
         name="request_password_reset",
     ),
     path("reset-password/", ResetPasswordView.as_view(), name="reset_password"),
+    path(
+        "mobile/request-password-reset/",
+        MobileRequestPasswordResetView.as_view(),
+        name="mobile_request_password_reset",
+    ),
+    path(
+        "mobile/reset-password/",
+        MobileResetPasswordView.as_view(),
+        name="mobile_reset_password",
+    ),
     # User profile endpoints
     path("me/", UserProfileView.as_view(), name="user_profile"),
     path("profile/", UserProfileView.as_view(), name="update_profile"),

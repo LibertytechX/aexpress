@@ -5,6 +5,29 @@
 
 const API_BASE_URL = window.VITE_API_BASE_URL || 'https://www.orders.axpress.net/api';
 
+const MASK_SECRET = "AX_SECURE_KEY_2026";
+
+/**
+ * Unmask string using XOR with MASK_SECRET
+ * @param {string} maskedKey - Base64 encoded masked key
+ */
+function unmaskPaystackKey(maskedKey) {
+  try {
+    const maskedBytes = Uint8Array.from(atob(maskedKey), c => c.charCodeAt(0));
+    const secretBytes = new TextEncoder().encode(MASK_SECRET);
+    const unmasked = new Uint8Array(maskedBytes.length);
+
+    for (let i = 0; i < maskedBytes.length; i++) {
+      unmasked[i] = maskedBytes[i] ^ secretBytes[i % secretBytes.length];
+    }
+
+    return new TextDecoder().decode(unmasked);
+  } catch (e) {
+    console.error('Failed to unmask key:', e);
+    return null;
+  }
+}
+
 // Token management
 const TokenManager = {
   getAccessToken: () => localStorage.getItem('access_token'),
@@ -388,9 +411,15 @@ const WalletAPI = {
    * Get Paystack public key
    */
   getPaystackKey: async () => {
-    return await apiRequest('/wallet/paystack-key/', {
+    const response = await apiRequest('/wallet/paystack-key/', {
       method: 'GET',
     });
+
+    if (response.success && response.data && response.data.public_key) {
+      response.data.public_key = unmaskPaystackKey(response.data.public_key);
+    }
+
+    return response;
   },
 
   /**
