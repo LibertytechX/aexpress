@@ -1,9 +1,12 @@
 from django.test import TestCase
 from unittest.mock import patch
 from decimal import Decimal
+import datetime
 
 from rest_framework import serializers
 from rest_framework.test import APIClient
+from django.core.management import call_command
+from django.utils import timezone
 
 
 class _Req:
@@ -299,3 +302,72 @@ class OrderPriceUpdateEndpointTests(TestCase):
             format="json",
         )
         self.assertEqual(res2.status_code, 400)
+
+
+class VehicleDistanceTodayCommandTests(TestCase):
+    def _mk_asset(self, plate: str, **kwargs):
+        from .models import VehicleAsset
+
+        return VehicleAsset.objects.create(
+            plate_number=plate,
+            vehicle_type="bike",
+            total_distance=kwargs.get("total_distance"),
+            unit_of_distance=kwargs.get("unit_of_distance"),
+            distance_today=kwargs.get("distance_today"),
+        )
+
+    def _mk_tracking(self, asset, travelled: Decimal, created_at):
+        from .models import VehicleTracking
+
+        row = VehicleTracking.objects.create(
+            vehicle_asset=asset,
+            latitude=Decimal("6.5000000"),
+            longitude=Decimal("3.3000000"),
+            travelled=travelled,
+            unit_of_distance="km",
+        )
+        VehicleTracking.objects.filter(id=row.id).update(created_at=created_at)
+
+    def test_compute_distance_today_uses_first_and_last_snapshot(self):
+        asset = self._mk_asset("TEST-PLATE-DAY-1")
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.datetime.combine(day, datetime.time.min), tz
+        )
+
+        self._mk_tracking(asset, Decimal("100.00"), start + datetime.timedelta(hours=1))
+        self._mk_tracking(asset, Decimal("112.00"), start + datetime.timedelta(hours=5))
+
+        call_command("compute_distance_today", date=day.isoformat())
+        asset.refresh_from_db()
+        self.assertEqual(asset.distance_today, Decimal("12.00"))
+
+    def test_compute_distance_today_clamps_negative_delta(self):
+        asset = self._mk_asset("TEST-PLATE-DAY-2")
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.datetime.combine(day, datetime.time.min), tz
+        )
+
+        self._mk_tracking(asset, Decimal("200.00"), start + datetime.timedelta(hours=1))
+        self._mk_tracking(asset, Decimal("50.00"), start + datetime.timedelta(hours=2))
+
+        call_command("compute_distance_today", date=day.isoformat())
+        asset.refresh_from_db()
+        self.assertEqual(asset.distance_today, Decimal("0.00"))
+
+    def test_compute_distance_today_reset_missing(self):
+        asset_no_data = self._mk_asset(
+            "TEST-PLATE-DAY-3", distance_today=Decimal("5.00")
+        )
+        day = timezone.localdate()
+
+        call_command(
+            "compute_distance_today",
+            date=day.isoformat(),
+            reset_missing=True,
+        )
+        asset_no_data.refresh_from_db()
+        self.assertEqual(asset_no_data.distance_today, Decimal("0.00"))
