@@ -301,6 +301,17 @@ export const OrdersAPI = {
         return normalizeOrder(data);
     },
 
+    async updatePrice(orderNumber, amount) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-price/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ amount })
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update price'));
+        return normalizeOrder(data);
+    },
+
     async create(orderData) {
         const res = await fetchWithAuth(`/dispatch/orders/`, {
             method: 'POST',

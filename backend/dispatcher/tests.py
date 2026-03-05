@@ -3,6 +3,7 @@ from unittest.mock import patch
 from decimal import Decimal
 
 from rest_framework import serializers
+from rest_framework.test import APIClient
 
 
 class _Req:
@@ -220,3 +221,81 @@ class VehicleDistanceTelemetryTests(TestCase):
         asset.refresh_from_db()
         self.assertEqual(asset.total_distance, Decimal("123.45"))
         self.assertEqual(asset.unit_of_distance, "km")
+
+
+class OrderPriceUpdateEndpointTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from orders.models import Vehicle
+
+        self.user = User.objects.create_user(
+            phone="08077776666",
+            email="dispatcher_price@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.vehicle = Vehicle.objects.create(
+            name="Bike-Price",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _create_order(self, **kwargs):
+        from orders.models import Order, Delivery
+
+        order = Order.objects.create(
+            order_number=kwargs.get("order_number", "6159001"),
+            user=self.user,
+            vehicle=self.vehicle,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=kwargs.get("total_amount", Decimal("1000.00")),
+            payment_status=kwargs.get("payment_status", "Pending"),
+            escrow_released=kwargs.get("escrow_released", False),
+            status=kwargs.get("status", "Pending"),
+        )
+        Delivery.objects.create(
+            order=order,
+            dropoff_address="Dropoff",
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+        )
+        return order
+
+    def test_update_price_updates_total_amount(self):
+        order = self._create_order(order_number="6159002")
+        res = self.client.patch(
+            f"/api/dispatch/orders/{order.order_number}/update-price/",
+            {"amount": "1760.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+        order.refresh_from_db()
+        self.assertEqual(order.total_amount, Decimal("1760.00"))
+        self.assertEqual(str(res.data.get("amount")), "1760.00")
+
+    def test_update_price_rejects_paid_or_released(self):
+        order_paid = self._create_order(order_number="6159003", payment_status="Paid")
+        res = self.client.patch(
+            f"/api/dispatch/orders/{order_paid.order_number}/update-price/",
+            {"amount": "1760.00"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400)
+
+        order_rel = self._create_order(order_number="6159004", escrow_released=True)
+        res2 = self.client.patch(
+            f"/api/dispatch/orders/{order_rel.order_number}/update-price/",
+            {"amount": "1760.00"},
+            format="json",
+        )
+        self.assertEqual(res2.status_code, 400)

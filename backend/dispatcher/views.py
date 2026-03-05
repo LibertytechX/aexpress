@@ -140,7 +140,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         .select_related("user", "rider", "rider__user")
         .prefetch_related("deliveries")
     )
-    from .serializers import OrderSerializer, OrderCreateSerializer
+    from .serializers import OrderSerializer, OrderCreateSerializer, OrderPriceUpdateSerializer
 
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -356,6 +356,34 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "rider": rider_name,
             },
         )
+
+        return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["patch"], url_path="update-price")
+    def update_price(self, request, order_number=None):
+        """Update the delivery fee (Order.total_amount).
+
+        This is intentionally a dedicated endpoint because `OrderSerializer.amount`
+        is read-only (computed mapping to total_amount).
+        """
+
+        order = self.get_object()
+
+        # Guardrails: don't allow editing a paid / released order
+        if getattr(order, "payment_status", None) == "Paid" or getattr(
+            order, "escrow_released", False
+        ):
+            return Response(
+                {"error": "Cannot update price for paid/released orders."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = self.OrderPriceUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_amount = ser.validated_data["amount"]
+
+        order.total_amount = new_amount
+        order.save(update_fields=["total_amount", "updated_at"])
 
         return Response(self.get_serializer(order).data)
 

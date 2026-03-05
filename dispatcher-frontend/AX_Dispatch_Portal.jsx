@@ -1728,6 +1728,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
+  const [priceError, setPriceError] = useState("");
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
@@ -1744,7 +1746,22 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   const savePickup = () => { onUpdateOrder(order.id, { pickup: pickupVal }); addLog(order.id, `Pickup address changed to: ${pickupVal}`, "Dispatch", "edit"); setEditPickup(false); };
   const saveDropoff = () => { onUpdateOrder(order.id, { dropoff: dropoffVal }); addLog(order.id, `Dropoff address changed to: ${dropoffVal}`, "Dispatch", "edit"); setEditDropoff(false); };
-  const savePrice = () => { const n = parseInt(priceVal) || order.amount; onUpdateOrder(order.id, { amount: n }); addLog(order.id, `Price changed to ₦${n.toLocaleString()}`, "Dispatch", "edit"); setEditPrice(false); };
+  const savePrice = async () => {
+    const n = Number(priceVal);
+    const next = Number.isFinite(n) && n >= 0 ? n : order.amount;
+    setPriceSaving(true);
+    setPriceError("");
+    try {
+      const updated = await OrdersAPI.updatePrice(order.id, next);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Price changed to ₦${updated.amount.toLocaleString()}`, "Dispatch", "edit");
+      setEditPrice(false);
+    } catch (e) {
+      setPriceError(e?.error || e?.detail || e?.message || "Failed to update price");
+    } finally {
+      setPriceSaving(false);
+    }
+  };
 
   const handleGenerateRelayRoute = async (force = false) => {
     setRelayLoading(true);
@@ -1914,13 +1931,14 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {editPrice ? (
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <span>₦</span><input value={priceVal} onChange={e => setPriceVal(e.target.value)} style={{ width: 80, border: `1px solid ${S.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontFamily: "'Space Mono',monospace", textAlign: "right" }} />
-                    <button onClick={savePrice} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓</button>
-                    <button onClick={() => setEditPrice(false)} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: "pointer" }}>✕</button>
+	                    <button onClick={savePrice} disabled={priceSaving} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>{priceSaving ? "…" : "✓"}</button>
+	                    <button onClick={() => { setEditPrice(false); setPriceError(""); }} disabled={priceSaving} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>✕</button>
                   </div>
                 ) : (
                   <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.amount.toLocaleString()}</span>
                 )}
               </div>
+	              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
               {order.cod > 0 && <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD collection</span><span style={{ fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{order.cod.toLocaleString()}</span></div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD fee</span><span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.codFee.toLocaleString()}</span></div>

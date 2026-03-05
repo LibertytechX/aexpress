@@ -353,6 +353,41 @@ class OrderSerializer(serializers.ModelSerializer):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
 
 
+class OrderPriceUpdateSerializer(serializers.Serializer):
+    """Write serializer for dispatcher price edits (Order.total_amount).
+
+    Frontend uses `amount`. For backward-compatibility we also accept `price`.
+    """
+
+    amount = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+    price = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+
+    def validate(self, attrs):
+        amt = attrs.get("amount")
+        price = attrs.get("price")
+        if amt is None and price is None:
+            raise serializers.ValidationError(
+                {"amount": "Provide 'amount' (or legacy 'price')."}
+            )
+
+        val = amt if amt is not None else price
+        # Normalize to 2dp in case caller sends integer/float-ish decimal.
+        try:
+            val = Decimal(str(val)).quantize(Decimal("0.01"))
+        except Exception:
+            # DecimalField normally prevents this, but keep a friendly error.
+            raise serializers.ValidationError(
+                {"amount": "Invalid amount."}
+            )
+
+        attrs["amount"] = val
+        return attrs
+
+
 class OrderCreateSerializer(serializers.ModelSerializer):
     # Input fields from Frontend
     pickup = serializers.CharField(write_only=True)
