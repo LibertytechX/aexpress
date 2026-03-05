@@ -2887,6 +2887,14 @@ function VehiclesLocationMap({ vehicles }) {
     return { lat, lng };
   };
 
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+
   const median = (arr) => {
     if (!arr || arr.length === 0) return null;
     const s = [...arr].sort((a, b) => a - b);
@@ -3103,6 +3111,8 @@ function VehiclesLocationMap({ vehicles }) {
           const latestColor = latest.engine_status === 'on' ? '#22c55e' : latest.engine_status === 'idle' ? '#F59E0B' : latest.engine_status === 'off' ? '#EF4444' : '#6b7280';
           const latestStatus = latest.engine_status === 'on' ? 'Engine On' : latest.engine_status === 'idle' ? 'Idle' : latest.engine_status === 'off' ? 'Engine Off' : 'Unknown';
           const latestIcon = latest.vehicle_type === 'bike' ? '🏍️' : latest.vehicle_type === 'car' ? '🚗' : '🚐';
+          const totalDistanceStr = fmtDistance(latest.total_distance, latest.unit_of_distance);
+          const distanceTodayStr = fmtDistance(latest.distance_today, latest.unit_of_distance);
           infoWindowRef.current.setContent(
             `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
             `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
@@ -3110,6 +3120,10 @@ function VehiclesLocationMap({ vehicles }) {
             `<div style="color:#555;font-size:11px;margin-top:4px;">${latest.asset_id} • ${(latest.vehicle_type || '').toUpperCase()}</div>` +
             (latest.make || latest.model ? `<div style="color:#888;font-size:10px;">${latest.make || ''} ${latest.model || ''}</div>` : '') +
             (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
+            `<div style="color:#555;font-size:10px;margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">` +
+              `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
+              `<span><span style="color:#888;font-weight:700;">Today:</span> ${distanceTodayStr}</span>` +
+            `</div>` +
             (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
             `</div>`
           );
@@ -3353,6 +3367,16 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
   const iSt = { width: "100%", padding: "8px 10px", border: `1px solid ${S.border}`, borderRadius: 6, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
   const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4 };
 
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+  const totalDistanceStr = fmtDistance(vehicle.total_distance, vehicle.unit_of_distance);
+  const distanceTodayStr = fmtDistance(vehicle.distance_today, vehicle.unit_of_distance);
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
@@ -3428,6 +3452,10 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
               {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
                 <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
               ))}
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Total:</span> {totalDistanceStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today:</span> {distanceTodayStr}</span>
             </div>
             {vehicle.latitude && vehicle.longitude && (
               <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
