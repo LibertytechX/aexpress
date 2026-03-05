@@ -20,6 +20,7 @@ from .emails import (
 )
 from .services import OTPService
 import logging
+from django.db import models
 
 
 logger = logging.getLogger(__name__)
@@ -654,9 +655,10 @@ class MobileRequestPasswordResetView(APIView):
 
     def post(self, request):
         """Generate a 6-digit OTP and send via SMS and Email."""
-        identifier = request.data.get("email") or request.data.get("phone")
+        email = request.data.get("email")
+        phone_number = request.data.get("phone")
 
-        if not identifier:
+        if not email and not phone_number:
             return Response(
                 {"success": False, "error": "Email or phone number is required."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -664,9 +666,10 @@ class MobileRequestPasswordResetView(APIView):
 
         try:
             # Try to find user with this identifier (email or phone)
-            user = User.objects.filter(
-                models.Q(email=identifier) | models.Q(phone=identifier)
-            ).first()
+            if email:
+                user = User.objects.get(email=email)
+            elif phone_number:
+                user = User.objects.get(phone=phone_number)
 
             if user:
                 # Generate a 6-digit OTP
@@ -714,10 +717,10 @@ class MobileRequestPasswordResetView(APIView):
             logger.error(f"Error in mobile password reset request: {str(e)}")
             return Response(
                 {
-                    "success": True,
-                    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email.",
+                    "success": False,
+                    "message": "An error occurred while processing your request. Please try again.",
                 },
-                status=status.HTTP_200_OK,
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
 
