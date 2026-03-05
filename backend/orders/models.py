@@ -428,6 +428,22 @@ class Delivery(models.Model):
     # Sequence for multi-drop
     sequence = models.IntegerField(default=1)
 
+    # Route details (locked in at order creation time)
+    # For multi-drop orders this should represent the leg distance/time to reach
+    # this stop (typically previous stop → this stop).
+    distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Road distance in kilometers for this delivery leg",
+    )
+    duration_minutes = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Estimated duration in minutes for this delivery leg",
+    )
+
     class Meta:
         db_table = "deliveries"
         ordering = ["order", "sequence"]

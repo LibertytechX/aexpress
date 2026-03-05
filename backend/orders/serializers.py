@@ -39,6 +39,8 @@ class DeliverySerializer(serializers.ModelSerializer):
             "package_type",
             "notes",
             "cod_amount",
+            "distance_km",
+            "duration_minutes",
             "status",
             "sequence",
             "created_at",
@@ -214,6 +216,12 @@ class MultiDropDeliverySerializer(serializers.Serializer):
     cod_amount = serializers.DecimalField(
         required=False, max_digits=10, decimal_places=2, default=0
     )
+
+    # Optional per-stop/leg route metrics (frontend-calculated preferred)
+    distance_km = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=10, decimal_places=2
+    )
+    duration_minutes = serializers.IntegerField(required=False, allow_null=True)
 
 
 class MultiDropSerializer(serializers.Serializer):

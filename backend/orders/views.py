@@ -116,6 +116,7 @@ class QuickSendView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
+
         # Create single delivery
         Delivery.objects.create(
             order=order,
@@ -129,6 +130,8 @@ class QuickSendView(APIView):
             receiver_phone=data["receiver_phone"],
             package_type=data.get("package_type", "Box"),
             notes=data.get("notes", ""),
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
             sequence=1,
         )
 
@@ -282,6 +285,7 @@ class MultiDropView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
+
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -297,6 +301,8 @@ class MultiDropView(APIView):
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
                 cod_amount=delivery_data.get("cod_amount", 0),
+                distance_km=delivery_data.get("distance_km"),
+                duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
 
@@ -428,6 +434,7 @@ class BulkImportView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
         )
 
+
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -443,6 +450,8 @@ class BulkImportView(APIView):
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
                 cod_amount=delivery_data.get("cod_amount", 0),
+                distance_km=delivery_data.get("distance_km"),
+                duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
 

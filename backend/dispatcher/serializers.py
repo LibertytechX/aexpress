@@ -344,10 +344,26 @@ class OrderSerializer(serializers.ModelSerializer):
         return method_map.get(obj.payment_method, "Wallet")
 
     def get_distance(self, obj):
-        return "5.2 km"  # Mock
+        # Frontend expects a human-readable string.
+        # Persisted at create time (from frontend-calculated routing) on Order.distance_km.
+        val = getattr(obj, "distance_km", None)
+        if val is None:
+            return None
+        try:
+            km = Decimal(str(val))
+        except Exception:
+            return None
+        return f"{km:.2f} km"
 
     def get_time(self, obj):
-        return "25 mins"  # Mock
+        val = getattr(obj, "duration_minutes", None)
+        if val is None:
+            return None
+        try:
+            minutes = int(val)
+        except Exception:
+            return None
+        return f"{minutes} mins"
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
@@ -637,6 +653,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             receiver_name=receiver_name,
             receiver_phone=receiver_phone,
             package_type=package_type,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
         )
 
         return order
@@ -1033,9 +1051,9 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "registration_expiry",
             "road_worthiness_expiry",
             "engine_status",
-	            "total_distance",
-	            "unit_of_distance",
-	            "distance_today",
+            "total_distance",
+            "unit_of_distance",
+            "distance_today",
             "stop_duration",
             "moved_timestamp",
             "latitude",

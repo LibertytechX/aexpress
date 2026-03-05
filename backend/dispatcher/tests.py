@@ -83,6 +83,10 @@ class OrderCreateSerializerGeocodingTests(TestCase):
         self.assertAlmostEqual(float(d.dropoff_latitude), 6.60, places=6)
         self.assertAlmostEqual(float(d.dropoff_longitude), 3.40, places=6)
 
+        # Persist per-delivery route stats (mirrors payload)
+        self.assertAlmostEqual(float(d.distance_km), 1.2, places=2)
+        self.assertEqual(d.duration_minutes, 10)
+
     @patch("orders.utils.geocode_address", return_value=None)
     def test_relay_order_requires_geocoded_coords(self, geocode_mock):
         from .serializers import OrderCreateSerializer
@@ -159,6 +163,62 @@ class OrderCreateSerializerGeocodingTests(TestCase):
         self.assertIsNotNone(order.rider)
         self.assertEqual(order.rider.rider_id, "168817")
         self.assertEqual(order.status, "Assigned")
+
+        from orders.models import Delivery
+
+        d = Delivery.objects.get(order=order)
+        self.assertAlmostEqual(float(d.distance_km), 1.2, places=2)
+        self.assertEqual(d.duration_minutes, 10)
+
+
+class OrderSerializerRouteStatsTests(TestCase):
+    def test_order_serializer_uses_persisted_distance_and_time(self):
+        from authentication.models import User
+        from orders.models import Order, Delivery, Vehicle
+        from .serializers import OrderSerializer
+
+        user = User.objects.create_user(
+            phone="08055554444",
+            email="dispatcher_stats@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+
+        vehicle = Vehicle.objects.create(
+            name="Bike-Stats",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+
+        order = Order.objects.create(
+            order_number="6159555",
+            user=user,
+            vehicle=vehicle,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            status="Pending",
+            distance_km=Decimal("5.2"),
+            duration_minutes=25,
+        )
+        Delivery.objects.create(
+            order=order,
+            dropoff_address="Dropoff",
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+        )
+
+        data = OrderSerializer(order).data
+        self.assertEqual(data.get("distance"), "5.20 km")
+        self.assertEqual(data.get("time"), "25 mins")
 
 
 class VehicleDistanceTelemetryTests(TestCase):
