@@ -60,6 +60,7 @@ INSTALLED_APPS = [
     "bot",
     "dispatcher",
     "riders",
+    "webhooks",
 ]
 
 MIDDLEWARE = [
@@ -314,6 +315,10 @@ CELERY_BEAT_SCHEDULE = {
     "publish-random-order-offer-every-minute": {
         "task": "riders.tasks.publish_random_order_offer",
         "schedule": crontab(minute="*"),
+    },
+    "webhook-retry-every-30-seconds": {
+        "task": "webhooks.tasks.webhook_retry_cron",
+        "schedule": 30.0,
     },
 }
 

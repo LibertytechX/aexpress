@@ -32,4 +32,5 @@ urlpatterns = [
     path("api/dispatch/", include("dispatcher.urls")),
     path("api/riders/", include("riders.urls")),
     path("api/bot/", include("bot.urls")),
+    path("api/webhooks/", include("webhooks.urls")),
 ]
