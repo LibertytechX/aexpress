@@ -13,9 +13,14 @@ from .serializers import (
     UserProfileSerializer,
     AddressSerializer,
 )
-from .emails import send_verification_email, send_password_reset_email
+from .emails import (
+    send_verification_email,
+    send_password_reset_email,
+    send_mobile_password_reset_email,
+)
 from .services import OTPService
 import logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -633,6 +638,177 @@ class ResetPasswordView(APIView):
             )
         except Exception as e:
             logger.error(f"Error resetting password: {str(e)}")
+            return Response(
+                {
+                    "success": False,
+                    "error": "An error occurred while resetting your password. Please try again.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class MobileRequestPasswordResetView(APIView):
+    """API endpoint for requesting an OTP to reset password (Mobile App)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Generate a 6-digit OTP and send via SMS and Email."""
+        identifier = request.data.get("email") or request.data.get("phone")
+
+        if not identifier:
+            return Response(
+                {"success": False, "error": "Email or phone number is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Try to find user with this identifier (email or phone)
+            user = User.objects.filter(
+                models.Q(email=identifier) | models.Q(phone=identifier)
+            ).first()
+
+            if user:
+                # Generate a 6-digit OTP
+                otp = OTPService.generate_otp()
+
+                # Save token to user
+                user.password_reset_token = otp
+                user.password_reset_token_created = timezone.now()
+                user.save(
+                    update_fields=[
+                        "password_reset_token",
+                        "password_reset_token_created",
+                    ]
+                )
+
+                # Send OTP via SMS
+                try:
+                    # using the existing WhisperSMS service implementation
+                    OTPService.send_sms_otp(user.phone, otp)
+                    logger.info(f"Mobile password reset SMS sent to {user.phone}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send mobile reset SMS to {user.phone}: {str(e)}"
+                    )
+
+                # Send OTP via Email
+                try:
+                    send_mobile_password_reset_email(user, otp)
+                    logger.info(f"Mobile password reset email sent to {user.email}")
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send mobile reset email to {user.email}: {str(e)}"
+                    )
+
+            # Always return success to prevent user enumeration
+            return Response(
+                {
+                    "success": True,
+                    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error in mobile password reset request: {str(e)}")
+            return Response(
+                {
+                    "success": True,
+                    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+
+class MobileResetPasswordView(APIView):
+    """API endpoint for verifying OTP and resetting password (Mobile App)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Validate the 6-digit OTP and update the user's password."""
+        identifier = request.data.get("email") or request.data.get("phone")
+        otp = request.data.get("otp")
+        new_password = request.data.get("new_password")
+        confirm_password = request.data.get("confirm_password")
+
+        # Validate input
+        if not identifier or not otp:
+            return Response(
+                {"success": False, "error": "Email/Phone and OTP are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not new_password or not confirm_password:
+            return Response(
+                {"success": False, "error": "Both password fields are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {"success": False, "error": "Passwords do not match."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 6:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Password must be at least 6 characters long.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Find user with this identifier (email or phone)
+            user = User.objects.filter(
+                models.Q(email=identifier) | models.Q(phone=identifier)
+            ).first()
+
+            if not user or user.password_reset_token != otp:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if OTP is expired (15 minutes limit for mobile OTP)
+            if user.password_reset_token_created:
+                token_age = timezone.now() - user.password_reset_token_created
+                if token_age > timedelta(minutes=15):
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Your reset code has expired. Please request a new one.",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Update password
+            user.set_password(new_password)
+            user.password_reset_token = None
+            user.password_reset_token_created = None
+            user.save(
+                update_fields=[
+                    "password",
+                    "password_reset_token",
+                    "password_reset_token_created",
+                ]
+            )
+
+            logger.info(f"Mobile password reset successfully for user {user.phone}")
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Password reset successfully! You can now login with your new password.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error executing mobile password reset: {str(e)}")
             return Response(
                 {
                     "success": False,
