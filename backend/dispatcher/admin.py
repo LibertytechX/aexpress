@@ -1,5 +1,15 @@
 from django.contrib import admin
-from .models import Rider, DispatcherProfile, Merchant, SystemSettings, ActivityFeed, Zone, RelayNode, VehicleAsset
+from .models import (
+    Rider,
+    DispatcherProfile,
+    Merchant,
+    SystemSettings,
+    ActivityFeed,
+    Zone,
+    RelayNode,
+    VehicleAsset,
+    VehicleTracking,
+)
 
 
 @admin.register(VehicleAsset)
@@ -17,6 +27,27 @@ class VehicleAssetAdmin(admin.ModelAdmin):
     list_filter = ("vehicle_type", "engine_status", "is_active")
     search_fields = ("asset_id", "plate_number", "vin", "make", "model")
     readonly_fields = ("id", "asset_id", "created_at", "updated_at")
+
+
+@admin.register(VehicleTracking)
+class VehicleTrackingAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "vehicle_asset",
+        "travelled",
+        "unit_of_distance",
+        "latitude",
+        "longitude",
+    )
+    list_filter = ("unit_of_distance", "created_at")
+    search_fields = (
+        "vehicle_asset__asset_id",
+        "vehicle_asset__plate_number",
+        "vehicle_asset__provider_id",
+    )
+    autocomplete_fields = ("vehicle_asset",)
+    readonly_fields = ("id", "created_at")
+    ordering = ("-created_at",)
 
 
 @admin.register(Rider)
