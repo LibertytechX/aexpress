@@ -215,8 +215,18 @@ class QuickSendView(APIView):
 
         threading.Thread(target=_notify_riders, daemon=True).start()
 
-        # Return created order
-        order_serializer = OrderSerializer(order)
+        # Trigger order-created webhook
+        try:
+            from webhooks.utils import trigger_webhook
+
+            payload = {
+                "event": "order-created",
+                "timestamp": order.created_at.isoformat(),
+                "data": order_serializer.data,
+            }
+            trigger_webhook("order-created", payload)
+        except Exception as e:
+            logger.error(f"Failed to trigger order-created webhook: {e}")
 
         return Response(
             {
@@ -350,8 +360,18 @@ class MultiDropView(APIView):
 
         threading.Thread(target=_notify_riders_multi, daemon=True).start()
 
-        # Return created order
-        order_serializer = OrderSerializer(order)
+        # Trigger order-created webhook
+        try:
+            from webhooks.utils import trigger_webhook
+
+            payload = {
+                "event": "order-created",
+                "timestamp": order.created_at.isoformat(),
+                "data": order_serializer.data,
+            }
+            trigger_webhook("order-created", payload)
+        except Exception as e:
+            logger.error(f"Failed to trigger order-created webhook: {e}")
 
         return Response(
             {
@@ -485,8 +505,18 @@ class BulkImportView(APIView):
 
         threading.Thread(target=_notify_riders_bulk, daemon=True).start()
 
-        # Return created order
-        order_serializer = OrderSerializer(order)
+        # Trigger order-created webhook
+        try:
+            from webhooks.utils import trigger_webhook
+
+            payload = {
+                "event": "order-created",
+                "timestamp": order.created_at.isoformat(),
+                "data": order_serializer.data,
+            }
+            trigger_webhook("order-created", payload)
+        except Exception as e:
+            logger.error(f"Failed to trigger order-created webhook: {e}")
 
         return Response(
             {
@@ -775,7 +805,7 @@ class BulkCalculateFareView(APIView):
             )
 
         except Exception as e:
-            
+
             return Response(
                 {"success": False, "error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -870,6 +900,21 @@ class CancelOrderView(APIView):
         order.status = "CustomerCanceled"
         order.updated_at = timezone.now()
         order.save()
+
+        # Trigger order-cancelled webhook
+        try:
+            from webhooks.utils import trigger_webhook
+            from .serializers import OrderSerializer
+
+            payload = {
+                "event": "order-cancelled",
+                "timestamp": order.updated_at.isoformat(),
+                "data": OrderSerializer(order).data,
+                "reason": reason,
+            }
+            trigger_webhook("order-cancelled", payload)
+        except Exception as e:
+            logger.error(f"Failed to trigger order-cancelled webhook: {e}")
 
         # Emit live-feed activity event for the dispatcher
         merchant_name = (
@@ -1010,6 +1055,27 @@ def _advance_order(request, order_number, new_status, event_desc):
         update_fields.append("completed_at")
 
     order.save(update_fields=update_fields)
+
+    # Trigger order-completed webhook if status is Done
+    if new_status == "Done":
+        try:
+            from webhooks.utils import trigger_webhook
+            from .serializers import OrderSerializer
+
+            payload = {
+                "event": "order-completed",
+                "timestamp": (
+                    order.completed_at.isoformat()
+                    if order.completed_at
+                    else timezone.now().isoformat()
+                ),
+                "data": OrderSerializer(order).data,
+            }
+            trigger_webhook("order-completed", payload)
+        except Exception as e:
+            logger.error(
+                f"Failed to trigger order-completed webhook in _advance_order: {e}"
+            )
 
     # Update rider location if provided
     rider_profile = getattr(request.user, "rider_profile", None)
@@ -1510,6 +1576,26 @@ class DeliveryCompleteView(APIView):
             order.status = "Done"
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
+
+            # Trigger order-completed webhook
+            try:
+                from webhooks.utils import trigger_webhook
+                from .serializers import OrderSerializer
+
+                payload = {
+                    "event": "order-completed",
+                    "timestamp": (
+                        order.completed_at.isoformat()
+                        if order.completed_at
+                        else timezone.now().isoformat()
+                    ),
+                    "data": OrderSerializer(order).data,
+                }
+                trigger_webhook("order-completed", payload)
+            except Exception as e:
+                logger.error(
+                    f"Failed to trigger order-completed webhook in DeliveryCompleteView: {e}"
+                )
 
             OrderEvent.objects.create(
                 order=order,
