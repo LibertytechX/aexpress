@@ -101,25 +101,6 @@ class SignupSerializer(serializers.ModelSerializer):
             usertype=validated_data.get("usertype", "Merchant"),
         )
 
-        # Trigger merchant-created webhook
-        try:
-            from webhooks.utils import trigger_webhook
-            from .serializers import UserSerializer
-
-            payload = {
-                "event": "merchant-created",
-                "timestamp": user.created_at.isoformat(),
-                "data": UserSerializer(user).data,
-            }
-            trigger_webhook("merchant-created", payload)
-        except Exception as e:
-            # We don't want to fail signup if webhook trigger fails
-            import logging
-
-            logging.getLogger(__name__).error(
-                f"Failed to trigger merchant-created webhook: {e}"
-            )
-
         return user
 
 
