@@ -3,7 +3,7 @@
  * Handles all backend API communication
  */
 
-const API_BASE_URL = 'https://www.orders.axpress.net/api';
+const API_BASE_URL = window.VITE_API_BASE_URL || 'https://www.orders.axpress.net/api';
 
 // Token management
 const TokenManager = {
@@ -14,9 +14,8 @@ const TokenManager = {
     localStorage.setItem('refresh_token', refresh);
   },
   clearTokens: () => {
-    localStorage.removeItem('access_token');
-    localStorage.removeItem('refresh_token');
-    localStorage.removeItem('user');
+    localStorage.clear();
+    sessionStorage.clear();
   },
   getUser: () => {
     const user = localStorage.getItem('user');
@@ -29,6 +28,11 @@ const TokenManager = {
 
 // Helper to extract error message from API response
 function extractErrorMessage(data) {
+  // If the error is an array of objects, extract from the first one
+  if (Array.isArray(data) && data.length > 0) {
+    return extractErrorMessage(data[0]);
+  }
+
   // Check for errors object (Django REST Framework format)
   if (data.errors) {
     // Handle non_field_errors
@@ -55,6 +59,11 @@ function extractErrorMessage(data) {
   // Check for detail field (DRF default)
   if (data.detail) {
     return data.detail;
+  }
+
+  // Check for basic error field
+  if (data.error && typeof data.error === 'string') {
+    return data.error;
   }
 
   // Fallback
@@ -128,14 +137,24 @@ const AuthAPI = {
   },
 
   logout: async () => {
+    // Blacklist the refresh token on the server (best-effort)
     try {
       const refreshToken = TokenManager.getRefreshToken();
-      await apiRequest('/auth/logout/', {
-        method: 'POST',
-        body: JSON.stringify({ refresh: refreshToken }),
-      });
-    } finally {
-      TokenManager.clearTokens();
+      if (refreshToken) {
+        await apiRequest('/auth/logout/', {
+          method: 'POST',
+          body: JSON.stringify({ refresh: refreshToken }),
+        });
+      }
+    } catch (_) { /* always clear locally even if server call fails */ }
+    // Wipe all local storage and session storage
+    TokenManager.clearTokens();
+    // Wipe all browser caches (service workers, fetch cache)
+    if ('caches' in window) {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k)));
+      } catch (_) { }
     }
   },
 
@@ -189,6 +208,51 @@ const AuthAPI = {
   setDefaultAddress: async (addressId) => {
     return await apiRequest(`/auth/addresses/${addressId}/set-default/`, {
       method: 'POST',
+    });
+  },
+
+  resendVerification: async () => {
+    return await apiRequest('/auth/resend-verification/', {
+      method: 'POST',
+    });
+  },
+
+  requestPasswordReset: async (email) => {
+    return await apiRequest('/auth/request-password-reset/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+      skipAuth: true,
+    });
+  },
+
+  resetPassword: async (token, newPassword) => {
+    return await apiRequest('/auth/reset-password/', {
+      method: 'POST',
+      body: JSON.stringify({ token, new_password: newPassword, confirm_password: newPassword }),
+      skipAuth: true,
+    });
+  },
+
+  resendOTP: async (phone) => {
+    return await apiRequest("/auth/resend-otp/", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+      skipAuth: true,
+    });
+  },
+
+  verifyOTP: async (phone, otp) => {
+    return await apiRequest("/auth/verify-otp/", {
+      method: "POST",
+      body: JSON.stringify({ phone, otp }),
+      skipAuth: true,
+    });
+  },
+
+  verifyEmail: async (token) => {
+    return await apiRequest(`/auth/verify-email/?token=${token}`, {
+      method: 'GET',
+      skipAuth: true,
     });
   },
 };
@@ -319,6 +383,31 @@ const WalletAPI = {
       method: 'GET',
     });
   },
+
+  /**
+   * Record that the merchant has claimed to have made a bank transfer.
+   * Creates a pending transaction so the claim is audited.
+   * The actual wallet credit happens when the bank webhook confirms the transfer.
+   * @param {number} amount - Amount in Naira
+   */
+  claimTransfer: async (amount) => {
+    return await apiRequest('/wallet/fund/transfer-claim/', {
+      method: 'POST',
+      body: JSON.stringify({ amount: amount.toString() }),
+    });
+  },
+};
+
+// Activity / Ably API
+const ActivityAPI = {
+  /**
+   * Request an Ably token from the backend.
+   * The returned object contains { token, token_request } and can be
+   * passed directly to Ably's authCallback.
+   */
+  getAblyToken: async () => {
+    return await apiRequest('/dispatch/ably-token/', { method: 'GET' });
+  },
 };
 
 // Export API modules
@@ -326,6 +415,7 @@ window.API = {
   Auth: AuthAPI,
   Orders: OrdersAPI,
   Wallet: WalletAPI,
+  Activity: ActivityAPI,
   Token: TokenManager,
 };
 

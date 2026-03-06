@@ -105,7 +105,7 @@ export default function LoginPage() {
                     <div className="absolute bottom-[-10%] left-[-20%] w-[800px] h-[800px] bg-[#00B67A]/5 blur-[120px] rounded-full" />
                 </div>
 
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3">
+                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3 w-[50px]">
                     <Logo />
                 </motion.div>
 
@@ -309,9 +309,13 @@ export default function LoginPage() {
                                     <input
                                         type="tel"
                                         value={phone}
-                                        onChange={(e) => setPhone(e.target.value)}
+                                        onChange={(e) => {
+                                            const val = e.target.value.replace(/\D/g, '');
+                                            if (val.length <= 11) setPhone(val);
+                                        }}
                                         onKeyPress={handleKeyPress}
                                         placeholder="8099999999"
+                                        maxLength={11}
                                         className="w-full pl-24 pr-4 py-3.5 bg-slate-50/80 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium"
                                     />
                                 </div>

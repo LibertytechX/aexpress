@@ -5,13 +5,20 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { S } from '@/lib/theme';
+import API from '@/lib/api';
 
 export default function SignupScreen() {
   const [step, setStep] = useState(1);
   const [error, setError] = useState("");
-  const { signup } = useAuth();
+  const { signup, verifyOTP } = useAuth();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  // OTP State
+  const [otp, setOtp] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [otpResent, setOtpResent] = useState(false);
 
   // Step 1 fields
   const [contactName, setContactName] = useState("");
@@ -33,7 +40,7 @@ export default function SignupScreen() {
       setLoading(true);
       setError("");
 
-      const success = await signup({
+      const response = await API.Auth.signup({
         business_name: businessName,
         contact_name: contactName,
         phone: phone,
@@ -43,25 +50,49 @@ export default function SignupScreen() {
         address: address
       });
 
-      if (success) {
+      if (response && response.success) {
         setStep(3);
-        // AuthContext handles redirect, but we might want to show success first
-        // actually useAuth().signup redirects to dashboard on success. 
-        // If we want to show Step 3 "You're all set", we might need to adjust AuthContext or handle it here.
-        // For now, let's assume AuthContext redirects. 
-        // Wait, if AuthContext redirects immediately, Step 3 won't be seen.
-        // The original logic showed Step 3 then called onComplete after 1.5s
-        // I'll modify logic to show Step 3 first if possible, but context sets user and redirects.
-        // Let's rely on dashboard redirect for now, or maybe I should have made signup return user without redirecting?
-        // logic in AuthContext: setUser; router.push('/dashboard'); return true;
-        // So it redirects. I'll stick to that. Step 3 "You're all set" might be skipped or flashed.
-        // I'll just let it redirect.
       }
-    } catch (err) {
+    } catch (err: any) {
       setError(err.message || "Signup failed. Please try again.");
       setStep(2); // Go back to step 2 to show error
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    try {
+      setVerifying(true);
+      setError("");
+
+      const success = await verifyOTP(email, otp);
+      if (success) {
+        setStep(4);
+        setTimeout(() => {
+          router.push('/dashboard');
+        }, 2000);
+      } else {
+        setError("Invalid OTP. Please try again.");
+      }
+    } catch (err: any) {
+      setError(err.message || "OTP verification failed.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    try {
+      setResending(true);
+      setError("");
+      await API.Auth.resendOTP(email);
+      setOtpResent(true);
+      setTimeout(() => setOtpResent(false), 5000);
+    } catch (err: any) {
+      setError(err.message || "Failed to resend OTP.");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -81,7 +112,7 @@ export default function SignupScreen() {
 
           {/* Steps indicator */}
           <div style={{ display: "flex", gap: 8, marginTop: 40 }}>
-            {[1, 2, 3].map(s => (
+            {[1, 2, 3, 4].map(s => (
               <div key={s} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <div style={{
                   width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center",
@@ -90,9 +121,9 @@ export default function SignupScreen() {
                   color: step >= s ? S.navy : "rgba(255,255,255,0.3)"
                 }}>{step > s ? "✓" : s}</div>
                 <span style={{ color: step >= s ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.3)", fontSize: 13 }}>
-                  {s === 1 ? "Account" : s === 2 ? "Business" : "Verify"}
+                  {s === 1 ? "Account" : s === 2 ? "Business" : s === 3 ? "Verify" : "Done"}
                 </span>
-                {s < 3 && <div style={{ width: 20, height: 1, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />}
+                {s < 4 && <div style={{ width: 20, height: 1, background: "rgba(255,255,255,0.1)", margin: "0 4px" }} />}
               </div>
             ))}
           </div>
@@ -160,18 +191,18 @@ export default function SignupScreen() {
                   {passwordsMatch ? (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12"/>
+                        <polyline points="20 6 9 17 4 12" />
                       </svg>
                       Passwords match
                     </>
                   ) : (
                     <>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="15" y1="9" x2="9" y2="15"/>
-                        <line x1="9" y1="9" x2="15" y2="15"/>
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="15" y1="9" x2="9" y2="15" />
+                        <line x1="9" y1="9" x2="15" y2="15" />
                       </svg>
-                      Passwords don't match
+                      Passwords don&apos;t match
                     </>
                   )}
                 </div>
@@ -221,11 +252,50 @@ export default function SignupScreen() {
         {step === 3 && (
           <>
             <div style={{ textAlign: "center", marginBottom: 24 }}>
-              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(232,168,56,0.1)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke={S.gold} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
               </div>
-              <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, marginBottom: 8 }}>You're all set!</h2>
-              <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>Your merchant account has been created. Fund your wallet to start sending deliveries.</p>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, marginBottom: 8 }}>Verify your email</h2>
+              <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>We&apos;ve sent a 6-digit code to <br /><span style={{ fontWeight: 600, color: S.navy }}>{email}</span></p>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <input
+                value={otp}
+                onChange={e => setOtp(e.target.value)}
+                placeholder="Enter 6-digit code"
+                maxLength={6}
+                style={{
+                  width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "0 14px", height: 50,
+                  fontSize: 24, fontWeight: 700, fontFamily: "monospace", textAlign: "center", letterSpacing: "8px"
+                }}
+              />
+            </div>
+            <button onClick={handleVerifyOTP} disabled={verifying || otp.length < 6} style={{ width: "100%", height: 46, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: (verifying || otp.length < 6) ? "not-allowed" : "pointer", background: (verifying || otp.length < 6) ? "#e2e8f0" : `linear-gradient(135deg, ${S.gold}, #F5C563)`, color: (verifying || otp.length < 6) ? "#94a3b8" : S.navy, fontFamily: "inherit" }}>
+              {verifying ? "Verifying..." : "Verify Code"}
+            </button>
+            <div style={{ textAlign: "center", marginTop: 20 }}>
+              <span style={{ color: "#64748b", fontSize: 14 }}>Didn&apos;t receive the code? </span>
+              <button
+                onClick={handleResendOTP}
+                disabled={resending || otpResent}
+                style={{
+                  background: "none", border: "none", color: (resending || otpResent) ? "#94a3b8" : S.gold,
+                  fontWeight: 700, fontSize: 14, fontFamily: "inherit", cursor: (resending || otpResent) ? "not-allowed" : "pointer"
+                }}
+              >
+                {resending ? "Sending..." : otpResent ? "Code Sent!" : "Resend Code"}
+              </button>
+            </div>
+          </>
+        )}
+        {step === 4 && (
+          <>
+            <div style={{ textAlign: "center", marginBottom: 24 }}>
+              <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#dcfce7", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+              </div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: S.navy, marginBottom: 8 }}>You&apos;re all set!</h2>
+              <p style={{ color: "#64748b", fontSize: 14, lineHeight: 1.6 }}>Your merchant account has been verified. Fund your wallet to start sending deliveries.</p>
             </div>
             <button onClick={() => router.push('/dashboard')} style={{ width: "100%", height: 46, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", background: `linear-gradient(135deg, ${S.gold}, #F5C563)`, color: S.navy, fontFamily: "inherit" }}>
               Go to Dashboard
@@ -239,6 +309,6 @@ export default function SignupScreen() {
           </div>
         )}
       </div>
-    </div>
+    </div >
   );
 }

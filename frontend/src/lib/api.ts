@@ -206,6 +206,27 @@ export const AuthAPI = {
     }
   },
 
+  verifyOTP: async (email: string, otp: string): Promise<AuthResponse> => {
+    const response = await apiRequest<AuthResponse>('/auth/verify-otp/', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp }),
+      skipAuth: true,
+    });
+    if (response.success && response.tokens && response.user) {
+      TokenManager.setTokens(response.tokens.access, response.tokens.refresh);
+      TokenManager.setUser(response.user);
+    }
+    return response;
+  },
+
+  resendOTP: async (email: string): Promise<{ success: boolean; message?: string }> => {
+    return await apiRequest('/auth/resend-otp/', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+      skipAuth: true,
+    });
+  },
+
   getProfile: async () => apiRequest('/auth/me/', { method: 'GET' }),
 
   updateProfile: async (userData: any) => {

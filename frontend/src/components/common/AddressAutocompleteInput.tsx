@@ -5,8 +5,15 @@ import React, { useState, useEffect, useRef } from 'react';
 declare global {
   interface Window {
     google: any;
+    googleMapsLoaded?: boolean;
   }
 }
+
+// Lagos State bounding box — used for both suggestion filtering and post-geocode validation
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat: number, lng: number) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
 
 interface AddressAutocompleteInputProps {
   value: string;
@@ -17,41 +24,45 @@ interface AddressAutocompleteInputProps {
 }
 
 export default function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }: AddressAutocompleteInputProps) {
-  const [suggestions, setSuggestions] = useState([]);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [error, setError] = useState(null);
-  const inputRef = useRef(null);
-  const dropdownRef = useRef(null);
-  const debounceTimer = useRef(null);
-  const autocompleteService = useRef(null);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+  const autocompleteService = useRef<any>(null);
+  const placesService = useRef<any>(null);
+  const geocoderRef = useRef<any>(null);
 
   // Initialize Google Maps services
   useEffect(() => {
     const initServices = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
+        const dummyDiv = document.createElement('div');
+        placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
+        geocoderRef.current = new window.google.maps.Geocoder();
         setError(null);
       } else {
-        // Retry if not ready
-        const checkInterval = setInterval(() => {
-          if (window.google && window.google.maps && window.google.maps.places) {
-            autocompleteService.current = new window.google.maps.places.AutocompleteService();
-            setError(null);
-            clearInterval(checkInterval);
-          }
-        }, 1000);
+        setError('Google Maps not loaded');
       }
     };
 
-    initServices();
+    if (window.googleMapsLoaded) {
+      initServices();
+    } else {
+      console.log('[AC] Waiting for google-maps-loaded event...');
+      window.addEventListener('google-maps-loaded', initServices);
+      return () => window.removeEventListener('google-maps-loaded', initServices);
+    }
   }, []);
 
   // Close dropdown when clicking outside
   useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target) &&
-        inputRef.current && !inputRef.current.contains(e.target)) {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        inputRef.current && !inputRef.current.contains(e.target as Node)) {
         setShowDropdown(false);
       }
     };
@@ -61,7 +72,7 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
   }, []);
 
   // Fetch suggestions with debouncing
-  const fetchSuggestions = (input) => {
+  const fetchSuggestions = (input: string) => {
     if (!input || input.length < 3) {
       setSuggestions([]);
       setShowDropdown(false);
@@ -69,13 +80,11 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     }
 
     if (!autocompleteService.current) {
-      // Try to init again if null
-      if (window.google && window.google.maps && window.google.maps.places) {
-        autocompleteService.current = new window.google.maps.places.AutocompleteService();
-      } else {
-        return; // Maps not loaded yet
-      }
+      console.error('[AC] fetchSuggestions called but autocompleteService is null');
+      setError('Google Maps not ready');
+      return;
     }
+    console.log('[AC] fetchSuggestions for:', input);
 
     setLoading(true);
     setError(null);
@@ -86,70 +95,71 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     }
 
     debounceTimer.current = setTimeout(() => {
+      // Bias results towards Lagos (bounds is a preference, not a hard filter for AutocompleteService)
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
       const request = {
-        input: input,
-        componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
-        types: ['address'], // Only addresses
-        // Bias results to Lagos
-        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
-        radius: 50000, // 50km radius
+        input,
+        bounds: lagosBounds,
+        componentRestrictions: { country: 'ng' },
       };
 
-      autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
+      autocompleteService.current.getPlacePredictions(request, (predictions: any[], status: string) => {
         setLoading(false);
-
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Filter to only Lagos addresses (optional, based on original code preference)
-          // The original code filtered for 'lagos', let's keep that behavior if desired,
-          // but maybe relax it if user wants broad search. Original code:
-          const lagosResults = predictions.filter(p =>
-            p.description.toLowerCase().includes('lagos')
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
+          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
+          const lagosOnly = predictions.filter(p =>
+            p.terms?.some((t: any) => /lagos/i.test(t.value)) ||
+            /lagos/i.test(p.description)
           );
-
-          if (lagosResults.length === 0) {
-            // Fallback to all results if strict filtering is too aggressive, 
-            // but original code said "No addresses found in Lagos". 
-            // We'll stick to original logic:
-            if (predictions.length > 0) {
-              // If we have predictions but none in Lagos, show them anyway but maybe warn?
-              // Or just show lagos results. Original code showed strict error.
-              // Let's relax it slightly to avoid "No results" if Google returns valid nearby places that don't say "Lagos" explicitly in description but are in Lagos.
-              // But adhering to original code:
-              setSuggestions(lagosResults);
-              if (lagosResults.length === 0) setError('No addresses found in Lagos');
-              else setShowDropdown(true);
-            } else {
-              setError('No addresses found');
-              setSuggestions([]);
-            }
-          } else {
-            setSuggestions(lagosResults);
+          if (lagosOnly.length > 0) {
+            setSuggestions(lagosOnly.slice(0, 8));
             setShowDropdown(true);
             setError(null);
+          } else {
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('Address not found in Lagos — we only deliver within Lagos State.');
           }
-        } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
-          setError('No addresses found');
-          setSuggestions([]);
         } else {
-          // console.error('Autocomplete error:', status);
-          // Don't show generic error to user, just clear suggestions
           setSuggestions([]);
+          setShowDropdown(false);
+          setError('Address not found in Lagos — we only deliver within Lagos State.');
         }
       });
     }, 550); // 550ms debounce
   };
 
-  const handleInputChange = (e) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
     onChange(newValue);
     fetchSuggestions(newValue);
   };
 
-  const handleSelectSuggestion = (suggestion) => {
-    onChange(suggestion.description);
+  const handleSelectSuggestion = (suggestion: any) => {
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
+    // Geocode the selection and validate it falls within Lagos State
+    if (geocoderRef.current) {
+      geocoderRef.current.geocode({ placeId: suggestion.place_id }, (results: any[], status: string) => {
+        if (status === 'OK' && results[0]?.geometry) {
+          const loc = results[0].geometry.location;
+          if (!isInLagos(loc.lat(), loc.lng())) {
+            onChange('');
+            setError('⚠️ Outside service area — we only deliver within Lagos State.');
+          } else {
+            onChange(suggestion.description);
+          }
+        } else {
+          onChange(suggestion.description); // geocode failed, allow through and let backend validate
+        }
+      });
+    } else {
+      onChange(suggestion.description);
+    }
   };
 
   return (
@@ -243,3 +253,4 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     </div>
   );
 }
+

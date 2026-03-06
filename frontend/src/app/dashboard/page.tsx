@@ -4,13 +4,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import API, { TokenManager } from '@/lib/api';
 import NotificationSidebar from '@/components/common/NotificationSidebar';
 import { useRouter } from 'next/navigation';
+import Logo from '@/components/ui/logo';
 
 // declare global window interface extension
 declare global {
   interface Window {
     PaystackPop: any;
     google: any;
-    googleMapsLoaded: boolean;
+    googleMapsLoaded?: boolean;
   }
 }
 
@@ -234,6 +235,7 @@ export default function DashboardPage() {
   const [verificationToken, setVerificationToken] = useState(null);
   const [passwordResetToken, setPasswordResetToken] = useState(null);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [showAppModal, setShowAppModal] = useState(false);
 
   const showNotif = (msg, type = "success") => {
     setNotification({ msg, type });
@@ -320,19 +322,24 @@ export default function DashboardPage() {
       const response = await API.Orders.cancelOrder(orderNumber);
       if (response.success) {
         showNotif(response.message, 'success');
-        if (response.refund.processed) {
+        if (response.refund && response.refund.processed) {
           showNotif(`₦${response.refund.amount.toLocaleString()} refunded to wallet`, 'success');
         }
         await loadOrders();
         await loadWalletBalance();
         await loadTransactions();
         setOrderDetailId(null); // Go back to orders list
+        return { success: true };
       } else {
-        showNotif(response.error || 'Failed to cancel order', 'error');
+        const errorMsg = response.error || response.detail || 'Failed to cancel order';
+        showNotif(errorMsg, 'error');
+        return { success: false, error: errorMsg };
       }
-    } catch (error) {
-      showNotif('Failed to cancel order', 'error');
+    } catch (error: any) {
+      const errorMsg = error.message || 'Failed to cancel order';
+      showNotif(errorMsg, 'error');
       console.error('Cancel order error:', error);
+      return { success: false, error: errorMsg };
     } finally {
       setLoading(false);
     }
@@ -477,7 +484,10 @@ export default function DashboardPage() {
           fontFamily: "'Space Mono', monospace", marginBottom: 24,
           boxShadow: "0 8px 32px rgba(251, 177, 47, 0.3)",
           animation: "pulse 1.5s ease-in-out infinite"
-        }}>AX</div>
+        }}>
+          <Logo />
+        </div>
+
         <div style={{ color: "rgba(255,255,255,0.7)", fontSize: 14, fontWeight: 500, letterSpacing: "1px" }}>Loading Merchant Portal...</div>
         <style>{`@keyframes pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.95); opacity: 0.8; } }`}</style>
       </div>
@@ -659,10 +669,12 @@ export default function DashboardPage() {
               width: 36, height: 36, borderRadius: 10, background: S.gold,
               display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16, color: S.navy,
               fontFamily: "'Outfit', sans-serif", boxShadow: "0 4px 10px rgba(251, 177, 47, 0.3)"
-            }}>AX</div>
+            }}>
+              <Logo />
+            </div>
             {!collapsed && (
               <div>
-                <div style={{ color: "#fff", fontWeight: 700, fontSize: 18, letterSpacing: "-0.5px", fontFamily: "'Outfit', sans-serif" }}>Donezo</div>
+                <div style={{ color: "#fff", fontWeight: 700, fontSize: 18, letterSpacing: "-0.5px", fontFamily: "'Outfit', sans-serif" }}>{currentUser?.business_name || "User"}</div>
                 <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 11, fontWeight: 500, marginTop: -2 }}>Merchant Portal</div>
               </div>
             )}
@@ -730,12 +742,18 @@ export default function DashboardPage() {
                 </div>
                 <div style={{ color: "#fff", fontSize: 14, fontWeight: 700, marginBottom: 4, fontFamily: "'Outfit', sans-serif" }}>Download our Mobile App</div>
                 <div style={{ color: "rgba(255,255,255,0.6)", fontSize: 11, marginBottom: 16, lineHeight: 1.4 }}>Get easy access to your orders on the go.</div>
-                <button style={{
-                  width: "100%", padding: "10px", borderRadius: 12, border: "none",
-                  background: S.green, color: "#ffffff", fontSize: 12, fontWeight: 600,
-                  cursor: "pointer", fontFamily: "'Outfit', sans-serif",
-                  boxShadow: "0 4px 12px rgba(0, 182, 122, 0.3)"
-                }}>Download</button>
+                <button
+                  onClick={() => setShowAppModal(true)}
+                  style={{
+                    width: "100%", padding: "10px", borderRadius: 12, border: "none",
+                    background: S.green, color: "#ffffff", fontSize: 12, fontWeight: 600,
+                    cursor: "pointer", fontFamily: "'Outfit', sans-serif",
+                    boxShadow: "0 4px 12px rgba(0, 182, 122, 0.3)",
+                    transition: "transform 0.2s"
+                  }}
+                  onMouseOver={e => e.currentTarget.style.transform = "translateY(-1px)"}
+                  onMouseOut={e => e.currentTarget.style.transform = "none"}
+                >Download</button>
               </div>
             </div>
           </div>
@@ -969,6 +987,7 @@ export default function DashboardPage() {
               onSelectOrder={setOrderDetailId}
               onBack={() => setOrderDetailId(null)}
               onCancelOrder={handleCancelOrder}
+              onRefresh={loadOrders}
             />
           )}
           {screen === "wallet" && (
@@ -997,11 +1016,135 @@ export default function DashboardPage() {
         @keyframes slideIn { from { transform: translateX(30px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes scaleUp { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         * { box-sizing: border-box; }
         button:hover { filter: brightness(1.05); }
         input:focus, select:focus, textarea:focus { outline: 2px solid ${S.gold}; outline-offset: -1px; }
         ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
       `}</style>
+
+      {/* ——— Mobile App "Coming Soon" Modal ——— */}
+      {showAppModal && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAppModal(false); }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "rgba(15, 23, 42, 0.6)", backdropFilter: "blur(12px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 24, animation: "fadeIn 0.25s ease"
+          }}
+        >
+          <div style={{
+            background: "#fff", borderRadius: 28, width: "100%", maxWidth: 400,
+            overflow: "hidden", position: "relative",
+            boxShadow: "0 25px 60px -12px rgba(0,0,0,0.35)",
+            animation: "scaleUp 0.35s cubic-bezier(0.16,1,0.3,1)"
+          }}>
+            {/* Close */}
+            <button
+              onClick={() => setShowAppModal(false)}
+              style={{
+                position: "absolute", top: 14, right: 14, zIndex: 10,
+                width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.2)",
+                border: "none", color: "#fff", fontSize: 16, lineHeight: 1,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "background 0.2s"
+              }}
+              onMouseOver={e => e.currentTarget.style.background = "rgba(255,255,255,0.3)"}
+              onMouseOut={e => e.currentTarget.style.background = "rgba(255,255,255,0.2)"}
+            >×</button>
+
+            {/* Hero gradient with phone illustration */}
+            <div style={{
+              background: `linear-gradient(145deg, ${S.navy} 0%, #1e40af 100%)`,
+              padding: "40px 24px 0", height: 200,
+              display: "flex", justifyContent: "center", alignItems: "flex-end",
+              overflow: "hidden", position: "relative"
+            }}>
+              {/* Decorative circles */}
+              <div style={{ position: "absolute", top: -30, left: -30, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
+              <div style={{ position: "absolute", bottom: -20, right: -20, width: 80, height: 80, borderRadius: "50%", background: "rgba(251,177,47,0.15)" }} />
+
+              {/* iPhone outline */}
+              <div style={{
+                width: 120, height: 240,
+                borderRadius: "22px 22px 0 0",
+                border: "2.5px solid rgba(255,255,255,0.35)",
+                borderBottom: "none",
+                background: "rgba(255,255,255,0.08)",
+                backdropFilter: "blur(4px)",
+                display: "flex", flexDirection: "column",
+                alignItems: "center", padding: "10px 8px 0",
+                transform: "translateY(4px)",
+                boxShadow: "0 -12px 32px rgba(0,0,0,0.25)"
+              }}>
+                {/* Notch */}
+                <div style={{ width: 36, height: 5, borderRadius: 3, background: "rgba(255,255,255,0.25)", marginBottom: 10 }} />
+                {/* Screen content */}
+                <div style={{
+                  flex: 1, width: "100%",
+                  background: "#fff", borderTopLeftRadius: 14, borderTopRightRadius: 14,
+                  display: "flex", flexDirection: "column", alignItems: "center",
+                  justifyContent: "center", gap: 8, padding: 12
+                }}>
+                  <div style={{ width: 42, height: 42, borderRadius: 12, background: S.gold, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 20, boxShadow: `0 4px 12px rgba(251,177,47,0.4)` }}>📦</div>
+                  <div style={{ width: "70%", height: 8, borderRadius: 4, background: "#f1f5f9" }} />
+                  <div style={{ width: "50%", height: 6, borderRadius: 4, background: "#f8fafc" }} />
+                  <div style={{ width: "80%", height: 28, borderRadius: 8, background: S.green, marginTop: 4, opacity: 0.2 }} />
+                </div>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div style={{ padding: "28px 24px 24px", textAlign: "center" }}>
+              <span style={{
+                display: "inline-block", padding: "4px 14px",
+                background: "#fef3c7", color: "#b45309",
+                borderRadius: 20, fontSize: 11, fontWeight: 800,
+                letterSpacing: 0.8, textTransform: "uppercase", marginBottom: 14
+              }}>Coming Soon</span>
+
+              <h2 style={{ fontSize: 22, fontWeight: 800, color: S.navy, margin: "0 0 10px", fontFamily: "'Outfit', sans-serif" }}>
+                AExpress on Mobile
+              </h2>
+              <p style={{ fontSize: 14, color: S.gray, lineHeight: 1.6, margin: "0 0 24px" }}>
+                We&apos;re crafting an amazing mobile experience. Track deliveries, place orders &amp; manage your business — right from your phone.
+              </p>
+
+              {/* Platform badges */}
+              <div style={{ display: "flex", gap: 12 }}>
+                {[
+                  { icon: "🍎", label: "App Store", sub: "iOS" },
+                  { icon: "🤖", label: "Google Play", sub: "Android" }
+                ].map(p => (
+                  <div key={p.label} style={{
+                    flex: 1, padding: "14px 12px",
+                    border: "1.5px solid #e2e8f0", borderRadius: 14,
+                    display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                    background: "#f8fafc", position: "relative", overflow: "hidden"
+                  }}>
+                    <div style={{ fontSize: 24 }}>{p.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{p.label}</div>
+                    <div style={{ fontSize: 11, color: S.grayLight }}>{p.sub}</div>
+                    <div style={{
+                      position: "absolute", top: 6, right: 8,
+                      fontSize: 9, fontWeight: 800, color: "#d97706",
+                      background: "#fef3c7", borderRadius: 6,
+                      padding: "1px 5px", letterSpacing: 0.4
+                    }}>SOON</div>
+                  </div>
+                ))}
+              </div>
+
+              <p style={{ fontSize: 11, color: S.grayLight, marginTop: 20 }}>
+                Click outside to close
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -1921,7 +2064,7 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
       {/* Welcome */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: S.navy, margin: 0 }}>Good afternoon, {currentUser?.contact_name?.split(' ')[0] || "User"}</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: S.navy, margin: 0 }}>Good afternoon, {currentUser?.contact_name?.split(' ')[0] + " " + currentUser?.contact_name?.split(' ')[1] || "User"}</h2>
           <p style={{ color: S.gray, fontSize: 14, margin: "4px 0 0" }}>Here&apos;s your delivery overview</p>
         </div>
         <button onClick={onNewOrder} style={{
@@ -2683,9 +2826,27 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Vehicle pricing from backend ───
   const [vehiclePricing, setVehiclePricing] = useState({
-    Bike: { base_fare: 500, rate_per_km: 50, rate_per_minute: 10 },
-    Car: { base_fare: 1000, rate_per_km: 100, rate_per_minute: 20 },
-    Van: { base_fare: 2000, rate_per_km: 200, rate_per_minute: 40 }
+    Bike: {
+      base_fare: 0, rate_per_km: 275, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 6, floor_fee: 1700,
+        tiers: [{ max_km: 10, rate: 275 }, { max_km: 15, rate: 235 }, { rate: 200 }]
+      }
+    },
+    Car: {
+      base_fare: 0, rate_per_km: 350, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 3, floor_fee: 2500,
+        tiers: [{ max_km: 8, rate: 350 }, { max_km: 15, rate: 300 }, { rate: 250 }]
+      }
+    },
+    Van: {
+      base_fare: 0, rate_per_km: 500, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 3, floor_fee: 5000,
+        tiers: [{ max_km: 8, rate: 500 }, { max_km: 15, rate: 450 }, { rate: 400 }]
+      }
+    },
   });
 
   // ─── Early price estimation (Step 1) ───
@@ -2712,6 +2873,23 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     setDropoffAddress(value);
   };
 
+  // ─── Same-address validation ───
+  const [sameAddressError, setSameAddressError] = useState(false);
+  const normaliseAddr = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+
+  // Fires reactively whenever either address changes — guaranteed real-time
+  useEffect(() => {
+    if (pickupAddress && dropoffAddress && normaliseAddr(pickupAddress) === normaliseAddr(dropoffAddress)) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSameAddressError(true);
+    } else {
+      setSameAddressError(false);
+    }
+  }, [pickupAddress, dropoffAddress]);
+
+  // Track whether user has tried to proceed (to show required-field errors)
+  const [triedProceed, setTriedProceed] = useState(false);
+
   // ─── Load vehicle pricing from backend ───
   useEffect(() => {
     const loadVehiclePricing = async () => {
@@ -2726,7 +2904,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               //@ts-ignore
               rate_per_km: parseFloat(v.rate_per_km),
               //@ts-ignore
-              rate_per_minute: parseFloat(v.rate_per_minute)
+              rate_per_minute: parseFloat(v.rate_per_minute),
+              //@ts-ignore
+              pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
             };
           });
           setVehiclePricing(pricing as any);
@@ -2978,6 +3158,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     setBulkRows(bulkRows.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
+  // ─── Tiered price calculation (rate-switch with boundary floors) ───
+  const calcTieredPrice = (km, pt) => {
+    if (!pt || pt.type !== 'tiered') return null;
+    if (km <= pt.floor_km) return pt.floor_fee;
+    const t = pt.tiers || [];
+    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
+    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
+    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
+    return Math.round(km * (t[t.length - 1]?.rate || 0));
+  };
+
   // ─── Price calculation ───
   // Calculate price for a specific vehicle using early route data
   const calculateEarlyPrice = (vehicleName) => {
@@ -2986,11 +3177,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicleName];
     if (!pricing) return null;
 
+    const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+
     const distanceCost = earlyRouteDistance * pricing.rate_per_km;
     const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const total = pricing.base_fare + distanceCost + timeCost;
-
-    return Math.round(total);
+    return Math.round(pricing.base_fare + distanceCost + timeCost);
   };
 
   const getActiveDropoffs = () => {
@@ -3008,24 +3200,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return 0;
 
     // Step 2 uses the full route (map) calculation.
-    // IMPORTANT: Don&apos;t use Step 2 route values on Step 1, otherwise pricing can appear "stuck"
-    // after navigating Step 2 → Step 1 and editing addresses.
     if (step === 2 && routeDistance && routeDuration) {
-      const distanceCost = routeDistance * pricing.rate_per_km;
-      const timeCost = routeDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total); // Round to nearest naira
+      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
     }
 
     // Step 1 (Quick Send): if we already calculated an early route, use it
     if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-      const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-      const total = pricing.base_fare + distanceCost + timeCost;
-      return Math.round(total);
+      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
     }
 
-    // Fallback: estimate based on base fare only (will be updated when route loads)
+    // Fallback: floor fee for tiered, or base fare for simple
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
     return pricing.base_fare;
   };
 
@@ -3033,7 +3222,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const totalCost = totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
-  const canProceed = pickupAddress && totalDeliveries > 0;
+  const quickValid = mode !== 'quick' || (
+    !!dropoffAddress && !!receiverName.trim() && !!receiverPhone.trim() && !sameAddressError
+  );
+  const canProceed = !!pickupAddress && totalDeliveries > 0 && quickValid;
 
   const handleConfirmAll = () => {
     const deliveries = getActiveDropoffs();
@@ -3095,8 +3287,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const vehicles = [
     { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", comingSoon: true },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", comingSoon: true },
   ];
 
   const modeConfig = [
@@ -3173,8 +3365,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 value={dropoffAddress}
                 onChange={handleDropoffChange}
                 placeholder="Enter delivery address"
-                style={{ ...inputStyle, marginBottom: 10 }}
+                style={{ ...inputStyle, marginBottom: sameAddressError ? 0 : 10, border: sameAddressError ? '1.5px solid #ef4444' : inputStyle.border }}
               />
+
+              {/* Same-address error banner */}
+              {sameAddressError && (
+                <div style={{
+                  margin: '8px 0 10px',
+                  padding: '10px 14px',
+                  background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
+                  display: 'flex', alignItems: 'flex-start', gap: 10
+                }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>🚧</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#b91c1c', marginBottom: 2 }}>Pickup &amp; dropoff can&apos;t be the same address</div>
+                    <div style={{ fontSize: 11, color: '#dc2626' }}>Please enter a different delivery destination.</div>
+                  </div>
+                </div>
+              )}
 
               {/* ═══ EARLY PRICE ESTIMATION ═══ */}
               {pickupAddress && dropoffAddress && (
@@ -3235,35 +3443,37 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                         {["Bike", "Car", "Van"].map(vehicleName => {
                           const price = calculateEarlyPrice(vehicleName);
                           const isSelected = vehicle === vehicleName;
+                          const isComingSoon = vehicleName === "Car" || vehicleName === "Van";
 
                           return (
                             <div
                               key={vehicleName}
-                              onClick={() => setVehicle(vehicleName)}
+                              onClick={() => !isComingSoon && setVehicle(vehicleName)}
                               style={{
-                                background: isSelected ? "#fff" : "#fef3c7",
-                                border: isSelected ? "2px solid #f59e0b" : "1px solid #fbbf24",
+                                background: isSelected && !isComingSoon ? "#fff" : "#fef3c7",
+                                border: isSelected && !isComingSoon ? "2px solid #f59e0b" : "1px solid #fbbf24",
                                 borderRadius: 10,
                                 padding: "10px 8px",
                                 textAlign: "center",
-                                cursor: "pointer",
+                                cursor: isComingSoon ? "not-allowed" : "pointer",
                                 transition: "all 0.2s ease",
-                                boxShadow: isSelected ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none"
+                                boxShadow: isSelected && !isComingSoon ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none",
+                                opacity: isComingSoon ? 0.72 : 1,
+                                position: "relative"
                               }}
                             >
-                              <div style={{
-                                fontSize: 11,
-                                fontWeight: 700,
-                                color: "#92400e",
-                                marginBottom: 4
-                              }}>
+                              {isComingSoon && (
+                                <div style={{
+                                  position: "absolute", top: 4, right: 4,
+                                  background: "#d1d5db", color: "#6b7280",
+                                  fontSize: 7, fontWeight: 700, padding: "1px 4px",
+                                  borderRadius: 3, textTransform: "uppercase", letterSpacing: 0.3
+                                }}>Soon</div>
+                              )}
+                              <div style={{ fontSize: 11, fontWeight: 700, color: isComingSoon ? "#a8a29e" : "#92400e", marginBottom: 4 }}>
                                 {vehicleName === "Bike" ? "🏍️" : vehicleName === "Car" ? "🚗" : "🚐"} {vehicleName}
                               </div>
-                              <div style={{
-                                fontSize: 16,
-                                fontWeight: 800,
-                                color: "#b45309"
-                              }}>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: isComingSoon ? "#a8a29e" : "#b45309" }}>
                                 ₦{price?.toLocaleString() || "—"}
                               </div>
                             </div>
@@ -3285,9 +3495,35 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 </div>
               )}
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
-                <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={inputStyle} />
-                <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={inputStyle} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    value={receiverName}
+                    onChange={e => setReceiverName(e.target.value)}
+                    placeholder="Receiver name *"
+                    style={{
+                      ...inputStyle,
+                      border: triedProceed && !receiverName.trim() ? '1.5px solid #ef4444' : inputStyle.border
+                    }}
+                  />
+                  {triedProceed && !receiverName.trim() && (
+                    <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>Required</div>
+                  )}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    value={receiverPhone}
+                    onChange={e => setReceiverPhone(e.target.value)}
+                    placeholder="Receiver phone *"
+                    style={{
+                      ...inputStyle,
+                      border: triedProceed && !receiverPhone.trim() ? '1.5px solid #ef4444' : inputStyle.border
+                    }}
+                  />
+                  {triedProceed && !receiverPhone.trim() && (
+                    <div style={{ fontSize: 11, color: '#ef4444', marginTop: 4 }}>Required</div>
+                  )}
+                </div>
               </div>
               <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Notes for driver (optional)"
                 style={{ ...inputStyle, height: "auto", padding: "10px 14px", minHeight: 44, resize: "vertical" }} />
@@ -3503,25 +3739,48 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Vehicle</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
               {vehicles.map(v => {
+                console.log(vehicles, "vehicles")
                 const isSelected = vehicle === v.id;
                 const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
                 const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
 
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
+                console.log(baseFare, "baseFare")
+
                 const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
+                console.log(earlyPrice, "earlyPrice")
+
                 const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
 
+                console.log(displayPrice, "displayPrice")
                 return (
-                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                    background: isSelected ? S.goldPale : "#f8fafc",
-                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
-                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                    transition: "all 0.2s"
-                  }}>
-                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
+                  <button
+                    key={v.id}
+                    onClick={() => !v.comingSoon && setVehicle(v.id)}
+                    disabled={v.comingSoon}
+                    style={{
+                      background: v.comingSoon ? "#f8fafc" : isSelected ? S.goldPale : "#f8fafc",
+                      border: isSelected && !v.comingSoon ? `2px solid ${S.gold}` : "2px solid transparent",
+                      borderRadius: 12, padding: "14px 10px",
+                      cursor: v.comingSoon ? "not-allowed" : "pointer",
+                      textAlign: "center", fontFamily: "inherit",
+                      transition: "all 0.2s",
+                      opacity: v.comingSoon ? 0.7 : 1,
+                      position: "relative"
+                    }}
+                  >
+                    {v.comingSoon && (
+                      <div style={{
+                        position: "absolute", top: 6, right: 6,
+                        background: "#e2e8f0", color: "#64748b",
+                        fontSize: 8, fontWeight: 700, padding: "2px 5px",
+                        borderRadius: 4, textTransform: "uppercase", letterSpacing: 0.3
+                      }}>Soon</div>
+                    )}
+                    <div style={{ color: v.comingSoon ? S.grayLight : isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: v.comingSoon ? S.grayLight : S.navy }}>{v.label}</div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? S.grayLight : S.gold, marginTop: 6 }}>
                       {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
                     </div>
                     <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
@@ -3565,8 +3824,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             </div>
 
             <button
-              onClick={() => setStep(2)}
-              disabled={!canProceed}
+              onClick={() => {
+                setTriedProceed(true);
+                if (canProceed) setStep(2);
+              }}
+              disabled={false}
               style={{
                 padding: "14px 32px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: canProceed ? "pointer" : "default",
                 background: canProceed ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#e2e8f0",
@@ -3715,8 +3977,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }) {
+function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, onRefresh }) {
   const [filter, setFilter] = useState("all");
+  const [cancelModalOrder, setCancelModalOrder] = useState<any>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isCanceling, setIsCanceling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   // Helper function to get vehicle icon
   const getVehicleIcon = (vehicleName) => {
@@ -3749,9 +4015,42 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
 
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: S.gold, fontSize: 14, fontWeight: 600, cursor: "pointer", marginBottom: 16, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
-          ← Back to Orders
-        </button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: S.gold, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
+            ← Back to Orders
+          </button>
+
+          {onRefresh && (
+            <button
+              onClick={async () => {
+                if (isRefreshing) return;
+                setIsRefreshing(true);
+                await onRefresh();
+                setTimeout(() => setIsRefreshing(false), 500); // minimum visual feedback
+              }}
+              style={{
+                background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8,
+                padding: "6px 12px", display: "flex", alignItems: "center", gap: 6,
+                fontSize: 12, fontWeight: 600, color: S.navy, cursor: "pointer",
+                transition: "all 0.2s"
+              }}
+              onMouseOver={e => e.currentTarget.style.background = "#f1f5f9"}
+              onMouseOut={e => e.currentTarget.style.background = "#f8fafc"}
+            >
+              <svg
+                className={isRefreshing ? "spinner" : ""}
+                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                style={{ width: 14, height: 14, animation: isRefreshing ? "spin 1s linear infinite" : "none" }}
+              >
+                <path d="M21 2v6h-6"></path>
+                <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+                <path d="M3 22v-6h6"></path>
+                <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+              </svg>
+              Refresh
+            </button>
+          )}
+        </div>
         <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", overflow: "hidden" }}>
           <div style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -3844,11 +4143,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
             {!['Delivered', 'Canceled'].includes(order.status) && (
               <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
                 <button
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to cancel order #${order.id}?\n\n${order.payment_method === 'wallet' ? 'Your wallet will be refunded automatically.' : ''}`)) {
-                      onCancelOrder(order.order_number);
-                    }
-                  }}
+                  onClick={() => setCancelModalOrder(order)}
                   style={{
                     width: '100%',
                     padding: '12px 20px',
@@ -3860,18 +4155,22 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
                     fontWeight: 600,
                     cursor: 'pointer',
                     fontFamily: 'inherit',
-                    transition: 'all 0.2s'
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8
                   }}
                   onMouseOver={(e) => {
-                    (e.target as any).style.background = '#fecaca';
-                    (e.target as any).style.borderColor = '#fca5a5';
+                    (e.currentTarget as HTMLButtonElement).style.background = '#fecaca';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#fca5a5';
                   }}
                   onMouseOut={(e) => {
-                    (e.target as any).style.background = '#fee2e2';
-                    (e.target as any).style.borderColor = '#fecaca';
+                    (e.currentTarget as HTMLButtonElement).style.background = '#fee2e2';
+                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#fecaca';
                   }}
                 >
-                  🚫 Cancel Order
+                  <span style={{ fontSize: 16 }}>🚫</span> Cancel Order
                 </button>
               </div>
             )}
@@ -3902,28 +4201,164 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
             </div>
           </div>
         </div>
+
+        {/* --- Custom Cancellation Modal --- */}
+        {cancelModalOrder && (
+          <div style={{
+            position: "fixed", inset: 0,
+            background: "rgba(15, 23, 42, 0.4)", backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+            padding: 24, animation: "fadeIn 0.2s ease"
+          }}>
+            <div style={{
+              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 360,
+              overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
+            }}>
+              <div style={{ padding: "24px 24px 0", textAlign: "center" }}>
+                <div style={{
+                  width: 56, height: 56, borderRadius: "50%", background: "#fee2e2",
+                  color: "#ef4444", fontSize: 24, display: "flex", alignItems: "center",
+                  justifyContent: "center", margin: "0 auto 16px"
+                }}>
+                  ⚠️
+                </div>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: S.navy, margin: "0 0 8px" }}>Cancel Order?</h3>
+                <p style={{ fontSize: 14, color: S.gray, margin: 0, lineHeight: 1.5 }}>
+                  Are you sure you want to cancel order <strong style={{ color: S.navy }}>#{cancelModalOrder.id}</strong>?
+                </p>
+                {cancelModalOrder.payment_method === 'wallet' && (
+                  <div style={{
+                    marginTop: 12, padding: "8px 12px", background: "#f8fafc",
+                    borderRadius: 8, fontSize: 12, color: S.gray, border: "1px solid #e2e8f0"
+                  }}>
+                    💡 Your wallet will be <strong style={{ color: S.gold }}>refunded automatically</strong>.
+                  </div>
+                )}
+              </div>
+
+              {cancelError && (
+                <div style={{
+                  margin: "16px 24px 0", padding: "10px 12px", background: "#fef2f2",
+                  borderRadius: 8, fontSize: 13, color: "#b91c1c", border: "1px solid #fecaca",
+                  display: "flex", alignItems: "flex-start", gap: 8, textAlign: "left"
+                }}>
+                  <span style={{ fontSize: 16 }}>🛑</span>
+                  <span style={{ flex: 1, lineHeight: 1.4, fontWeight: 500 }}>{cancelError}</span>
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, padding: 24, marginTop: cancelError ? 4 : 8 }}>
+                <button
+                  onClick={() => {
+                    if (!isCanceling) {
+                      setCancelModalOrder(null);
+                      setCancelError(null);
+                    }
+                  }}
+                  disabled={isCanceling}
+                  style={{
+                    padding: "12px", borderRadius: 10, background: "#f1f5f9",
+                    color: isCanceling ? S.grayLight : S.navy, fontWeight: 700, fontSize: 14, border: "none",
+                    cursor: isCanceling ? "not-allowed" : "pointer", transition: "background 0.2s"
+                  }}
+                  onMouseOver={e => !isCanceling && (e.currentTarget.style.background = "#e2e8f0")}
+                  onMouseOut={e => !isCanceling && (e.currentTarget.style.background = "#f1f5f9")}
+                >
+                  Keep It
+                </button>
+                <button
+                  onClick={async () => {
+                    if (isCanceling) return;
+                    setIsCanceling(true);
+                    setCancelError(null);
+                    const result = await onCancelOrder(cancelModalOrder.order_number);
+                    console.log(result, "result")
+                    setIsCanceling(false);
+                    if (result?.success) {
+                      setCancelModalOrder(null);
+                    } else {
+                      setCancelError(result?.error || "Failed to cancel order.");
+                    }
+                  }}
+                  disabled={isCanceling}
+                  style={{
+                    padding: "12px", borderRadius: 10, background: isCanceling ? "#fca5a5" : "#ef4444",
+                    color: "#fff", fontWeight: 700, fontSize: 14, border: "none",
+                    cursor: isCanceling ? "wait" : "pointer", transition: "all 0.2s",
+                    boxShadow: isCanceling ? "none" : "0 4px 12px rgba(239, 68, 68, 0.25)",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+                  }}
+                  onMouseOver={e => !isCanceling && (e.currentTarget.style.background = "#dc2626")}
+                  onMouseOut={e => !isCanceling && (e.currentTarget.style.background = "#ef4444")}
+                >
+                  {isCanceling ? (
+                    <>
+                      <div className="spinner" style={{ width: 16, height: 16, border: "2px solid rgba(255,255,255,0.4)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                      Canceling...
+                    </>
+                  ) : "Yes, Cancel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
 
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {[
-          { id: "all", label: "All Orders" },
-          { id: "active", label: "Active" },
-          { id: "completed", label: "Delivered" },
-          { id: "canceled", label: "Canceled" },
-        ].map(f => (
-          <button key={f.id} onClick={() => setFilter(f.id)} style={{
-            padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit",
-            fontSize: 13, fontWeight: 600,
-            background: filter === f.id ? S.navy : "#fff",
-            color: filter === f.id ? "#fff" : S.gray,
-            boxShadow: filter === f.id ? "none" : "0 1px 2px rgba(0,0,0,0.05)"
-          }}>{f.label}</button>
-        ))}
+      {/* Filters and Refresh */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+          {[
+            { id: "all", label: "All Orders" },
+            { id: "active", label: "Active" },
+            { id: "completed", label: "Delivered" },
+            { id: "canceled", label: "Canceled" },
+          ].map(f => (
+            <button key={f.id} onClick={() => setFilter(f.id)} style={{
+              padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit",
+              fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", flexShrink: 0,
+              background: filter === f.id ? S.navy : "#fff",
+              color: filter === f.id ? "#fff" : S.gray,
+              boxShadow: filter === f.id ? "none" : "0 1px 2px rgba(0,0,0,0.05)"
+            }}>{f.label}</button>
+          ))}
+        </div>
+
+        {onRefresh && (
+          <button
+            onClick={async () => {
+              if (isRefreshing) return;
+              setIsRefreshing(true);
+              await onRefresh();
+              setTimeout(() => setIsRefreshing(false), 500); // keep spinner visible slightly explicitly
+            }}
+            title="Refresh Orders"
+            style={{
+              background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8,
+              width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center",
+              color: S.navy, cursor: "pointer", flexShrink: 0, marginLeft: 12,
+              boxShadow: "0 1px 2px rgba(0,0,0,0.05)", transition: "all 0.2s"
+            }}
+            onMouseOver={e => e.currentTarget.style.background = "#f8fafc"}
+            onMouseOut={e => e.currentTarget.style.background = "#fff"}
+          >
+            <svg
+              className={isRefreshing ? "spinner" : ""}
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ width: 16, height: 16, animation: isRefreshing ? "spin 1s linear infinite" : "none" }}
+            >
+              <path d="M21 2v6h-6"></path>
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+              <path d="M3 22v-6h6"></path>
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Orders List */}

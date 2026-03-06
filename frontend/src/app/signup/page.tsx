@@ -12,6 +12,7 @@ import {
 import Image from 'next/image';
 import Logo from '@/components/ui/logo';
 import API from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 const slides = [
     {
@@ -52,6 +53,13 @@ export default function SignupPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [currentSlide, setCurrentSlide] = useState(0);
+    const { verifyOTP } = useAuth();
+
+    // OTP State
+    const [otp, setOtp] = useState("");
+    const [verifying, setVerifying] = useState(false);
+    const [resending, setResending] = useState(false);
+    const [otpResent, setOtpResent] = useState(false);
 
     // Step 1 fields
     const [contactName, setContactName] = useState("");
@@ -69,6 +77,7 @@ export default function SignupPage() {
     // Password match validation
     const passwordsMatch = pass && confirmPass && pass === confirmPass;
     const passwordsDontMatch = confirmPass && pass !== confirmPass;
+    const isValidEmail = email ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) : false;
 
     useEffect(() => {
         const timer = setInterval(() => {
@@ -93,17 +102,50 @@ export default function SignupPage() {
             });
 
             if (response.success) {
+                // If it auto-logged in (no OTP required by backend actually), we'd just go to Step 4.
+                // But let's assume OTP is required now and go to Step 3.
                 setStep(3);
-                // Navigate after delay
-                setTimeout(() => {
-                    router.push('/dashboard');
-                }, 2000);
             }
         } catch (err: any) {
             setError(err.message || "Signup failed. Please try again.");
             setStep(2); // Go back to step 2 to show error
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleVerifyOTP = async () => {
+        try {
+            setVerifying(true);
+            setError("");
+
+            const success = await verifyOTP(email, otp);
+            if (success) {
+                setStep(4);
+                setTimeout(() => {
+                    router.push('/dashboard');
+                }, 2000);
+            } else {
+                setError("Invalid OTP. Please try again.");
+            }
+        } catch (err: any) {
+            setError(err.message || "OTP verification failed.");
+        } finally {
+            setVerifying(false);
+        }
+    };
+
+    const handleResendOTP = async () => {
+        try {
+            setResending(true);
+            setError("");
+            await API.Auth.resendOTP(email);
+            setOtpResent(true);
+            setTimeout(() => setOtpResent(false), 5000);
+        } catch (err: any) {
+            setError(err.message || "Failed to resend OTP.");
+        } finally {
+            setResending(false);
         }
     };
 
@@ -219,8 +261,8 @@ export default function SignupPage() {
                                 </div>
 
                                 {/* Steps Indicator */}
-                                <div className="flex items-center gap-2">
-                                    {[1, 2, 3].map((s) => {
+                                <div className="flex items-center gap-2 mt-4 sm:mt-0">
+                                    {[1, 2, 3, 4].map((s) => {
                                         const isActive = step >= s;
                                         const isCompleted = step > s;
                                         return (
@@ -231,11 +273,11 @@ export default function SignupPage() {
                                                         {isCompleted ? <Check size={14} strokeWidth={3} /> : s}
                                                     </div>
                                                     <span className={`text-xs font-bold uppercase tracking-wider hidden sm:block ${isActive ? 'text-[#2F3758]' : 'text-slate-300'}`}>
-                                                        {s === 1 ? "Account" : s === 2 ? "Business" : "Verify"}
+                                                        {s === 1 ? "Account" : s === 2 ? "Business" : s === 3 ? "Verify" : "Done"}
                                                     </span>
                                                 </div>
-                                                {s < 3 && (
-                                                    <div className={`flex-1 h-0.5 rounded-full transition-all duration-300 ${isCompleted ? 'bg-[#FBB12F]' : 'bg-slate-100'}`} />
+                                                {s < 4 && (
+                                                    <div className={`flex-1 h-0.5 rounded-full transition-all duration-300 min-w-[20px] ${isCompleted ? 'bg-[#FBB12F]' : 'bg-slate-100'}`} />
                                                 )}
                                             </React.Fragment>
                                         );
@@ -273,7 +315,17 @@ export default function SignupPage() {
                                         <div className="relative group">
                                             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#FBB12F] transition-colors z-10"><Phone size={18} /></div>
                                             <div className="absolute left-10 top-1/2 -translate-y-1/2 text-slate-500 font-medium text-sm border-r border-slate-200 pr-3 h-5 flex items-center z-10">+234</div>
-                                            <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="8099999999" className="w-full pl-24 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium" />
+                                            <input
+                                                type="tel"
+                                                value={phone}
+                                                onChange={e => {
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    if (val.length <= 11) setPhone(val);
+                                                }}
+                                                placeholder="8099999999"
+                                                maxLength={11}
+                                                className="w-full pl-24 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium"
+                                            />
                                         </div>
                                     </div>
 
@@ -281,7 +333,13 @@ export default function SignupPage() {
                                         <label className="text-sm font-semibold text-[#2F3758]">Email Address</label>
                                         <div className="relative group">
                                             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#FBB12F] transition-colors"><Mail size={18} /></div>
-                                            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@business.com" className="w-full pl-10 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium" />
+                                            <input
+                                                type="email"
+                                                value={email}
+                                                onChange={e => setEmail(e.target.value)}
+                                                placeholder="you@business.com"
+                                                className={`w-full pl-10 pr-4 py-3.5 bg-slate-50 border rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:ring-4 transition-all font-medium ${email && !isValidEmail ? 'border-red-300 focus:border-red-500 focus:ring-red-100' : 'border-slate-200 focus:border-[#FBB12F] focus:ring-[#FBB12F]/10'}`}
+                                            />
                                         </div>
                                     </div>
 
@@ -306,7 +364,7 @@ export default function SignupPage() {
 
                                     <button
                                         onClick={() => setStep(2)}
-                                        disabled={!contactName || !phone || !email || !pass || !confirmPass || passwordsDontMatch}
+                                        disabled={!contactName || phone.length < 10 || !email || !isValidEmail || !pass || !confirmPass || passwordsDontMatch}
                                         className="w-full mt-4 relative overflow-hidden group bg-[#2F3758] text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-[#232a45] transition-all shadow-lg shadow-[#2F3758]/20 disabled:opacity-70 disabled:cursor-not-allowed"
                                     >
                                         <span className="relative z-10 flex items-center gap-2">Continue <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" /></span>
@@ -358,6 +416,56 @@ export default function SignupPage() {
                             {step === 3 && (
                                 <motion.div
                                     key="step3"
+                                    initial={{ opacity: 0, x: 20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -20 }}
+                                    className="space-y-6 text-center"
+                                >
+                                    <div>
+                                        <div className="w-16 h-16 bg-[#FBB12F]/10 rounded-full flex items-center justify-center mx-auto mb-4 text-[#FBB12F]">
+                                            <Shield size={32} />
+                                        </div>
+                                        <h3 className="text-xl font-bold text-[#2F3758] mb-2">Verify your email</h3>
+                                        <p className="text-slate-500 text-sm">We&apos;ve sent a 6-digit code to <br /><span className="font-semibold text-[#2F3758]">{email}</span></p>
+                                    </div>
+
+                                    <div className="space-y-4 max-w-[280px] mx-auto">
+                                        <input
+                                            value={otp}
+                                            onChange={e => setOtp(e.target.value)}
+                                            placeholder="Enter 6-digit code"
+                                            maxLength={6}
+                                            className="w-full text-center tracking-[0.5em] font-mono text-2xl py-4 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-300 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-bold"
+                                        />
+
+                                        <button
+                                            onClick={handleVerifyOTP}
+                                            disabled={verifying || otp.length < 6}
+                                            className="w-full relative overflow-hidden group bg-[#2F3758] text-white font-bold py-4 rounded-xl flex items-center justify-center gap-2 hover:bg-[#232a45] transition-all shadow-lg shadow-[#2F3758]/20 disabled:opacity-70 disabled:cursor-not-allowed"
+                                        >
+                                            <span className="relative z-10 flex items-center gap-2">
+                                                {verifying ? <><Loader2 size={18} className="animate-spin" /> Verifying...</> : <>Verify Code <ArrowRight size={18} /></>}
+                                            </span>
+                                            <div className="absolute inset-0 bg-gradient-to-r from-[#FBB12F] to-[#F5C563] opacity-0 group-hover:opacity-10 transition-opacity" />
+                                        </button>
+
+                                        <div className="text-sm text-slate-500 mt-4">
+                                            Didn&apos;t receive the code?{" "}
+                                            <button
+                                                onClick={handleResendOTP}
+                                                disabled={resending || otpResent}
+                                                className="font-bold text-[#FBB12F] hover:text-[#e0981e] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                {resending ? "Sending..." : otpResent ? "Code Sent!" : "Resend Code"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </motion.div>
+                            )}
+
+                            {step === 4 && (
+                                <motion.div
+                                    key="step4"
                                     initial={{ opacity: 0, scale: 0.95 }}
                                     animate={{ opacity: 1, scale: 1 }}
                                     className="text-center py-8"
@@ -366,7 +474,7 @@ export default function SignupPage() {
                                         <Check size={40} strokeWidth={3} />
                                     </div>
                                     <h2 className="text-2xl font-bold text-[#2F3758] mb-2">You&apos;re all set! 🎉</h2>
-                                    <p className="text-slate-500 mb-8 max-w-xs mx-auto">Your merchant account has been created successfully. Redirecting you to dashboard...</p>
+                                    <p className="text-slate-500 mb-8 max-w-xs mx-auto">Your merchant account has been verified successfully. Redirecting you to dashboard...</p>
                                     <button onClick={() => router.push('/dashboard')} className="w-full bg-[#E8A838] text-[#2F3758] font-bold py-4 rounded-xl hover:bg-[#e0981e] transition-colors relative overflow-hidden">
                                         <span className="relative z-10">Go to Dashboard</span>
                                     </button>
