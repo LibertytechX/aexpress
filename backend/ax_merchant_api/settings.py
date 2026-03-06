@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "dispatcher",
     "riders",
     "webhooks",
+    "referrals",
 ]
 
 MIDDLEWARE = [
