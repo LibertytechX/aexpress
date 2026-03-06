@@ -559,3 +559,160 @@ class VehicleAssetOrdersTodayEndpointTests(TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row.get("orders_today"), 2)
 
+    def test_vehicle_assets_orders_today_falls_back_to_delivery_delivered_at(self):
+        """If an order is marked Done but completed_at is missing, we still count it
+        when any related Delivery.delivered_at is within the local-day window.
+        """
+
+        from authentication.models import User
+        from dispatcher.models import VehicleAsset, Rider
+        from orders.models import Vehicle, Order, Delivery
+
+        vehicle = Vehicle.objects.create(
+            name="Bike",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+
+        asset = VehicleAsset.objects.create(
+            plate_number="TP-ORD-TDY-2",
+            vehicle_type="bike",
+            unit_of_distance="km",
+        )
+
+        rider_user = User.objects.create_user(
+            phone="08088880002",
+            email="rider_vehicle_assets_2@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider 2",
+        )
+        rider = Rider.objects.create(user=rider_user, vehicle_asset=asset)
+
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(datetime.datetime.combine(day, datetime.time.min), tz)
+
+        order = Order.objects.create(
+            order_number="6159910",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Done",
+            completed_at=None,
+        )
+
+        Delivery.objects.create(
+            order=order,
+            dropoff_address="Dropoff",
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+            status="Delivered",
+            delivered_at=start + datetime.timedelta(hours=1),
+            sequence=1,
+        )
+
+        res = self.client.get("/api/dispatch/vehicle-assets/")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        data = res.data
+        if isinstance(data, dict) and "results" in data:
+            rows = data["results"]
+        else:
+            rows = data
+
+        row = next((r for r in rows if str(r.get("id")) == str(asset.id)), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("orders_today"), 1)
+
+    def test_vehicle_assets_orders_today_falls_back_to_order_updated_at_when_timestamps_missing(self):
+        """If an order is marked Done/Delivered but both Order.completed_at and
+        Delivery.delivered_at are missing, count it for today using Order.updated_at
+        *only* when Delivery.status indicates completion.
+        """
+
+        from authentication.models import User
+        from dispatcher.models import VehicleAsset, Rider
+        from orders.models import Vehicle, Order, Delivery
+
+        vehicle = Vehicle.objects.create(
+            name="Bike",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+
+        asset = VehicleAsset.objects.create(
+            plate_number="TP-ORD-TDY-3",
+            vehicle_type="bike",
+            unit_of_distance="km",
+        )
+
+        rider_user = User.objects.create_user(
+            phone="08088880003",
+            email="rider_vehicle_assets_3@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider 3",
+        )
+        rider = Rider.objects.create(user=rider_user, vehicle_asset=asset)
+
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(datetime.datetime.combine(day, datetime.time.min), tz)
+
+        order = Order.objects.create(
+            order_number="6159920",
+            user=self.user,
+            vehicle=vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            escrow_released=False,
+            status="Done",
+            completed_at=None,
+        )
+        Delivery.objects.create(
+            order=order,
+            dropoff_address="Dropoff",
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+            status="Delivered",
+            delivered_at=None,
+            sequence=1,
+        )
+
+        # Force updated_at into the current local-day window.
+        Order.objects.filter(id=order.id).update(updated_at=start + datetime.timedelta(hours=1))
+
+        res = self.client.get("/api/dispatch/vehicle-assets/")
+        self.assertEqual(res.status_code, 200, res.data)
+
+        data = res.data
+        if isinstance(data, dict) and "results" in data:
+            rows = data["results"]
+        else:
+            rows = data
+
+        row = next((r for r in rows if str(r.get("id")) == str(asset.id)), None)
+        self.assertIsNotNone(row)
+        self.assertEqual(row.get("orders_today"), 1)
+

@@ -308,9 +308,24 @@ class OrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+
         old_status = order.status
+        now = timezone.now()
         order.status = new_status
-        order.save(update_fields=["status"])
+
+        # Keep timestamps consistent with rider-app completion flows.
+        update_fields = ["status", "updated_at"]
+        if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
+            order.picked_up_at = now
+            update_fields.append("picked_up_at")
+        if new_status == "Arrived" and not getattr(order, "arrived_at", None):
+            order.arrived_at = now
+            update_fields.append("arrived_at")
+        if new_status == "Done" and not getattr(order, "completed_at", None):
+            order.completed_at = now
+            update_fields.append("completed_at")
+
+        order.save(update_fields=update_fields)
 
         # Keep Delivery records in sync so the serializer fallback stays consistent.
         ORDER_TO_DELIVERY_STATUS = {
@@ -324,7 +339,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         }
         delivery_sync_status = ORDER_TO_DELIVERY_STATUS.get(new_status)
         if delivery_sync_status:
-            order.deliveries.all().update(status=delivery_sync_status)
+            deliveries_qs = order.deliveries.all()
+            deliveries_qs.update(status=delivery_sync_status)
+            if delivery_sync_status == "Delivered":
+                deliveries_qs.filter(delivered_at__isnull=True).update(delivered_at=now)
 
         event_type, color = STATUS_MAP[new_status]
         rider_name = None
@@ -760,13 +778,34 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
         )
         end = start + datetime.timedelta(days=1)
 
+        completed_statuses = ["Done", "Delivered"]
         qs = qs.annotate(
             orders_today=Count(
                 "riders__rider_orders",
-                filter=Q(
-                    riders__rider_orders__status="Done",
-                    riders__rider_orders__completed_at__gte=start,
-                    riders__rider_orders__completed_at__lt=end,
+                filter=(
+                    Q(riders__rider_orders__status__in=completed_statuses)
+                    & (
+                        # Primary signal: Order.completed_at
+                        Q(
+                            riders__rider_orders__completed_at__gte=start,
+                            riders__rider_orders__completed_at__lt=end,
+                        )
+                        # Fallback: Delivery.delivered_at when completed_at is missing
+                        | Q(
+                            riders__rider_orders__completed_at__isnull=True,
+                            riders__rider_orders__deliveries__delivered_at__gte=start,
+                            riders__rider_orders__deliveries__delivered_at__lt=end,
+                        )
+                        # Legacy fallback: status is Done but both timestamps are missing.
+                        # Use Order.updated_at *only* when Delivery.status indicates completion.
+                        | Q(
+                            riders__rider_orders__completed_at__isnull=True,
+                            riders__rider_orders__deliveries__status="Delivered",
+                            riders__rider_orders__deliveries__delivered_at__isnull=True,
+                            riders__rider_orders__updated_at__gte=start,
+                            riders__rider_orders__updated_at__lt=end,
+                        )
+                    )
                 ),
                 distinct=True,
             )
