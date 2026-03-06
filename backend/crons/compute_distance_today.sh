@@ -34,7 +34,17 @@ fi
 # ── Load environment variables ───────────────────────────────
 if [ -f "$DEPLOY_PATH/.env" ]; then
   set -a
+  # NOTE: /home/backend/.env is a dotenv-style file and may not always be
+  # bash-sourceable (e.g., if it contains characters bash treats specially).
+  # Failing to source it should not prevent the cron from running.
+  set +e
+  # shellcheck disable=SC1090
   source "$DEPLOY_PATH/.env"
+  SRC_RC=$?
+  set -e
+  if [ "$SRC_RC" -ne 0 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARN: failed to source $DEPLOY_PATH/.env (rc=$SRC_RC); continuing" >> "$LOG_FILE"
+  fi
   set +a
 fi
 
