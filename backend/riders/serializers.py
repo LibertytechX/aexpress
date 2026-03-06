@@ -305,7 +305,7 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     pickup_contact_name = serializers.CharField(
         source="order.sender_name", read_only=True
     )
-    total_amount = serializers.DecimalField(source="order.total_amount", read_only=True)
+    total_amount = serializers.DecimalField(source="order.total_amount", max_digits=10, decimal_places=2, read_only=True)
 
     dropoff_address = serializers.SerializerMethodField()
     dropoff_latitude = serializers.SerializerMethodField()
