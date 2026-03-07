@@ -160,6 +160,16 @@ class VehicleAsset(models.Model):
         blank=True,
         help_text="Distance travelled since start of local day (computed by job)",
     )
+    # Sum of distance_km from completed orders today (updated by compute_deliveries_today job).
+    # Stored here so Ably real-time publishes include the correct value without DB annotation.
+    deliveries_km_today = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=0,
+        help_text="Total km of completed orders today for riders on this asset (computed by job)",
+    )
     stop_duration = models.DurationField(
         null=True, blank=True,
         help_text="How long the vehicle has been stationary",

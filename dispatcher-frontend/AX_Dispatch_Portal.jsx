@@ -1307,7 +1307,9 @@ export default function AXDispatchPortal() {
           setVehicleAssets(prev => {
             const map = {};
             prev.forEach(v => { map[v.id] = v; });
-            incoming.forEach(v => { map[v.id] = v; });
+            // Merge-patch: spread existing state first so any field the Ably payload
+            // omits is preserved (e.g. orders_today from the REST API initial load).
+            incoming.forEach(v => { map[v.id] = { ...(map[v.id] || {}), ...v }; });
             return Object.values(map);
           });
         });

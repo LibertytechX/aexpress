@@ -14,7 +14,7 @@ from .serializers import (
 )
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
-from django.db.models import Count, Q, Prefetch, Sum, DecimalField
+from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
@@ -770,39 +770,11 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
 
-        # Today metrics (used by dispatcher Vehicles table)
-        day = timezone.localdate()
-        tz = timezone.get_current_timezone()
-        start = timezone.make_aware(
-            datetime.datetime.combine(day, datetime.time.min), tz
-        )
-        end = start + datetime.timedelta(days=1)
-
-        completed_statuses = ["Done", "Delivered"]
-        # Filter for orders completed today.
-        # We avoid joining through Delivery in the Sum to prevent double-counting
-        # when an order has multiple delivery records. Modern orders always have
-        # completed_at; legacy fallback uses updated_at only.
-        today_order_filter = Q(riders__rider_orders__status__in=completed_statuses) & (
-            # Primary: completed_at timestamp
-            Q(
-                riders__rider_orders__completed_at__gte=start,
-                riders__rider_orders__completed_at__lt=end,
-            )
-            # Legacy fallback: completed_at missing, use updated_at
-            | Q(
-                riders__rider_orders__completed_at__isnull=True,
-                riders__rider_orders__updated_at__gte=start,
-                riders__rider_orders__updated_at__lt=end,
-            )
-        )
-        qs = qs.annotate(
-            # Sum of distance_km for all orders delivered today by riders on this asset.
-            orders_today=Sum(
-                "riders__rider_orders__distance_km",
-                filter=today_order_filter,
-            )
-        ).prefetch_related(
+        # deliveries_km_today is a persisted model field kept up to date by the
+        # compute_deliveries_today cron job.  No live annotation is needed here —
+        # using a stored field means Ably real-time payloads (which also call
+        # VehicleAssetSerializer) always carry the correct value.
+        qs = qs.prefetch_related(
             Prefetch(
                 "riders",
                 queryset=Rider.objects.select_related("user").order_by("created_at"),

@@ -1037,7 +1037,15 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider = serializers.SerializerMethodField()
-    orders_today = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, default=0)
+    # Sourced from the persisted model field so Ably real-time payloads include the
+    # correct value without requiring a live ORM annotation on every publish.
+    orders_today = serializers.DecimalField(
+        source="deliveries_km_today",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+        default=0,
+    )
 
     class Meta:
         model = VehicleAsset
