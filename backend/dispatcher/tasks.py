@@ -126,12 +126,6 @@ def _estimate_legs_haversine(origin, points):
 
 RELAY_THRESHOLD_KM = 18.0  # Orders longer than this are split via relay hubs
 
-# Flat per-km payout rate paid to each relay leg rider.
-# This is intentionally separate from Vehicle.rate_per_km (which is what
-# merchants are charged) — relay legs earn a fixed dispatch rate regardless
-# of the vehicle type or tiered merchant pricing.
-RELAY_PAYOUT_RATE_PER_KM = Decimal("330")
-
 
 def _nearest_rider_to(lat, lng):
     """Return the nearest authorized rider (with GPS) to (lat, lng)."""
@@ -456,13 +450,19 @@ def generate_relay_legs_sync(order_id):
                 created_legs.append(leg)
                 prev_node = next_node
 
-            # Settlement: flat per-km rate for each relay leg
-            for leg in created_legs:
-                payout = (
-                    Decimal(str(float(leg.distance_km or 0))) * RELAY_PAYOUT_RATE_PER_KM
-                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                leg.rider_payout = payout
-                leg.save(update_fields=["rider_payout"])
+            # Settlement: each leg earns a proportional share of the full
+            # order total_amount based on its distance fraction.
+            # Formula: leg_payout = (leg_km / total_km) * total_amount
+            total_distance = sum(float(l.distance_km or 0) for l in created_legs) or 0.0
+            order_total = order.total_amount or Decimal("0")
+            if total_distance > 0:
+                for leg in created_legs:
+                    share = Decimal(str(float(leg.distance_km or 0) / total_distance))
+                    payout = (order_total * share).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    leg.rider_payout = payout
+                    leg.save(update_fields=["rider_payout"])
 
             # Keep order.suggested_rider pointing to the leg-1 suggestion
             # (used by the banner; consistent with previous behaviour)
