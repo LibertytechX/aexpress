@@ -20,6 +20,13 @@ from .views import (
     RiderNotificationDetailView,
     RiderNotificationMarkReadView,
 )
+from .gamification_views import (
+    RideToOwnView,
+    MonthlyTargetView,
+    ChallengeListView,
+    LeaderboardView,
+    DashboardSummaryView,
+)
 
 app_name = "riders"
 
@@ -78,5 +85,15 @@ urlpatterns = [
         "notifications/<uuid:pk>/read/",
         RiderNotificationMarkReadView.as_view(),
         name="rider-notification-mark-read",
+    ),
+    # ── Gamification ─────────────────────────────────────────────────────────
+    path("ride-to-own/", RideToOwnView.as_view(), name="rider-ride-to-own"),
+    path("monthly-target/", MonthlyTargetView.as_view(), name="rider-monthly-target"),
+    path("challenges/", ChallengeListView.as_view(), name="rider-challenges"),
+    path("leaderboard/", LeaderboardView.as_view(), name="rider-leaderboard"),
+    path(
+        "dashboard-summary/",
+        DashboardSummaryView.as_view(),
+        name="rider-dashboard-summary",
     ),
 ]

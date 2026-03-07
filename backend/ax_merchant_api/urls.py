@@ -33,4 +33,5 @@ urlpatterns = [
     path("api/riders/", include("riders.urls")),
     path("api/bot/", include("bot.urls")),
     path("api/webhooks/", include("webhooks.urls")),
+    path("api/riders/referrals/", include("referrals.urls")),
 ]
