@@ -408,6 +408,26 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.total_amount = new_amount
         order.save(update_fields=["total_amount", "updated_at"])
 
+        # If this is a relay order with legs, recalculate per-leg payouts so they
+        # always reflect 80 % of the current total_amount (distance-weighted).
+        if getattr(order, "is_relay_order", False):
+            from decimal import Decimal, ROUND_HALF_UP
+
+            legs = list(order.legs.all())
+            if legs:
+                total_distance = sum(float(l.distance_km or 0) for l in legs) or 0.0
+                total_pool = new_amount * Decimal("0.8")
+                if total_distance > 0:
+                    for leg in legs:
+                        share = Decimal(
+                            str(float(leg.distance_km or 0) / total_distance)
+                        )
+                        payout = (total_pool * share).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        )
+                        leg.rider_payout = payout
+                        leg.save(update_fields=["rider_payout"])
+
         return Response(self.get_serializer(order).data)
 
     @action(detail=True, methods=["post"], url_path="generate-relay-route")

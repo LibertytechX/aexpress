@@ -2150,7 +2150,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 })}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600, padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
                   <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
-                  <span style={{ color: S.green }}>Total payout: ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}</span>
+                  <span style={{ color: S.green }}>
+                    Riders' share (80%): ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}
+                    {" "}<span style={{ color: S.textMuted, fontWeight: 400 }}>of ₦{order.amount.toLocaleString()}</span>
+                  </span>
                 </div>
               </div>
             )}
