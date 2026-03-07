@@ -455,7 +455,9 @@ function MerchantPortal() {
       merchant: order.user_business_name,
       deliveries: order.deliveries,
       mode: order.mode,
-      payment_method: order.payment_method
+      payment_method: order.payment_method,
+      collect_on_delivery: order.collect_on_delivery || false,
+      cod_amount: order.cod_amount ? parseFloat(order.cod_amount) : null,
     }));
   };
 
@@ -821,7 +823,9 @@ function MerchantPortal() {
                       package_type: data.packageType || 'Box',
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
+                      cod_amount: data.codAmount || null,
                     };
                     response = await window.API.Orders.createQuickSend(apiPayload);
                   } else if (data.mode === 'multi') {
@@ -834,7 +838,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   } else if (data.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
@@ -846,7 +851,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   }
                   if (response && response.success) {
@@ -2676,6 +2682,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [payMethod, setPayMethod] = useState("wallet");
   const [step, setStep] = useState(1); // 1=form, 2=review
 
+  // ─── Cash on Delivery ───
+  const [collectOnDelivery, setCollectOnDelivery] = useState(false);
+  const [codAmount, setCodAmount] = useState("");
+
   // ─── Vehicle pricing from backend ───
   // Defaults mirror the production tiered pricing so the UI is correct even
   // before the API response arrives (or if it fails).
@@ -3375,6 +3385,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 	        : (mode === 'quick' ? (effectiveQuickDurationMin || 0) : (routeDuration || earlyRouteDuration || 0)),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
+      // Cash on Delivery
+      collectOnDelivery: collectOnDelivery,
+      codAmount: collectOnDelivery && codAmount ? parseFloat(codAmount) : null,
     };
 
     if (mode === 'quick') {
@@ -4072,6 +4085,50 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               ))}
             </div>
 
+            {/* Cash on Delivery */}
+            <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collectOnDelivery ? 14 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Cash on Delivery (COD)</div>
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>Rider collects payment from customer on your behalf</div>
+                </div>
+                <button
+                  onClick={() => { setCollectOnDelivery(v => !v); if (collectOnDelivery) setCodAmount(""); }}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", flexShrink: 0,
+                    background: collectOnDelivery ? S.gold : "#e2e8f0", transition: "background 0.2s", position: "relative"
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                    position: "absolute", top: 3, left: collectOnDelivery ? 23 : 3,
+                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                  }} />
+                </button>
+              </div>
+              {collectOnDelivery && (
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 5 }}>
+                    Amount to collect from customer (₦)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 15000"
+                    value={codAmount}
+                    onChange={e => setCodAmount(e.target.value)}
+                    style={{
+                      width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                      padding: "0 14px", height: 42, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box"
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 6 }}>
+                    ⚠️ This is the goods payment amount — separate from the delivery fee.
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setStep(1)} style={{
@@ -4291,6 +4348,23 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
               </div>
             ))}
 
+            {/* COD detail row */}
+            {order.collect_on_delivery && (
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "12px 14px", borderTop: "1px solid #f8fafc", marginTop: 2,
+                background: "#fefce8", borderRadius: 8
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#854d0e" }}>💵 Cash on Delivery</div>
+                  <div style={{ fontSize: 11, color: "#a16207" }}>Rider collects from customer</div>
+                </div>
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#854d0e", fontFamily: "'Space Mono', monospace" }}>
+                  {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : 'Amount TBD'}
+                </span>
+              </div>
+            )}
+
             {/* Cancel Order Button — hidden once the order has been picked up or beyond */}
             {!['Delivered', 'Canceled', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled', 'PickedUp', 'Started', 'Done'].includes(order.status) && (
               <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
@@ -4406,6 +4480,11 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
                   {order.deliveries && order.deliveries.length > 1 && (
                     <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: "#f1f5f9", color: S.navy }}>
                       {order.deliveries.length} stops
+                    </span>
+                  )}
+                  {order.collect_on_delivery && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#fef9c3", color: "#854d0e" }}>
+                      COD {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : ''}
                     </span>
                   )}
                 </div>

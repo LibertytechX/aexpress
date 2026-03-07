@@ -330,6 +330,19 @@ class Order(models.Model):
         help_text="Suggested first-leg rider for relay orders",
     )
 
+    # Cash on Delivery
+    collect_on_delivery = models.BooleanField(
+        default=False,
+        help_text="Whether the rider should collect payment from the customer on behalf of the merchant",
+    )
+    cod_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Amount the rider should collect from the customer (COD)",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)

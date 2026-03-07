@@ -107,6 +107,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "updated_at",
             "scheduled_pickup_time",
             "notes",
+            "collect_on_delivery",
+            "cod_amount",
             "deliveries",
             "delivery_count",
         ]
@@ -185,11 +187,24 @@ class QuickSendSerializer(serializers.Serializer):
     )
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
+    # Cash on Delivery
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
+    cod_amount = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=12, decimal_places=2, default=None
+    )
+
     # Route information for pricing
     distance_km = serializers.DecimalField(
         required=True, max_digits=10, decimal_places=2
     )
     duration_minutes = serializers.IntegerField(required=True)
+
+    def validate(self, data):
+        if data.get("collect_on_delivery") and not data.get("cod_amount"):
+            raise serializers.ValidationError(
+                {"cod_amount": "cod_amount is required when collect_on_delivery is true."}
+            )
+        return data
 
     def validate_vehicle(self, value):
         """Validate that the vehicle exists."""
@@ -243,6 +258,9 @@ class MultiDropSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
+
     # Route information for pricing
     distance_km = serializers.DecimalField(
         required=True, max_digits=10, decimal_places=2
@@ -284,6 +302,9 @@ class BulkImportSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
 
     # Route information for pricing
     distance_km = serializers.DecimalField(

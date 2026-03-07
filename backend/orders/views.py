@@ -114,6 +114,8 @@ class QuickSendView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
+            cod_amount=data.get("cod_amount"),
         )
 
 
@@ -133,6 +135,7 @@ class QuickSendView(APIView):
             distance_km=distance_km,
             duration_minutes=duration_minutes,
             sequence=1,
+            cod_amount=data.get("cod_amount") or 0,
         )
 
         # Emit activity event for live feed (fire-and-forget in background thread)
@@ -287,6 +290,7 @@ class MultiDropView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
 
@@ -440,6 +444,7 @@ class BulkImportView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
 
