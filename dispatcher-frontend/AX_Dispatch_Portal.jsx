@@ -2169,7 +2169,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span style={{ color: S.blue, fontWeight: 700 }}>💡 Suggested for Leg 1: {suggestedRider?.name || `Rider #${order.suggestedRiderId}`}</span>
-                    <button onClick={() => onAssign(order.id, order.suggestedRiderId)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: S.blue, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
+                    <button onClick={() => suggestedRider && onAssign(order.id, suggestedRider.id)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: suggestedRider ? S.blue : S.textMuted, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 3, color: S.textDim, fontSize: 10 }}>
                     <span><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {order.pickup}</span>
