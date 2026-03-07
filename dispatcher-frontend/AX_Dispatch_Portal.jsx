@@ -1161,6 +1161,7 @@ export default function AXDispatchPortal() {
   const [vehicleAssets, setVehicleAssets] = useState([]);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
+  const [commissionPct, setCommissionPct] = useState(20);
   const ablyRef = useRef(null);
 
   // Initialize event logs when orders change
@@ -1207,12 +1208,13 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => []),
           DispatchersAPI.getAll().catch(() => []),
-          VehicleAssetsAPI.getAll().catch(() => [])
+          VehicleAssetsAPI.getAll().catch(() => []),
+          SettingsAPI.get().catch(() => null)
         ]);
         if (cancelled) return;
         setRiders(ridersData);
@@ -1221,6 +1223,9 @@ export default function AXDispatchPortal() {
         setDispatchers(dispatchersData);
         setVehicleAssets(vehicleAssetsData);
         setEventLogs(initEventLogs(ordersData));
+        if (settingsData?.commission_pct != null) {
+          setCommissionPct(parseFloat(settingsData.commission_pct) || 20);
+        }
       } catch (error) {
         console.error('Failed to fetch data:', error);
         AuthAPI.logout();
@@ -1514,7 +1519,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1667,14 +1672,14 @@ function formatOrderDateTime(raw) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
   if (selectedId) {
     const order = orders.find(o => o.id === selectedId);
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
-    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} />;
+    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} />;
   }
 
   const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
@@ -1730,7 +1735,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20 }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -2122,6 +2127,9 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     : null;
                   const suggestedName = leg.suggestedRiderName || (legSuggestedRider?.name) || null;
 
+                  const legPayout = parseFloat(leg.rider_payout) || 0;
+                  const legNetPay = legPayout * (1 - commissionPct / 100);
+
                   return (
                   <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
@@ -2129,7 +2137,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                         <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
                         {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{(parseFloat(leg.rider_payout) || 0).toLocaleString()}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{legPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 500 }}>Rider gets: <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{legNetPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> <span style={{ color: S.textMuted }}>({100 - commissionPct}%)</span></div>
+                      </div>
                     </div>
                     <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
                       <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
@@ -2148,13 +2159,24 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                   </div>
                   );
                 })}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600, padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
-                  <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
-                  <span style={{ color: S.green }}>
-                    Riders' share: ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}
-                    {" "}<span style={{ color: S.textMuted, fontWeight: 400 }}>(proportional of ₦{order.amount.toLocaleString()})</span>
-                  </span>
-                </div>
+                {(() => {
+                  const totalPayout = order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0);
+                  const totalNet = totalPayout * (1 - commissionPct / 100);
+                  return (
+                    <div style={{ padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600 }}>
+                        <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
+                        <span style={{ color: S.green }}>
+                          Total: ₦{totalPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {" "}<span style={{ color: S.textMuted, fontWeight: 400 }}>(of ₦{order.amount.toLocaleString()})</span>
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 10, marginTop: 3 }}>
+                        <span style={{ color: S.textMuted }}>Riders' take-home ({100 - commissionPct}%): <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{totalNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
