@@ -1037,7 +1037,7 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider = serializers.SerializerMethodField()
-    orders_today = serializers.IntegerField(read_only=True, default=0)
+    orders_today = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, default=0)
 
     class Meta:
         model = VehicleAsset

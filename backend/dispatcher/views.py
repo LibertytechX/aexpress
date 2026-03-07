@@ -14,7 +14,7 @@ from .serializers import (
 )
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Sum, DecimalField
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
@@ -779,35 +779,28 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
         end = start + datetime.timedelta(days=1)
 
         completed_statuses = ["Done", "Delivered"]
+        # Filter for orders completed today.
+        # We avoid joining through Delivery in the Sum to prevent double-counting
+        # when an order has multiple delivery records. Modern orders always have
+        # completed_at; legacy fallback uses updated_at only.
+        today_order_filter = Q(riders__rider_orders__status__in=completed_statuses) & (
+            # Primary: completed_at timestamp
+            Q(
+                riders__rider_orders__completed_at__gte=start,
+                riders__rider_orders__completed_at__lt=end,
+            )
+            # Legacy fallback: completed_at missing, use updated_at
+            | Q(
+                riders__rider_orders__completed_at__isnull=True,
+                riders__rider_orders__updated_at__gte=start,
+                riders__rider_orders__updated_at__lt=end,
+            )
+        )
         qs = qs.annotate(
-            orders_today=Count(
-                "riders__rider_orders",
-                filter=(
-                    Q(riders__rider_orders__status__in=completed_statuses)
-                    & (
-                        # Primary signal: Order.completed_at
-                        Q(
-                            riders__rider_orders__completed_at__gte=start,
-                            riders__rider_orders__completed_at__lt=end,
-                        )
-                        # Fallback: Delivery.delivered_at when completed_at is missing
-                        | Q(
-                            riders__rider_orders__completed_at__isnull=True,
-                            riders__rider_orders__deliveries__delivered_at__gte=start,
-                            riders__rider_orders__deliveries__delivered_at__lt=end,
-                        )
-                        # Legacy fallback: status is Done but both timestamps are missing.
-                        # Use Order.updated_at *only* when Delivery.status indicates completion.
-                        | Q(
-                            riders__rider_orders__completed_at__isnull=True,
-                            riders__rider_orders__deliveries__status="Delivered",
-                            riders__rider_orders__deliveries__delivered_at__isnull=True,
-                            riders__rider_orders__updated_at__gte=start,
-                            riders__rider_orders__updated_at__lt=end,
-                        )
-                    )
-                ),
-                distinct=True,
+            # Sum of distance_km for all orders delivered today by riders on this asset.
+            orders_today=Sum(
+                "riders__rider_orders__distance_km",
+                filter=today_order_filter,
             )
         ).prefetch_related(
             Prefetch(
