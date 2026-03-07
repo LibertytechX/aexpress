@@ -53,6 +53,17 @@ const playDeliveredChime = () => playChime([
   { freq: 1047, start: 0.2, dur: 0.3 },  // C6
 ]);
 
+// ─── GEO UTILS ──────────────────────────────────────────────────
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const la1 = lat1 * Math.PI / 180;
+  const la2 = lat2 * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
   dashboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>,
@@ -2103,7 +2114,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                       <span style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{(parseFloat(leg.rider_payout) || 0).toLocaleString()}</span>
                     </div>
                     <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
-                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || "Pickup"} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || "Dropoff"}
+                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
                     </div>
                     <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
                       <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
@@ -2120,12 +2131,29 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             )}
 
             {/* Suggested rider for leg 1 */}
-            {order.routingStatus === "ready" && order.suggestedRiderId && (
-              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ color: S.blue, fontWeight: 600 }}>💡 Suggested for leg 1: {riders.find(r => r.id === order.suggestedRiderId)?.name || `Rider #${order.suggestedRiderId}`}</span>
-                <button onClick={() => onAssign(order.id, order.suggestedRiderId)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: S.blue, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
-              </div>
-            )}
+            {order.routingStatus === "ready" && order.suggestedRiderId && (() => {
+              const suggestedRider = riders.find(r => r.id === order.suggestedRiderId);
+              const leg1 = order.relayLegs?.[0];
+              const endAddr = leg1?.end_relay_node?.name || order.dropoff;
+              const rLat = suggestedRider?.lat ? parseFloat(suggestedRider.lat) : null;
+              const rLng = suggestedRider?.lng ? parseFloat(suggestedRider.lng) : null;
+              const pLat = order.pickupLat ? parseFloat(order.pickupLat) : null;
+              const pLng = order.pickupLng ? parseFloat(order.pickupLng) : null;
+              const distKm = (rLat && rLng && pLat && pLng) ? haversineKm(rLat, rLng, pLat, pLng) : null;
+              return (
+                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ color: S.blue, fontWeight: 700 }}>💡 Suggested for Leg 1: {suggestedRider?.name || `Rider #${order.suggestedRiderId}`}</span>
+                    <button onClick={() => onAssign(order.id, order.suggestedRiderId)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: S.blue, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, color: S.textDim, fontSize: 10 }}>
+                    <span><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {order.pickup}</span>
+                    <span><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {endAddr}</span>
+                    {distKm !== null && <span style={{ color: S.textMuted }}>🏍️ {distKm.toFixed(1)} km from pickup</span>}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
