@@ -408,25 +408,20 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.total_amount = new_amount
         order.save(update_fields=["total_amount", "updated_at"])
 
-        # If this is a relay order with legs, recalculate per-leg payouts so they
-        # always reflect 80 % of the current total_amount (distance-weighted).
+        # If this is a relay order with legs, recalculate per-leg payouts using
+        # the flat per-km relay rate.  Payouts are distance-driven (not derived
+        # from total_amount), so this is a no-op when only the price changes —
+        # but we keep the call here so the response always reflects current values.
         if getattr(order, "is_relay_order", False):
             from decimal import Decimal, ROUND_HALF_UP
+            from .tasks import RELAY_PAYOUT_RATE_PER_KM
 
-            legs = list(order.legs.all())
-            if legs:
-                total_distance = sum(float(l.distance_km or 0) for l in legs) or 0.0
-                total_pool = new_amount * Decimal("0.8")
-                if total_distance > 0:
-                    for leg in legs:
-                        share = Decimal(
-                            str(float(leg.distance_km or 0) / total_distance)
-                        )
-                        payout = (total_pool * share).quantize(
-                            Decimal("0.01"), rounding=ROUND_HALF_UP
-                        )
-                        leg.rider_payout = payout
-                        leg.save(update_fields=["rider_payout"])
+            for leg in order.legs.all():
+                payout = (
+                    Decimal(str(float(leg.distance_km or 0))) * RELAY_PAYOUT_RATE_PER_KM
+                ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                leg.rider_payout = payout
+                leg.save(update_fields=["rider_payout"])
 
         return Response(self.get_serializer(order).data)
 
