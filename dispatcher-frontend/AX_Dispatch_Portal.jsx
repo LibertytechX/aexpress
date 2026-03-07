@@ -622,7 +622,7 @@ function RelayRouteMap({ order, riders }) {
 
       // Rider marker (🏍️) — show suggested rider GPS if available
       if (order.suggestedRiderId && riders) {
-        const riderObj = riders.find(r => r.id === order.suggestedRiderId);
+        const riderObj = riders.find(r => r._uuid === order.suggestedRiderId);
         if (riderObj && riderObj.lat && riderObj.lng) {
           markersRef.current.push(new window.google.maps.Marker({
             position: { lat: riderObj.lat, lng: riderObj.lng }, map, zIndex: 11,
@@ -2132,7 +2132,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
             {/* Suggested rider for leg 1 */}
             {order.routingStatus === "ready" && order.suggestedRiderId && (() => {
-              const suggestedRider = riders.find(r => r.id === order.suggestedRiderId);
+              const suggestedRider = riders.find(r => r._uuid === order.suggestedRiderId);
               const leg1 = order.relayLegs?.[0];
               const endAddr = leg1?.end_relay_node?.name || order.dropoff;
               const rLat = suggestedRider?.lat ? parseFloat(suggestedRider.lat) : null;

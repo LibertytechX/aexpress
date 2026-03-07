@@ -419,7 +419,6 @@ def generate_relay_legs_sync(order_id):
             try:
                 riders = Rider.objects.filter(
                     is_authorized=True,
-                    status=Rider.Status.ONLINE,
                     current_latitude__isnull=False,
                     current_longitude__isnull=False,
                 )
