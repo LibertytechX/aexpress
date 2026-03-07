@@ -2217,7 +2217,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>📦 PICKUP</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.pickup.split(",")[0]}</div>
               </div>
-              <div style={{ fontSize: 16, color: S.textMuted, alignSelf: "center" }}>→</div>
+              <div style={{ textAlign: "center", alignSelf: "center" }}>
+                {order.distance && (
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.blue, fontFamily: "'Space Mono',monospace" }}>📍 {order.distance}</div>
+                )}
+                {order.time && (
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>⏱ {order.time}</div>
+                )}
+                {!order.distance && <div style={{ fontSize: 16, color: S.textMuted }}>→</div>}
+              </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>🏠 DROPOFF</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.dropoff.split(",")[0]}</div>
