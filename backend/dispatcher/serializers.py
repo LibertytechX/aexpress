@@ -178,6 +178,7 @@ class OrderSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     pkg = serializers.SerializerMethodField()
     codFee = serializers.SerializerMethodField()
+    collect_on_delivery = serializers.BooleanField(read_only=True)
 
     # Extra fields for backward compatibility or extra detail
     items = serializers.SerializerMethodField()
@@ -221,6 +222,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "created",
             "cod",
             "codFee",
+            "collect_on_delivery",
             "payment",
             "items",
             "pkg",
@@ -333,7 +335,9 @@ class OrderSerializer(serializers.ModelSerializer):
         return [d.package_type for d in obj.deliveries.all()]
 
     def get_cod(self, obj):
-        return 0  # Mock for now
+        if obj.collect_on_delivery and obj.cod_amount:
+            return float(obj.cod_amount)
+        return 0
 
     def get_payment(self, obj):
         method_map = {

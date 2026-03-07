@@ -270,6 +270,7 @@ const normalizeOrder = (o) => ({
     amount: parseFloat(o.amount) || 0,
     cod: parseFloat(o.cod) || 0,
     codFee: parseFloat(o.codFee) || 0,
+    collectOnDelivery: o.collect_on_delivery || false,
     vehicle: o.vehicle || 'Bike',
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',

@@ -1848,6 +1848,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
         </div>
       )}
 
+      {/* COD Instruction Banner — visible to dispatchers/riders */}
+      {order.collectOnDelivery && (
+        <div style={{ background: "rgba(245,158,11,0.08)", border: "1.5px solid rgba(245,158,11,0.35)", borderRadius: 14, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 28, flexShrink: 0 }}>💵</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", marginBottom: 2 }}>Cash on Delivery — Rider must collect from customer</div>
+            <div style={{ fontSize: 13, color: "#92400E" }}>
+              Collect <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>₦{(order.cod || 0).toLocaleString()}</span> in cash from the customer at the delivery point on behalf of the merchant.
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 16 }}>
         {/* LEFT */}
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
