@@ -715,6 +715,12 @@ class OrderLegSerializer(serializers.ModelSerializer):
     start_relay_node = RelayNodeMiniSerializer(read_only=True)
     end_relay_node = RelayNodeMiniSerializer(read_only=True)
     rider_id = serializers.CharField(source="rider.id", read_only=True, allow_null=True)
+    suggested_rider_id = serializers.CharField(
+        source="suggested_rider.id", read_only=True, allow_null=True
+    )
+    suggested_rider_name = serializers.CharField(
+        source="suggested_rider.user.contact_name", read_only=True, allow_null=True
+    )
 
     class Meta:
         from orders.models import OrderLeg
@@ -730,6 +736,8 @@ class OrderLegSerializer(serializers.ModelSerializer):
             "rider_payout",
             "zone_compliance_bonus",
             "rider_id",
+            "suggested_rider_id",
+            "suggested_rider_name",
             "start_relay_node",
             "end_relay_node",
         ]

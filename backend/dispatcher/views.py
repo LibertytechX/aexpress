@@ -166,6 +166,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             "legs__end_relay_node",
             "legs__rider",
             "legs__rider__user",
+            "legs__suggested_rider",
+            "legs__suggested_rider__user",
         )
 
     def create(self, request, *args, **kwargs):
@@ -503,6 +505,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "legs",
                 "legs__start_relay_node",
                 "legs__end_relay_node",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
                 "deliveries",
             )
             .select_related(

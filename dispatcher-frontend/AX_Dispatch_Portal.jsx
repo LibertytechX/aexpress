@@ -2104,7 +2104,25 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             {/* Legs list */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {order.relayLegs.map((leg, idx) => (
+                {order.relayLegs.map((leg, idx) => {
+                  // Compute suggested rider distance from this leg's start point
+                  const legSuggestedRider = leg.suggestedRiderId
+                    ? riders.find(r => r.id === leg.suggestedRiderId)
+                    : null;
+                  const startLat = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.latitude)
+                    : (order.pickupLat ? parseFloat(order.pickupLat) : null);
+                  const startLng = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.longitude)
+                    : (order.pickupLng ? parseFloat(order.pickupLng) : null);
+                  const rLat = legSuggestedRider?.lat ? parseFloat(legSuggestedRider.lat) : null;
+                  const rLng = legSuggestedRider?.lng ? parseFloat(legSuggestedRider.lng) : null;
+                  const legDistKm = (rLat && rLng && startLat && startLng)
+                    ? haversineKm(rLat, rLng, startLat, startLng)
+                    : null;
+                  const suggestedName = leg.suggestedRiderName || (legSuggestedRider?.name) || null;
+
+                  return (
                   <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2121,8 +2139,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                       <span>⏱ {leg.duration_minutes || 0} min</span>
                       {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
                     </div>
+                    {suggestedName && (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, color: S.blue, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span></span>
+                        {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600, padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
                   <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
                   <span style={{ color: S.green }}>Total payout: ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}</span>

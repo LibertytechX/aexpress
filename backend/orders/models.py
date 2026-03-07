@@ -516,6 +516,16 @@ class OrderLeg(models.Model):
         related_name="relay_legs",
     )
 
+    # Nearest available rider suggested at route-generation time for this leg
+    suggested_rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggested_legs",
+        help_text="Nearest authorized rider suggested for this leg at generation time",
+    )
+
     # Relay handoff points
     # Null start_relay_node  → first leg, picks up at order.pickup_address
     # Null end_relay_node    → last leg, delivers to order delivery address

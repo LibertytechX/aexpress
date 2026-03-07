@@ -284,7 +284,11 @@ const normalizeOrder = (o) => ({
     pickupLng: o.pickup_lng || null,
     dropoffLat: o.dropoff_lat || null,
     dropoffLng: o.dropoff_lng || null,
-    relayLegs: o.relay_legs || [],
+    relayLegs: (o.relay_legs || []).map(leg => ({
+        ...leg,
+        suggestedRiderId: leg.suggested_rider_id || null,
+        suggestedRiderName: leg.suggested_rider_name || null,
+    })),
 });
 
 export const OrdersAPI = {
