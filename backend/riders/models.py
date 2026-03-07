@@ -454,11 +454,13 @@ class RideToOwnEnrollment(models.Model):
         days_elapsed = max((today - self.start_date).days, 1)
         days_total = max((self.end_date - self.start_date).days, 1)
         days_remaining = max((self.end_date - today).days, 0)
-        months_remaining = math.ceil(days_remaining / 30)
+        from dateutil.relativedelta import relativedelta
+        rd = relativedelta(self.end_date, today)
+        months_remaining = rd.years * 12 + rd.months + (1 if rd.days > 0 else 0)
 
-        avg_orders_per_day = round(orders_done / days_elapsed, 1)
+        avg_orders_per_day = math.ceil(orders_done / days_elapsed)
         orders_per_day_needed = (
-            round(orders_to_go / days_remaining, 1) if days_remaining > 0 else 0
+            math.ceil(orders_to_go / days_remaining) if days_remaining > 0 else 0
         )
 
         # Monthly timeline (which months are complete)
