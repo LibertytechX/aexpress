@@ -332,11 +332,17 @@ def generate_relay_legs_sync(order_id):
                 first_delivery.dropoff_latitude = dropoff["lat"]
                 first_delivery.dropoff_longitude = dropoff["lng"]
 
-            # Build hop chain (2-pass: tighter hops if road legs exceed cap)
-            hop_nodes = (
-                _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0)
-                or _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=80.0)
-            )
+            # Build hop chain.
+            # First pass: allow legs up to 90 km.  If no path exists (None),
+            # try a tighter 80 km cap so road-distance inflation doesn't bust
+            # the 100 km hard cap.
+            # IMPORTANT: use explicit `is None` — an empty list [] means a
+            # valid *direct* single-leg delivery (< max_leg_km_est haversine)
+            # and must not trigger the fallback, which would incorrectly fail
+            # deliveries in the 80–90 km range.
+            hop_nodes = _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0)
+            if hop_nodes is None:
+                hop_nodes = _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=80.0)
             if hop_nodes is None:
                 order.routing_status = Order.RoutingStatus.FAILED
                 order.routing_error = "Could not find relay hops to keep legs within 100km."

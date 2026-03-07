@@ -2045,10 +2045,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {order.isRelayOrder && order.routingStatus === "processing" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700 }}>PROCESSING</span>}
                 {order.isRelayOrder && order.routingStatus === "failed" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>FAILED</span>}
               </div>
-              {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && !relayLoading && (
-                <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                  {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
-                </button>
+              {!relayLoading && (
+                <>
+                  {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && (
+                    <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
+                    </button>
+                  )}
+                  {order.isRelayOrder && order.routingStatus === "ready" && (
+                    <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      🔄 Re-generate
+                    </button>
+                  )}
+                </>
               )}
               {relayLoading && <span style={{ fontSize: 11, color: S.blue, fontWeight: 600 }}>⏳ Generating...</span>}
             </div>
