@@ -439,7 +439,6 @@ class Rider(models.Model):
     # Referral
     referral_code = models.CharField(
         max_length=30,
-        unique=True,
         db_index=True,
         blank=True,
         help_text="Unique referral code, e.g. AX-RIDER-MK042",
