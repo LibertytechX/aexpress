@@ -7,6 +7,14 @@ from .models import (
     Challenge,
     RiderChallengeProgress,
     LeaderboardEntry,
+    RiderCodRecord,
+    RiderEarning,
+    OrderOffer,
+    RiderDocument,
+    RiderDevice,
+    RiderNotification,
+    RiderLocation,
+    AreaDemand,
 )
 
 
@@ -148,3 +156,73 @@ class LeaderboardEntryAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False  # Managed by rebuild_leaderboard command only
+
+
+@admin.register(RiderCodRecord)
+class RiderCodRecordAdmin(admin.ModelAdmin):
+    list_display = ("rider", "order", "amount", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("rider__rider_id", "order__order_id")
+    raw_id_fields = ("rider", "order")
+    readonly_fields = ("created_at", "remitted_at", "verified_at")
+
+
+@admin.register(RiderEarning)
+class RiderEarningAdmin(admin.ModelAdmin):
+    list_display = ("rider", "order", "net_earning", "created_at")
+    list_filter = ("created_at",)
+    search_fields = ("rider__rider_id", "order__order_id")
+    raw_id_fields = ("rider", "order")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(OrderOffer)
+class OrderOfferAdmin(admin.ModelAdmin):
+    list_display = ("order", "rider", "status", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("rider__rider_id", "order__order_id")
+    raw_id_fields = ("rider", "order")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(RiderDocument)
+class RiderDocumentAdmin(admin.ModelAdmin):
+    list_display = ("rider", "doc_type", "status", "expires_at", "created_at")
+    list_filter = ("status", "doc_type")
+    search_fields = ("rider__rider_id",)
+    raw_id_fields = ("rider",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(RiderDevice)
+class RiderDeviceAdmin(admin.ModelAdmin):
+    list_display = ("rider", "device_id", "platform", "is_active", "updated_at")
+    list_filter = ("platform", "is_active")
+    search_fields = ("rider__rider_id", "device_id")
+    raw_id_fields = ("rider",)
+    readonly_fields = ("created_at", "updated_at")
+
+
+@admin.register(RiderNotification)
+class RiderNotificationAdmin(admin.ModelAdmin):
+    list_display = ("rider", "title", "is_read", "created_at")
+    list_filter = ("is_read", "created_at")
+    search_fields = ("rider__rider_id", "title")
+    raw_id_fields = ("rider",)
+    readonly_fields = ("created_at",)
+
+
+@admin.register(RiderLocation)
+class RiderLocationAdmin(admin.ModelAdmin):
+    list_display = ("rider", "latitude", "longitude", "updated_at")
+    search_fields = ("rider__rider_id",)
+    raw_id_fields = ("rider",)
+    readonly_fields = ("updated_at",)
+
+
+@admin.register(AreaDemand)
+class AreaDemandAdmin(admin.ModelAdmin):
+    list_display = ("area_name", "level", "pending_orders", "active_riders", "updated_at")
+    list_filter = ("level",)
+    search_fields = ("area_name",)
+    readonly_fields = ("updated_at",)
