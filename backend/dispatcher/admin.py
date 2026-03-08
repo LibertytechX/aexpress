@@ -101,12 +101,29 @@ class ActivityFeedAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+@admin.register(Vertical)
+class VerticalAdmin(admin.ModelAdmin):
+    list_display = ("code", "name", "lead_name", "is_active", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "code", "lead_name")
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
 @admin.register(Zone)
 class ZoneAdmin(admin.ModelAdmin):
-    list_display = ("name", "center_lat", "center_lng", "radius_km", "is_active", "created_at")
-    list_filter = ("is_active",)
-    search_fields = ("name",)
+    list_display = (
+        "name",
+        "vertical",
+        "center_lat",
+        "center_lng",
+        "radius_km",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("is_active", "vertical")
+    search_fields = ("name", "description")
     readonly_fields = ("id", "created_at", "updated_at")
+    autocomplete_fields = ("vertical",)
 
 
 class RelayNodeInline(admin.TabularInline):
