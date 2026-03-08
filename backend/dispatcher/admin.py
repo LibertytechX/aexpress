@@ -9,6 +9,7 @@ from .models import (
     RelayNode,
     VehicleAsset,
     VehicleTracking,
+    Vertical,
 )
 
 
