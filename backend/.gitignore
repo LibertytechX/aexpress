@@ -23,7 +23,7 @@ MANIFEST
 migrations/
 firebase_key.json
 0008_vehicleasset_provider_id_sync_meta.py
-
+*.docx
 # Virtual Environment
 venv/
 env/

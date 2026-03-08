@@ -12,6 +12,28 @@ import string
 # ---------------------------------------------------------------------------
 
 
+class Vertical(models.Model):
+    """
+    An organizational unit that groups multiple zones.
+    Each Vertical has a lead and a unique code (A, B, C, D).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    code = models.CharField(max_length=10, unique=True, help_text="Vertical code (A, B, C, D)")
+    lead_name = models.CharField(max_length=100, help_text="Vertical Lead name")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "verticals"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"Vertical {self.code}: {self.name} (Lead: {self.lead_name})"
+
+
 class Zone(models.Model):
     """
     A delivery zone defined by a center point and radius.
@@ -19,7 +41,19 @@ class Zone(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vertical = models.ForeignKey(
+        Vertical,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="zones",
+    )
     name = models.CharField(max_length=100)
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="List of areas covered by this zone",
+    )
     center_lat = models.FloatField(help_text="Zone center latitude")
     center_lng = models.FloatField(help_text="Zone center longitude")
     radius_km = models.FloatField(default=5.0, help_text="Zone radius in kilometers")
