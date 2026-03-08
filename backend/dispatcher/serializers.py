@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
+from decimal import Decimal
 
 User = get_user_model()
 
@@ -177,6 +178,7 @@ class OrderSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     pkg = serializers.SerializerMethodField()
     codFee = serializers.SerializerMethodField()
+    collect_on_delivery = serializers.BooleanField(read_only=True)
 
     # Extra fields for backward compatibility or extra detail
     items = serializers.SerializerMethodField()
@@ -220,6 +222,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "created",
             "cod",
             "codFee",
+            "collect_on_delivery",
             "payment",
             "items",
             "pkg",
@@ -332,7 +335,9 @@ class OrderSerializer(serializers.ModelSerializer):
         return [d.package_type for d in obj.deliveries.all()]
 
     def get_cod(self, obj):
-        return 0  # Mock for now
+        if obj.collect_on_delivery and obj.cod_amount:
+            return float(obj.cod_amount)
+        return 0
 
     def get_payment(self, obj):
         method_map = {
@@ -343,13 +348,64 @@ class OrderSerializer(serializers.ModelSerializer):
         return method_map.get(obj.payment_method, "Wallet")
 
     def get_distance(self, obj):
-        return "5.2 km"  # Mock
+        # Frontend expects a human-readable string.
+        # Persisted at create time (from frontend-calculated routing) on Order.distance_km.
+        val = getattr(obj, "distance_km", None)
+        if val is None:
+            return None
+        try:
+            km = Decimal(str(val))
+        except Exception:
+            return None
+        return f"{km:.2f} km"
 
     def get_time(self, obj):
-        return "25 mins"  # Mock
+        val = getattr(obj, "duration_minutes", None)
+        if val is None:
+            return None
+        try:
+            minutes = int(val)
+        except Exception:
+            return None
+        return f"{minutes} mins"
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
+
+
+class OrderPriceUpdateSerializer(serializers.Serializer):
+    """Write serializer for dispatcher price edits (Order.total_amount).
+
+    Frontend uses `amount`. For backward-compatibility we also accept `price`.
+    """
+
+    amount = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+    price = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+
+    def validate(self, attrs):
+        amt = attrs.get("amount")
+        price = attrs.get("price")
+        if amt is None and price is None:
+            raise serializers.ValidationError(
+                {"amount": "Provide 'amount' (or legacy 'price')."}
+            )
+
+        val = amt if amt is not None else price
+        # Normalize to 2dp in case caller sends integer/float-ish decimal.
+        try:
+            val = Decimal(str(val)).quantize(Decimal("0.01"))
+        except Exception:
+            # DecimalField normally prevents this, but keep a friendly error.
+            raise serializers.ValidationError(
+                {"amount": "Invalid amount."}
+            )
+
+        attrs["amount"] = val
+        return attrs
 
 
 class OrderCreateSerializer(serializers.ModelSerializer):
@@ -364,6 +420,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     packageType = serializers.CharField(write_only=True)
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
+    )
+    manual_price = serializers.BooleanField(
+        write_only=True, required=False, default=False
     )
     cod = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
@@ -416,6 +475,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "vehicle",
             "packageType",
             "price",
+            "manual_price",
             "cod",
             "riderId",
             "merchantId",
@@ -428,6 +488,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         from orders.models import Order, Delivery, Vehicle
         from .models import Rider
         from authentication.models import User
+        from orders.utils import geocode_address
+        from orders.pricing import calculate_effective_fare
+        import uuid
 
         # Extract non-model fields
         pickup = validated_data.pop("pickup")
@@ -444,11 +507,53 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         vehicle_name = validated_data.pop("vehicle")
         package_type = validated_data.pop("packageType")
         price = validated_data.get("price")
+        manual_price = bool(validated_data.get("manual_price"))
         # cod = validated_data.get("cod") # Unused
-        rider_id = validated_data.get("riderId")
-        merchant_id = validated_data.get("merchantId")
+        # riderId/merchantId are frontend-only fields (not model fields)
+        rider_id = (validated_data.pop("riderId", "") or "").strip()
+        merchant_id = (validated_data.pop("merchantId", "") or "").strip()
         distance_km = validated_data.get("distance_km")
         duration_minutes = validated_data.get("duration_minutes")
+
+        def _coords_missing(lat, lng):
+            return lat is None or lng is None
+
+        # Best-effort geocoding fallback: frontend may send addresses without selecting a Places suggestion.
+        # For relay orders, coordinates are required (routing depends on them).
+        if _coords_missing(pickup_lat, pickup_lng) and pickup:
+            try:
+                geo = geocode_address(pickup)
+            except Exception:
+                geo = None
+            if geo:
+                pickup_lat = geo.get("lat")
+                pickup_lng = geo.get("lng")
+
+        if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
+            try:
+                geo = geocode_address(dropoff)
+            except Exception:
+                geo = None
+            if geo:
+                dropoff_lat = geo.get("lat")
+                dropoff_lng = geo.get("lng")
+
+        if is_relay_order:
+            missing = []
+            if _coords_missing(pickup_lat, pickup_lng):
+                missing.append("pickup")
+            if _coords_missing(dropoff_lat, dropoff_lng):
+                missing.append("dropoff")
+            if missing:
+                raise serializers.ValidationError(
+                    {
+                        "detail": (
+                            "Could not geocode "
+                            + " and ".join(missing)
+                            + " address. Please select from suggestions or enter a more specific address."
+                        )
+                    }
+                )
 
         # Resolve Vehicle
         vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
@@ -458,7 +563,23 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         # Resolve Rider
         rider_obj = None
         if rider_id:
-            rider_obj = Rider.objects.filter(id=rider_id).first()
+            # Frontend historically sends Rider.rider_id (6-digit string), but
+            # some clients may send the Rider UUID. Filtering a UUIDField with
+            # a non-UUID string raises ValidationError, so we must guard.
+            def _is_uuid(val: str) -> bool:
+                try:
+                    uuid.UUID(str(val))
+                    return True
+                except (ValueError, AttributeError, TypeError):
+                    return False
+
+            if _is_uuid(rider_id):
+                rider_obj = Rider.objects.filter(id=rider_id).first()
+                # Fallback in case an upstream client accidentally sends rider_id
+                if not rider_obj:
+                    rider_obj = Rider.objects.filter(rider_id=rider_id).first()
+            else:
+                rider_obj = Rider.objects.filter(rider_id=rider_id).first()
 
         # Resolve User (Merchant or Request User)
         order_user = self.context["request"].user
@@ -482,7 +603,21 @@ class OrderCreateSerializer(serializers.ModelSerializer):
                 pass
 
         # Calculate Price
-        total_amount = price if price else vehicle_obj.base_price
+        if manual_price and price is not None:
+            total_amount = price
+        else:
+            total_amount = calculate_effective_fare(
+                order_user,
+                vehicle_obj,
+                distance_km or 0,
+                duration_minutes or 0,
+            )
+
+        # Ensure decimals serialize consistently
+        try:
+            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
 
         # Create Order
         order = Order.objects.create(
@@ -522,9 +657,50 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             receiver_name=receiver_name,
             receiver_phone=receiver_phone,
             package_type=package_type,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
         )
 
         return order
+
+
+class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
+    """Upsert serializer for per-merchant/per-vehicle pricing overrides."""
+
+    vehicle_name = serializers.CharField(source="vehicle.name", read_only=True)
+    merchant_user_id = serializers.CharField(source="merchant.id", read_only=True)
+
+    class Meta:
+        from orders.models import MerchantPricingOverride
+
+        model = MerchantPricingOverride
+        fields = [
+            "id",
+            "merchant",
+            "merchant_user_id",
+            "vehicle",
+            "vehicle_name",
+            "flat_fee",
+            "pricing_tiers",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+
+    def create(self, validated_data):
+        from orders.models import MerchantPricingOverride
+
+        merchant = validated_data["merchant"]
+        vehicle = validated_data["vehicle"]
+        defaults = {
+            k: v
+            for k, v in validated_data.items()
+            if k not in ("merchant", "vehicle")
+        }
+        obj, _ = MerchantPricingOverride.objects.update_or_create(
+            merchant=merchant, vehicle=vehicle, defaults=defaults
+        )
+        return obj
 
 
 class RelayNodeMiniSerializer(serializers.ModelSerializer):
@@ -539,6 +715,12 @@ class OrderLegSerializer(serializers.ModelSerializer):
     start_relay_node = RelayNodeMiniSerializer(read_only=True)
     end_relay_node = RelayNodeMiniSerializer(read_only=True)
     rider_id = serializers.CharField(source="rider.id", read_only=True, allow_null=True)
+    suggested_rider_id = serializers.CharField(
+        source="suggested_rider.id", read_only=True, allow_null=True
+    )
+    suggested_rider_name = serializers.CharField(
+        source="suggested_rider.user.contact_name", read_only=True, allow_null=True
+    )
 
     class Meta:
         from orders.models import OrderLeg
@@ -554,6 +736,8 @@ class OrderLegSerializer(serializers.ModelSerializer):
             "rider_payout",
             "zone_compliance_bonus",
             "rider_id",
+            "suggested_rider_id",
+            "suggested_rider_name",
             "start_relay_node",
             "end_relay_node",
         ]
@@ -861,6 +1045,15 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider = serializers.SerializerMethodField()
+    # Sourced from the persisted model field so Ably real-time payloads include the
+    # correct value without requiring a live ORM annotation on every publish.
+    orders_today = serializers.DecimalField(
+        source="deliveries_km_today",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+        default=0,
+    )
 
     class Meta:
         model = VehicleAsset
@@ -879,6 +1072,10 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "registration_expiry",
             "road_worthiness_expiry",
             "engine_status",
+            "total_distance",
+            "unit_of_distance",
+            "distance_today",
+            "orders_today",
             "stop_duration",
             "moved_timestamp",
             "latitude",
@@ -894,7 +1091,8 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 
     def get_assigned_rider(self, obj):
-        rider = obj.riders.select_related("user").first()
+        # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
+        rider = obj.riders.all().first()
         if rider:
             return {
                 "id": str(rider.id),

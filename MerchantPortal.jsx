@@ -444,6 +444,9 @@ function MerchantPortal() {
       id: order.order_number,
       order_number: order.order_number,
       status: order.status,
+			rider_code: order.rider_code,
+			rider_name: order.rider_name,
+			rider_phone: order.rider_phone,
       pickup: order.pickup_address,
       dropoff: order.deliveries[0]?.dropoff_address || '',
       amount: parseFloat(order.total_amount),
@@ -452,7 +455,9 @@ function MerchantPortal() {
       merchant: order.user_business_name,
       deliveries: order.deliveries,
       mode: order.mode,
-      payment_method: order.payment_method
+      payment_method: order.payment_method,
+      collect_on_delivery: order.collect_on_delivery || false,
+      cod_amount: order.cod_amount ? parseFloat(order.cod_amount) : null,
     }));
   };
 
@@ -818,7 +823,9 @@ function MerchantPortal() {
                       package_type: data.packageType || 'Box',
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
+                      cod_amount: data.codAmount || null,
                     };
                     response = await window.API.Orders.createQuickSend(apiPayload);
                   } else if (data.mode === 'multi') {
@@ -831,7 +838,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   } else if (data.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
@@ -843,7 +851,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   }
                   if (response && response.success) {
@@ -2673,6 +2682,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [payMethod, setPayMethod] = useState("wallet");
   const [step, setStep] = useState(1); // 1=form, 2=review
 
+  // ─── Cash on Delivery ───
+  const [collectOnDelivery, setCollectOnDelivery] = useState(false);
+  const [codAmount, setCodAmount] = useState("");
+
   // ─── Vehicle pricing from backend ───
   // Defaults mirror the production tiered pricing so the UI is correct even
   // before the API response arrives (or if it fails).
@@ -3071,14 +3084,32 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
 
+	  // When transitioning Step 1 → Step 2 (Review & Pay) for Quick Send,
+	  // we *lock* the route stats used for pricing so the displayed price does not
+	  // change later when the map finishes (re)computing directions.
+	  const [lockedQuickDistanceKm, setLockedQuickDistanceKm] = useState(null);
+	  const [lockedQuickDurationMin, setLockedQuickDurationMin] = useState(null);
+
   // When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
   // Step 1 should always reflect the *current* addresses via early-route calculation.
   useEffect(() => {
     if (step === 1) {
       setRouteDistance(null);
       setRouteDuration(null);
+	      setLockedQuickDistanceKm(null);
+	      setLockedQuickDurationMin(null);
     }
   }, [step]);
+
+	  const handleProceedToReview = () => {
+	    // Freeze pricing inputs to whatever Step 1 used (early route) so the
+	    // amount doesn't change on Step 2 when OrderMap reports a route.
+	    if (mode === 'quick') {
+	      if (typeof earlyRouteDistance === 'number') setLockedQuickDistanceKm(earlyRouteDistance);
+	      if (typeof earlyRouteDuration === 'number') setLockedQuickDurationMin(earlyRouteDuration);
+	    }
+	    setStep(2);
+	  };
 
   // ─── Bulk Import state ───
   const [bulkText, setBulkText] = useState("");
@@ -3171,11 +3202,25 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const calcTieredPrice = (km, pt) => {
     if (!pt || pt.type !== 'tiered') return null;
     if (km <= pt.floor_km) return pt.floor_fee;
-    const t = pt.tiers || [];
-    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
-    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
-    return Math.round(km * (t[t.length - 1]?.rate || 0));
+	    // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+	    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+	    let prevMaxKm = Number(pt.floor_km || 0);
+	    let prevRate = null;
+	    for (let i = 0; i < tiers.length; i++) {
+	      const tier = tiers[i] || {};
+	      const rate = Number(tier.rate || 0);
+	      const maxKm = tier.max_km;
+	      const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	      if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+	        return Math.max(Math.round(km * rate), minFloor);
+	      }
+	      prevMaxKm = Number(maxKm);
+	      prevRate = rate;
+	    }
+	    // Fallback for unexpected tier config
+	    const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+	    const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	    return Math.max(Math.round(km * lastRate), minFloor);
   };
 
   // ─── Compute per-drop fare for Multi-Drop ───
@@ -3219,19 +3264,29 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation — Quick Send only
-    if (step === 2 && routeDistance && routeDuration && mode === 'quick') {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
-    }
+	    // Quick Send pricing: use the *locked* route stats on Step 2 so price is stable.
+	    if (mode === 'quick') {
+	      const km = (typeof lockedQuickDistanceKm === 'number')
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number')
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number')
+	            ? routeDistance
+	            : null;
+	      const mins = (typeof lockedQuickDurationMin === 'number')
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number')
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number')
+	            ? routeDuration
+	            : null;
 
-    // Step 1 (Quick Send): if we already calculated an early route, use it
-    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
-    }
+	      if (typeof km === 'number' && typeof mins === 'number') {
+	        const tiered = calcTieredPrice(km, pricing.pricing_tiers);
+	        if (tiered !== null) return tiered;
+	        return Math.round(pricing.base_fare + km * pricing.rate_per_km + mins * pricing.rate_per_minute);
+	      }
+	    }
 
     // Fallback: floor fee for tiered, or base fare for simple
     if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
@@ -3296,6 +3351,21 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (submitting) return;
     const deliveries = getActiveDropoffs();
 
+	    const effectiveQuickDistanceKm = (mode === 'quick')
+	      ? (typeof lockedQuickDistanceKm === 'number'
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number'
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number' ? routeDistance : 0)))
+	      : null;
+	    const effectiveQuickDurationMin = (mode === 'quick')
+	      ? (typeof lockedQuickDurationMin === 'number'
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number'
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number' ? routeDuration : 0)))
+	      : null;
+
     // Prepare order data based on mode
     const orderData = {
       mode: mode,
@@ -3307,14 +3377,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       notes: notes,
       // Include route information for pricing calculation.
       // For multi-drop, send average distance so backend per-unit pricing is roughly correct.
-      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
+	      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
         ? parseFloat((drops.filter(d => d.address.trim() && d.distance_km).reduce((s, d) => s + d.distance_km, 0) / drops.filter(d => d.address.trim() && d.distance_km).length).toFixed(1))
-        : (routeDistance || earlyRouteDistance || 0),
+	        : (mode === 'quick' ? (effectiveQuickDistanceKm || 0) : (routeDistance || earlyRouteDistance || 0)),
       duration_minutes: (mode === 'multi' && drops.filter(d => d.address.trim() && d.duration_minutes).length > 0)
         ? Math.ceil(drops.filter(d => d.address.trim() && d.duration_minutes).reduce((s, d) => s + d.duration_minutes, 0) / drops.filter(d => d.address.trim() && d.duration_minutes).length)
-        : (routeDuration || earlyRouteDuration || 0),
+	        : (mode === 'quick' ? (effectiveQuickDurationMin || 0) : (routeDuration || earlyRouteDuration || 0)),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
+      // Cash on Delivery
+      collectOnDelivery: collectOnDelivery,
+      codAmount: collectOnDelivery && codAmount ? parseFloat(codAmount) : null,
     };
 
     if (mode === 'quick') {
@@ -3875,7 +3948,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             </div>
 
             <button
-              onClick={() => setStep(2)}
+	              onClick={handleProceedToReview}
               disabled={!canProceed}
               style={{
                 padding: "14px 32px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: canProceed ? "pointer" : "default",
@@ -4012,6 +4085,50 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               ))}
             </div>
 
+            {/* Cash on Delivery */}
+            <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collectOnDelivery ? 14 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Cash on Delivery (COD)</div>
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>Rider collects payment from customer on your behalf</div>
+                </div>
+                <button
+                  onClick={() => { setCollectOnDelivery(v => !v); if (collectOnDelivery) setCodAmount(""); }}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", flexShrink: 0,
+                    background: collectOnDelivery ? S.gold : "#e2e8f0", transition: "background 0.2s", position: "relative"
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                    position: "absolute", top: 3, left: collectOnDelivery ? 23 : 3,
+                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                  }} />
+                </button>
+              </div>
+              {collectOnDelivery && (
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 5 }}>
+                    Amount to collect from customer (₦)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 15000"
+                    value={codAmount}
+                    onChange={e => setCodAmount(e.target.value)}
+                    style={{
+                      width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                      padding: "0 14px", height: 42, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box"
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 6 }}>
+                    ⚠️ This is the goods payment amount — separate from the delivery fee.
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setStep(1)} style={{
@@ -4093,6 +4210,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
     const order = orders.find(o => o.id === detailId);
     if (!order) return null;
     const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
+			const hasRider = Boolean(order.rider_phone || order.rider_name || order.rider_code);
+			const isLikelyAssigned = ["Assigned", "Started", "PickedUp", "Arrived", "Done"].includes(order.status);
 
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
@@ -4116,7 +4235,49 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
             <span style={{ padding: "6px 14px", borderRadius: 8, background: st.bg, color: st.text, fontSize: 13, fontWeight: 700 }}>{st.label}</span>
           </div>
 
-          <div style={{ padding: 24 }}>
+			  <div style={{ padding: 24 }}>
+					{/* Rider */}
+				<div style={{
+					marginBottom: 24,
+					padding: 14,
+					borderRadius: 12,
+					background: "#f8fafc",
+					border: "1px solid #e2e8f0",
+				}}>
+					<div style={{ fontSize: 11, color: S.grayLight, fontWeight: 700, marginBottom: 8 }}>RIDER</div>
+						{hasRider ? (
+						<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+							<div style={{ minWidth: 0 }}>
+								<div style={{ fontSize: 14, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+									{order.rider_name || "Rider"}{order.rider_code ? ` (${order.rider_code})` : ""}
+								</div>
+								<div style={{ fontSize: 12, color: S.gray }}>Assigned to your order</div>
+							</div>
+								{order.rider_phone ? (
+									<a
+										href={`tel:${order.rider_phone}`}
+										style={{
+											flexShrink: 0,
+											padding: "8px 12px",
+											borderRadius: 10,
+											border: "1px solid #dbeafe",
+											background: "#eff6ff",
+											color: "#1e40af",
+											fontSize: 13,
+											fontWeight: 700,
+											textDecoration: "none",
+										}}
+									>
+										📞 {order.rider_phone}
+									</a>
+								) : (
+									<div style={{ flexShrink: 0, fontSize: 12, color: S.grayLight, fontWeight: 700 }}>Phone not available</div>
+								)}
+						</div>
+					) : (
+							<div style={{ fontSize: 13, color: S.gray }}>{isLikelyAssigned ? "Assigned — rider details unavailable" : "Not assigned yet"}</div>
+					)}
+				</div>
             {/* Pickup Address */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ display: "flex", gap: 12 }}>
@@ -4186,6 +4347,23 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
                 <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
               </div>
             ))}
+
+            {/* COD detail row */}
+            {order.collect_on_delivery && (
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "12px 14px", borderTop: "1px solid #f8fafc", marginTop: 2,
+                background: "#fefce8", borderRadius: 8
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#854d0e" }}>💵 Cash on Delivery</div>
+                  <div style={{ fontSize: 11, color: "#a16207" }}>Rider collects from customer</div>
+                </div>
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#854d0e", fontFamily: "'Space Mono', monospace" }}>
+                  {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : 'Amount TBD'}
+                </span>
+              </div>
+            )}
 
             {/* Cancel Order Button — hidden once the order has been picked up or beyond */}
             {!['Delivered', 'Canceled', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled', 'PickedUp', 'Started', 'Done'].includes(order.status) && (
@@ -4302,6 +4480,11 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
                   {order.deliveries && order.deliveries.length > 1 && (
                     <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: "#f1f5f9", color: S.navy }}>
                       {order.deliveries.length} stops
+                    </span>
+                  )}
+                  {order.collect_on_delivery && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#fef9c3", color: "#854d0e" }}>
+                      COD {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : ''}
                     </span>
                   )}
                 </div>

@@ -1,4 +1,6 @@
 import logging
+import datetime
+
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -12,6 +14,7 @@ from .serializers import (
 )
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
+from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
@@ -140,7 +143,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         .select_related("user", "rider", "rider__user")
         .prefetch_related("deliveries")
     )
-    from .serializers import OrderSerializer, OrderCreateSerializer
+    from .serializers import OrderSerializer, OrderCreateSerializer, OrderPriceUpdateSerializer
 
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -163,6 +166,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             "legs__end_relay_node",
             "legs__rider",
             "legs__rider__user",
+            "legs__suggested_rider",
+            "legs__suggested_rider__user",
         )
 
     def create(self, request, *args, **kwargs):
@@ -305,9 +310,24 @@ class OrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+
         old_status = order.status
+        now = timezone.now()
         order.status = new_status
-        order.save(update_fields=["status"])
+
+        # Keep timestamps consistent with rider-app completion flows.
+        update_fields = ["status", "updated_at"]
+        if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
+            order.picked_up_at = now
+            update_fields.append("picked_up_at")
+        if new_status == "Arrived" and not getattr(order, "arrived_at", None):
+            order.arrived_at = now
+            update_fields.append("arrived_at")
+        if new_status == "Done" and not getattr(order, "completed_at", None):
+            order.completed_at = now
+            update_fields.append("completed_at")
+
+        order.save(update_fields=update_fields)
 
         # Keep Delivery records in sync so the serializer fallback stays consistent.
         ORDER_TO_DELIVERY_STATUS = {
@@ -321,7 +341,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         }
         delivery_sync_status = ORDER_TO_DELIVERY_STATUS.get(new_status)
         if delivery_sync_status:
-            order.deliveries.all().update(status=delivery_sync_status)
+            deliveries_qs = order.deliveries.all()
+            deliveries_qs.update(status=delivery_sync_status)
+            if delivery_sync_status == "Delivered":
+                deliveries_qs.filter(delivered_at__isnull=True).update(delivered_at=now)
 
         event_type, color = STATUS_MAP[new_status]
         rider_name = None
@@ -356,6 +379,54 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "rider": rider_name,
             },
         )
+
+        return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["patch"], url_path="update-price")
+    def update_price(self, request, order_number=None):
+        """Update the delivery fee (Order.total_amount).
+
+        This is intentionally a dedicated endpoint because `OrderSerializer.amount`
+        is read-only (computed mapping to total_amount).
+        """
+
+        order = self.get_object()
+
+        # Guardrails: don't allow editing a paid / released order
+        if getattr(order, "payment_status", None) == "Paid" or getattr(
+            order, "escrow_released", False
+        ):
+            return Response(
+                {"error": "Cannot update price for paid/released orders."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ser = self.OrderPriceUpdateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_amount = ser.validated_data["amount"]
+
+        order.total_amount = new_amount
+        order.save(update_fields=["total_amount", "updated_at"])
+
+        # If this is a relay order, recalculate leg payouts as a proportional
+        # share of the new total_amount weighted by each leg's distance.
+        # Formula: leg_payout = (leg_km / total_km) * total_amount
+        if getattr(order, "is_relay_order", False):
+            from decimal import Decimal, ROUND_HALF_UP
+
+            legs = list(order.legs.all())
+            if legs:
+                total_distance = sum(float(l.distance_km or 0) for l in legs) or 0.0
+                if total_distance > 0:
+                    for leg in legs:
+                        share = Decimal(
+                            str(float(leg.distance_km or 0) / total_distance)
+                        )
+                        payout = (new_amount * share).quantize(
+                            Decimal("0.01"), rounding=ROUND_HALF_UP
+                        )
+                        leg.rider_payout = payout
+                        leg.save(update_fields=["rider_payout"])
 
         return Response(self.get_serializer(order).data)
 
@@ -454,6 +525,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 "legs",
                 "legs__start_relay_node",
                 "legs__end_relay_node",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
                 "deliveries",
             )
             .select_related(
@@ -548,6 +621,35 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+
+class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
+    """CRUD (POST-upsert) for per-merchant/per-vehicle pricing overrides."""
+
+    from orders.models import MerchantPricingOverride
+    from .serializers import MerchantPricingOverrideSerializer
+
+    queryset = MerchantPricingOverride.objects.select_related(
+        "merchant", "vehicle"
+    ).all()
+    serializer_class = MerchantPricingOverrideSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset().order_by("-updated_at")
+
+        merchant = self.request.query_params.get("merchant")
+        vehicle = self.request.query_params.get("vehicle")
+        active = self.request.query_params.get("active")
+
+        if merchant:
+            qs = qs.filter(merchant_id=merchant)
+        if vehicle:
+            qs = qs.filter(vehicle_id=vehicle)
+        if active is not None:
+            qs = qs.filter(is_active=str(active).lower() in ("true", "1", "yes"))
+
+        return qs
 
 
 class SystemSettingsView(views.APIView):
@@ -691,6 +793,18 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+
+        # deliveries_km_today is a persisted model field kept up to date by the
+        # compute_deliveries_today cron job.  No live annotation is needed here —
+        # using a stored field means Ably real-time payloads (which also call
+        # VehicleAssetSerializer) always carry the correct value.
+        qs = qs.prefetch_related(
+            Prefetch(
+                "riders",
+                queryset=Rider.objects.select_related("user").order_by("created_at"),
+            )
+        )
+
         vtype = self.request.query_params.get("type")
         if vtype:
             qs = qs.filter(vehicle_type=vtype)

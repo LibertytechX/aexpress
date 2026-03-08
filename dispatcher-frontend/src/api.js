@@ -270,6 +270,7 @@ const normalizeOrder = (o) => ({
     amount: parseFloat(o.amount) || 0,
     cod: parseFloat(o.cod) || 0,
     codFee: parseFloat(o.codFee) || 0,
+    collectOnDelivery: o.collect_on_delivery || false,
     vehicle: o.vehicle || 'Bike',
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',
@@ -279,11 +280,17 @@ const normalizeOrder = (o) => ({
     routingError: o.routing_error || '',
     relayLegsCount: o.relay_legs_count || 0,
     suggestedRiderId: o.suggested_rider_id || null,
+    distance: o.distance || null,
+    time: o.time || null,
     pickupLat: o.pickup_lat || null,
     pickupLng: o.pickup_lng || null,
     dropoffLat: o.dropoff_lat || null,
     dropoffLng: o.dropoff_lng || null,
-    relayLegs: o.relay_legs || [],
+    relayLegs: (o.relay_legs || []).map(leg => ({
+        ...leg,
+        suggestedRiderId: leg.suggested_rider_id || null,
+        suggestedRiderName: leg.suggested_rider_name || null,
+    })),
 });
 
 export const OrdersAPI = {
@@ -298,6 +305,17 @@ export const OrdersAPI = {
         const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/`);
         if (!res.ok) throw new Error('Failed to fetch order');
         const data = await res.json();
+        return normalizeOrder(data);
+    },
+
+    async updatePrice(orderNumber, amount) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-price/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ amount })
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update price'));
         return normalizeOrder(data);
     },
 
@@ -356,6 +374,8 @@ export const MerchantsAPI = {
         const data = await res.json();
         return data.map(m => ({
             id: m.id || 'N/A',
+            // Backend exposes the merchant's UUID as userId; we need it for per-merchant override endpoints.
+            userId: m.userId || m.user_id || m.user || null,
             name: m.name || 'Unknown',
             contact: m.contact || '',
             phone: m.phone || '',
@@ -366,6 +386,47 @@ export const MerchantsAPI = {
             status: m.status || 'Active',
             joined: m.joined || 'N/A'
         }));
+    }
+};
+
+// ─── MERCHANT PRICING OVERRIDES ─────────────────────────────────
+export const MerchantPricingOverridesAPI = {
+    async list({ merchant, vehicle, active } = {}) {
+        const qs = new URLSearchParams();
+        if (merchant) qs.set('merchant', merchant);
+        if (vehicle) qs.set('vehicle', vehicle);
+        if (active !== undefined && active !== null) qs.set('active', String(active));
+        const url = `${API_BASE_URL}/dispatch/merchant-pricing-overrides/${qs.toString() ? `?${qs.toString()}` : ''}`;
+        const res = await fetch(url, { headers: authHeaders() });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to fetch merchant pricing overrides'));
+        return Array.isArray(data) ? data : (data?.results || []);
+    },
+
+    async upsert(payload) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to save merchant pricing override'));
+        return data;
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) {
+            let data;
+            try { data = await res.json(); } catch (_) { data = null; }
+            throw (data || new Error('Failed to delete merchant pricing override'));
+        }
+        return true;
     }
 };
 

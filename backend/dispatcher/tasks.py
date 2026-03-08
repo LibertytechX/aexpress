@@ -124,6 +124,24 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
+RELAY_THRESHOLD_KM = 18.0  # Orders longer than this are split via relay hubs
+
+
+def _nearest_rider_to(lat, lng):
+    """Return the nearest authorized rider (with GPS) to (lat, lng)."""
+    riders = Rider.objects.filter(
+        is_authorized=True,
+        current_latitude__isnull=False,
+        current_longitude__isnull=False,
+    )
+    best, best_d = None, None
+    for r in riders[:200]:
+        d = _haversine_km(lat, lng, float(r.current_latitude), float(r.current_longitude))
+        if best is None or d < best_d:
+            best, best_d = r, d
+    return best
+
+
 def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
     """Greedy hop selection using haversine distance as a cheap proxy."""
     nodes = _get_active_relay_nodes_cached()
@@ -332,14 +350,32 @@ def generate_relay_legs_sync(order_id):
                 first_delivery.dropoff_latitude = dropoff["lat"]
                 first_delivery.dropoff_longitude = dropoff["lng"]
 
-            # Build hop chain (2-pass: tighter hops if road legs exceed cap)
-            hop_nodes = (
-                _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0)
-                or _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=80.0)
+            # Build hop chain.
+            # Orders ≤ 18 km go direct (single leg, no hub handoffs).
+            # Orders > 18 km must pass through relay hubs — the algorithm
+            # tries progressively relaxed per-leg caps until a valid path
+            # is found or all caps are exhausted (→ fail).
+            # IMPORTANT: use explicit `is None` — an empty list [] means a
+            # valid direct single-leg delivery and must not trigger the
+            # fallback path.
+            direct_km = _haversine_km(
+                float(pickup["lat"]), float(pickup["lng"]),
+                float(dropoff["lat"]), float(dropoff["lng"]),
             )
+            if direct_km <= RELAY_THRESHOLD_KM:
+                hop_nodes = []  # short enough — direct delivery, no hubs needed
+            else:
+                hop_nodes = None
+                for max_leg in [18.0, 25.0, 35.0, 50.0, 80.0]:
+                    hop_nodes = _build_greedy_relay_hops(
+                        pickup, dropoff, max_leg_km_est=max_leg
+                    )
+                    if hop_nodes is not None:
+                        break
+
             if hop_nodes is None:
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "Could not find relay hops to keep legs within 100km."
+                order.routing_error = "Could not find relay hubs to split this route into manageable legs."
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",
@@ -385,11 +421,28 @@ def generate_relay_legs_sync(order_id):
             prev_node = None
             for idx, (dist_km, dur_min) in enumerate(legs_metrics, start=1):
                 next_node = hop_nodes[idx - 1] if idx - 1 < len(hop_nodes) else None
+
+                # Determine this leg's start coordinates for rider suggestion:
+                #   Leg 1  → order pickup point
+                #   Leg N  → the hub where the previous leg ended
+                if prev_node is None:
+                    start_lat = float(pickup["lat"])
+                    start_lng = float(pickup["lng"])
+                else:
+                    start_lat = float(prev_node.latitude)
+                    start_lng = float(prev_node.longitude)
+
+                try:
+                    suggested = _nearest_rider_to(start_lat, start_lng)
+                except Exception:
+                    suggested = None
+
                 leg = OrderLeg.objects.create(
                     order=order,
                     leg_number=idx,
                     start_relay_node=prev_node,
                     end_relay_node=next_node,
+                    suggested_rider=suggested,
                     hub_pin=f"{secrets.randbelow(1000000):06d}",
                     distance_km=float(dist_km or 0),
                     duration_minutes=int(dur_min or 0),
@@ -397,40 +450,23 @@ def generate_relay_legs_sync(order_id):
                 created_legs.append(leg)
                 prev_node = next_node
 
-            # Settlement: distance-weighted split of 80% of order total
+            # Settlement: each leg earns a proportional share of the full
+            # order total_amount based on its distance fraction.
+            # Formula: leg_payout = (leg_km / total_km) * total_amount
             total_distance = sum(float(l.distance_km or 0) for l in created_legs) or 0.0
-            total_pool = (order.total_amount or Decimal("0")) * Decimal("0.8")
+            order_total = order.total_amount or Decimal("0")
             if total_distance > 0:
                 for leg in created_legs:
-                    share = Decimal(str(float(leg.distance_km) / total_distance))
-                    payout = (total_pool * share).quantize(
+                    share = Decimal(str(float(leg.distance_km or 0) / total_distance))
+                    payout = (order_total * share).quantize(
                         Decimal("0.01"), rounding=ROUND_HALF_UP
                     )
                     leg.rider_payout = payout
                     leg.save(update_fields=["rider_payout"])
 
-            # Suggest rider for first leg
-            try:
-                riders = Rider.objects.filter(
-                    is_authorized=True,
-                    status=Rider.Status.ONLINE,
-                    current_latitude__isnull=False,
-                    current_longitude__isnull=False,
-                )
-                best = None
-                best_d = None
-                for r in riders[:200]:
-                    d = _haversine_km(
-                        float(pickup["lat"]),
-                        float(pickup["lng"]),
-                        float(r.current_latitude),
-                        float(r.current_longitude),
-                    )
-                    if best is None or d < best_d:
-                        best, best_d = r, d
-                order.suggested_rider = best
-            except Exception:
-                order.suggested_rider = None
+            # Keep order.suggested_rider pointing to the leg-1 suggestion
+            # (used by the banner; consistent with previous behaviour)
+            order.suggested_rider = created_legs[0].suggested_rider if created_legs else None
 
             # Persist computed totals + status
             order.relay_legs_count = len(created_legs)

@@ -86,26 +86,29 @@ class Vehicle(models.Model):
             if km <= floor_km:
                 return Decimal(str(floor_fee)).quantize(Decimal("0.01"))
 
-            # Tier 0: e.g. ≤10 km → km × rate, floored at floor_fee
-            if len(tiers) > 0 and (tiers[0].get("max_km") is None or km <= float(tiers[0]["max_km"])):
-                price = max(round(km * float(tiers[0]["rate"])), floor_fee)
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+            # Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+            prev_max_km = floor_km
+            prev_rate = None
+            for i, tier in enumerate(tiers):
+                if not isinstance(tier, dict):
+                    continue
+                rate = float(tier.get("rate") or 0)
+                max_km = tier.get("max_km")
 
-            # Tier 1: e.g. ≤15 km → km × rate, floored at tier-0 boundary
-            if len(tiers) > 1 and (tiers[1].get("max_km") is None or km <= float(tiers[1]["max_km"])):
-                boundary = float(tiers[0].get("max_km", floor_km)) * float(tiers[0].get("rate", 0))
-                price = max(round(km * float(tiers[1]["rate"])), round(boundary))
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+                min_floor = floor_fee if i == 0 else round(prev_max_km * float(prev_rate or 0))
 
-            # Tier 2+: e.g. >15 km → km × rate, floored at tier-1 boundary
-            if len(tiers) > 2:
-                boundary = float(tiers[1].get("max_km", 0)) * float(tiers[1].get("rate", 0))
-                price = max(round(km * float(tiers[2]["rate"])), round(boundary))
-                return Decimal(str(price)).quantize(Decimal("0.01"))
+                # Unbounded tier (or missing max) applies to any remaining distances
+                if max_km is None or km <= float(max_km):
+                    price = max(round(km * rate), round(min_floor))
+                    return Decimal(str(price)).quantize(Decimal("0.01"))
+
+                prev_max_km = float(max_km)
+                prev_rate = rate
 
             # Fallback for unexpected tier config
-            last_rate = float(tiers[-1].get("rate", 0)) if tiers else 0
-            price = round(km * last_rate)
+            last_rate = float(tiers[-1].get("rate") or 0) if tiers else 0
+            min_floor = floor_fee if prev_rate is None else round(prev_max_km * float(prev_rate or 0))
+            price = max(round(km * last_rate), round(min_floor))
             return Decimal(str(price)).quantize(Decimal("0.01"))
 
         # ── Legacy formula ─────────────────────────────────────────────
@@ -132,6 +135,59 @@ class Vehicle(models.Model):
             )
 
         return total.quantize(Decimal("0.01"))
+
+
+class MerchantPricingOverride(models.Model):
+    """Optional per-merchant pricing override for a specific vehicle.
+
+    Precedence (when is_active=True):
+      1) flat_fee (if set)
+      2) pricing_tiers (if set)
+      3) fallback to Vehicle.calculate_fare()
+    """
+
+    merchant = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="merchant_pricing_overrides",
+        help_text="Merchant user this override applies to",
+    )
+    vehicle = models.ForeignKey(
+        Vehicle,
+        on_delete=models.CASCADE,
+        related_name="merchant_pricing_overrides",
+    )
+
+    # If set, this becomes the full delivery fee (ignores distance/duration/tiers)
+    flat_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Flat per-ride fee (if set, ignores tiered pricing)",
+    )
+
+    # If set (and flat_fee is null), used instead of Vehicle.pricing_tiers
+    pricing_tiers = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Tiered pricing config (same shape as Vehicle.pricing_tiers)",
+    )
+
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_pricing_overrides"
+        unique_together = [("merchant", "vehicle")]
+        indexes = [
+            models.Index(fields=["merchant", "vehicle"]),
+            models.Index(fields=["merchant", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Override: {self.merchant_id} × {self.vehicle.name}"
 
 
 class Order(models.Model):
@@ -274,6 +330,19 @@ class Order(models.Model):
         help_text="Suggested first-leg rider for relay orders",
     )
 
+    # Cash on Delivery
+    collect_on_delivery = models.BooleanField(
+        default=False,
+        help_text="Whether the rider should collect payment from the customer on behalf of the merchant",
+    )
+    cod_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Amount the rider should collect from the customer (COD)",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
@@ -372,6 +441,22 @@ class Delivery(models.Model):
     # Sequence for multi-drop
     sequence = models.IntegerField(default=1)
 
+    # Route details (locked in at order creation time)
+    # For multi-drop orders this should represent the leg distance/time to reach
+    # this stop (typically previous stop → this stop).
+    distance_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Road distance in kilometers for this delivery leg",
+    )
+    duration_minutes = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Estimated duration in minutes for this delivery leg",
+    )
+
     class Meta:
         db_table = "deliveries"
         ordering = ["order", "sequence"]
@@ -429,6 +514,16 @@ class OrderLeg(models.Model):
         null=True,
         blank=True,
         related_name="relay_legs",
+    )
+
+    # Nearest available rider suggested at route-generation time for this leg
+    suggested_rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="suggested_legs",
+        help_text="Nearest authorized rider suggested for this leg at generation time",
     )
 
     # Relay handoff points

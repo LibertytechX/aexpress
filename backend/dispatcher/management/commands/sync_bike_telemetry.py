@@ -9,16 +9,19 @@ Usage:
     python manage.py sync_bike_telemetry --dry-run
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from datetime import timedelta, timezone as dt_timezone
+from decimal import Decimal, InvalidOperation
 
 import requests
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from dispatcher.models import VehicleAsset
+from dispatcher.models import VehicleAsset, VehicleTracking
 
 logger = logging.getLogger(__name__)
 
@@ -142,11 +145,95 @@ def _normalise_moved_timestamp(raw):
         return None
 
 
+def _normalise_decimal(raw) -> Decimal | None:
+    """Accept int/float/str Decimal-like values."""
+    if raw is None:
+        return None
+    try:
+        # str() avoids float binary artefacts where possible
+        return Decimal(str(raw))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _extract_total_distance(device: dict) -> Decimal | None:
+    """Best-effort extraction of provider odometer/total distance from payload."""
+    # Primary expected keys
+    for key in (
+        "total_distance",
+        "travelled",
+        "traveled",
+        "odometer",
+        "distance",
+        "totalDistance",
+    ):
+        if key in device and device.get(key) is not None:
+            return _normalise_decimal(device.get(key))
+    return None
+
+
+def _extract_unit_of_distance(device: dict) -> str | None:
+    for key in ("unit_of_distance", "distance_unit", "unit", "unitOfDistance"):
+        raw = device.get(key)
+        if raw is None:
+            continue
+        s = str(raw).strip()
+        return s or None
+    return None
+
+
+def _normalise_coord(raw) -> Decimal | None:
+    d = _normalise_decimal(raw)
+    if d is None:
+        return None
+    return d
+
+
+def _is_valid_coord_pair(lat: Decimal | None, lng: Decimal | None) -> bool:
+    if lat is None or lng is None:
+        return False
+    # Explicitly ignore (0,0) outlier
+    if lat == 0 and lng == 0:
+        return False
+    # Rough bounds check
+    if lat < -90 or lat > 90:
+        return False
+    if lng < -180 or lng > 180:
+        return False
+    return True
+
+
+def _build_tracking_row(asset: VehicleAsset | None, device: dict) -> VehicleTracking | None:
+    """Create an unsaved VehicleTracking row from telemetry payload."""
+    if asset is None:
+        return None
+
+    lat = _normalise_coord(device.get("lat"))
+    lng = _normalise_coord(device.get("lng"))
+    if not _is_valid_coord_pair(lat, lng):
+        return None
+
+    travelled = _extract_total_distance(device) or asset.total_distance
+    if travelled is None:
+        return None
+
+    unit = _extract_unit_of_distance(device) or asset.unit_of_distance
+    return VehicleTracking(
+        vehicle_asset=asset,
+        latitude=lat,
+        longitude=lng,
+        travelled=travelled,
+        unit_of_distance=unit,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core sync logic
 # ---------------------------------------------------------------------------
 
-def _upsert_device(device: dict, status_code: int, snippet: str, dry_run: bool) -> str:
+def _upsert_device(
+    device: dict, status_code: int, snippet: str, dry_run: bool
+) -> tuple[str, VehicleAsset | None]:
     """
     Upsert a single device dict into VehicleAsset.
     Returns 'created', 'updated', or 'skipped'.
@@ -154,12 +241,14 @@ def _upsert_device(device: dict, status_code: int, snippet: str, dry_run: bool) 
     provider_id = str(device.get("id", "")).strip()
     if not provider_id:
         logger.warning("Device entry has no 'id' field — skipping: %s", device)
-        return "skipped"
+        return "skipped", None
 
     device_name = (device.get("name") or "").strip()
     is_online = bool(device.get("online"))
     lat = device.get("lat")
     lng = device.get("lng")
+    distance = _extract_total_distance(device)
+    unit = _extract_unit_of_distance(device)
 
     telemetry_fields = {
         "latitude": lat,
@@ -177,6 +266,11 @@ def _upsert_device(device: dict, status_code: int, snippet: str, dry_run: bool) 
             "synced_at": timezone.now().isoformat(),
         },
     }
+    # Avoid overwriting distance fields with null when provider omits them
+    if distance is not None:
+        telemetry_fields["total_distance"] = distance
+    if unit is not None:
+        telemetry_fields["unit_of_distance"] = unit
 
     existing = VehicleAsset.objects.filter(provider_id=provider_id).first()
 
@@ -186,7 +280,7 @@ def _upsert_device(device: dict, status_code: int, snippet: str, dry_run: bool) 
                 setattr(existing, field, value)
             existing.save(update_fields=list(telemetry_fields.keys()))
         logger.debug("Updated  provider_id=%s  name=%s", provider_id, device_name)
-        return "updated"
+        return "updated", existing
 
     # New device — create a minimal VehicleAsset record.
     # plate_number must be unique; use the device name as a provisional value.
@@ -204,10 +298,12 @@ def _upsert_device(device: dict, status_code: int, snippet: str, dry_run: bool) 
     }
 
     if not dry_run:
-        VehicleAsset.objects.create(provider_id=provider_id, **create_defaults)
+        created = VehicleAsset.objects.create(provider_id=provider_id, **create_defaults)
+    else:
+        created = None
 
     logger.debug("Created  provider_id=%s  plate=%s", provider_id, provisional_plate)
-    return "created"
+    return "created", created
 
 
 # ---------------------------------------------------------------------------
@@ -267,11 +363,20 @@ class Command(BaseCommand):
 
         # ── Step 3: upsert ──────────────────────────────────────────
         counts = {"created": 0, "updated": 0, "skipped": 0}
+        tracking_rows: list[VehicleTracking] = []
         try:
             with transaction.atomic():
                 for device in devices:
-                    result = _upsert_device(device, status_code, snippet, dry_run)
+                    result, asset = _upsert_device(device, status_code, snippet, dry_run)
                     counts[result] += 1
+                    if not dry_run:
+                        row = _build_tracking_row(asset, device)
+                        if row is not None:
+                            tracking_rows.append(row)
+
+                # Bulk insert tracking points once per sync for efficiency
+                if not dry_run and tracking_rows:
+                    VehicleTracking.objects.bulk_create(tracking_rows, batch_size=1000)
         except Exception as exc:
             logger.exception("sync_bike_telemetry: database error during upsert")
             self.stderr.write(self.style.ERROR("Database error: %s" % exc))

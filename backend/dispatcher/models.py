@@ -193,6 +193,40 @@ class VehicleAsset(models.Model):
         choices=EngineStatus.choices,
         default=EngineStatus.UNKNOWN,
     )
+
+    # ── Distance / odometer (from telemetry provider) ───────────────
+    # NOTE: These may be null if the provider does not send them for a device.
+    total_distance = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Lifetime / odometer-like distance value from telemetry provider",
+    )
+    unit_of_distance = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Unit for total_distance (e.g. km, mi)",
+    )
+    # Prepared for a future aggregation job; may remain null initially.
+    distance_today = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Distance travelled since start of local day (computed by job)",
+    )
+    # Sum of distance_km from completed orders today (updated by compute_deliveries_today job).
+    # Stored here so Ably real-time publishes include the correct value without DB annotation.
+    deliveries_km_today = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=0,
+        help_text="Total km of completed orders today for riders on this asset (computed by job)",
+    )
     stop_duration = models.DurationField(
         null=True,
         blank=True,
@@ -274,6 +308,40 @@ class VehicleAsset(models.Model):
         return (
             f"{self.plate_number} ({self.get_vehicle_type_display()}) [{self.asset_id}]"
         )
+
+
+class VehicleTracking(models.Model):
+    """Historical telemetry snapshot used for distance tracking & analytics."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.CASCADE,
+        related_name="tracking",
+        db_index=True,
+    )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    travelled = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Poll-time odometer snapshot (typically equals VehicleAsset.total_distance)",
+    )
+    unit_of_distance = models.CharField(max_length=10, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicle_tracking"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["vehicle_asset", "created_at"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.vehicle_asset.plate_number} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,8 @@ class DeliverySerializer(serializers.ModelSerializer):
             "package_type",
             "notes",
             "cod_amount",
+            "distance_km",
+            "duration_minutes",
             "status",
             "sequence",
             "created_at",
@@ -72,12 +74,20 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     delivery_count = serializers.SerializerMethodField()
 
+    # Rider contact (merchant-facing)
+    rider_code = serializers.SerializerMethodField()
+    rider_name = serializers.SerializerMethodField()
+    rider_phone = serializers.SerializerMethodField()
+
     class Meta:
         model = Order
         fields = [
             "id",
             "order_number",
             "user_business_name",
+            "rider_code",
+            "rider_name",
+            "rider_phone",
             "mode",
             "vehicle_name",
             "vehicle_price",
@@ -97,6 +107,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "updated_at",
             "scheduled_pickup_time",
             "notes",
+            "collect_on_delivery",
+            "cod_amount",
             "deliveries",
             "delivery_count",
         ]
@@ -105,6 +117,49 @@ class OrderSerializer(serializers.ModelSerializer):
     def get_delivery_count(self, obj):
         """Get the number of deliveries for this order."""
         return obj.deliveries.count()
+
+    def _get_rider(self, obj):
+        """Return the best rider object for merchant-facing 'assigned rider' display.
+
+        For standard (non-relay) orders we use Order.rider.
+        For relay orders, Order.rider may be null while each OrderLeg has its own rider.
+        In that case we fall back to the most relevant leg rider.
+        """
+        rider = getattr(obj, "rider", None)
+        if rider:
+            return rider
+
+        # Relay fallback: pick an active leg rider if present.
+        if getattr(obj, "is_relay_order", False):
+            legs = (
+                obj.legs.filter(rider__isnull=False)
+                .select_related("rider__user")
+                .order_by("leg_number")
+            )
+            # Prefer an 'active' leg first.
+            for st in ["InTransit", "PickedUp", "Assigned"]:
+                leg = legs.filter(status=st).first()
+                if leg and getattr(leg, "rider", None):
+                    return leg.rider
+            # Otherwise fall back to the first leg that has a rider.
+            leg = legs.first()
+            return getattr(leg, "rider", None) if leg else None
+
+        return None
+
+    def get_rider_code(self, obj):
+        rider = self._get_rider(obj)
+        return getattr(rider, "rider_id", None) if rider else None
+
+    def get_rider_name(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "contact_name", None) if user else None
+
+    def get_rider_phone(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "phone", None) if user else None
 
 
 class QuickSendSerializer(serializers.Serializer):
@@ -132,11 +187,24 @@ class QuickSendSerializer(serializers.Serializer):
     )
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
+    # Cash on Delivery
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
+    cod_amount = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=12, decimal_places=2, default=None
+    )
+
     # Route information for pricing
     distance_km = serializers.DecimalField(
         required=True, max_digits=10, decimal_places=2
     )
     duration_minutes = serializers.IntegerField(required=True)
+
+    def validate(self, data):
+        if data.get("collect_on_delivery") and not data.get("cod_amount"):
+            raise serializers.ValidationError(
+                {"cod_amount": "cod_amount is required when collect_on_delivery is true."}
+            )
+        return data
 
     def validate_vehicle(self, value):
         """Validate that the vehicle exists."""
@@ -164,6 +232,12 @@ class MultiDropDeliverySerializer(serializers.Serializer):
         required=False, max_digits=10, decimal_places=2, default=0
     )
 
+    # Optional per-stop/leg route metrics (frontend-calculated preferred)
+    distance_km = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=10, decimal_places=2
+    )
+    duration_minutes = serializers.IntegerField(required=False, allow_null=True)
+
 
 class MultiDropSerializer(serializers.Serializer):
     """Serializer for Multi-Drop order creation."""
@@ -183,6 +257,9 @@ class MultiDropSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
 
     # Route information for pricing
     distance_km = serializers.DecimalField(
@@ -225,6 +302,9 @@ class BulkImportSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
 
     # Route information for pricing
     distance_km = serializers.DecimalField(

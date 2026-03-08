@@ -114,7 +114,10 @@ class QuickSendView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
+            cod_amount=data.get("cod_amount"),
         )
+
 
         # Create single delivery
         Delivery.objects.create(
@@ -129,7 +132,10 @@ class QuickSendView(APIView):
             receiver_phone=data["receiver_phone"],
             package_type=data.get("package_type", "Box"),
             notes=data.get("notes", ""),
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
             sequence=1,
+            cod_amount=data.get("cod_amount") or 0,
         )
 
         # Emit activity event for live feed (fire-and-forget in background thread)
@@ -284,7 +290,9 @@ class MultiDropView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
         )
+
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -301,6 +309,8 @@ class MultiDropView(APIView):
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
                 cod_amount=delivery_data.get("cod_amount", 0),
+                distance_km=delivery_data.get("distance_km"),
+                duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
 
@@ -434,7 +444,9 @@ class BulkImportView(APIView):
             duration_minutes=duration_minutes,
             notes=data.get("notes", ""),
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
+            collect_on_delivery=data.get("collect_on_delivery", False),
         )
+
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -451,6 +463,8 @@ class BulkImportView(APIView):
                 package_type=delivery_data.get("package_type", "Box"),
                 notes=delivery_data.get("notes", ""),
                 cod_amount=delivery_data.get("cod_amount", 0),
+                distance_km=delivery_data.get("distance_km"),
+                duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
 
@@ -557,7 +571,7 @@ class OrderListView(APIView):
         # Base queryset
         orders = (
             Order.objects.filter(user=request.user)
-            .select_related("vehicle")
+            .select_related("vehicle", "rider", "rider__user")
             .prefetch_related("deliveries")
         )
 
@@ -593,9 +607,9 @@ class OrderDetailView(APIView):
         """Get order details by order number."""
         try:
             order = (
-                Order.objects.select_related("vehicle")
+                Order.objects.select_related("vehicle", "rider", "rider__user")
                 .prefetch_related("deliveries")
-                .get(order_number=order_number)
+                .get(order_number=order_number, user=request.user)
             )
         except Order.DoesNotExist:
             return Response(

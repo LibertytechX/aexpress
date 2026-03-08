@@ -1,8 +1,28 @@
 import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+// Dispatcher portal event tone (wav)
+const EVENT_TONE_URL = new URL('./car_honk_3s_opt1_cluster.wav', import.meta.url).href;
+let eventToneAudio = null;
+
+const playEventTone = () => {
+  try {
+    if (!eventToneAudio) eventToneAudio = new Audio(EVENT_TONE_URL);
+    // Restart from the beginning for repeated events.
+    eventToneAudio.pause();
+    eventToneAudio.currentTime = 0;
+    eventToneAudio.volume = 0.9;
+    const p = eventToneAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((e) => console.warn('[Tone] Playback blocked or failed:', e));
+    }
+  } catch (e) {
+    console.warn('[Tone] Could not play:', e);
+  }
+};
+
 const playChime = (notes) => {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -21,11 +41,8 @@ const playChime = (notes) => {
     setTimeout(() => ctx.close(), 1500);
   } catch (e) { console.warn('[Chime] Could not play:', e); }
 };
-const playNewOrderChime = () => playChime([
-  { freq: 784, start: 0, dur: 0.15 },    // G5
-  { freq: 988, start: 0.15, dur: 0.15 },  // B5
-  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
-]);
+// New order: use the wav tone. Other events keep the original (subtle) chimes.
+const playNewOrderChime = () => playEventTone();
 const playStartedChime = () => playChime([
   { freq: 523, start: 0, dur: 0.12 },    // C5
   { freq: 659, start: 0.12, dur: 0.2 },  // E5
@@ -35,6 +52,17 @@ const playDeliveredChime = () => playChime([
   { freq: 784, start: 0.1, dur: 0.1 },   // G5
   { freq: 1047, start: 0.2, dur: 0.3 },  // C6
 ]);
+
+// ─── GEO UTILS ──────────────────────────────────────────────────
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const la1 = lat1 * Math.PI / 180;
+  const la2 = lat2 * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
@@ -594,7 +622,7 @@ function RelayRouteMap({ order, riders }) {
 
       // Rider marker (🏍️) — show suggested rider GPS if available
       if (order.suggestedRiderId && riders) {
-        const riderObj = riders.find(r => r.id === order.suggestedRiderId);
+        const riderObj = riders.find(r => r._uuid === order.suggestedRiderId);
         if (riderObj && riderObj.lat && riderObj.lng) {
           markersRef.current.push(new window.google.maps.Marker({
             position: { lat: riderObj.lat, lng: riderObj.lng }, map, zIndex: 11,
@@ -1133,6 +1161,7 @@ export default function AXDispatchPortal() {
   const [vehicleAssets, setVehicleAssets] = useState([]);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
+  const [commissionPct, setCommissionPct] = useState(20);
   const ablyRef = useRef(null);
 
   // Initialize event logs when orders change
@@ -1179,12 +1208,13 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
           OrdersAPI.getAll().catch(() => []),
           MerchantsAPI.getAll().catch(() => []),
           DispatchersAPI.getAll().catch(() => []),
-          VehicleAssetsAPI.getAll().catch(() => [])
+          VehicleAssetsAPI.getAll().catch(() => []),
+          SettingsAPI.get().catch(() => null)
         ]);
         if (cancelled) return;
         setRiders(ridersData);
@@ -1193,6 +1223,9 @@ export default function AXDispatchPortal() {
         setDispatchers(dispatchersData);
         setVehicleAssets(vehicleAssetsData);
         setEventLogs(initEventLogs(ordersData));
+        if (settingsData?.commission_pct != null) {
+          setCommissionPct(parseFloat(settingsData.commission_pct) || 20);
+        }
       } catch (error) {
         console.error('Failed to fetch data:', error);
         AuthAPI.logout();
@@ -1290,7 +1323,9 @@ export default function AXDispatchPortal() {
           setVehicleAssets(prev => {
             const map = {};
             prev.forEach(v => { map[v.id] = v; });
-            incoming.forEach(v => { map[v.id] = v; });
+            // Merge-patch: spread existing state first so any field the Ably payload
+            // omits is preserved (e.g. orders_today from the REST API initial load).
+            incoming.forEach(v => { map[v.id] = { ...(map[v.id] || {}), ...v }; });
             return Object.values(map);
           });
         });
@@ -1387,7 +1422,16 @@ export default function AXDispatchPortal() {
     try {
       await OrdersAPI.assignRider(oid, rid);
       updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned" });
-      setRiders(p => p.map(x => x.id === rid ? { ...x, currentOrder: oid, status: "on_delivery" } : x));
+	      // Allow assigning even if rider is already fulfilling another ride.
+	      // Don't overwrite an existing currentOrder (it represents the *active* ride).
+	      setRiders(p => p.map(x => {
+	        if (x.id !== rid) return x;
+	        const next = { ...x };
+	        if (!next.currentOrder) next.currentOrder = oid;
+	        // Keep status if already on_delivery; otherwise mark as on_delivery for visibility.
+	        if (next.status === "online") next.status = "on_delivery";
+	        return next;
+	      }));
       addLog(oid, `Assigned to ${r.name}`, "Dispatch", "assign");
       addLog(oid, "Status → Assigned", "System", "status");
     } catch (error) {
@@ -1409,7 +1453,14 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: ns });
         addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+	        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
+	        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
+	          setRiders(p => p.map(r => {
+	            if (r.id !== o.riderId) return r;
+	            if (r.currentOrder && r.currentOrder !== oid) return r;
+	            return { ...r, currentOrder: null, status: "online" };
+	          }));
+	        }
       }
     } catch (err) {
       console.error("Failed to update status:", err);
@@ -1468,7 +1519,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1621,14 +1672,14 @@ function formatOrderDateTime(raw) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
 
   if (selectedId) {
     const order = orders.find(o => o.id === selectedId);
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
-    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} />;
+    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} />;
   }
 
   const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
@@ -1684,7 +1735,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20 }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -1695,6 +1746,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [priceSaving, setPriceSaving] = useState(false);
+  const [priceError, setPriceError] = useState("");
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
@@ -1711,7 +1764,22 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   const savePickup = () => { onUpdateOrder(order.id, { pickup: pickupVal }); addLog(order.id, `Pickup address changed to: ${pickupVal}`, "Dispatch", "edit"); setEditPickup(false); };
   const saveDropoff = () => { onUpdateOrder(order.id, { dropoff: dropoffVal }); addLog(order.id, `Dropoff address changed to: ${dropoffVal}`, "Dispatch", "edit"); setEditDropoff(false); };
-  const savePrice = () => { const n = parseInt(priceVal) || order.amount; onUpdateOrder(order.id, { amount: n }); addLog(order.id, `Price changed to ₦${n.toLocaleString()}`, "Dispatch", "edit"); setEditPrice(false); };
+  const savePrice = async () => {
+    const n = Number(priceVal);
+    const next = Number.isFinite(n) && n >= 0 ? n : order.amount;
+    setPriceSaving(true);
+    setPriceError("");
+    try {
+      const updated = await OrdersAPI.updatePrice(order.id, next);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Price changed to ₦${updated.amount.toLocaleString()}`, "Dispatch", "edit");
+      setEditPrice(false);
+    } catch (e) {
+      setPriceError(e?.error || e?.detail || e?.message || "Failed to update price");
+    } finally {
+      setPriceSaving(false);
+    }
+  };
 
   const handleGenerateRelayRoute = async (force = false) => {
     setRelayLoading(true);
@@ -1794,6 +1862,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* COD Instruction Banner — visible to dispatchers/riders */}
+      {order.collectOnDelivery && (
+        <div style={{ background: "rgba(245,158,11,0.08)", border: "1.5px solid rgba(245,158,11,0.35)", borderRadius: 14, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 28, flexShrink: 0 }}>💵</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", marginBottom: 2 }}>Cash on Delivery — Rider must collect from customer</div>
+            <div style={{ fontSize: 13, color: "#92400E" }}>
+              Collect <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>₦{(order.cod || 0).toLocaleString()}</span> in cash from the customer at the delivery point on behalf of the merchant.
+            </div>
           </div>
         </div>
       )}
@@ -1881,13 +1962,14 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {editPrice ? (
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <span>₦</span><input value={priceVal} onChange={e => setPriceVal(e.target.value)} style={{ width: 80, border: `1px solid ${S.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontFamily: "'Space Mono',monospace", textAlign: "right" }} />
-                    <button onClick={savePrice} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓</button>
-                    <button onClick={() => setEditPrice(false)} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: "pointer" }}>✕</button>
+	                    <button onClick={savePrice} disabled={priceSaving} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>{priceSaving ? "…" : "✓"}</button>
+	                    <button onClick={() => { setEditPrice(false); setPriceError(""); }} disabled={priceSaving} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>✕</button>
                   </div>
                 ) : (
                   <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.amount.toLocaleString()}</span>
                 )}
               </div>
+	              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
               {order.cod > 0 && <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD collection</span><span style={{ fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{order.cod.toLocaleString()}</span></div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD fee</span><span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.codFee.toLocaleString()}</span></div>
@@ -1925,26 +2007,38 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <div style={{ marginTop: 12, borderTop: `1px solid ${S.border}`, paddingTop: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>SELECT RIDER</div>
                 {riders.filter(r => r.status !== "offline").map(r => {
-                  const busy = !!r.currentOrder && r.currentOrder !== order.id;
-                  const available = !r.currentOrder || r.currentOrder === order.id;
+	                  // A rider can be assigned even if they are currently fulfilling another order.
+	                  // We still *indicate* busyness, but we do not block assignment.
+	                  const busy = (r.status === "on_delivery" && (!r.currentOrder || r.currentOrder !== order.id)) || (!!r.currentOrder && r.currentOrder !== order.id);
+	                  const available = !busy;
                   return (
-                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.5 : 1 }}>
+	                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.75 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ width: 8, height: 8, borderRadius: "50%", background: r.status === "on_delivery" ? S.purple : S.green }} />
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name} <span style={{ fontSize: 10, color: S.textMuted }}>({r.vehicle})</span></div>
                           <div style={{ fontSize: 10, color: S.textMuted }}>
                             ⭐ {r.rating} • {r.todayOrders} today
-                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 Fulfilling {r.currentOrder}</span>}
+	                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 {r.currentOrder ? `Fulfilling ${r.currentOrder}` : "On delivery"}</span>}
                             {available && r.status === "online" && <span style={{ color: S.green, fontWeight: 700, marginLeft: 6 }}>✓ Available</span>}
                           </div>
                         </div>
                       </div>
-                      {available ? (
-                        <button onClick={() => { onAssign(order.id, r.id); setShowAssign(false); }} style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}>Assign</button>
-                      ) : (
-                        <span style={{ fontSize: 10, color: S.textMuted, fontStyle: "italic" }}>Busy</span>
-                      )}
+	                      <button
+	                        onClick={() => {
+	                          if (busy) {
+	                            const msg = r.currentOrder
+	                              ? `${r.name} is currently fulfilling order ${r.currentOrder}. Assign this order anyway?`
+	                              : `${r.name} is currently on delivery. Assign this order anyway?`;
+	                            if (!confirm(msg)) return;
+	                          }
+	                          onAssign(order.id, r.id);
+	                          setShowAssign(false);
+	                        }}
+	                        style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}
+	                      >
+	                        {busy ? "Assign anyway" : "Assign"}
+	                      </button>
                     </div>
                   );
                 })}
@@ -1967,10 +2061,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {order.isRelayOrder && order.routingStatus === "processing" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700 }}>PROCESSING</span>}
                 {order.isRelayOrder && order.routingStatus === "failed" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>FAILED</span>}
               </div>
-              {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && !relayLoading && (
-                <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                  {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
-                </button>
+              {!relayLoading && (
+                <>
+                  {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && (
+                    <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
+                    </button>
+                  )}
+                  {order.isRelayOrder && order.routingStatus === "ready" && (
+                    <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      🔄 Re-generate
+                    </button>
+                  )}
+                </>
               )}
               {relayLoading && <span style={{ fontSize: 11, color: S.blue, fontWeight: 600 }}>⏳ Generating...</span>}
             </div>
@@ -2006,39 +2109,101 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             {/* Legs list */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {order.relayLegs.map((leg, idx) => (
+                {order.relayLegs.map((leg, idx) => {
+                  // Compute suggested rider distance from this leg's start point
+                  const legSuggestedRider = leg.suggestedRiderId
+                    ? riders.find(r => r.id === leg.suggestedRiderId)
+                    : null;
+                  const startLat = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.latitude)
+                    : (order.pickupLat ? parseFloat(order.pickupLat) : null);
+                  const startLng = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.longitude)
+                    : (order.pickupLng ? parseFloat(order.pickupLng) : null);
+                  const rLat = legSuggestedRider?.lat ? parseFloat(legSuggestedRider.lat) : null;
+                  const rLng = legSuggestedRider?.lng ? parseFloat(legSuggestedRider.lng) : null;
+                  const legDistKm = (rLat && rLng && startLat && startLng)
+                    ? haversineKm(rLat, rLng, startLat, startLng)
+                    : null;
+                  const suggestedName = leg.suggestedRiderName || (legSuggestedRider?.name) || null;
+
+                  const legPayout = parseFloat(leg.rider_payout) || 0;
+                  const legNetPay = legPayout * (1 - commissionPct / 100);
+
+                  return (
                   <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
                         {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
                       </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{(parseFloat(leg.rider_payout) || 0).toLocaleString()}</span>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{legPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 500 }}>Rider gets: <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{legNetPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> <span style={{ color: S.textMuted }}>({100 - commissionPct}%)</span></div>
+                      </div>
                     </div>
                     <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
-                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || "Pickup"} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || "Dropoff"}
+                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
                     </div>
                     <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
                       <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
                       <span>⏱ {leg.duration_minutes || 0} min</span>
                       {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
                     </div>
+                    {suggestedName && (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, color: S.blue, display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span></span>
+                        {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                      </div>
+                    )}
                   </div>
-                ))}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600, padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
-                  <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
-                  <span style={{ color: S.green }}>Total payout: ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}</span>
-                </div>
+                  );
+                })}
+                {(() => {
+                  const totalPayout = order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0);
+                  const totalNet = totalPayout * (1 - commissionPct / 100);
+                  return (
+                    <div style={{ padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600 }}>
+                        <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
+                        <span style={{ color: S.green }}>
+                          Total: ₦{totalPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {" "}<span style={{ color: S.textMuted, fontWeight: 400 }}>(of ₦{order.amount.toLocaleString()})</span>
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 10, marginTop: 3 }}>
+                        <span style={{ color: S.textMuted }}>Riders' take-home ({100 - commissionPct}%): <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{totalNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
             {/* Suggested rider for leg 1 */}
-            {order.routingStatus === "ready" && order.suggestedRiderId && (
-              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ color: S.blue, fontWeight: 600 }}>💡 Suggested for leg 1: {riders.find(r => r.id === order.suggestedRiderId)?.name || `Rider #${order.suggestedRiderId}`}</span>
-                <button onClick={() => onAssign(order.id, order.suggestedRiderId)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: S.blue, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
-              </div>
-            )}
+            {order.routingStatus === "ready" && order.suggestedRiderId && (() => {
+              const suggestedRider = riders.find(r => r._uuid === order.suggestedRiderId);
+              const leg1 = order.relayLegs?.[0];
+              const endAddr = leg1?.end_relay_node?.name || order.dropoff;
+              const rLat = suggestedRider?.lat ? parseFloat(suggestedRider.lat) : null;
+              const rLng = suggestedRider?.lng ? parseFloat(suggestedRider.lng) : null;
+              const pLat = order.pickupLat ? parseFloat(order.pickupLat) : null;
+              const pLng = order.pickupLng ? parseFloat(order.pickupLng) : null;
+              const distKm = (rLat && rLng && pLat && pLng) ? haversineKm(rLat, rLng, pLat, pLng) : null;
+              return (
+                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ color: S.blue, fontWeight: 700 }}>💡 Suggested for Leg 1: {suggestedRider?.name || `Rider #${order.suggestedRiderId}`}</span>
+                    <button onClick={() => suggestedRider && onAssign(order.id, suggestedRider.id)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: suggestedRider ? S.blue : S.textMuted, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3, color: S.textDim, fontSize: 10 }}>
+                    <span><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {order.pickup}</span>
+                    <span><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {endAddr}</span>
+                    {distKm !== null && <span style={{ color: S.textMuted }}>🏍️ {distKm.toFixed(1)} km from pickup</span>}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
@@ -2074,7 +2239,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>📦 PICKUP</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.pickup.split(",")[0]}</div>
               </div>
-              <div style={{ fontSize: 16, color: S.textMuted, alignSelf: "center" }}>→</div>
+              <div style={{ textAlign: "center", alignSelf: "center" }}>
+                {order.distance && (
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.blue, fontFamily: "'Space Mono',monospace" }}>📍 {order.distance}</div>
+                )}
+                {order.time && (
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>⏱ {order.time}</div>
+                )}
+                {!order.distance && <div style={{ fontSize: 16, color: S.textMuted }}>→</div>}
+              </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>🏠 DROPOFF</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.dropoff.split(",")[0]}</div>
@@ -2712,7 +2885,15 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   }
 
   const sMap = { "Online": "online", "On Delivery": "on_delivery", "Offline": "offline" };
-  const filtered = riders.filter(r => { if (filter !== "All" && r.status !== sMap[filter]) return false; if (search) { const s = search.toLowerCase(); return r.name.toLowerCase().includes(s) || r.phone.includes(s); } return true; });
+	  const filtered = riders.filter(r => {
+	    if (filter !== "All" && r.status !== sMap[filter]) return false;
+	    if (search) {
+	      const s = search.toLowerCase();
+	      const plate = (r.vehicle_asset?.plate_number || "").toLowerCase();
+	      return r.name.toLowerCase().includes(s) || r.phone.includes(s) || plate.includes(s);
+	    }
+	    return true;
+	  });
   const sc = (s) => s === "online" ? S.green : s === "on_delivery" ? S.purple : S.textMuted;
 
   return (
@@ -2742,13 +2923,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               {I.plus} Add Rider
             </button>
           </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
-            </div>
+	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(r => (
-                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+	                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name.split(" ").map(n => n[0]).join("")}</div>
@@ -2756,6 +2937,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                   </div>
                   <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
+	                  <span style={{ fontSize: 11, color: r.vehicle_asset?.plate_number ? S.textDim : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: r.vehicle_asset?.plate_number ? 700 : 400 }}>{r.vehicle_asset?.plate_number || "—"}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
                   <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
                   <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
@@ -2787,9 +2969,121 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 function VehiclesLocationMap({ vehicles }) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
-  const markersRef = useRef([]);
+  const markersByIdRef = useRef({});
+  const overlaysByIdRef = useRef({});
+  const latestVehiclesByIdRef = useRef({});
+  const vehiclesRef = useRef([]);
   const infoWindowRef = useRef(null);
   const [mapReady, setMapReady] = useState(false);
+
+  // Camera control
+  const didInitialFitRef = useRef(false);
+  const userInteractedRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+
+  const safeVehicleKey = (v) => {
+    // Prefer stable backend id; fall back to other identifiers.
+    return (v && (v.id ?? v.asset_id ?? v.plate_number)) ?? null;
+  };
+
+  const parseVehicleLatLng = (v) => {
+    if (!v || v.latitude == null || v.longitude == null) return null;
+    const lat = parseFloat(v.latitude);
+    const lng = parseFloat(v.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    // Treat (0,0) as bad telemetry for this app (prevents world-zoom).
+    if (Math.abs(lat) < 1e-9 && Math.abs(lng) < 1e-9) return null;
+    return { lat, lng };
+  };
+
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+
+  const median = (arr) => {
+    if (!arr || arr.length === 0) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return (s.length % 2 === 1) ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+
+  // Haversine distance in km
+  const haversineKm = (a, b) => {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const sin1 = Math.sin(dLat / 2);
+    const sin2 = Math.sin(dLng / 2);
+    const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  };
+
+  const computeClusterInliers = (points, { keepPercentile = 0.9, madFactor = 6 } = {}) => {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+
+    const medLat = median(points.map(p => p.lat));
+    const medLng = median(points.map(p => p.lng));
+    if (medLat == null || medLng == null) return points;
+    const center = { lat: medLat, lng: medLng };
+
+    const withD = points.map(p => ({ p, d: haversineKm(center, p) }));
+    const dists = withD.map(x => x.d);
+    const medD = median(dists);
+    if (medD == null) return points;
+    const absDev = dists.map(d => Math.abs(d - medD));
+    const mad = median(absDev) ?? 0;
+
+    const sorted = [...withD].sort((a, b) => a.d - b.d);
+    const pctIdx = Math.max(0, Math.min(sorted.length - 1, Math.floor(keepPercentile * (sorted.length - 1))));
+    const pctCutoff = sorted[pctIdx]?.d ?? sorted[sorted.length - 1]?.d ?? 0;
+
+    // Combine a percentile cutoff with a MAD cutoff; choose the more "zoomed-in" (smaller) cutoff,
+    // but never so strict that we drop to <3 points when we have more.
+    const madCutoff = (mad > 0) ? (medD + madFactor * mad) : pctCutoff;
+    let cutoff = Math.min(pctCutoff, madCutoff);
+    if (!Number.isFinite(cutoff) || cutoff <= 0) cutoff = pctCutoff;
+
+    let inliers = withD.filter(x => x.d <= cutoff).map(x => x.p);
+    if (inliers.length < Math.min(3, points.length)) inliers = points;
+    return inliers;
+  };
+
+  const fitMapToVehicles = (vehiclesList) => {
+    const map = mapInstanceRef.current;
+    if (!map || !window.google || !window.google.maps) return false;
+
+    const pts = (vehiclesList || [])
+      .map(v => parseVehicleLatLng(v))
+      .filter(Boolean);
+
+    if (pts.length === 0) return false;
+
+    const inliers = computeClusterInliers(pts, { keepPercentile: 0.9, madFactor: 6 });
+
+    programmaticMoveRef.current = true;
+
+    if (inliers.length === 1) {
+      map.setCenter(inliers[0]);
+      map.setZoom(15);
+    } else {
+      const bounds = new window.google.maps.LatLngBounds();
+      inliers.forEach(p => bounds.extend(p));
+      map.fitBounds(bounds, { padding: 60 });
+      const z = map.getZoom?.();
+      if (typeof z === 'number' && z > 16) map.setZoom(16);
+    }
+
+    didInitialFitRef.current = true;
+    return true;
+  };
 
   useEffect(() => {
     const init = () => {
@@ -2802,6 +3096,17 @@ function VehiclesLocationMap({ vehicles }) {
       });
       mapInstanceRef.current = map;
       infoWindowRef.current = new window.google.maps.InfoWindow();
+
+      // Track user interaction so we don't unexpectedly override their camera.
+      map.addListener('dragstart', () => { userInteractedRef.current = true; });
+      map.addListener('zoom_changed', () => {
+        if (!programmaticMoveRef.current) userInteractedRef.current = true;
+      });
+      map.addListener('idle', () => {
+        // Clear programmatic guard after a fit/center/zoom.
+        if (programmaticMoveRef.current) programmaticMoveRef.current = false;
+      });
+
       setMapReady(true);
     };
     let unsub = null;
@@ -2809,7 +3114,14 @@ function VehiclesLocationMap({ vehicles }) {
     else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
     return () => {
       if (unsub) unsub();
-      markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
+      Object.values(markersByIdRef.current).forEach(m => {
+        try {
+          if (m?._labelOverlay) m._labelOverlay.setMap(null);
+          m?.setMap?.(null);
+        } catch { }
+      });
+      markersByIdRef.current = {};
+      overlaysByIdRef.current = {};
       if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
       mapInstanceRef.current = null;
     };
@@ -2818,9 +3130,7 @@ function VehiclesLocationMap({ vehicles }) {
   useEffect(() => {
     if (!mapReady || !mapInstanceRef.current || !window.google) return;
     const map = mapInstanceRef.current;
-    markersRef.current.forEach(m => { if (m._labelOverlay) m._labelOverlay.setMap(null); m.setMap(null); }); markersRef.current = [];
-    const bounds = new window.google.maps.LatLngBounds();
-    let hasPoints = false;
+    vehiclesRef.current = vehicles || [];
 
     // Helper: build a rotated emoji icon as a canvas-based marker image
     const buildVehicleIcon = (emoji, rotation, borderColor) => {
@@ -2848,78 +3158,164 @@ function VehiclesLocationMap({ vehicles }) {
       return { url: canvas.toDataURL(), scaledSize: new window.google.maps.Size(size, size), anchor: new window.google.maps.Point(size / 2, size / 2) };
     };
 
-    vehicles.forEach(v => {
-      if (!v.latitude || !v.longitude) return;
-      const lat = parseFloat(v.latitude);
-      const lng = parseFloat(v.longitude);
-      if (isNaN(lat) || isNaN(lng)) return;
+    const LabelOverlayCtor = class extends window.google.maps.OverlayView {
+      constructor(latLng, div) {
+        super();
+        this.latLng = latLng;
+        this.div = div;
+      }
+      onAdd() {
+        (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(this.div);
+      }
+      draw() {
+        const proj = this.getProjection();
+        if (!proj || !this.latLng) return;
+        const pos = proj.fromLatLngToDivPixel(this.latLng);
+        if (!pos) return;
+        this.div.style.left = (pos.x - this.div.offsetWidth / 2) + 'px';
+        this.div.style.top = (pos.y - 32) + 'px';
+      }
+      onRemove() {
+        if (this.div?.parentNode) this.div.parentNode.removeChild(this.div);
+      }
+      setPosition(latLng) {
+        this.latLng = latLng;
+        this.draw();
+      }
+    };
+
+    const nextKeys = new Set();
+
+    (vehicles || []).forEach(v => {
+      const key = safeVehicleKey(v);
+      if (!key) return;
+      const ll = parseVehicleLatLng(v);
+      if (!ll) return;
+      nextKeys.add(String(key));
+      latestVehiclesByIdRef.current[String(key)] = v;
 
       const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
       const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
       const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
       const rotation = parseFloat(v.course) || 0;
 
-      const marker = new window.google.maps.Marker({
-        position: { lat, lng }, map, title: v.plate_number,
-        icon: buildVehicleIcon(typeIcon, rotation, color),
-        zIndex: v.engine_status === 'on' ? 10 : 5,
-      });
-
       // Floating label: plate | rider | speed
       const riderName = v.assigned_rider ? v.assigned_rider.name : '';
       const speedStr = v.speed > 0 ? `${v.speed} km/h` : '';
       const labelParts = [v.plate_number, riderName, speedStr].filter(Boolean);
-      const labelDiv = document.createElement('div');
-      labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
-        'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
-        'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
-        'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
-      labelDiv.textContent = labelParts.join(' · ');
 
-      // Use OverlayView for the label
-      const LabelOverlay = class extends window.google.maps.OverlayView {
-        onAdd() { (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(labelDiv); }
-        draw() {
-          const proj = this.getProjection(); if (!proj) return;
-          const pos = proj.fromLatLngToDivPixel(new window.google.maps.LatLng(lat, lng));
-          if (pos) { labelDiv.style.left = (pos.x - labelDiv.offsetWidth / 2) + 'px'; labelDiv.style.top = (pos.y - 32) + 'px'; }
+      // Create or update marker
+      let marker = markersByIdRef.current[String(key)];
+      if (!marker) {
+        marker = new window.google.maps.Marker({
+          position: ll,
+          map,
+          title: v.plate_number,
+          icon: buildVehicleIcon(typeIcon, rotation, color),
+          zIndex: v.engine_status === 'on' ? 10 : 5,
+        });
+        markersByIdRef.current[String(key)] = marker;
+
+        marker.addListener('click', () => {
+          const latest = latestVehiclesByIdRef.current[String(key)] || v;
+          const latestColor = latest.engine_status === 'on' ? '#22c55e' : latest.engine_status === 'idle' ? '#F59E0B' : latest.engine_status === 'off' ? '#EF4444' : '#6b7280';
+          const latestStatus = latest.engine_status === 'on' ? 'Engine On' : latest.engine_status === 'idle' ? 'Idle' : latest.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+          const latestIcon = latest.vehicle_type === 'bike' ? '🏍️' : latest.vehicle_type === 'car' ? '🚗' : '🚐';
+          const totalDistanceStr = fmtDistance(latest.total_distance, latest.unit_of_distance);
+          const distanceTodayStr = fmtDistance(latest.distance_today, latest.unit_of_distance);
+          infoWindowRef.current.setContent(
+            `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
+            `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
+            `<div style="color:${latestColor};font-weight:600;font-size:11px;">${latestStatus}</div>` +
+            `<div style="color:#555;font-size:11px;margin-top:4px;">${latest.asset_id} • ${(latest.vehicle_type || '').toUpperCase()}</div>` +
+            (latest.make || latest.model ? `<div style="color:#888;font-size:10px;">${latest.make || ''} ${latest.model || ''}</div>` : '') +
+            (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
+            `<div style="color:#555;font-size:10px;margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">` +
+              `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
+              `<span><span style="color:#888;font-weight:700;">Today:</span> ${distanceTodayStr}</span>` +
+            `</div>` +
+            (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
+            `</div>`
+          );
+          infoWindowRef.current.open(map, marker);
+        });
+
+        // Label overlay
+        const labelDiv = document.createElement('div');
+        labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
+          'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
+          'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
+          'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+        labelDiv.textContent = labelParts.join(' · ');
+        const overlay = new LabelOverlayCtor(new window.google.maps.LatLng(ll.lat, ll.lng), labelDiv);
+        overlay.setMap(map);
+        overlaysByIdRef.current[String(key)] = overlay;
+        marker._labelOverlay = overlay;
+      } else {
+        marker.setPosition(ll);
+        marker.setIcon(buildVehicleIcon(typeIcon, rotation, color));
+        marker.setZIndex(v.engine_status === 'on' ? 10 : 5);
+
+        const overlay = overlaysByIdRef.current[String(key)];
+        if (overlay) overlay.setPosition(new window.google.maps.LatLng(ll.lat, ll.lng));
+        // Update label text if overlay div exists
+        const div = overlay?.div;
+        if (div) {
+          const nextText = labelParts.join(' · ');
+          if (div.textContent !== nextText) div.textContent = nextText;
+          overlay?.draw?.();
         }
-        onRemove() { if (labelDiv.parentNode) labelDiv.parentNode.removeChild(labelDiv); }
-      };
-      const overlay = new LabelOverlay();
-      overlay.setMap(map);
-
-      marker.addListener('click', () => {
-        infoWindowRef.current.setContent(
-          `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
-          `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${typeIcon} ${v.plate_number}</div>` +
-          `<div style="color:${color};font-weight:600;font-size:11px;">${statusLabel}</div>` +
-          `<div style="color:#555;font-size:11px;margin-top:4px;">${v.asset_id} • ${(v.vehicle_type || '').toUpperCase()}</div>` +
-          (v.make || v.model ? `<div style="color:#888;font-size:10px;">${v.make || ''} ${v.model || ''}</div>` : '') +
-          (v.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${v.speed} km/h</div>` : '') +
-          (v.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${v.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
-          `</div>`
-        );
-        infoWindowRef.current.open(map, marker);
-      });
-
-      markersRef.current.push(marker);
-      // Store overlay reference for cleanup
-      marker._labelOverlay = overlay;
-      bounds.extend({ lat, lng });
-      hasPoints = true;
+      }
     });
 
-    if (hasPoints) map.fitBounds(bounds, { padding: 60 });
+    // Remove markers for vehicles no longer present / no longer valid
+    Object.keys(markersByIdRef.current).forEach(k => {
+      if (nextKeys.has(k)) return;
+      const m = markersByIdRef.current[k];
+      try {
+        if (m?._labelOverlay) m._labelOverlay.setMap(null);
+        m?.setMap?.(null);
+      } catch { }
+      delete markersByIdRef.current[k];
+      delete overlaysByIdRef.current[k];
+      delete latestVehiclesByIdRef.current[k];
+    });
+
+    // Initial fit ONCE: only if user hasn't already taken control.
+    if (!didInitialFitRef.current && !userInteractedRef.current) {
+      fitMapToVehicles(vehicles);
+    }
+
   }, [mapReady, vehicles]);
 
-  const withLocation = vehicles.filter(v => v.latitude && v.longitude).length;
+  const withLocation = (vehicles || []).map(v => parseVehicleLatLng(v)).filter(Boolean).length;
 
   return (
     <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
       <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-        <span>🗺️ Vehicle Locations</span>
-        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {vehicles.length} vehicles with GPS</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span>🗺️ Vehicle Locations</span>
+          <button
+            type="button"
+            onClick={() => fitMapToVehicles(vehiclesRef.current)}
+            disabled={!mapReady || withLocation === 0}
+            title="Recenter to the main cluster (ignores outliers like 0,0)"
+            style={{
+              padding: '5px 9px',
+              borderRadius: 10,
+              border: `1px solid ${S.border}`,
+              background: S.borderLight,
+              color: S.navy,
+              fontSize: 10,
+              fontWeight: 800,
+              cursor: (!mapReady || withLocation === 0) ? 'not-allowed' : 'pointer',
+              opacity: (!mapReady || withLocation === 0) ? 0.6 : 1,
+            }}
+          >
+            Recenter / Fit
+          </button>
+        </div>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {(vehicles || []).length} vehicles with GPS</span>
       </div>
       <div style={{ flex: 1, position: 'relative' }}>
         <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
@@ -2958,6 +3354,14 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
+		  const gridCols = "70px 90px 60px minmax(70px, 1fr) minmax(70px, 1fr) 80px 80px 110px 110px 80px 90px 80px";
+	  const fmtDistance = (raw, unit) => {
+	    if (raw === null || raw === undefined || raw === "") return "—";
+	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+	    if (!Number.isFinite(n)) return "—";
+	    const u = String(unit || "").trim();
+	    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+	  };
 
   return (
     <div>
@@ -2982,13 +3386,13 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
               {I.plus} Add Vehicle
             </button>
           </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Engine</span><span>Speed</span><span>Rider</span><span>Status</span>
-            </div>
+		          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+	            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Engine</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
+	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
-              {filtered.map(v => (
-                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: "70px 90px 60px 90px 90px 80px 80px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+	              {filtered.map(v => (
+	                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
                   <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
@@ -2996,6 +3400,9 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
                   <span style={{ fontSize: 11, color: S.textDim }}>{v.model || '—'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${ec(v.engine_status)}18`, color: ec(v.engine_status) }}>{(v.engine_status || 'unknown').toUpperCase()}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
+	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
+	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
+		                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : fmtDistance(v.orders_today, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
                 </div>
@@ -3070,6 +3477,16 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
   const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
   const iSt = { width: "100%", padding: "8px 10px", border: `1px solid ${S.border}`, borderRadius: 6, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
   const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4 };
+
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+  const totalDistanceStr = fmtDistance(vehicle.total_distance, vehicle.unit_of_distance);
+  const distanceTodayStr = fmtDistance(vehicle.distance_today, vehicle.unit_of_distance);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -3146,6 +3563,10 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
               {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
                 <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
               ))}
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Total:</span> {totalDistanceStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today:</span> {distanceTodayStr}</span>
             </div>
             {vehicle.latitude && vehicle.longitude && (
               <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
@@ -3253,6 +3674,8 @@ function CreateVehicleModal({ onClose, onVehicleCreated }) {
 // ─── MERCHANTS ──────────────────────────────────────────────────
 function MerchantsScreen({ data }) {
   const [search, setSearch] = useState("");
+  const [pricingMerchant, setPricingMerchant] = useState(null);
+  const [pricingError, setPricingError] = useState(null);
   const f = data.filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.contact.toLowerCase().includes(search.toLowerCase()));
   return (
     <div>
@@ -3266,11 +3689,19 @@ function MerchantsScreen({ data }) {
         <span style={{ opacity: 0.4 }}>{I.search}</span>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search merchants..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
       </div>
+      {pricingError && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, color: S.red, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>⚠️ {pricingError}</div>}
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
           <span>ID</span><span>Business</span><span>Contact</span><span>Category</span><span>Total</span><span>Month</span><span>Wallet</span><span>Status</span><span>Joined</span>
         </div>
-        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"} onClick={() => {
+          setPricingError(null);
+          if (!m.userId) {
+            setPricingError("Pricing overrides require real merchant records (missing merchant userId in this row).");
+            return;
+          }
+          setPricingMerchant(m);
+        }}>
           <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.id}</span>
           <span style={{ fontSize: 12, fontWeight: 700 }}>{m.name}</span>
           <div><div style={{ fontSize: 12 }}>{m.contact}</div><div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.phone}</div></div>
@@ -3282,6 +3713,8 @@ function MerchantsScreen({ data }) {
           <span style={{ fontSize: 11, color: S.textMuted }}>{m.joined}</span>
         </div>))}
       </div>
+
+      {pricingMerchant && <MerchantPricingOverridesModal merchant={pricingMerchant} onClose={() => setPricingMerchant(null)} />}
     </div>
   );
 }
@@ -3374,6 +3807,252 @@ const labelStyle = { display: "block", fontSize: 11, fontWeight: 600, color: S.t
 const Toggle = ({ on, setOn, size }) => { const w = size === "sm" ? 36 : 44; const d = size === "sm" ? 16 : 20; return (<div onClick={() => setOn(!on)} style={{ width: w, height: Math.round(w / 1.83), borderRadius: w / 2, cursor: "pointer", background: on ? S.green : S.border, position: "relative", transition: "background 0.2s", flexShrink: 0 }}><div style={{ width: d, height: d, borderRadius: "50%", background: "#fff", position: "absolute", top: Math.round((w / 1.83 - d) / 2), left: on ? w - d - Math.round((w / 1.83 - d) / 2) : Math.round((w / 1.83 - d) / 2), transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} /></div>) };
 const SC = ({ children, title, icon, desc, right }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}><div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>{icon}</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{title}</div>{desc && <div style={{ fontSize: 11, color: S.textMuted }}>{desc}</div>}</div></div>{right}</div><div style={{ padding: 20 }}>{children}</div></div>);
 
+//     MERCHANT PRICING OVERRIDES MODAL    
+function MerchantPricingOverridesModal({ merchant, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [vehicles, setVehicles] = useState([]);
+  const [forms, setForms] = useState({});
+
+  const DEFAULTS = {
+    bike: { floorKm: 6, floorFee: 1700, t1MaxKm: 10, t1Rate: 275, t2Rate: 235, t3Rate: 200, t4Rate: 200 },
+    car: { floorKm: 3, floorFee: 2500, t1MaxKm: 8, t1Rate: 350, t2Rate: 300, t3Rate: 250, t4Rate: 250 },
+    van: { floorKm: 3, floorFee: 5000, t1MaxKm: 8, t1Rate: 500, t2Rate: 450, t3Rate: 400, t4Rate: 400 },
+  };
+
+  const parseTierFields = (pt, vehicleKey) => {
+    const d = DEFAULTS[vehicleKey] || DEFAULTS.bike;
+    if (!pt || pt.type !== 'tiered') return { ...d };
+    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+    const floorKm = pt.floor_km ?? d.floorKm;
+    const floorFee = pt.floor_fee ?? d.floorFee;
+    const t1MaxKm = tiers?.[0]?.max_km ?? d.t1MaxKm;
+    const t1Rate = tiers?.[0]?.rate ?? d.t1Rate;
+    const t2Rate = tiers?.[1]?.rate ?? d.t2Rate;
+    // 4-tier config: tiers[2] = <=25, tiers[3] = 25+
+    // Legacy 3-tier config: tiers[2] is treated as both <=25 and 25+
+    const legacyLast = tiers?.[2]?.rate ?? d.t3Rate;
+    const t3Rate = (tiers.length >= 4 ? (tiers?.[2]?.rate ?? d.t3Rate) : legacyLast);
+    const t4Rate = (tiers.length >= 4 ? (tiers?.[3]?.rate ?? t3Rate) : legacyLast);
+    return { floorKm, floorFee, t1MaxKm, t1Rate, t2Rate, t3Rate, t4Rate };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        if (!merchant?.userId) throw new Error('Missing merchant userId (UUID).');
+        const [vs, ovs] = await Promise.all([
+          VehiclesAPI.getAll(),
+          MerchantPricingOverridesAPI.list({ merchant: merchant.userId }).catch(() => [])
+        ]);
+        if (cancelled) return;
+        setVehicles(vs);
+
+        const next = {};
+        (vs || []).forEach(v => {
+          const key = String(v.name || '').toLowerCase();
+          const vehicleKey = key === 'bike' ? 'bike' : key === 'car' ? 'car' : 'van';
+          const existing = (ovs || []).find(o => String(o.vehicle) === String(v.id));
+          const srcPt = existing?.pricing_tiers ?? v.pricing_tiers ?? null;
+          const tf = parseTierFields(srcPt, vehicleKey);
+          next[v.id] = {
+            overrideId: existing?.id || null,
+            vehicleId: v.id,
+            vehicleName: v.name,
+            vehicleKey,
+            is_active: existing?.is_active ?? false,
+            flatFeeText: (existing?.flat_fee === 0 || existing?.flat_fee) ? String(existing.flat_fee) : '',
+            ...tf,
+          };
+        });
+        setForms(next);
+      } catch (e) {
+        if (!cancelled) setError(e?.detail || e?.message || 'Failed to load merchant pricing overrides.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [merchant?.userId]);
+
+  const setForm = (vehicleId, patch) => {
+    setForms(prev => ({
+      ...prev,
+      [vehicleId]: { ...prev[vehicleId], ...patch }
+    }));
+  };
+
+  const buildPricingTiers = (f) => ({
+    type: 'tiered',
+    floor_km: Number(f.floorKm) || 0,
+    floor_fee: Number(f.floorFee) || 0,
+    tiers: [
+      { max_km: Number(f.t1MaxKm) || 0, rate: Number(f.t1Rate) || 0 },
+      { max_km: 15, rate: Number(f.t2Rate) || 0 },
+      { max_km: 25, rate: Number(f.t3Rate) || 0 },
+      { rate: Number(f.t4Rate) || 0 },
+    ]
+  });
+
+  const parseFlatFee = (txt) => {
+    if (txt === null || txt === undefined) return null;
+    const t = String(txt).trim();
+    if (t === '') return null;
+    const n = parseFloat(t);
+    return isNaN(n) ? null : n;
+  };
+
+  const saveAll = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const vehicleIds = Object.keys(forms);
+      await Promise.all(vehicleIds.map(async (vid) => {
+        const f = forms[vid];
+        if (!f) return;
+        // Only create a new record when enabling; otherwise we update existing records.
+        if (!f.overrideId && !f.is_active) return;
+        const payload = {
+          merchant: merchant.userId,
+          vehicle: f.vehicleId,
+          is_active: !!f.is_active,
+          flat_fee: parseFlatFee(f.flatFeeText),
+          pricing_tiers: buildPricingTiers(f),
+        };
+        const saved = await MerchantPricingOverridesAPI.upsert(payload);
+        // Capture returned id so subsequent disables/enables update instead of creating.
+        if (saved?.id && !f.overrideId) {
+          setForms(prev => ({ ...prev, [vid]: { ...prev[vid], overrideId: saved.id } }));
+        }
+      }));
+      onClose();
+    } catch (e) {
+      const msg = e?.detail || e?.non_field_errors?.[0] || e?.merchant?.[0] || e?.vehicle?.[0] || e?.message || 'Failed to save overrides.';
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const vehicleOrder = ['bike', 'car', 'van'];
+  const sortedVehicles = [...(vehicles || [])].sort((a, b) => vehicleOrder.indexOf(String(a.name || '').toLowerCase()) - vehicleOrder.indexOf(String(b.name || '').toLowerCase()));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 760, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", border: `1px solid ${S.border}` }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: S.navy }}>Merchant Pricing Overrides</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 3 }}><span style={{ fontWeight: 700, color: S.text }}>{merchant?.name || 'Merchant'}</span>  —  <span style={{ fontFamily: "'Space Mono',monospace" }}>{merchant?.id || ''}</span></div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 6 }}>{I.x}</button>
+        </div>
+
+        <div style={{ padding: 22 }}>
+          {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 14 }}>⚠️ {error}</div>}
+
+          {loading ? (
+            <div style={{ padding: 26, textAlign: "center", color: S.textMuted, fontSize: 13 }}>Loading pricing overrides…</div>
+          ) : (
+            <>
+              <div style={{ padding: "12px 14px", background: "rgba(232,168,56,0.08)", border: "1px solid rgba(232,168,56,0.22)", borderRadius: 12, marginBottom: 14, fontSize: 12, color: S.navy, fontWeight: 700 }}>
+                Flat fee (if set) fully overrides distance/tier pricing for that vehicle.
+              </div>
+
+              {sortedVehicles.map(v => {
+                const f = forms?.[v.id];
+                if (!f) return null;
+                const icon = f.vehicleKey === 'bike' ? '🏍️' : f.vehicleKey === 'car' ? '🚗' : '🚐';
+                return (
+                  <div key={v.id} style={{ border: `1px solid ${S.border}`, borderRadius: 14, overflow: "hidden", marginBottom: 14 }}>
+                    <div style={{ padding: "14px 16px", background: S.borderLight, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{icon}</div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 900, color: S.navy }}>{v.name}</div>
+                          <div style={{ fontSize: 11, color: S.textMuted }}>Enable override + set flat fee or tiers</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Override Active</span>
+                        <Toggle on={!!f.is_active} setOn={(on) => setForm(v.id, { is_active: on })} size="sm" />
+                      </div>
+                    </div>
+
+                    <div style={{ padding: 16 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                        <div>
+                          <label style={labelStyle}>Flat fee (₦)</label>
+                          <input value={f.flatFeeText} onChange={e => setForm(v.id, { flatFeeText: e.target.value })} placeholder="Leave blank to use tiers" style={inputStyle} inputMode="numeric" />
+                          <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>If set, distance is ignored.</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "flex-end", gap: 10 }}>
+                          <button onClick={() => {
+                            const tf = parseTierFields(v.pricing_tiers || null, f.vehicleKey);
+                            setForm(v.id, { ...tf });
+                          }} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim, display: "flex", alignItems: "center", gap: 6 }}>{I.copy} Copy Global Tiers</button>
+                          <button onClick={() => setForm(v.id, { flatFeeText: '' })} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim }}>Clear Flat</button>
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", borderRadius: 12, padding: 14, border: `1px solid ${S.border}` }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: S.navy, marginBottom: 12 }}>Tiered Pricing</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Floor km</label>
+                            <input value={f.floorKm} onChange={e => setForm(v.id, { floorKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Floor fee (₦)</label>
+                            <input value={f.floorFee} onChange={e => setForm(v.id, { floorFee: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 max km</label>
+                            <input value={f.t1MaxKm} onChange={e => setForm(v.id, { t1MaxKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 rate</label>
+                            <input value={f.t1Rate} onChange={e => setForm(v.id, { t1Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Tier2 rate (≤ 15km)</label>
+                            <input value={f.t2Rate} onChange={e => setForm(v.id, { t2Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier3 rate (≤ 25km)</label>
+                            <input value={f.t3Rate} onChange={e => setForm(v.id, { t3Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier4 rate (25+)</label>
+                            <input value={f.t4Rate} onChange={e => setForm(v.id, { t4Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={onClose} disabled={saving} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: S.textDim }}>Cancel</button>
+                <button onClick={saveAll} disabled={saving} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: saving ? 0.75 : 1 }}>{saving ? "Saving…" : "Save Overrides"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
   // ─── PRICING STATE (Research-based Lagos defaults) ───
@@ -3384,7 +4063,9 @@ function SettingsScreen() {
   const [bikeT1Rate, setBikeT1Rate] = useState(275);
   const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
   const [bikeT2Rate, setBikeT2Rate] = useState(235);
-  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+	  const [bikeT3MaxKm, setBikeT3MaxKm] = useState(25);
+	  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+	  const [bikeT4Rate, setBikeT4Rate] = useState(200);
   // Legacy bike state kept for getVC compatibility
   const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
   // Car uses tiered rate-switch pricing
@@ -3394,7 +4075,9 @@ function SettingsScreen() {
   const [carT1Rate, setCarT1Rate] = useState(350);
   const [carT2MaxKm, setCarT2MaxKm] = useState(15);
   const [carT2Rate, setCarT2Rate] = useState(300);
-  const [carT3Rate, setCarT3Rate] = useState(250);
+	  const [carT3MaxKm, setCarT3MaxKm] = useState(25);
+	  const [carT3Rate, setCarT3Rate] = useState(250);
+	  const [carT4Rate, setCarT4Rate] = useState(250);
   const carBase = 0, carPerKm = 0, carMinKm = carFloorKm, carMin = carFloorFee;
   // Van uses tiered rate-switch pricing
   const [vanFloorKm, setVanFloorKm] = useState(3);
@@ -3403,7 +4086,9 @@ function SettingsScreen() {
   const [vanT1Rate, setVanT1Rate] = useState(500);
   const [vanT2MaxKm, setVanT2MaxKm] = useState(15);
   const [vanT2Rate, setVanT2Rate] = useState(450);
-  const [vanT3Rate, setVanT3Rate] = useState(400);
+	  const [vanT3MaxKm, setVanT3MaxKm] = useState(25);
+	  const [vanT3Rate, setVanT3Rate] = useState(400);
+	  const [vanT4Rate, setVanT4Rate] = useState(400);
   const vanBase = 0, vanPerKm = 0, vanMinKm = vanFloorKm, vanMin = vanFloorFee;
   const [codFee, setCodFee] = useState(500);
   const [codPct, setCodPct] = useState(1.5);
@@ -3466,16 +4151,17 @@ function SettingsScreen() {
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
   const [nodeSaving, setNodeSaving] = useState(false);
 
-  // Tiered price: rate-switch with boundary floors
-  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3Rate) => {
-    if (km <= floorKm) return floorFee;
-    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
-    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
-    return Math.max(km * t3Rate, t2MaxKm * t2Rate);
-  };
-  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3Rate);
-  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3Rate);
-  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3Rate);
+	  // Tiered price: rate-switch with boundary floors
+	  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3MaxKm, t3Rate, t4Rate) => {
+	    if (km <= floorKm) return floorFee;
+	    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
+	    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
+	    if (km <= t3MaxKm) return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+	    return Math.max(km * t4Rate, t3MaxKm * t3Rate);
+	  };
+		  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3MaxKm, bikeT3Rate, bikeT4Rate);
+		  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3MaxKm, carT3Rate, carT4Rate);
+		  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3MaxKm, vanT3Rate, vanT4Rate);
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
     if (vehicleType === "bike") { price = calcBikePrice(km); }
@@ -3526,9 +4212,18 @@ function SettingsScreen() {
               setBikeFloorFee(pt.floor_fee ?? 1700);
               setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
               setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
-              setBikeT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setBikeT2MaxKm(15);
               setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
-              setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+	              setBikeT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+	                setBikeT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 200);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 200;
+	                setBikeT3Rate(legacyLast);
+	                setBikeT4Rate(legacyLast);
+	              }
             } else {
               setBikeFloorKm(pf(v.min_distance_km, 6));
               setBikeFloorFee(pf(v.min_fee, 1700));
@@ -3540,9 +4235,18 @@ function SettingsScreen() {
               setCarFloorFee(pt.floor_fee ?? 2500);
               setCarT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setCarT1Rate(pt.tiers?.[0]?.rate ?? 350);
-              setCarT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setCarT2MaxKm(15);
               setCarT2Rate(pt.tiers?.[1]?.rate ?? 300);
-              setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+	              setCarT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+	                setCarT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 250);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 250;
+	                setCarT3Rate(legacyLast);
+	                setCarT4Rate(legacyLast);
+	              }
             } else {
               setCarFloorKm(pf(v.min_distance_km, 3));
               setCarFloorFee(pf(v.min_fee, 2500));
@@ -3554,9 +4258,18 @@ function SettingsScreen() {
               setVanFloorFee(pt.floor_fee ?? 5000);
               setVanT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setVanT1Rate(pt.tiers?.[0]?.rate ?? 500);
-              setVanT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+	              // Pricing breakpoints are fixed at 15km and 25km
+	              setVanT2MaxKm(15);
               setVanT2Rate(pt.tiers?.[1]?.rate ?? 450);
-              setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+	              setVanT3MaxKm(25);
+	              if ((pt.tiers?.length ?? 0) >= 4) {
+	                setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+	                setVanT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 400);
+	              } else {
+	                const legacyLast = pt.tiers?.[2]?.rate ?? 400;
+	                setVanT3Rate(legacyLast);
+	                setVanT4Rate(legacyLast);
+	              }
             } else {
               setVanFloorKm(pf(v.min_distance_km, 3));
               setVanFloorFee(pf(v.min_fee, 5000));
@@ -3635,11 +4348,11 @@ function SettingsScreen() {
     try {
       // PATCH each vehicle's pricing
       await Promise.all(
-        [
-          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: bikeT2MaxKm, rate: bikeT2Rate }, { rate: bikeT3Rate }] } } },
-          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: carT2MaxKm, rate: carT2Rate }, { rate: carT3Rate }] } } },
-          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: vanT2MaxKm, rate: vanT2Rate }, { rate: vanT3Rate }] } } },
-        ]
+	        [
+	          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: 15, rate: bikeT2Rate }, { max_km: 25, rate: bikeT3Rate }, { rate: bikeT4Rate }] } } },
+	          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: 15, rate: carT2Rate }, { max_km: 25, rate: carT3Rate }, { rate: carT4Rate }] } } },
+	          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: 15, rate: vanT2Rate }, { max_km: 25, rate: vanT3Rate }, { rate: vanT4Rate }] } } },
+	        ]
           .filter(({ key }) => vehicleIds[key])
           .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
       );
@@ -3666,7 +4379,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
+	  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3MaxKm(25); setBikeT3Rate(200); setBikeT4Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3MaxKm(25); setCarT3Rate(250); setCarT4Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3MaxKm(25); setVanT3Rate(400); setVanT4Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
 
   const tabs = [{ id: "pricing", label: "Pricing & Fees", icon: "💰" }, { id: "zones", label: "Zones & Surcharges", icon: "🗺️" }, { id: "simulator", label: "Price Calculator", icon: "🧮" }, { id: "dispatch", label: "Dispatch Rules", icon: "⚙️" }, { id: "relay", label: "Relay Network", icon: "🔗" }, { id: "notifications", label: "Notifications", icon: "🔔" }, { id: "integrations", label: "API & Integrations", icon: "🔌" }];
 
@@ -3717,21 +4430,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
-                <input value={bikeT2MaxKm} onChange={e => setBikeT2MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	                <input value={bikeT2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={bikeT2Rate} onChange={e => setBikeT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}km+)</span></div>
-                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}–{bikeT3MaxKm}km)</span></div>
+	                <input value={bikeT3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+	                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT3MaxKm}km+)</span></div>
+	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+	                <input value={bikeT4Rate} onChange={e => setBikeT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = calcBikePrice(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= bikeFloorKm ? "#10B98130" : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: "#10B981", fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= bikeFloorKm && <div style={{ fontSize: 8, color: "#10B981", fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}km+ → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}–{bikeT3MaxKm}km → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). {bikeT3MaxKm}km+ → km × ₦{bikeT4Rate} (min ₦{(bikeT3MaxKm * bikeT3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>
@@ -3742,14 +4460,16 @@ function SettingsScreen() {
           floorKm: carFloorKm, setFloorKm: setCarFloorKm, floorFee: carFloorFee, setFloorFee: setCarFloorFee,
           t1MaxKm: carT1MaxKm, setT1MaxKm: setCarT1MaxKm, t1Rate: carT1Rate, setT1Rate: setCarT1Rate,
           t2MaxKm: carT2MaxKm, setT2MaxKm: setCarT2MaxKm, t2Rate: carT2Rate, setT2Rate: setCarT2Rate,
-          t3Rate: carT3Rate, setT3Rate: setCarT3Rate, calcFn: calcCarPrice
+	          t3MaxKm: carT3MaxKm, setT3MaxKm: setCarT3MaxKm, t3Rate: carT3Rate, setT3Rate: setCarT3Rate,
+	          t4Rate: carT4Rate, setT4Rate: setCarT4Rate, calcFn: calcCarPrice
         },
         {
           label: "Van", emoji: "🚐", color: "#8B5CF6", desc: "Bulk orders, furniture, large cargo. Max 500kg.",
           floorKm: vanFloorKm, setFloorKm: setVanFloorKm, floorFee: vanFloorFee, setFloorFee: setVanFloorFee,
           t1MaxKm: vanT1MaxKm, setT1MaxKm: setVanT1MaxKm, t1Rate: vanT1Rate, setT1Rate: setVanT1Rate,
           t2MaxKm: vanT2MaxKm, setT2MaxKm: setVanT2MaxKm, t2Rate: vanT2Rate, setT2Rate: setVanT2Rate,
-          t3Rate: vanT3Rate, setT3Rate: setVanT3Rate, calcFn: calcVanPrice
+	          t3MaxKm: vanT3MaxKm, setT3MaxKm: setVanT3MaxKm, t3Rate: vanT3Rate, setT3Rate: setVanT3Rate,
+	          t4Rate: vanT4Rate, setT4Rate: setVanT4Rate, calcFn: calcVanPrice
         }
         ].map(v => (<div key={v.label} style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -3774,21 +4494,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
-                <input value={v.t2MaxKm} onChange={e => v.setT2MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	                <input value={v.t2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={v.t2Rate} onChange={e => v.setT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}km+)</span></div>
-                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}–{v.t3MaxKm}km)</span></div>
+	                <input value={v.t3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+	                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
+	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t3MaxKm}km+)</span></div>
+	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+	                <input value={v.t4Rate} onChange={e => v.setT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+	              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = v.calcFn(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= v.floorKm ? `${v.color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: v.color, fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= v.floorKm && <div style={{ fontSize: 8, color: v.color, fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}km+ → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}–{v.t3MaxKm}km → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). {v.t3MaxKm}km+ → km × ₦{v.t4Rate} (min ₦{(v.t3MaxKm * v.t3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>))}
@@ -4133,7 +4858,7 @@ function SettingsScreen() {
 }
 // ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
 // onPlaceSelected(place) is called with { address, lat, lng } when a suggestion is picked
-function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style }) {
+function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style, onBlur }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -4183,18 +4908,10 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
       autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
-          const lagosOnly = predictions.filter(p =>
-            p.terms?.some(t => /lagos/i.test(t.value)) ||
-            /lagos/i.test(p.description)
-          );
-          if (lagosOnly.length > 0) {
-            setSuggestions(lagosOnly.slice(0, 8));
-            setShowDropdown(true);
-          } else {
-            setSuggestions([]);
-            setShowDropdown(false);
-          }
+          // Do not hard-filter by the word "Lagos" (valid Lagos addresses often resolve to e.g. Ikeja/Eti-Osa).
+          // We validate service area AFTER geocoding the selected place.
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
         } else {
           setSuggestions([]);
           setShowDropdown(false);
@@ -4205,7 +4922,7 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }}
+      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }} onBlur={onBlur}
         placeholder={placeholder} style={style} />
       {loading && <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#94a3b8' }}>⏳</div>}
       {showDropdown && suggestions.length > 0 && (
@@ -4228,6 +4945,8 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
                     } else {
                       onPlaceSelected({ address: s.description, lat, lng });
                     }
+                  } else {
+                    onPlaceSelected({ error: status || 'GEOCODE_FAILED', address: s.description });
                   }
                 });
               }
@@ -4331,11 +5050,25 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (pt && pt.type === 'tiered' && routeDistance) {
       const km = routeDistance;
       if (km <= pt.floor_km) return pt.floor_fee;
-      const t = pt.tiers || [];
-      if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-      if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
-      if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
-      return Math.round(km * (t[t.length - 1]?.rate || 0));
+	      // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+	      const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+	      let prevMaxKm = Number(pt.floor_km || 0);
+	      let prevRate = null;
+	      for (let i = 0; i < tiers.length; i++) {
+	        const tier = tiers[i] || {};
+	        const rate = Number(tier.rate || 0);
+	        const maxKm = tier.max_km;
+	        const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	        if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+	          return Math.max(Math.round(km * rate), minFloor);
+	        }
+	        prevMaxKm = Number(maxKm);
+	        prevRate = rate;
+	      }
+	      // Fallback for unexpected tier config
+	      const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+	      const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	      return Math.max(Math.round(km * lastRate), minFloor);
     }
     if (pt && pt.type === 'tiered') return pt.floor_fee;
     // Simple pricing fallback
@@ -4347,6 +5080,40 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   const displayPrice = priceOverride ? parseInt(priceOverride) : (calcPrice(vehicle) || 0);
 
+  // Local helpers for reliable coordinate capture
+  const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
+  const geocodeFreeText = (address) => {
+    return new Promise((resolve) => {
+      try {
+        if (!address || address.length < 3) return resolve(null);
+        if (!window.google || !window.google.maps) return resolve(null);
+        const gc = new window.google.maps.Geocoder();
+        gc.geocode({ address }, (results, status) => {
+          if (status === 'OK' && results && results[0] && results[0].geometry) {
+            const loc = results[0].geometry.location;
+            const lat = loc.lat(), lng = loc.lng();
+            return resolve({ lat, lng });
+          }
+          return resolve(null);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  };
+
+  const handlePickupChange = (v) => {
+    setPickup(v);
+    // If user edits text after selecting a suggestion, coords are no longer trustworthy.
+    setPickupLat(null);
+    setPickupLng(null);
+  };
+  const handleDropoffChange = (v) => {
+    setDropoff(v);
+    setDropoffLat(null);
+    setDropoffLng(null);
+  };
+
   const handleSubmit = async () => {
     setError(null);
     if (!pickup) { setError("Pickup address is required"); return; }
@@ -4355,6 +5122,38 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (!receiverName) { setError("Receiver name is required"); return; }
     setSubmitting(true);
     try {
+      // Ensure relay orders always have coordinates (either from Places selection or fallback geocode)
+      let finalPickupLat = pickupLat, finalPickupLng = pickupLng;
+      let finalDropoffLat = dropoffLat, finalDropoffLng = dropoffLng;
+
+      const pickupMissing = (finalPickupLat == null || finalPickupLng == null);
+      const dropoffMissing = (finalDropoffLat == null || finalDropoffLng == null);
+
+      if (pickupMissing) {
+        const g = await geocodeFreeText(pickup);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalPickupLat = g.lat; finalPickupLng = g.lng;
+          setPickupLat(g.lat); setPickupLng(g.lng);
+        }
+      }
+      if (dropoffMissing) {
+        const g = await geocodeFreeText(dropoff);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalDropoffLat = g.lat; finalDropoffLng = g.lng;
+          setDropoffLat(g.lat); setDropoffLng(g.lng);
+        }
+      }
+
+      if (isRelayOrder) {
+        const pOk = (finalPickupLat != null && finalPickupLng != null);
+        const dOk = (finalDropoffLat != null && finalDropoffLng != null);
+        if (!pOk || !dOk) {
+          setError("Relay Delivery requires geocoded pickup & dropoff. Please select both addresses from suggestions (or use a more specific address).");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const payload = {
         pickup, dropoff,
         senderName, senderPhone: senderPhone || "N/A",
@@ -4367,10 +5166,10 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         distance_km: routeDistance || 0,
         duration_minutes: routeDuration || 0,
         is_relay_order: isRelayOrder,
-        pickup_lat: pickupLat,
-        pickup_lng: pickupLng,
-        dropoff_lat: dropoffLat,
-        dropoff_lng: dropoffLng,
+        pickup_lat: finalPickupLat,
+        pickup_lng: finalPickupLng,
+        dropoff_lat: finalDropoffLat,
+        dropoff_lng: finalDropoffLng,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -4416,8 +5215,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Pickup */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p => {
+            <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
               if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
               setPickupLat(p.lat); setPickupLng(p.lng);
             }} placeholder="Enter pickup address..." style={iSt} />
           </div>
@@ -4425,8 +5225,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           {/* Dropoff */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p => {
+            <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
               if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+              if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
               setDropoffLat(p.lat); setDropoffLng(p.lng);
             }} placeholder="Enter delivery address..." style={iSt} />
           </div>
@@ -4507,8 +5308,16 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
             <label style={lSt}>Assign Rider (Optional)</label>
             <select value={riderId} onChange={e => setRiderId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Auto-assign nearest rider</option>
-              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (<option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>))}
-              {riders.filter(r => r.status === "on_delivery").map(r => (<option key={r.id} value={r.id} disabled>{r.name} — 📦 Busy</option>))}
+	              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (
+	                <option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>
+	              ))}
+	              {riders
+	                .filter(r => r.status !== "offline" && (r.status === "on_delivery" || !!r.currentOrder))
+	                .map(r => (
+	                  <option key={r.id} value={r.id}>
+	                    {r.name} — 📦 Busy{r.currentOrder ? ` (${r.currentOrder})` : ""}
+	                  </option>
+	                ))}
             </select>
           </div>
 
