@@ -1313,8 +1313,8 @@ class OrderCompleteView(APIView):
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
             is_cod = order.payment_method in self.COD_METHODS
-            print("Let's see the payment method", order.payment_method)
-            print("Let's see the payment methods", self.COD_METHODS)
+            logger.info("Let's see the payment method %s", order.payment_method)
+            logger.info("Let's see the payment methods %s", self.COD_METHODS)
             cod_total = Decimal("0.00")
 
             if is_cod:
