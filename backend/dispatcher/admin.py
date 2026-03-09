@@ -10,6 +10,14 @@ from .models import (
     VehicleAsset,
     VehicleTracking,
     Vertical,
+    ServiceAPIKey,
+    VerticalLead,
+    ZoneCaptain,
+    RiderDutyLog,
+    RiderDailySnapshot,
+    MerchantDailySnapshot,
+    DeliveryRating,
+    ZoneTarget,
 )
 
 
@@ -75,7 +83,8 @@ class DispatcherProfileAdmin(admin.ModelAdmin):
 
 @admin.register(Merchant)
 class MerchantAdmin(admin.ModelAdmin):
-    list_display = ("user", "merchant_id", "created_at")
+    list_display = ("user", "merchant_id", "zone", "activity_status", "created_at")
+    list_filter = ("activity_status", "zone")
     search_fields = (
         "user__username",
         "user__email",
@@ -139,3 +148,36 @@ class RelayNodeAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "zone")
     search_fields = ("name", "address")
     readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(ServiceAPIKey)
+class ServiceAPIKeyAdmin(admin.ModelAdmin):
+    list_display = ("name", "prefix", "is_active", "last_used_at", "expires_at", "created_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "prefix")
+    readonly_fields = ("id", "key_hash", "prefix", "created_at")
+
+
+@admin.register(VerticalLead)
+class VerticalLeadAdmin(admin.ModelAdmin):
+    list_display = ("user", "vertical", "is_active", "created_at")
+    list_filter = ("is_active",)
+
+
+@admin.register(ZoneCaptain)
+class ZoneCaptainAdmin(admin.ModelAdmin):
+    list_display = ("user", "zone", "is_active", "created_at")
+    list_filter = ("is_active",)
+
+
+@admin.register(ZoneTarget)
+class ZoneTargetAdmin(admin.ModelAdmin):
+    list_display = ("zone", "month", "target_orders", "target_revenue")
+    list_filter = ("month",)
+
+
+@admin.register(DeliveryRating)
+class DeliveryRatingAdmin(admin.ModelAdmin):
+    list_display = ("rider", "score", "created_at")
+    list_filter = ("score",)
+    readonly_fields = ("id", "created_at")

@@ -1,46 +1,57 @@
-# AX Merchant Portal - Django Backend
+# AXpress Backend
 
-## 🎉 Phase 1: Authentication & Order Management - COMPLETED ✅
-
-This is the Django backend for the AX Merchant Portal, a package delivery service platform for merchants in Lagos, Nigeria.
+This is the Django backend for AXpress, a package delivery service platform for merchants in Lagos, Nigeria. It powers the Merchant Portal, Rider App, and the Operations Command Center (OCC).
 
 ---
 
-## 📋 Project Structure
+## Project Structure
 
 ```
 backend/
 ├── ax_merchant_api/          # Django project settings
 │   ├── settings.py           # Main configuration
 │   ├── urls.py               # URL routing
+│   ├── celery.py             # Celery app configuration
 │   └── wsgi.py               # WSGI application
 ├── authentication/           # Authentication app
-│   ├── models.py             # Custom User model
+│   ├── models.py             # Custom User model (with user types)
 │   ├── serializers.py        # DRF serializers
 │   ├── views.py              # API views
-│   ├── urls.py               # Authentication URLs
-│   └── admin.py              # Admin configuration
+│   └── urls.py               # Authentication URLs
 ├── orders/                   # Order Management app
-│   ├── models.py             # Order, Delivery, Vehicle models
+│   ├── models.py             # Order, Delivery, Vehicle, OrderLeg models
 │   ├── serializers.py        # Order serializers
 │   ├── views.py              # Order API views
-│   ├── urls.py               # Order URLs
-│   ├── admin.py              # Order admin configuration
-│   └── management/           # Management commands
-│       └── commands/
-│           └── seed_vehicles.py  # Seed vehicle data
-├── .env                      # Environment variables
+│   └── urls.py               # Order URLs
+├── dispatcher/               # Dispatch & Operations app
+│   ├── models.py             # Rider, Merchant, Zone, Vertical, VehicleAsset,
+│   │                         #   ServiceAPIKey, RiderDutyLog, snapshots, etc.
+│   ├── views.py              # Rider/Zone/Vertical ViewSets
+│   ├── urls.py               # Dispatcher URLs (/api/dispatch/)
+│   ├── authentication.py     # ServiceAPIKeyAuthentication (server-to-server)
+│   ├── permissions.py        # HasOCCReadScope, HasOCCWriteScope
+│   ├── occ_views.py          # OCC analytics endpoints (12 views)
+│   ├── occ_urls.py           # OCC URL routing (/api/occ/)
+│   ├── tasks.py              # Celery tasks (snapshots, ghost riders, etc.)
+│   ├── serializers.py        # Dispatcher serializers
+│   ├── admin.py              # Admin configuration
+│   └── management/commands/
+│       └── create_service_key.py  # Generate service API keys
+├── riders/                   # Rider-specific app
+│   ├── models.py             # OrderOffer model
+│   ├── tasks.py              # Rider Celery tasks
+│   └── urls.py               # Rider URLs
+├── wallet/                   # Wallet & payments app
+├── webhooks/                 # Webhook delivery app
+├── bot/                      # Bot integration app
+├── referrals/                # Referral system app
 ├── requirements.txt          # Python dependencies
-├── manage.py                 # Django management script
-├── test_auth_api.py          # Authentication API test script
-├── test_orders_api.py        # Order Management API test script
-├── API_DOCUMENTATION.md      # Authentication API docs
-└── README.md                 # This file
+└── manage.py                 # Django management script
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Python 3.9+
@@ -61,296 +72,201 @@ backend/
    ```
 
 3. **Configure environment variables:**
-   Edit `.env` file with your settings (already configured)
+   Copy `.env.example` to `.env` and fill in your settings.
 
 4. **Run migrations:**
    ```bash
+   python manage.py makemigrations
    python manage.py migrate
    ```
 
 5. **Seed initial data:**
    ```bash
    python manage.py seed_vehicles
+   python manage.py seed_verticals_and_zones
+   python manage.py populate_users
    ```
 
-6. **Start development server:**
+6. **Seed OCC test data** (optional — populates zone captains, vertical leads, duty logs, snapshots, ratings, and zone targets):
+   ```bash
+   python manage.py seed_occ_test_data
+   ```
+
+7. **Start development server:**
    ```bash
    python manage.py runserver 8000
    ```
 
-7. **Test the APIs:**
+8. **Start Celery worker + beat (for background tasks):**
    ```bash
-   python test_auth_api.py
-   python test_orders_api.py
+   celery -A ax_merchant_api worker -l info
+   celery -A ax_merchant_api beat -l info
    ```
 
 ---
 
-## 🔧 Technology Stack
+## Technology Stack
 
-- **Django 4.2.28** - Web framework
-- **Django REST Framework 3.16.1** - REST API toolkit
+- **Django 4.2** - Web framework
+- **Django REST Framework** - REST API toolkit
 - **PostgreSQL** - Primary database
-- **Redis** - Caching and session storage
-- **JWT (Simple JWT)** - Token-based authentication
+- **Redis** - Celery broker, caching, and session storage
+- **Celery** - Async task queue and periodic beat scheduler
+- **JWT (Simple JWT)** - Token-based authentication (merchants, riders)
+- **Service API Keys** - Server-to-server authentication (OCC)
 - **CORS Headers** - Cross-origin resource sharing
 
 ---
 
-## 📡 API Endpoints
+## API Endpoints
 
-### Authentication
-- `POST /api/auth/signup/` - Register new merchant
-- `POST /api/auth/login/` - Login with phone + password
-- `POST /api/auth/logout/` - Logout (blacklist token)
-- `POST /api/auth/refresh/` - Refresh access token
-- `GET /api/auth/me/` - Get current user profile
-- `PUT /api/auth/profile/` - Update user profile
+### Authentication (`/api/auth/`)
+- `POST /signup/` - Register new merchant
+- `POST /login/` - Login with phone + password
+- `POST /logout/` - Logout (blacklist token)
+- `POST /refresh/` - Refresh access token
+- `GET /me/` - Get current user profile
+- `PUT /profile/` - Update user profile
 
-### Order Management
-- `GET /api/orders/vehicles/` - Get available vehicles
-- `POST /api/orders/quick-send/` - Create Quick Send order
-- `POST /api/orders/multi-drop/` - Create Multi-Drop order
-- `POST /api/orders/bulk-import/` - Create Bulk Import order
-- `GET /api/orders/` - Get all orders (with filters)
-- `GET /api/orders/stats/` - Get order statistics
-- `GET /api/orders/<order_number>/` - Get order details
+### Orders (`/api/orders/`)
+- `GET /vehicles/` - Get available vehicles
+- `POST /quick-send/` - Create Quick Send order
+- `POST /multi-drop/` - Create Multi-Drop order
+- `POST /bulk-import/` - Create Bulk Import order
+- `GET /` - List orders (with filters)
+- `GET /stats/` - Order statistics
+- `GET /<order_number>/` - Order details
 
-See `API_DOCUMENTATION.md` and `orders/API_DOCUMENTATION.md` for detailed API documentation.
+### Dispatch (`/api/dispatch/`)
+- Rider CRUD + `toggle_duty`, `update_location`
+- Zone CRUD
+- Vertical CRUD (`/verticals/`)
+- VehicleAsset management
+- Relay node management
+- Activity feed
 
----
+### OCC Analytics (`/api/occ/`) — Service API Key auth
+- `GET /verticals/` - All verticals with aggregated metrics
+- `GET /verticals/<id>/` - Single vertical detail
+- `GET /verticals/<id>/zones/` - Zones under a vertical
+- `GET /zones/<id>/dashboard/` - Zone dashboard (orders, revenue, riders, merchants)
+- `GET /zones/<id>/riders/` - Riders in a zone with performance metrics
+- `GET /zones/<id>/merchants/` - Merchants in a zone with analytics
+- `GET /riders/<id>/performance/` - Individual rider performance
+- `GET /riders/locations/` - Real-time rider GPS positions
+- `GET /merchants/<id>/analytics/` - Individual merchant analytics
+- `GET /leaderboard/zones/` - Zone leaderboard with salary calculations
+- `GET /leaderboard/verticals/` - Vertical leaderboard with salary calculations
+- `GET /orders/analytics/` - Platform-wide order analytics
 
-## 🗄️ Database Schema
+All OCC endpoints accept a `?period=` query param: `today`, `this_week`, `past_7_days`, `this_month`, `last_month`, `this_year`, or `YYYY-MM`.
 
-### Users Table
-- `id` (UUID) - Primary key
-- `business_name` - Merchant business name
-- `contact_name` - Contact person name
-- `phone` - Phone number (unique, used for login)
-- `email` - Email address (unique)
-- `address` - Business address
-- `is_active` - Account status
-- `email_verified` - Email verification status
-- `phone_verified` - Phone verification status
-- `created_at` - Account creation timestamp
-- `updated_at` - Last update timestamp
-- `last_login` - Last login timestamp
-
-### Vehicles Table
-- `id` (Integer) - Primary key
-- `name` - Vehicle type (Bike, Car, Van)
-- `max_weight_kg` - Maximum weight capacity
-- `base_price` - Base delivery price
-- `description` - Vehicle description
-- `is_active` - Availability status
-
-### Orders Table
-- `id` (UUID) - Primary key
-- `order_number` - Unique order number (6XXXXXX format)
-- `user_id` (FK) - Reference to merchant
-- `mode` - Order mode (quick, multi, bulk)
-- `vehicle_id` (FK) - Reference to vehicle
-- `pickup_address` - Pickup location
-- `sender_name` - Sender name
-- `sender_phone` - Sender phone
-- `payment_method` - Payment method (wallet, cash_on_pickup, receiver_pays)
-- `total_amount` - Total order cost
-- `status` - Order status (Pending, Assigned, Started, Done, etc.)
-- `created_at` - Order creation timestamp
-- `updated_at` - Last update timestamp
-- `scheduled_pickup_time` - Scheduled pickup time (optional)
-- `notes` - Order notes
-
-### Deliveries Table
-- `id` (UUID) - Primary key
-- `order_id` (FK) - Reference to order
-- `dropoff_address` - Delivery destination
-- `receiver_name` - Receiver name
-- `receiver_phone` - Receiver phone
-- `package_type` - Package type (Box, Envelope, Fragile, etc.)
-- `notes` - Delivery notes
-- `status` - Delivery status (Pending, InTransit, Delivered, etc.)
-- `sequence` - Delivery sequence number (for multi-drop)
-- `created_at` - Delivery creation timestamp
-- `delivered_at` - Delivery completion timestamp
+### Other
+- `/api/wallet/` - Wallet & Paystack integration
+- `/api/riders/` - Rider-specific endpoints
+- `/api/webhooks/` - Webhook delivery
+- `/api/bot/` - Bot integration
+- `/api/riders/referrals/` - Referral system
 
 ---
 
-## 🔐 Authentication Flow
+## Authentication
 
-1. **Signup:** User registers with business details → Receives JWT tokens
-2. **Login:** User logs in with phone + password → Receives JWT tokens
-3. **Access Protected Routes:** Include `Authorization: Bearer <access_token>` header
-4. **Token Refresh:** When access token expires, use refresh token to get new one
-5. **Logout:** Blacklist refresh token to invalidate session
+### Merchant / Rider Auth (JWT)
+1. Register or login to receive JWT access + refresh tokens
+2. Include `Authorization: Bearer <access_token>` on protected routes
+3. Refresh tokens when expired, blacklist on logout
 
----
-
-## ✅ Phase 1 Completed Features
-
-### Authentication (Feature 1) ✅
-- ✅ Custom User model with UUID primary key
-- ✅ User registration (signup)
-- ✅ User login with phone + password
-- ✅ JWT token generation (access + refresh)
-- ✅ Token refresh endpoint
-- ✅ User profile retrieval
-- ✅ User profile update
-- ✅ Logout with token blacklisting
-- ✅ PostgreSQL database integration
-- ✅ Redis caching setup
-- ✅ CORS configuration for frontend
-- ✅ Django admin panel integration
-- ✅ API testing script
-
-### Order Management (Feature 3) ✅
-- ✅ Vehicle model with pricing (Bike: ₦1,200, Car: ₦4,500, Van: ₦12,000)
-- ✅ Order model with auto-generated order numbers
-- ✅ Delivery model for multi-drop support
-- ✅ Quick Send order creation (single delivery)
-- ✅ Multi-Drop order creation (multiple deliveries)
-- ✅ Bulk Import order creation (CSV/text/OCR support)
-- ✅ Order listing with filtering (status, mode, limit)
-- ✅ Order detail retrieval by order number
-- ✅ Order statistics for dashboard
-- ✅ Vehicle listing endpoint
-- ✅ Django admin integration for orders
-- ✅ Management command to seed vehicle data
-- ✅ Comprehensive API testing script
+### OCC Server-to-Server Auth (Service API Key)
+1. Generate a key: `python manage.py create_service_key "OCC Production" --scopes occ:read occ:write`
+2. The raw `sk_...` key is displayed once — store it securely in the OCC backend's environment
+3. OCC calls include `Authorization: Bearer sk_...` header
+4. Keys are SHA-256 hashed at rest; scoped permissions control access
 
 ---
 
-## 📝 Environment Variables
+## Celery Beat Schedule
 
-```env
-# Django Settings
-SECRET_KEY=<your-secret-key>
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-
-# Database Configuration
-DB_NAME=axpress
-DB_USER=postgres
-DB_PASSWORD=19sedimat54
-DB_HOST=localhost
-DB_PORT=5432
-
-# Redis Configuration
-REDIS_HOST=localhost
-REDIS_PORT=6379
-
-# JWT Configuration
-JWT_ACCESS_TOKEN_LIFETIME=24    # hours
-JWT_REFRESH_TOKEN_LIFETIME=168  # hours (7 days)
-
-# Frontend URL (for CORS)
-FRONTEND_URL=http://localhost:9000
-```
+| Task | Schedule | Description |
+|------|----------|-------------|
+| `riders.tasks.publish_random_order_offer` | Every minute | Publish pending order offers to riders |
+| `webhooks.tasks.webhook_retry_cron` | Every 30 seconds | Retry failed webhook deliveries |
+| `dispatcher.tasks.aggregate_daily_rider_snapshots` | Daily 00:05 | Pre-aggregate rider metrics into snapshot table |
+| `dispatcher.tasks.aggregate_daily_merchant_snapshots` | Daily 00:10 | Pre-aggregate merchant metrics into snapshot table |
+| `dispatcher.tasks.update_merchant_activity_status` | Every 6 hours | Classify merchants as active/watch/inactive |
+| `dispatcher.tasks.flag_ghost_riders` | Every 15 minutes | Detect offline riders with GPS movement |
 
 ---
 
-## 🧪 Testing
+## Key Models
 
-### Authentication API Tests
-Run the automated authentication API test script:
+| Model | App | Purpose |
+|-------|-----|---------|
+| `User` | authentication | Custom user with UUID PK, user types (Merchant, Rider, ZoneCaptain, VerticalLead) |
+| `Order` | orders | Delivery orders with status flow, payment, and routing |
+| `Delivery` | orders | Individual drop-off within an order |
+| `OrderLeg` | orders | Relay leg for long-distance multi-hop deliveries |
+| `Rider` | dispatcher | Rider profile, GPS, duty status, vehicle assignment |
+| `Merchant` | dispatcher | Merchant profile, zone assignment, activity status |
+| `Vertical` | dispatcher | Organizational unit grouping multiple zones |
+| `Zone` | dispatcher | Geographic delivery zone with center point + radius |
+| `VehicleAsset` | dispatcher | Physical vehicle with GPS telemetry |
+| `ServiceAPIKey` | dispatcher | SHA-256 hashed API keys for server-to-server auth |
+| `RiderDutyLog` | dispatcher | On/off duty transitions for peak-hour analysis |
+| `RiderDailySnapshot` | dispatcher | Pre-aggregated daily rider metrics |
+| `MerchantDailySnapshot` | dispatcher | Pre-aggregated daily merchant metrics |
+| `DeliveryRating` | dispatcher | Per-delivery CSAT rating |
+| `ZoneTarget` | dispatcher | Monthly KPI targets per zone |
+| `ZoneCaptain` | dispatcher | Zone captain assignment and salary structure |
+| `VerticalLead` | dispatcher | Vertical lead assignment and salary structure |
+
+---
+
+## Management Commands
+
+| Command | Description |
+|---------|-------------|
+| `seed_vehicles` | Seed vehicle types (Bike, Car, Van) with pricing |
+| `seed_verticals_and_zones` | Seed 4 verticals and 20 Lagos zones with coordinates |
+| `populate_users` | Create test merchants and riders |
+| `seed_occ_test_data` | Seed all OCC tables: zone captains, vertical leads, zone targets, duty logs, rider/merchant daily snapshots, delivery ratings. Requires the 3 commands above to run first |
+| `create_service_key` | Generate a service API key for server-to-server auth (e.g. OCC) |
+| `seed_relay_network` | Seed relay nodes and riders across zones |
+| `populate_mock_orders` | Create mock orders for testing |
+
+### Seeding order for a fresh database
+
 ```bash
-python test_auth_api.py
+python manage.py seed_vehicles
+python manage.py seed_verticals_and_zones
+python manage.py populate_users
+python manage.py populate_mock_orders
+python manage.py seed_occ_test_data
+python manage.py create_service_key "OCC Dev" --scopes occ:read occ:write
 ```
-
-This will test:
-- User signup
-- User login
-- Get profile
-- Update profile
-- Token refresh
-- Logout
-
-### Order Management API Tests
-Run the automated order management API test script:
-```bash
-python test_orders_api.py
-```
-
-This will test:
-- Login and authentication
-- Get available vehicles
-- Create Quick Send order
-- Create Multi-Drop order (3 deliveries)
-- Create Bulk Import order (5 deliveries)
-- Get all orders
-- Get order statistics
-- Get specific order details
 
 ---
 
-## 📦 Next Steps (Remaining Phase 1 Features)
+## Order Status Flow
 
-1. **Wallet System (Feature 2)** - PENDING
-   - Create Wallet model
-   - Paystack integration for funding
-   - Transaction history
-   - Balance management
-   - Wallet deduction on order creation
-   - Wallet funding endpoints
-
-2. **Dashboard (Feature 4)** - PARTIALLY COMPLETE
-   - ✅ Order statistics endpoint (already implemented)
-   - ⏳ Wallet balance display
-   - ⏳ Recent transactions
-   - ⏳ Quick actions
+```
+Pending -> Assigned -> Started -> Pickup -> Fulfilling -> Arrived -> Done
+            |
+            v
+  CustomerCanceled / RiderCanceled / Failed
+```
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Local Development
 - Backend: `http://127.0.0.1:8000`
 - Frontend: `http://localhost:9000`
 
-### Production (Planned)
+### Production
 - **Backend:** Digital Ocean
 - **Frontend:** Vercel
 - **Database:** PostgreSQL (Digital Ocean)
-- **Cache:** Redis (Digital Ocean)
-
----
-
-## 📞 Support
-
-For issues or questions, refer to:
-- `API_DOCUMENTATION.md` - Complete API reference
-- `../frontend/BACKEND_REQUIREMENTS.md` - Full backend requirements
-- `../frontend/FEATURE_SUMMARY.md` - Feature breakdown
-
----
-
-**Status:** ✅ Phase 1 Authentication & Order Management - COMPLETE
-**Server:** Running on http://127.0.0.1:8000
-**Last Updated:** February 14, 2026
-
----
-
-## 🎯 Order Management Features
-
-### Three Delivery Modes:
-1. **Quick Send** - Single pickup, single delivery
-2. **Multi-Drop** - Single pickup, multiple deliveries
-3. **Bulk Import** - Single pickup, multiple deliveries (from CSV/text/OCR)
-
-### Vehicle Types & Pricing:
-- **Bike**: ₦1,200 (max 10kg)
-- **Car**: ₦4,500 (max 70kg)
-- **Van**: ₦12,000 (max 600kg)
-
-### Payment Methods:
-- **Wallet**: Prepaid wallet balance (auto-debit)
-- **Cash on Pickup**: Pay rider at pickup
-- **Receiver Pays**: Cash on delivery (COD)
-
-### Order Status Flow:
-```
-Pending → Assigned → Started → Done
-         ↓
-    CustomerCanceled / RiderCanceled / Failed
-```
+- **Cache/Broker:** Redis (Digital Ocean)
 

@@ -225,6 +225,12 @@ class OrderOffer(models.Model):
     estimated_earnings = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
+    decline_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Reason the rider declined this offer",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -170,6 +170,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "dispatcher.authentication.ServiceAPIKeyAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
@@ -320,6 +321,23 @@ CELERY_BEAT_SCHEDULE = {
     "webhook-retry-every-30-seconds": {
         "task": "webhooks.tasks.webhook_retry_cron",
         "schedule": 30.0,
+    },
+    # OCC Snapshot Tasks
+    "aggregate-daily-rider-snapshots": {
+        "task": "dispatcher.tasks.aggregate_daily_rider_snapshots",
+        "schedule": crontab(hour=0, minute=5),
+    },
+    "aggregate-daily-merchant-snapshots": {
+        "task": "dispatcher.tasks.aggregate_daily_merchant_snapshots",
+        "schedule": crontab(hour=0, minute=10),
+    },
+    "update-merchant-activity-status": {
+        "task": "dispatcher.tasks.update_merchant_activity_status",
+        "schedule": crontab(minute=0, hour="*/6"),
+    },
+    "flag-ghost-riders": {
+        "task": "dispatcher.tasks.flag_ghost_riders",
+        "schedule": crontab(minute="*/15"),
     },
 }
 
