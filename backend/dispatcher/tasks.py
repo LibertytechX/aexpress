@@ -3,15 +3,254 @@ import logging
 import time
 import math
 import secrets
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
 import requests
 from celery import shared_task
 from django.conf import settings
+from django.db.models import Count, Q, Sum
+from django.utils import timezone
+
 from .models import Rider
 from .utils import MailgunEmailService
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# OCC Snapshot & Maintenance Tasks
+# ---------------------------------------------------------------------------
+
+
+@shared_task
+def aggregate_daily_rider_snapshots(target_date=None):
+    """
+    Nightly task: aggregate yesterday's metrics per rider into RiderDailySnapshot.
+    Scheduled at 00:05 Africa/Lagos.
+    """
+    from orders.models import Order
+    from .models import RiderDailySnapshot, RiderDutyLog
+
+    if target_date is None:
+        target_date = date.today() - timedelta(days=1)
+    elif isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date)
+
+    day_start = timezone.make_aware(
+        timezone.datetime.combine(target_date, timezone.datetime.min.time())
+    )
+    day_end = day_start + timedelta(days=1)
+
+    riders = Rider.objects.all()
+    created_count = 0
+
+    for rider in riders.iterator():
+        rider_orders = Order.objects.filter(
+            rider=rider,
+            created_at__gte=day_start,
+            created_at__lt=day_end,
+        )
+        completed = rider_orders.filter(status="Done").count()
+        rejected = rider_orders.filter(
+            status__in=["CustomerCanceled", "RiderCanceled"]
+        ).count()
+        failed = rider_orders.filter(status="Failed").count()
+        revenue = (
+            rider_orders.filter(status="Done").aggregate(total=Sum("total_amount"))[
+                "total"
+            ]
+            or Decimal("0")
+        )
+        distance = (
+            rider_orders.filter(status="Done").aggregate(total=Sum("distance_km"))[
+                "total"
+            ]
+            or Decimal("0")
+        )
+
+        # Online minutes from RiderDutyLog
+        duty_logs = RiderDutyLog.objects.filter(
+            rider=rider,
+            went_online__lt=day_end,
+        ).filter(Q(went_offline__gte=day_start) | Q(went_offline__isnull=True))
+
+        online_mins = 0
+        peak_mins = 0
+        for log in duty_logs:
+            start = max(log.went_online, day_start)
+            end = min(log.went_offline or day_end, day_end)
+            if end > start:
+                online_mins += int((end - start).total_seconds() / 60)
+
+            # Peak hours: 12-15 and 17-20
+            for peak_start_h, peak_end_h in [(12, 15), (17, 20)]:
+                peak_s = day_start.replace(hour=peak_start_h, minute=0, second=0)
+                peak_e = day_start.replace(hour=peak_end_h, minute=0, second=0)
+                overlap_start = max(start, peak_s)
+                overlap_end = min(end, peak_e)
+                if overlap_end > overlap_start:
+                    peak_mins += int(
+                        (overlap_end - overlap_start).total_seconds() / 60
+                    )
+
+        RiderDailySnapshot.objects.update_or_create(
+            rider=rider,
+            date=target_date,
+            defaults={
+                "orders_completed": completed,
+                "orders_rejected": rejected,
+                "orders_failed": failed,
+                "revenue": revenue,
+                "distance_km": distance,
+                "online_minutes": online_mins,
+                "peak_hour_minutes": peak_mins,
+                "ghost_ride_minutes": 0,  # populated by flag_ghost_riders
+            },
+        )
+        created_count += 1
+
+    logger.info(
+        f"aggregate_daily_rider_snapshots: {created_count} snapshots for {target_date}"
+    )
+    return created_count
+
+
+@shared_task
+def aggregate_daily_merchant_snapshots(target_date=None):
+    """
+    Nightly task: aggregate yesterday's metrics per merchant into MerchantDailySnapshot.
+    Scheduled at 00:10 Africa/Lagos.
+    """
+    from orders.models import Order
+    from .models import Merchant, MerchantDailySnapshot
+
+    if target_date is None:
+        target_date = date.today() - timedelta(days=1)
+    elif isinstance(target_date, str):
+        target_date = date.fromisoformat(target_date)
+
+    day_start = timezone.make_aware(
+        timezone.datetime.combine(target_date, timezone.datetime.min.time())
+    )
+    day_end = day_start + timedelta(days=1)
+
+    merchants = Merchant.objects.select_related("user").all()
+    created_count = 0
+
+    for merchant in merchants.iterator():
+        merchant_orders = Order.objects.filter(
+            user=merchant.user,
+            created_at__gte=day_start,
+            created_at__lt=day_end,
+        )
+        placed = merchant_orders.count()
+        completed = merchant_orders.filter(status="Done").count()
+        failed = merchant_orders.filter(status="Failed").count()
+        revenue = (
+            merchant_orders.filter(status="Done").aggregate(
+                total=Sum("total_amount")
+            )["total"]
+            or Decimal("0")
+        )
+
+        MerchantDailySnapshot.objects.update_or_create(
+            merchant=merchant.user,
+            date=target_date,
+            defaults={
+                "orders_placed": placed,
+                "orders_completed": completed,
+                "orders_failed": failed,
+                "revenue": revenue,
+            },
+        )
+        created_count += 1
+
+    logger.info(
+        f"aggregate_daily_merchant_snapshots: {created_count} snapshots for {target_date}"
+    )
+    return created_count
+
+
+@shared_task
+def update_merchant_activity_status():
+    """
+    Every 6 hours: update Merchant.activity_status based on order frequency.
+    - active: ordered within last 7 days
+    - watch: ordered within last 30 days (but not last 7)
+    - inactive: no order in 30+ days
+    """
+    from .models import Merchant
+
+    now = timezone.now()
+    seven_days_ago = now - timedelta(days=7)
+    thirty_days_ago = now - timedelta(days=30)
+
+    # Active: last_order_date within 7 days
+    active_count = Merchant.objects.filter(
+        last_order_date__gte=seven_days_ago
+    ).exclude(activity_status="active").update(activity_status="active")
+
+    # Watch: last_order_date between 7-30 days
+    watch_count = Merchant.objects.filter(
+        last_order_date__lt=seven_days_ago,
+        last_order_date__gte=thirty_days_ago,
+    ).exclude(activity_status="watch").update(activity_status="watch")
+
+    # Inactive: last_order_date > 30 days or null
+    inactive_count = Merchant.objects.filter(
+        Q(last_order_date__lt=thirty_days_ago) | Q(last_order_date__isnull=True)
+    ).exclude(activity_status="inactive").update(activity_status="inactive")
+
+    logger.info(
+        f"update_merchant_activity_status: active={active_count}, "
+        f"watch={watch_count}, inactive={inactive_count}"
+    )
+    return {"active": active_count, "watch": watch_count, "inactive": inactive_count}
+
+
+@shared_task
+def flag_ghost_riders():
+    """
+    Every 15 minutes: detect riders who are offline but whose current_speed > 5 km/h.
+    Logs a warning and increments their daily ghost_ride_minutes.
+    """
+    from .models import RiderDailySnapshot
+
+    today = date.today()
+    ghost_riders = Rider.objects.filter(
+        status=Rider.Status.OFFLINE,
+        current_speed__gt=5,
+    )
+
+    flagged = 0
+    for rider in ghost_riders:
+        logger.warning(
+            f"Ghost rider detected: {rider.rider_id} "
+            f"(speed={rider.current_speed} km/h, status={rider.status})"
+        )
+        # Add 15 minutes to today's ghost_ride_minutes
+        snapshot, _ = RiderDailySnapshot.objects.get_or_create(
+            rider=rider,
+            date=today,
+            defaults={
+                "orders_completed": 0,
+                "orders_rejected": 0,
+                "orders_failed": 0,
+                "revenue": Decimal("0"),
+                "distance_km": Decimal("0"),
+                "online_minutes": 0,
+                "peak_hour_minutes": 0,
+                "ghost_ride_minutes": 0,
+            },
+        )
+        snapshot.ghost_ride_minutes += 15
+        snapshot.save(update_fields=["ghost_ride_minutes"])
+        flagged += 1
+
+    if flagged:
+        logger.info(f"flag_ghost_riders: {flagged} ghost riders flagged")
+    return flagged
 
 
 _RELAY_NODES_CACHE = {"ts": 0.0, "nodes": None}

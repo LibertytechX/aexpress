@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset
+from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset, Vertical
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
@@ -1101,3 +1101,24 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
                 "phone": rider.user.phone if rider.user else "",
             }
         return None
+
+
+class VerticalSerializer(serializers.ModelSerializer):
+    zone_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Vertical
+        fields = [
+            "id",
+            "name",
+            "code",
+            "lead_name",
+            "is_active",
+            "zone_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_zone_count(self, obj):
+        return obj.zones.count()

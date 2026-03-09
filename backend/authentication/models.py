@@ -46,6 +46,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         ("Rider", "Rider"),
         ("Customer", "Customer"),
         ("Dispatcher", "Dispatcher"),
+        ("ZoneCaptain", "Zone Captain"),
+        ("VerticalLead", "Vertical Lead"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

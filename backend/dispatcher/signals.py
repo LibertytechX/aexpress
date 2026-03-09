@@ -12,6 +12,8 @@ def create_user_profile(sender, instance, created, **kwargs):
     if created:
         if instance.usertype == "Dispatcher":
             DispatcherProfile.objects.create(user=instance)
+        elif instance.usertype == "Rider":
+            Rider.objects.create(user=instance)
         elif instance.usertype == "Merchant":
             Merchant.objects.create(user=instance)
 
