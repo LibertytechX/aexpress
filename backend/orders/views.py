@@ -119,7 +119,6 @@ class QuickSendView(APIView):
             cod_amount=data.get("cod_amount"),
         )
 
-
         # Create single delivery
         Delivery.objects.create(
             order=order,
@@ -294,7 +293,6 @@ class MultiDropView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
-
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -447,7 +445,6 @@ class BulkImportView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
-
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -1316,6 +1313,8 @@ class OrderCompleteView(APIView):
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
             is_cod = order.payment_method in self.COD_METHODS
+            print("Let's see the payment method", order.payment_method)
+            print("Let's see the payment methods", self.COD_METHODS)
             cod_total = Decimal("0.00")
 
             if is_cod:
@@ -1353,7 +1352,10 @@ class OrderCompleteView(APIView):
                         amount=cod_total,
                         description=f"COD remittance for order #{order_number}",
                         reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
-                        metadata={"order_number": order_number, "order_id": str(order.id)},
+                        metadata={
+                            "order_number": order_number,
+                            "order_id": str(order.id),
+                        },
                     )
 
             # ── Step 2: Calculate and record rider earnings ───────────────────────
@@ -1415,7 +1417,10 @@ class OrderCompleteView(APIView):
                     rider=rider,
                     title="Order Completed 🎉",
                     body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
-                    data={"order_number": order_number, "net_earning": str(net_earning)},
+                    data={
+                        "order_number": order_number,
+                        "net_earning": str(net_earning),
+                    },
                 )
             except Exception as exc:
                 logger.warning(
