@@ -98,6 +98,7 @@ class DeliveryAdmin(admin.ModelAdmin):
         "dropoff_address",
         "status",
         "created_at",
+        "cod_amount",
     ]
     list_filter = ["status", "package_type", "created_at"]
     search_fields = [
