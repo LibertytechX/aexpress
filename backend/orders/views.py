@@ -1301,7 +1301,7 @@ class OrderCompleteView(APIView):
                 )
 
             try:
-                order = Order.objects.select_for_update().get(order_number=order_number)
+                order = Order.objects.get(order_number=order_number)
             except Order.DoesNotExist:
                 return Response(
                     {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
