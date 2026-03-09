@@ -14,6 +14,7 @@ from .views import (
     RelayNodeViewSet,
     DispatcherViewSet,
     VehicleAssetViewSet,
+    VerticalViewSet,
 )
 
 router = DefaultRouter()
@@ -29,6 +30,7 @@ router.register(r"zones", ZoneViewSet)
 router.register(r"relay-nodes", RelayNodeViewSet)
 router.register(r"dispatchers", DispatcherViewSet, basename="dispatcher")
 router.register(r"vehicle-assets", VehicleAssetViewSet)
+router.register(r"verticals", VerticalViewSet)
 
 urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),

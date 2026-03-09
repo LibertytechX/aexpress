@@ -1,3 +1,4 @@
+import hashlib
 import math
 
 from django.db import models
@@ -549,12 +550,43 @@ class DispatcherProfile(models.Model):
 
 
 class Merchant(models.Model):
+    ACTIVITY_STATUS_CHOICES = [
+        ("active", "Active"),
+        ("watch", "Watch"),
+        ("inactive", "Inactive"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="merchant_profile",
+    )
+    zone = models.ForeignKey(
+        Zone,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merchants",
+        help_text="Zone this merchant is assigned to",
+    )
+    acquisition_source = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text='How the merchant was acquired: "experiential", "referral", "organic"',
+    )
+    activity_status = models.CharField(
+        max_length=20,
+        choices=ACTIVITY_STATUS_CHOICES,
+        default="active",
+        help_text="Computed from order frequency",
+    )
+    last_order_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of most recent order",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -689,3 +721,223 @@ class ActivityFeed(models.Model):
 
     def __str__(self):
         return f"[{self.event_type}] {self.order_id} — {self.text[:50]}"
+
+
+# ---------------------------------------------------------------------------
+# Service API Keys (inter-project auth for OCC)
+# ---------------------------------------------------------------------------
+
+
+class ServiceAPIKey(models.Model):
+    """
+    API keys for server-to-server authentication.
+    Used by the OCC backend to call this main backend.
+    Keys are hashed (SHA-256); the raw key is shown once at creation time.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=100,
+        help_text='Descriptive name, e.g. "OCC Production"',
+    )
+    key_hash = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="SHA-256 hash of the raw API key",
+    )
+    prefix = models.CharField(
+        max_length=12,
+        unique=True,
+        help_text="First 11 chars of the key (sk_ + 8) for DB lookup",
+    )
+    scopes = models.JSONField(
+        default=list,
+        help_text='Allowed scopes, e.g. ["occ:read", "occ:write"]',
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "service_api_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.prefix}…)"
+
+
+# ---------------------------------------------------------------------------
+# OCC Hierarchy: Vertical Lead & Zone Captain
+# ---------------------------------------------------------------------------
+
+
+class VerticalLead(models.Model):
+    """Links a user to a vertical as its lead."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="vertical_lead_profile",
+    )
+    vertical = models.OneToOneField(
+        Vertical, on_delete=models.CASCADE, related_name="lead"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vertical_leads"
+
+    def __str__(self):
+        return f"Lead: {self.user.contact_name or self.user.phone} → {self.vertical.name}"
+
+
+class ZoneCaptain(models.Model):
+    """Links a user to a zone as its captain."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="zone_captain_profile",
+    )
+    zone = models.OneToOneField(
+        Zone, on_delete=models.CASCADE, related_name="captain"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "zone_captains"
+
+    def __str__(self):
+        return f"Captain: {self.user.contact_name or self.user.phone} → {self.zone.name}"
+
+
+# ---------------------------------------------------------------------------
+# OCC Snapshot & Analytics Models
+# ---------------------------------------------------------------------------
+
+
+class RiderDutyLog(models.Model):
+    """Tracks every on/off duty transition for peak-hour analysis."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        Rider, on_delete=models.CASCADE, related_name="duty_logs"
+    )
+    went_online = models.DateTimeField()
+    went_offline = models.DateTimeField(null=True, blank=True)
+    duration_minutes = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "rider_duty_logs"
+        ordering = ["-went_online"]
+        indexes = [
+            models.Index(fields=["rider", "-went_online"]),
+        ]
+
+    def __str__(self):
+        return f"DutyLog: {self.rider.rider_id} online {self.went_online}"
+
+
+class RiderDailySnapshot(models.Model):
+    """Pre-aggregated daily metrics per rider, computed by nightly Celery task."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        Rider, on_delete=models.CASCADE, related_name="daily_snapshots"
+    )
+    date = models.DateField(db_index=True)
+    orders_completed = models.IntegerField(default=0)
+    orders_rejected = models.IntegerField(default=0)
+    orders_failed = models.IntegerField(default=0)
+    revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    distance_km = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    online_minutes = models.IntegerField(default=0)
+    peak_hour_minutes = models.IntegerField(
+        default=0, help_text="Minutes online during 12-3pm + 5-8pm"
+    )
+    ghost_ride_minutes = models.IntegerField(
+        default=0, help_text="Minutes offline but GPS shows movement"
+    )
+
+    class Meta:
+        db_table = "rider_daily_snapshots"
+        unique_together = ("rider", "date")
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"Snapshot: {self.rider.rider_id} on {self.date}"
+
+
+class MerchantDailySnapshot(models.Model):
+    """Pre-aggregated daily metrics per merchant, computed by nightly Celery task."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_daily_snapshots",
+    )
+    date = models.DateField(db_index=True)
+    orders_placed = models.IntegerField(default=0)
+    orders_completed = models.IntegerField(default=0)
+    orders_failed = models.IntegerField(default=0)
+    revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "merchant_daily_snapshots"
+        unique_together = ("merchant", "date")
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"MerchantSnapshot: {self.merchant_id} on {self.date}"
+
+
+class DeliveryRating(models.Model):
+    """Per-delivery CSAT rating from the customer."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.OneToOneField(
+        "orders.Order", on_delete=models.CASCADE, related_name="rating"
+    )
+    rider = models.ForeignKey(
+        Rider, on_delete=models.CASCADE, related_name="delivery_ratings"
+    )
+    score = models.IntegerField(help_text="1-5 star rating")
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "delivery_ratings"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Rating: {self.rider.rider_id} — {self.score}★"
+
+
+class ZoneTarget(models.Model):
+    """Monthly order/revenue targets per zone."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    zone = models.ForeignKey(
+        Zone, on_delete=models.CASCADE, related_name="targets"
+    )
+    month = models.DateField(help_text="First day of the target month")
+    target_orders = models.IntegerField(
+        default=2000, help_text="5 riders × 400 orders"
+    )
+    target_revenue = models.DecimalField(
+        max_digits=12, decimal_places=2, default=600000
+    )
+
+    class Meta:
+        db_table = "zone_targets"
+        unique_together = ("zone", "month")
+        ordering = ["-month"]
+
+    def __str__(self):
+        return f"Target: {self.zone.name} — {self.month.strftime('%b %Y')}"

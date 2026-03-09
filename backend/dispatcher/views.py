@@ -5,12 +5,13 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset
+from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset, Vertical, RiderDutyLog
 from .serializers import (
     RiderSerializer,
     ZoneSerializer,
     RelayNodeSerializer,
     VehicleAssetSerializer,
+    VerticalSerializer,
 )
 from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
@@ -83,10 +84,29 @@ class RiderViewSet(viewsets.ModelViewSet):
         if status_val == Rider.Status.ONLINE:
             if rider.status != Rider.Status.ONLINE:
                 rider.go_online()
+                # Open a new duty log entry
+                RiderDutyLog.objects.create(
+                    rider=rider, went_online=timezone.now()
+                )
             return Response({"status": "success", "message": "Rider is now online"})
         elif status_val == Rider.Status.OFFLINE:
             if rider.status != Rider.Status.OFFLINE:
                 rider.go_offline()
+                # Close the most recent open duty log
+                open_log = (
+                    RiderDutyLog.objects.filter(rider=rider, went_offline__isnull=True)
+                    .order_by("-went_online")
+                    .first()
+                )
+                if open_log:
+                    now = timezone.now()
+                    open_log.went_offline = now
+                    open_log.duration_minutes = int(
+                        (now - open_log.went_online).total_seconds() / 60
+                    )
+                    open_log.save(
+                        update_fields=["went_offline", "duration_minutes"]
+                    )
             return Response({"status": "success", "message": "Rider is now offline"})
         else:
             return Response(
@@ -812,3 +832,11 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
         if active is not None:
             qs = qs.filter(is_active=active.lower() in ("true", "1"))
         return qs
+
+
+class VerticalViewSet(viewsets.ModelViewSet):
+    """Full CRUD for verticals (organizational units)."""
+
+    queryset = Vertical.objects.all().prefetch_related("zones").order_by("code")
+    serializer_class = VerticalSerializer
+    permission_classes = [permissions.IsAuthenticated]

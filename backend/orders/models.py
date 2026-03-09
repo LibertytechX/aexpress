@@ -363,7 +363,7 @@ class Order(models.Model):
         """Generate order number if not exists."""
         if not self.order_number:
             # Generate order number: 6XXXXXX format
-            last_order = Order.objects.order_by("-created_at").first()
+            last_order = Order.objects.order_by("-order_number").first()
             if last_order and last_order.order_number:
                 try:
                     last_num = int(last_order.order_number)
@@ -433,6 +433,12 @@ class Delivery(models.Model):
 
     # Status
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="Pending")
+    failure_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Reason the delivery failed",
+    )
 
     # Timestamps
     created_at = models.DateTimeField(default=timezone.now)
