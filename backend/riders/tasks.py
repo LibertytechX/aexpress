@@ -17,7 +17,13 @@ def publish_random_order_offer():
     """
     try:
         # Get a random pending offer
-        offer = OrderOffer.objects.filter(status="pending").order_by("?").first()
+        offer = (
+            OrderOffer.objects.filter(
+                status="pending", rider__isnull=True, order__status="Pending"
+            )
+            .order_by("?")
+            .first()
+        )
 
         if not offer:
             logger.info("No pending order offers found to publish.")
