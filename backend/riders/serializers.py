@@ -305,7 +305,10 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     pickup_contact_name = serializers.CharField(
         source="order.sender_name", read_only=True
     )
-    total_amount = serializers.DecimalField(source="order.total_amount", max_digits=10, decimal_places=2, read_only=True)
+    total_amount = serializers.DecimalField(
+        source="order.total_amount", max_digits=10, decimal_places=2, read_only=True
+    )
+    created_at = serializers.DateTimeField(source="order.created_at", read_only=True)
 
     dropoff_address = serializers.SerializerMethodField()
     dropoff_latitude = serializers.SerializerMethodField()
@@ -333,6 +336,7 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
             "vehicle_type",
             "payment_method",
             "merchant_name",
+            "created_at",
             "pickup_contact_name",
             "dropoff_contact_name",
             "cod_amount",

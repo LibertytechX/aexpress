@@ -202,7 +202,9 @@ class QuickSendSerializer(serializers.Serializer):
     def validate(self, data):
         if data.get("collect_on_delivery") and not data.get("cod_amount"):
             raise serializers.ValidationError(
-                {"cod_amount": "cod_amount is required when collect_on_delivery is true."}
+                {
+                    "cod_amount": "cod_amount is required when collect_on_delivery is true."
+                }
             )
         return data
 
@@ -509,6 +511,7 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
             "total_estimated_time_mins",
             "total_earnings",
             "total_cod",
+            "created_at",
             "completed_stops",
             "stops",
         ]
