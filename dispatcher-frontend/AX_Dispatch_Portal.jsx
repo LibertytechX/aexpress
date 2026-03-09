@@ -3354,7 +3354,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-		  const gridCols = "70px 90px 60px minmax(70px, 1fr) minmax(70px, 1fr) 80px 80px 110px 110px 80px 90px 80px";
+		  const gridCols = "70px 90px 60px 60px 60px 80px 110px 110px 80px 90px 80px";
 	  const fmtDistance = (raw, unit) => {
 	    if (raw === null || raw === undefined || raw === "") return "—";
 	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -3388,7 +3388,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
 		          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
 	            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Engine</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
+		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
 	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
 	              {filtered.map(v => (
@@ -3396,9 +3396,8 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
                   <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
-                  <span style={{ fontSize: 11, color: S.textDim }}>{v.make || '—'}</span>
-                  <span style={{ fontSize: 11, color: S.textDim }}>{v.model || '—'}</span>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${ec(v.engine_status)}18`, color: ec(v.engine_status) }}>{(v.engine_status || 'unknown').toUpperCase()}</span>
+                  <span title={v.make || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.make || '—'}</span>
+                  <span title={v.model || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.model || '—'}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
 	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
 	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
