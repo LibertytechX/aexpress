@@ -86,29 +86,21 @@ class Vehicle(models.Model):
             if km <= floor_km:
                 return Decimal(str(floor_fee)).quantize(Decimal("0.01"))
 
-            # Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
-            prev_max_km = floor_km
-            prev_rate = None
-            for i, tier in enumerate(tiers):
+            # Generic tiered pricing — select the tier by distance, apply rate × distance
+            for tier in tiers:
                 if not isinstance(tier, dict):
                     continue
                 rate = float(tier.get("rate") or 0)
                 max_km = tier.get("max_km")
 
-                min_floor = floor_fee if i == 0 else round(prev_max_km * float(prev_rate or 0))
-
                 # Unbounded tier (or missing max) applies to any remaining distances
                 if max_km is None or km <= float(max_km):
-                    price = max(round(km * rate), round(min_floor))
+                    price = round(km * rate)
                     return Decimal(str(price)).quantize(Decimal("0.01"))
-
-                prev_max_km = float(max_km)
-                prev_rate = rate
 
             # Fallback for unexpected tier config
             last_rate = float(tiers[-1].get("rate") or 0) if tiers else 0
-            min_floor = floor_fee if prev_rate is None else round(prev_max_km * float(prev_rate or 0))
-            price = max(round(km * last_rate), round(min_floor))
+            price = round(km * last_rate)
             return Decimal(str(price)).quantize(Decimal("0.01"))
 
         # ── Legacy formula ─────────────────────────────────────────────

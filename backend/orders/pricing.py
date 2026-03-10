@@ -30,29 +30,21 @@ def calculate_tiered_fare(distance_km: Any, pricing_tiers: dict) -> Decimal:
     if km <= floor_km:
         return _money(floor_fee)
 
-    prev_max_km = floor_km
-    prev_rate = None
-    for i, tier in enumerate(tiers):
+    # Select the tier by distance and apply rate × distance directly
+    for tier in tiers:
         if not isinstance(tier, dict):
             continue
 
         rate = float(tier.get("rate") or 0)
         max_km = tier.get("max_km")
 
-        min_floor = floor_fee if i == 0 else round(prev_max_km * float(prev_rate or 0))
-
         # Unbounded tier (or missing max) applies to any remaining distances
         if max_km is None or km <= float(max_km):
-            price = max(round(km * rate), round(min_floor))
-            return _money(price)
-
-        prev_max_km = float(max_km)
-        prev_rate = rate
+            return _money(round(km * rate))
 
     # Fallback for unexpected tier config
     last_rate = float(tiers[-1].get("rate") or 0) if tiers else 0
-    min_floor = floor_fee if prev_rate is None else round(prev_max_km * float(prev_rate or 0))
-    return _money(max(round(km * last_rate), round(min_floor)))
+    return _money(round(km * last_rate))
 
 
 def calculate_effective_fare(
