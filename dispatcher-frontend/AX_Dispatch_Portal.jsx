@@ -1987,6 +1987,35 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
 
+          {/* EVENT LOG */}
+          {order.events && order.events.length > 0 && (
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 10 }}>Event Log</span>
+              {order.events.map((ev, i) => {
+                const fmtAmt = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? `₦${n.toLocaleString()}` : v; };
+                const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-NG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (_) { return iso; } };
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingTop: i === 0 ? 0 : 8, marginTop: i === 0 ? 0 : 8, borderTop: i === 0 ? "none" : `1px solid ${S.border}` }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: S.text, marginBottom: 2 }}>
+                        {ev.eventType === "price_change" ? "Price changed" : ev.eventType}
+                      </div>
+                      {ev.eventType === "price_change" && ev.oldValue && ev.newValue && (
+                        <div style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>
+                          {fmtAmt(ev.oldValue)}<span style={{ color: S.textMuted, margin: "0 6px" }}>→</span>{fmtAmt(ev.newValue)}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>
+                        {ev.createdBy ? `by ${ev.createdBy}` : "by System"}
+                        {ev.createdAt ? ` · ${fmtDate(ev.createdAt)}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {/* RIDER ASSIGNMENT — shows availability clearly, persists */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>

@@ -292,6 +292,13 @@ const normalizeOrder = (o) => ({
         suggestedRiderId: leg.suggested_rider_id || null,
         suggestedRiderName: leg.suggested_rider_name || null,
     })),
+    events: (o.events || []).map(ev => ({
+        eventType: ev.event_type || ev.event || '',
+        oldValue: ev.old_value || '',
+        newValue: ev.new_value || '',
+        createdBy: ev.created_by || null,
+        createdAt: ev.created_at || null,
+    })),
 });
 
 export const OrdersAPI = {

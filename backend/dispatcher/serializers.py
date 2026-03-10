@@ -157,6 +157,30 @@ class RiderSerializer(serializers.ModelSerializer):
         }
 
 
+class OrderEventSerializer(serializers.ModelSerializer):
+    event_type = serializers.CharField(source="event", read_only=True)
+    created_by = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(format="%Y-%m-%dT%H:%M:%S", read_only=True)
+
+    class Meta:
+        from orders.models import OrderEvent
+
+        model = OrderEvent
+        fields = ["event_type", "old_value", "new_value", "created_by", "created_at"]
+
+    def get_created_by(self, obj):
+        if obj.created_by is None:
+            return None
+        user = obj.created_by
+        name = (
+            getattr(user, "get_full_name", lambda: "")()
+            or getattr(user, "business_name", None)
+            or getattr(user, "contact_name", None)
+            or user.username
+        )
+        return name.strip() or user.username
+
+
 class OrderSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="order_number", read_only=True)
     merchant = serializers.CharField(source="user.business_name", read_only=True)
@@ -188,6 +212,7 @@ class OrderSerializer(serializers.ModelSerializer):
     time = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
     price_per_km = serializers.SerializerMethodField()
+    events = OrderEventSerializer(many=True, read_only=True)
 
     # Relay routing (async)
     routing_status = serializers.CharField(read_only=True)
@@ -244,6 +269,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "dropoff_lng",
             "relay_legs",
             "price_per_km",
+            "events",
         ]
 
     def get_pickup_lat(self, obj):

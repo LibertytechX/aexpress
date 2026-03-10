@@ -188,6 +188,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             "legs__rider__user",
             "legs__suggested_rider",
             "legs__suggested_rider__user",
+            "events",
+            "events__created_by",
         )
 
     def create(self, request, *args, **kwargs):
@@ -425,8 +427,23 @@ class OrderViewSet(viewsets.ModelViewSet):
         ser.is_valid(raise_exception=True)
         new_amount = ser.validated_data["amount"]
 
+        # Capture old amount before overwriting
+        old_amount = order.total_amount
+
         order.total_amount = new_amount
         order.save(update_fields=["total_amount", "updated_at"])
+
+        # Record audit event
+        from orders.models import OrderEvent
+
+        OrderEvent.objects.create(
+            order=order,
+            event="price_change",
+            description=f"Price changed from ₦{old_amount} to ₦{new_amount}",
+            old_value=str(old_amount),
+            new_value=str(new_amount),
+            created_by=request.user if request.user.is_authenticated else None,
+        )
 
         # If this is a relay order, recalculate leg payouts as a proportional
         # share of the new total_amount weighted by each leg's distance.

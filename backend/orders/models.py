@@ -472,6 +472,20 @@ class OrderEvent(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="events")
     event = models.CharField(max_length=100)
     description = models.TextField()
+
+    # Structured values for auditable events (e.g. price_change)
+    old_value = models.CharField(max_length=100, blank=True, default="")
+    new_value = models.CharField(max_length=100, blank=True, default="")
+
+    # Who triggered the event (nullable so existing rows are unaffected)
+    created_by = models.ForeignKey(
+        "authentication.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_order_events",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
