@@ -121,20 +121,22 @@ class RegisterReferralBusinessView(APIView):
 
         business_name = data.get("business_name", "").strip()
         contact_phone = data.get("contact_phone", "").strip()
+        email = data.get("email", "").strip().lower()
         address = data.get("address", "").strip()
 
-        if not business_name or not contact_phone:
+        if not business_name or not contact_phone or not email:
             return Response(
-                {"error": "business_name and contact_phone are required."},
+                {"error": "business_name, contact_phone, and email are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Check if this phone is already a registered user
+        # Check if this phone or email is already a registered user
         from django.contrib.auth import get_user_model
+        from django.db.models import Q
 
         User = get_user_model()
 
-        existing = User.objects.filter(phone=contact_phone).first()
+        existing = User.objects.filter(Q(phone=contact_phone) | Q(email=email)).first()
 
         if existing:
             # Link to existing user if not already referred
@@ -142,7 +144,7 @@ class RegisterReferralBusinessView(APIView):
                 referring_rider=rider, merchant=existing
             ).exists():
                 return Response(
-                    {"error": "You have already referred this business."},
+                    {"error": "This business has already been referred."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             referral = RiderReferral.objects.create(
@@ -154,7 +156,7 @@ class RegisterReferralBusinessView(APIView):
                 {
                     "message": "Business linked to your referral. You will earn commission on their orders.",
                     "referral_id": str(referral.id),
-                    "business_name": existing.business_name,
+                    "business_name": existing.business_name or business_name,
                     "status": referral.status,
                 },
                 status=status.HTTP_201_CREATED,
@@ -166,10 +168,11 @@ class RegisterReferralBusinessView(APIView):
         temp_password = get_random_string(12)
         new_user = User.objects.create_user(
             phone=contact_phone,
+            email=email,
             business_name=business_name,
             address=address,
             password=temp_password,
-            is_active=False,  # Not yet activated — they must verify themselves
+            is_active=True,
         )
 
         referral = RiderReferral.objects.create(
