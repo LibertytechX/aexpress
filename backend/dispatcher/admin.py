@@ -65,14 +65,64 @@ class RiderAdmin(admin.ModelAdmin):
         "user",
         "rider_id",
         "status",
+        "home_zone",
         "vehicle_type",
         "vehicle_asset",
         "rating",
         "total_deliveries",
     )
-    list_filter = ("status", "vehicle_type", "vehicle_asset__vehicle_type")
+    list_filter = ("status", "home_zone", "vehicle_type", "vehicle_asset__vehicle_type")
     search_fields = ("user__username", "user__email", "rider_id", "user__phone")
-    autocomplete_fields = ("vehicle_asset",)
+    autocomplete_fields = ("vehicle_asset", "home_zone")
+    actions = ["assign_zone"]
+
+    @admin.action(description="Assign selected riders to a zone")
+    def assign_zone(self, request, queryset):
+        from django.shortcuts import render
+        from django.http import HttpResponseRedirect
+        from django import forms
+        from django.contrib import messages
+        from .models import Zone
+
+        class AssignZoneForm(forms.Form):
+            _selected_action = forms.CharField(widget=forms.MultipleHiddenInput)
+            zone = forms.ModelChoiceField(
+                queryset=Zone.objects.filter(is_active=True),
+                required=True,
+                label="Target Zone",
+            )
+
+        if "apply" in request.POST:
+            form = AssignZoneForm(request.POST)
+            if form.is_valid():
+                zone = form.cleaned_data["zone"]
+                updated_count = queryset.update(home_zone=zone)
+                self.message_user(
+                    request,
+                    f"Successfully assigned {updated_count} riders to {zone.name}.",
+                    level=messages.SUCCESS,
+                )
+                return HttpResponseRedirect(request.get_full_path())
+        else:
+            from django.contrib.admin import helpers
+
+            form = AssignZoneForm(
+                initial={
+                    "_selected_action": request.POST.getlist(
+                        helpers.ACTION_CHECKBOX_NAME
+                    )
+                }
+            )
+
+        context = self.admin_site.each_context(request)
+        context.update(
+            {
+                "form": form,
+                "title": "Assign Zone to Riders",
+                "queryset": queryset,
+            }
+        )
+        return render(request, "admin/assign_zone_intermediate.html", context)
 
 
 @admin.register(DispatcherProfile)
@@ -139,12 +189,26 @@ class ZoneAdmin(admin.ModelAdmin):
 class RelayNodeInline(admin.TabularInline):
     model = RelayNode
     extra = 0
-    fields = ("name", "address", "latitude", "longitude", "catchment_radius_km", "is_active")
+    fields = (
+        "name",
+        "address",
+        "latitude",
+        "longitude",
+        "catchment_radius_km",
+        "is_active",
+    )
 
 
 @admin.register(RelayNode)
 class RelayNodeAdmin(admin.ModelAdmin):
-    list_display = ("name", "zone", "latitude", "longitude", "catchment_radius_km", "is_active")
+    list_display = (
+        "name",
+        "zone",
+        "latitude",
+        "longitude",
+        "catchment_radius_km",
+        "is_active",
+    )
     list_filter = ("is_active", "zone")
     search_fields = ("name", "address")
     readonly_fields = ("id", "created_at", "updated_at")
@@ -152,7 +216,14 @@ class RelayNodeAdmin(admin.ModelAdmin):
 
 @admin.register(ServiceAPIKey)
 class ServiceAPIKeyAdmin(admin.ModelAdmin):
-    list_display = ("name", "prefix", "is_active", "last_used_at", "expires_at", "created_at")
+    list_display = (
+        "name",
+        "prefix",
+        "is_active",
+        "last_used_at",
+        "expires_at",
+        "created_at",
+    )
     list_filter = ("is_active",)
     search_fields = ("name", "prefix")
     readonly_fields = ("id", "key_hash", "prefix", "created_at")

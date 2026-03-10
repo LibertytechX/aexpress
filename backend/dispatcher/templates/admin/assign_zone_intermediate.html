@@ -1,0 +1,22 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+<form action="" method="post">
+    {% csrf_token %}
+    <p>{% trans "Select the zone you wish to assign to the following riders:" %}</p>
+    <ul>
+        {% for rider in queryset %}
+        <li>{{ rider }}</li>
+        {% endfor %}
+    </ul>
+    
+    <div>
+        {{ form.as_p }}
+    </div>
+    
+    <input type="hidden" name="action" value="assign_zone" />
+    <input type="submit" name="apply" value="{% trans 'Apply' %}" class="default" />
+    <a href="." class="button cancel-link">{% trans "Cancel" %}</a>
+</form>
+{% endblock %}
