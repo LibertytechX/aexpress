@@ -282,6 +282,7 @@ const normalizeOrder = (o) => ({
     suggestedRiderId: o.suggested_rider_id || null,
     distance: o.distance || null,
     time: o.time || null,
+    pricePerKm: o.price_per_km != null ? parseFloat(o.price_per_km) : null,
     pickupLat: o.pickup_lat || null,
     pickupLng: o.pickup_lng || null,
     dropoffLat: o.dropoff_lat || null,

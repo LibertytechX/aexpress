@@ -1721,7 +1721,10 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
                 <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
                 <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
+                  {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
+                </div>
                 <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
                 <Badge status={o.status} />
               </div>
@@ -1969,6 +1972,12 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                   <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.amount.toLocaleString()}</span>
                 )}
               </div>
+              {!editPrice && order.pricePerKm != null && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: S.textMuted, marginBottom: 4 }}>
+                  <span>Effective rate</span>
+                  <span style={{ fontFamily: "'Space Mono',monospace" }}>₦{order.pricePerKm.toFixed(0)}/km</span>
+                </div>
+              )}
 	              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
               {order.cod > 0 && <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD collection</span><span style={{ fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{order.cod.toLocaleString()}</span></div>

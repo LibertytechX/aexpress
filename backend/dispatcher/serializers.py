@@ -187,6 +187,7 @@ class OrderSerializer(serializers.ModelSerializer):
     distance = serializers.SerializerMethodField()
     time = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
+    price_per_km = serializers.SerializerMethodField()
 
     # Relay routing (async)
     routing_status = serializers.CharField(read_only=True)
@@ -242,6 +243,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "dropoff_lat",
             "dropoff_lng",
             "relay_legs",
+            "price_per_km",
         ]
 
     def get_pickup_lat(self, obj):
@@ -368,6 +370,21 @@ class OrderSerializer(serializers.ModelSerializer):
         except Exception:
             return None
         return f"{minutes} mins"
+
+    def get_price_per_km(self, obj):
+        """Effective rate: total_amount / distance_km, rounded to 2 dp.
+
+        Returns None if distance_km is missing or zero so the frontend
+        can display a dash instead of a nonsensical number.
+        """
+        try:
+            dist = Decimal(str(obj.distance_km))
+            if dist <= 0:
+                return None
+            rate = obj.total_amount / dist
+            return float(rate.quantize(Decimal("0.01")))
+        except Exception:
+            return None
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
