@@ -391,7 +391,7 @@ function VehiclesLocationMap({ vehicles }: { vehicles: any[] }) {
         return (s.length % 2 === 1) ? s[mid] : (s[mid - 1] + s[mid]) / 2;
     };
 
-    // Haversine distance in km
+    // Haversine distance in km.
     const haversineKm = (a: any, b: any) => {
         const R = 6371;
         const toRad = (d: number) => (d * Math.PI) / 180;
