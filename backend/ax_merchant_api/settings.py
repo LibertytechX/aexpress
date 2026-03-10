@@ -34,7 +34,7 @@ DEBUG = os.getenv("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.getenv(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev,https://aexpress-staging.vercel.app/",
 ).split(",")
 
 
@@ -225,6 +225,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://aexpress-staging.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -243,6 +244,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://aexpress-staging.vercel.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
