@@ -1066,6 +1066,33 @@ def _advance_order(request, order_number, new_status, event_desc):
     ser = OrderStatusUpdateSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
+    # Proximity check for pickup actions
+    if new_status in ["PickedUp", "Fulfilling"]:
+        lat = ser.validated_data.get("latitude")
+        lng = ser.validated_data.get("longitude")
+
+        if lat is None or lng is None:
+            return Response(
+                {
+                    "error": "Latitude and longitude are required to mark order as picked up."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if order.pickup_latitude is not None and order.pickup_longitude is not None:
+            from dispatcher.models import Zone
+
+            dist = Zone.haversine_distance(
+                lat, lng, order.pickup_latitude, order.pickup_longitude
+            )
+            if dist > 0.5:  # 500 meters
+                return Response(
+                    {
+                        "error": f"You are too far from the pickup location ({dist:.2f}km). Please move closer."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
     old_status = order.status
     order.status = new_status
     if new_status in ["PickedUp", "Fulfilling"] and not order.picked_up_at:

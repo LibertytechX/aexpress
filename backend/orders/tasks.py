@@ -52,9 +52,13 @@ def process_order_proximity(self, order_id):
                 f"process_order_proximity: find_closest_zone failed for Order {order.order_number}: {e}"
             )
 
-    # 3. Calculate estimated earnings (20% of total_amount)
+    # 3. Calculate estimated earnings (using commission_pct from SystemSettings)
+    from dispatcher.models import SystemSettings
+    settings = SystemSettings.objects.first()
+    commission_factor = Decimal(str(settings.commission_pct / 100)) if settings else Decimal("0.2")
+    
     total_amount = Decimal(str(order.total_amount or 0))
-    estimated_earnings = (total_amount * Decimal("0.2")).quantize(Decimal("0.01"))
+    estimated_earnings = (total_amount * commission_factor).quantize(Decimal("0.01"))
 
     # 4. Create OrderOffer
     try:
