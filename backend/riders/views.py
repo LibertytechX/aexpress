@@ -91,10 +91,18 @@ class OrderOfferListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        # now = timezone.now()
+        # Filter by rider's home zone if assigned
+        rider = getattr(request.user, "rider_profile", None)
+        zone_filter = {}
+        if rider and rider.home_zone:
+            zone_filter["zone"] = rider.home_zone
+
         offers = (
             OrderOffer.objects.filter(
-                status="pending", rider__isnull=True, order__status="Pending"
+                status="pending",
+                rider__isnull=True,
+                order__status="Pending",
+                **zone_filter,
             )
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
