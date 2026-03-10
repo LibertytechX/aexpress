@@ -1,22 +1,32 @@
 import { useState } from "react";
 import { S } from "../common/theme";
-import type { Order, Rider } from "../../types";
 
-interface LagosMapProps {
-    orders: Order[];
-    riders: Rider[];
-    highlightOrder?: string | null;
-    small?: boolean;
-    showZones?: boolean;
-}
-
-export function LagosMap({ orders, riders, highlightOrder, small, showZones }: LagosMapProps) {
+// ─── LAGOS MAP COMPONENT (Enhanced with zones & routes) ─────────
+export function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes, zones, mode }: any) {
     const [hoverPin, setHoverPin] = useState<string | null>(null);
     const [mapView, setMapView] = useState("live"); // live | zones | heatmap
     const h = small ? 140 : 320;
 
-    // Lagos zones with real approximate positions
-    const zones = [
+    const isRelayMode = mode === "relay";
+
+    // Lagos bounding box: lat 6.38–6.70, lng 3.10–3.75
+    const latMin = 6.38, latMax = 6.70, lngMin = 3.10, lngMax = 3.75;
+    const toPct = (lat: number, lng: number) => {
+        const xPct = ((lng - lngMin) / (lngMax - lngMin)) * 100;
+        const yPct = ((latMax - lat) / (latMax - latMin)) * 100;
+        return { xPct, yPct };
+    };
+    const kmToPctRadius = (km: number, atLat: number) => {
+        const latDeg = km / 111;
+        const cos = Math.cos((parseFloat(atLat as any) || 0) * Math.PI / 180) || 0.00001;
+        const lngDeg = km / (111 * cos);
+        const rx = (lngDeg / (lngMax - lngMin)) * 100;
+        const ry = (latDeg / (latMax - latMin)) * 100;
+        return { rx, ry };
+    };
+
+    // Mock zones (used in legacy/non-relay views)
+    const mockZones = [
         { id: "mainland-core", label: "Mainland Core", x: 32, y: 32, w: 22, h: 20, color: "rgba(59,130,246,0.08)", areas: "Ikeja · Maryland · Yaba · Surulere" },
         { id: "island", label: "Island", x: 50, y: 48, w: 22, h: 22, color: "rgba(232,168,56,0.08)", areas: "V.I. · Ikoyi · Lekki Phase 1" },
         { id: "lekki-ajah", label: "Lekki-Ajah", x: 74, y: 45, w: 20, h: 18, color: "rgba(139,92,246,0.08)", areas: "Lekki · Ajah · Sangotedo · VGC" },
@@ -24,78 +34,32 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
         { id: "outer-north", label: "Outer Lagos", x: 10, y: 15, w: 24, h: 18, color: "rgba(16,185,129,0.06)", areas: "Ikorodu · Agbara · Ojo · Badagry" },
     ];
 
-    /* 
-       Ideally we would calculate pin positions based on lat/lng, 
-       but for this mockup we will use hardcoded positions based on the order ID or similar,
-       or just reuse the hardcoded pins from the original file if possible.
-       
-       The original file had 'pins' hardcoded. To make this dynamic based on the 'orders' prop,
-       we need to map orders to coordinates. 
-       For now, to strictly follow the migration, I will use a mapping strategy or fallback to the hardcoded logic if I can match IDs.
-       
-       Actually, looking at the original code, 'pins' variable was hardcoded. 
-       However, the component receives 'orders'. 
-       The original code logic was: `const pins = [...]`. It didn't seem to use the `orders` prop for positioning logic 
-       except for filtering active ones. 
-       Wait, in the original code, `pins` seems to be a hardcoded list of specific orders.
-       If I want to support dynamic orders, I should map them.
-       But to reproduce the exact visual, I will include the hardcoded pins logic but try to link it to the passed orders if they match.
-    */
+    // Mock order pins (used in legacy/non-relay views)
+    const mockPins = [
+        { id: "AX-6158260", px: 36, py: 40, dx: 55, dy: 52, label: "Yaba→VI", color: S.gold, status: "In Transit", rider: "Musa K." },
+        { id: "AX-6158261", px: 38, py: 48, dx: 56, dy: 56, label: "Surulere→VI", color: S.purple, status: "Picked Up", rider: "Chinedu O." },
+        { id: "AX-6158262", px: 30, py: 28, dx: 78, dy: 50, label: "Ikeja→Lekki", color: S.yellow, status: "Pending", rider: null },
+        { id: "AX-6158263", px: 26, py: 42, dx: 34, dy: 30, label: "Mushin→Ikeja", color: S.blue, status: "Assigned", rider: "Kola A." },
+        { id: "AX-6158258", px: 55, py: 50, dx: 72, dy: 50, label: "VI→Lekki Ph1", color: S.gold, status: "Assigned", rider: "Ahmed B." },
+        { id: "AX-6158257", px: 36, py: 40, dx: 54, dy: 52, label: "Yaba→VI", color: S.green, status: "Delivered", rider: "Musa K." },
+        { id: "AX-6158255", px: 72, py: 48, dx: 76, dy: 52, label: "Lekki→Lekki", color: S.green, status: "Delivered", rider: "Emeka N." },
+    ];
+    const mockRiderDots = [
+        { id: "R001", x: 48, y: 46, name: "Musa K.", status: "on_delivery", vehicle: "🏍️" },
+        { id: "R002", x: 58, y: 50, name: "Ahmed B.", status: "on_delivery", vehicle: "🏍️" },
+        { id: "R003", x: 52, y: 52, name: "Chinedu O.", status: "on_delivery", vehicle: "🚗" },
+        { id: "R005", x: 28, y: 38, name: "Ibrahim S.", status: "online", vehicle: "🏍️" },
+        { id: "R006", x: 30, y: 36, name: "Kola A.", status: "on_delivery", vehicle: "🚗" },
+        { id: "R007", x: 70, y: 44, name: "Emeka N.", status: "online", vehicle: "🏍️" },
+    ];
 
-    // Hardcoded positions for the demo orders to match the original visual
-    const DEMO_LOCATIONS: Record<string, { px: number, py: number, dx: number, dy: number, label: string }> = {
-        "AX-6158260": { px: 36, py: 40, dx: 55, dy: 52, label: "Yaba→VI" },
-        "AX-6158261": { px: 38, py: 48, dx: 56, dy: 56, label: "Surulere→VI" },
-        "AX-6158262": { px: 30, py: 28, dx: 78, dy: 50, label: "Ikeja→Lekki" },
-        "AX-6158263": { px: 26, py: 42, dx: 34, dy: 30, label: "Mushin→Ikeja" },
-        "AX-6158258": { px: 55, py: 50, dx: 72, dy: 50, label: "VI→Lekki Ph1" },
-        "AX-6158257": { px: 36, py: 40, dx: 54, dy: 52, label: "Yaba→VI" },
-        "AX-6158255": { px: 72, py: 48, dx: 76, dy: 52, label: "Lekki→Lekki" },
-    };
-
-    const mapOrderToPin = (o: Order) => {
-        const loc = DEMO_LOCATIONS[o.id] || { px: 50, py: 50, dx: 50, dy: 50, label: "Unknown" };
-        let color = S.gold;
-        if (o.status === "Assigned") color = S.blue;
-        if (o.status === "Picked Up") color = S.purple;
-        if (o.status === "Delivered") color = S.green;
-        if (o.status === "Pending") color = S.yellow;
-
-        return {
-            id: o.id,
-            px: loc.px, py: loc.py, dx: loc.dx, dy: loc.dy,
-            label: loc.label,
-            color,
-            status: o.status,
-            rider: o.rider
-        };
-    };
-
-    const pins = orders.map(mapOrderToPin);
-
-    // Rider positions (simulated mock)
-    const riderDots = riders.map((r, i) => {
-        // Hardcoded positions matching original riders
-        const positions = [
-            { x: 48, y: 46 }, { x: 58, y: 50 }, { x: 52, y: 52 }, { x: 10, y: 10 },
-            { x: 28, y: 38 }, { x: 30, y: 36 }, { x: 70, y: 44 }, { x: 5, y: 5 }
-        ];
-        const pos = positions[i] || { x: 50, y: 50 };
-
-        return {
-            id: r.id,
-            x: pos.x, y: pos.y,
-            name: r.name,
-            status: r.status,
-            vehicle: r.vehicle === "Bike" ? "🏍️" : r.vehicle === "Car" ? "🚗" : "🚐"
-        };
-    });
+    // In relay mode we do not show mock orders/riders at all.
+    const pins = isRelayMode ? [] : mockPins;
+    const riderDots = isRelayMode ? [] : mockRiderDots;
+    const zonesToRender = isRelayMode ? (Array.isArray(zones) ? zones : []) : mockZones;
 
     const activeOrders = pins.filter(p => !["Delivered", "Cancelled", "Failed"].includes(p.status));
     const displayPins = highlightOrder ? pins.filter(p => p.id === highlightOrder) : (mapView === "live" ? activeOrders : pins);
-
-    // Helper for safe color usage
-    const getPinColor = (p: any) => p.color || S.gold;
 
     return (
         <div style={{ position: "relative", width: "100%", height: h, borderRadius: 14, overflow: "hidden", border: `1px solid ${S.border}`, background: "#EEF2F7" }}>
@@ -123,12 +87,33 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
             </svg>
 
             {/* Zone overlays */}
-            {(mapView === "zones" || showZones) && zones.map(z => (
+            {(mapView === "zones" || showZones) && !isRelayMode && zonesToRender.map((z: any) => (
                 <div key={z.id} style={{ position: "absolute", left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%`, background: z.color, border: "1px dashed rgba(0,0,0,0.12)", borderRadius: 8, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1 }}>
                     <div style={{ fontSize: 7, fontWeight: 800, color: S.navy, opacity: 0.5, textTransform: "uppercase", letterSpacing: "0.5px" }}>{z.label}</div>
                     <div style={{ fontSize: 6, color: S.textMuted, opacity: 0.6, textAlign: "center" }}>{z.areas}</div>
                 </div>
             ))}
+            {(mapView === "zones" || showZones) && isRelayMode && zonesToRender.length > 0 && (
+                <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 2 }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {zonesToRender.map((z: any, idx: number) => {
+                        const lat = parseFloat(z.center_lat);
+                        const lng = parseFloat(z.center_lng);
+                        const rkm = parseFloat(z.radius_km);
+                        if ([lat, lng, rkm].some(n => isNaN(n))) return null;
+                        const { xPct, yPct } = toPct(lat, lng);
+                        const { rx, ry } = kmToPctRadius(rkm, lat);
+                        const fill = ["rgba(59,130,246,0.10)", "rgba(232,168,56,0.10)", "rgba(16,185,129,0.10)", "rgba(139,92,246,0.10)", "rgba(239,68,68,0.08)"][idx % 5];
+                        const stroke = ["rgba(59,130,246,0.40)", "rgba(232,168,56,0.45)", "rgba(16,185,129,0.40)", "rgba(139,92,246,0.40)", "rgba(239,68,68,0.35)"][idx % 5];
+                        return (
+                            <g key={z.id || z.name || idx}>
+                                <ellipse cx={xPct} cy={yPct} rx={rx} ry={ry} fill={fill} stroke={stroke} strokeWidth="0.6" strokeDasharray="2,2" />
+                                <circle cx={xPct} cy={yPct} r="0.8" fill={stroke} opacity="0.7" />
+                                {!small && <text x={xPct} y={yPct} textAnchor="middle" dominantBaseline="central" fontSize="2.6" fill={stroke} style={{ fontWeight: 800 }}>{(z.name || "").slice(0, 18)}</text>}
+                            </g>
+                        );
+                    })}
+                </svg>
+            )}
 
             {/* Area labels (when no zones) */}
             {mapView !== "zones" && !showZones && !small && <>
@@ -144,34 +129,34 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
                 <div style={{ position: "absolute", left: "82%", top: "48%", fontSize: 8, color: "rgba(27,42,74,0.2)", fontWeight: 700 }}>AJAH</div>
             </>}
 
-            {/* Route lines */}
-            <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 4 }} viewBox="0 0 100 100" preserveAspectRatio="none">
-                {displayPins.filter(p => !["Delivered", "Cancelled", "Failed"].includes(p.status)).map(p => (
-                    <g key={p.id + "route"}>
-                        <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={getPinColor(p)} strokeWidth={highlightOrder === p.id ? "0.8" : "0.4"} strokeDasharray="2,2" opacity={highlightOrder === p.id ? 0.8 : 0.4} />
-                        {/* Pickup dot */}
-                        <circle cx={p.px} cy={p.py} r={highlightOrder === p.id ? 1.5 : 1} fill="#fff" stroke={getPinColor(p)} strokeWidth="0.5" />
-                        {/* Dropoff dot */}
-                        <circle cx={p.dx} cy={p.dy} r={highlightOrder === p.id ? 1.5 : 1} fill={getPinColor(p)} stroke="#fff" strokeWidth="0.4" />
-                    </g>
-                ))}
-            </svg>
+            {/* Route lines (pickup → current position for active, or pickup → dropoff) */}
+            {!isRelayMode && (
+                <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 4 }} viewBox="0 0 100 100" preserveAspectRatio="none">
+                    {displayPins.filter((p: any) => !["Delivered", "Cancelled", "Failed"].includes(p.status)).map((p: any) => (
+                        <g key={p.id + "route"}>
+                            <line x1={p.px} y1={p.py} x2={p.dx} y2={p.dy} stroke={p.color} strokeWidth={highlightOrder === p.id ? "0.8" : "0.4"} strokeDasharray="2,2" opacity={highlightOrder === p.id ? 0.8 : 0.4} />
+                            {/* Pickup dot */}
+                            <circle cx={p.px} cy={p.py} r={highlightOrder === p.id ? 1.5 : 1} fill="#fff" stroke={p.color} strokeWidth="0.5" />
+                            {/* Dropoff dot */}
+                            <circle cx={p.dx} cy={p.dy} r={highlightOrder === p.id ? 1.5 : 1} fill={p.color} stroke="#fff" strokeWidth="0.4" />
+                        </g>
+                    ))}
+                </svg>
+            )}
 
             {/* Order pins */}
-            {displayPins.map(p => {
+            {!isRelayMode && displayPins.map((p: any) => {
                 const isH = highlightOrder === p.id || hoverPin === p.id;
                 const cx = p.status === "Delivered" ? p.dx : p.status === "Pending" ? p.px : (p.px + p.dx) / 2;
                 const cy = p.status === "Delivered" ? p.dy : p.status === "Pending" ? p.py : (p.py + p.dy) / 2;
-                const col = getPinColor(p);
-
                 return (
                     <div key={p.id} onMouseEnter={() => setHoverPin(p.id)} onMouseLeave={() => setHoverPin(null)}
                         style={{ position: "absolute", left: `${cx}%`, top: `${cy}%`, transform: "translate(-50%,-100%)", zIndex: isH ? 15 : 5, cursor: "pointer", transition: "transform 0.15s" }}>
-                        <div style={{ width: isH ? 16 : 10, height: isH ? 16 : 10, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: col, border: "2px solid #fff", boxShadow: `0 2px 8px ${col}50`, transition: "all 0.15s" }} />
+                        <div style={{ width: isH ? 16 : 10, height: isH ? 16 : 10, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: p.color, border: "2px solid #fff", boxShadow: `0 2px 8px ${p.color}50`, transition: "all 0.15s" }} />
                         {isH && (
                             <div style={{ position: "absolute", top: -40, left: "50%", transform: "translateX(-50%)", background: "#fff", padding: "4px 8px", borderRadius: 6, boxShadow: "0 2px 12px rgba(0,0,0,0.15)", whiteSpace: "nowrap", zIndex: 20, border: `1px solid ${S.border}` }}>
                                 <div style={{ fontSize: 9, fontWeight: 800, color: S.navy }}>{p.id.slice(-7)}</div>
-                                <div style={{ fontSize: 8, color: col, fontWeight: 700 }}>{p.label}</div>
+                                <div style={{ fontSize: 8, color: p.color, fontWeight: 700 }}>{p.label}</div>
                                 {p.rider && <div style={{ fontSize: 7, color: S.textMuted }}>🏍️ {p.rider}</div>}
                             </div>
                         )}
@@ -181,7 +166,7 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
             })}
 
             {/* Rider dots */}
-            {!highlightOrder && riderDots.map(r => (
+            {!isRelayMode && !highlightOrder && riderDots.map((r: any) => (
                 <div key={r.id} style={{ position: "absolute", left: `${r.x}%`, top: `${r.y + 3}%`, zIndex: 6 }}>
                     <div style={{ position: "relative" }}>
                         <div style={{ width: 10, height: 10, borderRadius: "50%", background: r.status === "online" ? S.green : S.gold, border: "2px solid #fff", boxShadow: "0 1px 6px rgba(0,0,0,0.2)" }} />
@@ -191,6 +176,18 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
                 </div>
             ))}
 
+            {/* Relay node pins */}
+            {relayNodes && relayNodes.map((nd: any) => {
+                // Map real Lagos lat/lng to approximate SVG viewport coordinates.
+                const { xPct, yPct } = toPct(nd.latitude, nd.longitude);
+                return (
+                    <div key={nd.id} style={{ position: "absolute", left: `${xPct}%`, top: `${yPct}%`, transform: "translate(-50%,-50%)", zIndex: 12 }}>
+                        <div title={`${nd.name}\n${nd.address || ""}`} style={{ width: 14, height: 14, borderRadius: "50%", background: "#8B5CF6", border: "2.5px solid #fff", boxShadow: "0 2px 6px rgba(139,92,246,0.6)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 7, color: "#fff", fontWeight: 800 }}>⬡</div>
+                        {!small && <div style={{ position: "absolute", top: 15, left: "50%", transform: "translateX(-50%)", fontSize: 6, fontWeight: 700, color: "#8B5CF6", whiteSpace: "nowrap", background: "rgba(255,255,255,0.9)", padding: "1px 4px", borderRadius: 3, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis" }}>{nd.name}</div>}
+                    </div>
+                );
+            })}
+
             {/* Bridge labels */}
             {!small && <>
                 <div style={{ position: "absolute", left: "40%", top: "45%", fontSize: 6, color: "rgba(232,168,56,0.6)", fontWeight: 700, transform: "rotate(-35deg)", whiteSpace: "nowrap" }}>3rd Mainland Bridge</div>
@@ -198,7 +195,7 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
             </>}
 
             {/* Map controls */}
-            {!small && (
+            {!isRelayMode && !small && (
                 <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4, zIndex: 20 }}>
                     {[{ id: "live", label: "Live", icon: "📡" }, { id: "zones", label: "Zones", icon: "🗺️" }, { id: "heatmap", label: "Heat", icon: "🔥" }].map(v => (
                         <button key={v.id} onClick={() => setMapView(v.id)} style={{
@@ -213,14 +210,18 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
 
             {/* Legend */}
             <div style={{ position: "absolute", bottom: 8, right: 8, display: "flex", gap: 8, background: "rgba(255,255,255,0.95)", padding: "5px 10px", borderRadius: 8, boxShadow: "0 1px 4px rgba(0,0,0,0.08)", zIndex: 10 }}>
-                <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: S.gold }} /> Active</span>
-                <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /> Rider</span>
-                <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: S.yellow }} /> Pending</span>
-                <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: S.purple }} /> In Progress</span>
+                {!isRelayMode && <>
+                    <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: S.gold }} /> Active</span>
+                    <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /> Rider</span>
+                    <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: S.yellow }} /> Pending</span>
+                    <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50% 50% 50% 0", transform: "rotate(-45deg)", background: S.purple }} /> In Progress</span>
+                </>}
+                {isRelayMode && zonesToRender.length > 0 && <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 10, height: 6, borderRadius: 6, border: "1px dashed rgba(59,130,246,0.55)", background: "rgba(59,130,246,0.10)" }} /> Zone</span>}
+                {relayNodes && relayNodes.length > 0 && <span style={{ fontSize: 8, color: S.textMuted, display: "flex", alignItems: "center", gap: 3 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#8B5CF6" }} /> Relay Hub</span>}
             </div>
 
             {/* Live stats overlay */}
-            {!small && mapView === "live" && (
+            {!isRelayMode && !small && mapView === "live" && (
                 <div style={{ position: "absolute", bottom: 8, left: 8, background: "rgba(27,42,74,0.9)", padding: "6px 12px", borderRadius: 8, zIndex: 10 }}>
                     <div style={{ display: "flex", gap: 14 }}>
                         <div style={{ textAlign: "center" }}>
@@ -240,7 +241,7 @@ export function LagosMap({ orders, riders, highlightOrder, small, showZones }: L
             )}
 
             {/* Heatmap overlay */}
-            {mapView === "heatmap" && !small && (
+            {!isRelayMode && mapView === "heatmap" && !small && (
                 <svg width="100%" height="100%" style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 3 }} viewBox="0 0 100 100" preserveAspectRatio="none">
                     <defs>
                         <radialGradient id="heat1"><stop offset="0%" stopColor="rgba(239,68,68,0.4)" /><stop offset="100%" stopColor="rgba(239,68,68,0)" /></radialGradient>

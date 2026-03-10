@@ -1,3 +1,4 @@
+"use client";
 import { useState, useEffect } from "react";
 import { S } from "../common/theme";
 import { LagosMap } from "../map/LagosMap";

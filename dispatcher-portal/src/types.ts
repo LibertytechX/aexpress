@@ -3,11 +3,12 @@ export interface Order {
     customer: string;
     customerPhone: string;
     merchant: string;
+    merchantPhone?: string;
     pickup: string;
     dropoff: string;
     rider: string | null;
     riderId: string | null;
-    status: "Pending" | "Assigned" | "Picked Up" | "In Transit" | "Delivered" | "Cancelled" | "Failed";
+    status: "Pending" | "Assigned" | "Picked Up" | "In Transit" | "At Dropoff" | "Delivered" | "Cancelled" | "Failed";
     amount: number;
     cod: number;
     codFee: number;

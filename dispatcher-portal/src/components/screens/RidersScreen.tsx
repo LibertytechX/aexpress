@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 import type { Rider, Order } from "../../types";
 import { S } from "../common/theme";
@@ -49,7 +50,7 @@ export function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onV
                         <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance</div>
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                                {[{ l: "Total Deliveries", v: rider.totalDeliveries.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
+                                {[{ l: "Total Deliveries", v: rider?.totalDeliveries?.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
                                     <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
                                 ))}
                             </div>

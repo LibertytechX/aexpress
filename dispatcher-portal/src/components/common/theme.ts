@@ -15,6 +15,7 @@ export const STS: Record<string, { bg: string; text: string }> = {
   Assigned: { bg: S.blueBg, text: S.blue },
   "Picked Up": { bg: S.purpleBg, text: S.purple },
   "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold },
+  "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" },
   Delivered: { bg: S.greenBg, text: S.green },
   Cancelled: { bg: S.redBg, text: S.red },
   Failed: { bg: S.redBg, text: "#F87171" }

@@ -6,3 +6,5 @@ export * from "./CustomersScreen";
 export * from "./MessagingScreen";
 export * from "./SettingsScreen";
 export * from "./OrderDetail";
+export * from "./VehiclesScreen";
+export * from "./TeamsScreen";

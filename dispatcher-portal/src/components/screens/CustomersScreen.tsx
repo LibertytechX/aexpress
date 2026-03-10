@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 import type { Customer } from "../../types";
 import { S } from "../common/theme";

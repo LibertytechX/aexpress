@@ -30,19 +30,33 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         }
     }, [authState, router]);
 
+    if (authState === "loading") {
+        return (
+            <div className="flex h-screen w-full items-center justify-center bg-[#2F3758]">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-t-[#FBB12F] border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                    <div className="text-white text-sm font-['Outfit'] tracking-widest text-opacity-70 uppercase">Loading Portal...</div>
+                </div>
+            </div>
+        );
+    }
     if (authState !== "authenticated") return null;
 
     const navItems = [
-        { id: "Dashboard", href: "/dashboard", icon: I.dashboard },
+        { id: "Dashboard", href: "/", icon: I.dashboard },
         { id: "Orders", href: "/orders", icon: I.orders },
         { id: "Riders", href: "/riders", icon: I.riders },
         { id: "Merchants", href: "/merchants", icon: I.merchants },
         { id: "Customers", href: "/customers", icon: I.customers },
+        { id: "Vehicles", href: "/vehicles", icon: I.vehicles },
+        { id: "Teams", href: "/teams", icon: I.teams },
         { id: "Messaging", href: "/messaging", icon: I.messaging },
         { id: "Settings", href: "/settings", icon: I.settings },
     ];
 
-    const activeMenu = navItems.find(m => m.href === pathname || (pathname.startsWith(m.href) && m.href !== "/dashboard")) || navItems[0];
+    const activeMenu = navItems.find(m =>
+        m.href === '/' ? pathname === '/' : pathname.startsWith(m.href)
+    ) || navItems[0];
 
     return (
         <div className='flex h-screen w-full p-2 gap-2 overflow-hidden font-sans' style={{ background: S.navy }}>

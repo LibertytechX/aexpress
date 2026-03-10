@@ -1,3 +1,4 @@
+"use client";
 
 import type { Order, Merchant } from "../../types";
 import { S } from "../common/theme";

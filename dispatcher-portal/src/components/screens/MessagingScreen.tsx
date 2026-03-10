@@ -1,3 +1,4 @@
+"use client";
 import { useState } from "react";
 import { MSG_RIDER, MSG_CUSTOMER } from "../../data/mockData";
 import { S } from "../common/theme";
