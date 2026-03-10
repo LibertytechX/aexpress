@@ -225,6 +225,13 @@ class OrderOffer(models.Model):
     estimated_earnings = models.DecimalField(
         max_digits=10, decimal_places=2, default=Decimal("0.00")
     )
+    zone = models.ForeignKey(
+        "dispatcher.Zone",
+        on_delete=models.CASCADE,
+        related_name="order_offers",
+        null=True,
+        blank=True,
+    )
     decline_reason = models.CharField(
         max_length=255,
         blank=True,

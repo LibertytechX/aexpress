@@ -11,16 +11,10 @@ from datetime import timedelta
 @receiver(post_save, sender=Order)
 def create_order_offer(sender, instance, created, **kwargs):
     if created:
-        # Calculate estimated earnings (20% of total_amount goes to rider)
-        total_amount = Decimal(str(instance.total_amount or 0))
-        estimated_earnings = (total_amount * Decimal("0.2")).quantize(Decimal("0.01"))
+        from .tasks import process_order_proximity
 
-        OrderOffer.objects.create(
-            order=instance,
-            rider=None,
-            status=OrderOffer.Status.PENDING,
-            estimated_earnings=estimated_earnings,
-        )
+        # Trigger background task for geocoding and zone assignment
+        process_order_proximity.delay(instance.id)
 
 
 @receiver(pre_save, sender=Order)

@@ -119,3 +119,74 @@ class MailgunEmailService:
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
             return False
+
+
+def find_closest_zone(lat, lng):
+    """
+    Find the closest active Zone to a given (lat, lng) point.
+    Uses Google Maps Distance Matrix API for road distance,
+    falling back to Haversine (great-circle) distance if API fails or is not configured.
+    """
+    from .models import Zone
+    from django.conf import settings
+    import requests
+
+    zones = list(Zone.objects.filter(is_active=True))
+    if not zones:
+        return None
+
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if api_key:
+        try:
+            # Prepare Distance Matrix request
+            origins = f"{lat},{lng}"
+            destinations = "|".join([f"{z.center_lat},{z.center_lng}" for z in zones])
+
+            url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+            params = {
+                "origins": origins,
+                "destinations": destinations,
+                "key": api_key,
+                "mode": "driving",
+            }
+
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get("status") == "OK":
+                results = data["rows"][0]["elements"]
+                min_distance = float("inf")
+                closest_index = -1
+
+                for i, res in enumerate(results):
+                    if res.get("status") == "OK":
+                        # distance['value'] is in meters
+                        dist_val = res["distance"]["value"]
+                        if dist_val < min_distance:
+                            min_distance = dist_val
+                            closest_index = i
+
+                if closest_index != -1:
+                    logger.info(
+                        f"find_closest_zone: Found closest zone '{zones[closest_index].name}' via Google Maps (dist: {min_distance}m)"
+                    )
+                    return zones[closest_index]
+
+        except Exception as e:
+            logger.error(f"find_closest_zone: Google Maps Distance Matrix failed: {e}")
+
+    # Fallback to Haversine distance
+    closest = None
+    min_dist = float("inf")
+    for zone in zones:
+        dist = Zone.haversine_distance(lat, lng, zone.center_lat, zone.center_lng)
+        if dist < min_dist:
+            min_dist = dist
+            closest = zone
+
+    if closest:
+        logger.info(
+            f"find_closest_zone: Found closest zone '{closest.name}' via Haversine (dist: {min_dist:.2f}km)"
+        )
+    return closest
