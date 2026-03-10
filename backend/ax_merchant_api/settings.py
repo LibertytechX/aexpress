@@ -15,6 +15,7 @@ import os
 from dotenv import load_dotenv
 from datetime import timedelta
 from celery.schedules import crontab
+from sparky_utils.logger import LoggerConfig
 
 # Load environment variables
 load_dotenv()
@@ -366,3 +367,9 @@ RESPOND_IO_BASE_URL = os.getenv("RESPOND_IO_BASE_URL", "https://api.respond.io/v
 
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+# Logger Configuration
+
+LOG_LEVEL = "INFO"
+
+logger_config = LoggerConfig(log_level=LOG_LEVEL)
