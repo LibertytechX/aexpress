@@ -5,6 +5,7 @@ import API, { TokenManager } from '@/lib/api';
 import NotificationSidebar from '@/components/common/NotificationSidebar';
 import { useRouter } from 'next/navigation';
 import Logo from '@/components/ui/logo';
+import { LagosMap } from '@/components/map/LagosMap';
 
 // declare global window interface extension
 declare global {
@@ -4014,7 +4015,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
     const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
 
     return (
-      <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
+      <div style={{ maxWidth: 1000, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <button onClick={onBack} style={{ background: "none", border: "none", color: S.gold, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 6 }}>
             ← Back to Orders
@@ -4068,137 +4069,167 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
             <span style={{ padding: "6px 14px", borderRadius: 8, background: st.bg, color: st.text, fontSize: 13, fontWeight: 700 }}>{st.label}</span>
           </div>
 
-          <div style={{ padding: 24 }}>
-            {/* Pickup Address */}
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ display: "flex", gap: 12 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.green }} />
-                  {order.deliveries && order.deliveries.length > 0 && (
-                    <div style={{ width: 2, flex: 1, background: "#e2e8f0", minHeight: 30 }} />
-                  )}
-                </div>
-                <div style={{ flex: 1, paddingBottom: 12 }}>
-                  <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>PICKUP</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>{order.pickup}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, padding: 24 }}>
+            {/* Left Column: Order Details */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+              {/* Pickup Address */}
+              <div>
+                <div style={{ display: "flex", gap: 12 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.green }} />
+                    {order.deliveries && order.deliveries.length > 0 && (
+                      <div style={{ width: 2, flex: 1, background: "#e2e8f0", minHeight: 30 }} />
+                    )}
+                  </div>
+                  <div style={{ flex: 1, paddingBottom: 12 }}>
+                    <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>PICKUP</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>{order.pickup}</div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Deliveries */}
-            {order.deliveries && order.deliveries.length > 0 ? (
-              <div style={{ marginBottom: 24 }}>
-                {order.deliveries.map((delivery, idx) => (
-                  <div key={idx} style={{ display: "flex", gap: 12, marginBottom: idx < order.deliveries.length - 1 ? 20 : 0 }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                      <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.gold }} />
-                      {idx < order.deliveries.length - 1 && (
-                        <div style={{ width: 2, flex: 1, background: "#e2e8f0", minHeight: 30 }} />
-                      )}
-                    </div>
-                    <div style={{ flex: 1, paddingBottom: idx < order.deliveries.length - 1 ? 12 : 0 }}>
-                      <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>
-                        DROPOFF {order.deliveries.length > 1 ? `#${idx + 1}` : ''}
+              {/* Deliveries */}
+              {order.deliveries && order.deliveries.length > 0 ? (
+                <div style={{ marginBottom: 24 }}>
+                  {order.deliveries.map((delivery, idx) => (
+                    <div key={idx} style={{ display: "flex", gap: 12, marginBottom: idx < order.deliveries.length - 1 ? 20 : 0 }}>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.gold }} />
+                        {idx < order.deliveries.length - 1 && (
+                          <div style={{ width: 2, flex: 1, background: "#e2e8f0", minHeight: 30 }} />
+                        )}
                       </div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: S.navy, marginBottom: 4 }}>
-                        {delivery.dropoff_address}
-                      </div>
-                      <div style={{ fontSize: 12, color: S.gray }}>
-                        {delivery.receiver_name} • {delivery.receiver_phone}
-                      </div>
-                      {delivery.package_type && (
-                        <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
-                          📦 {delivery.package_type}
+                      <div style={{ flex: 1, paddingBottom: idx < order.deliveries.length - 1 ? 12 : 0 }}>
+                        <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>
+                          DROPOFF {order.deliveries.length > 1 ? `#${idx + 1}` : ''}
                         </div>
-                      )}
+                        <div style={{ fontSize: 14, fontWeight: 600, color: S.navy, marginBottom: 4 }}>
+                          {delivery.dropoff_address}
+                        </div>
+                        <div style={{ fontSize: 12, color: S.gray }}>
+                          {delivery.receiver_name} • {delivery.receiver_phone}
+                        </div>
+                        {delivery.package_type && (
+                          <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
+                            📦 {delivery.package_type}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.gold }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>DROPOFF</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>{order.dropoff}</div>
+                  </div>
+                </div>
+              )}
+
+              {[
+                { l: "Vehicle", v: order.vehicle },
+                { l: "Date", v: order.date },
+                { l: "Amount", v: `₦${order.amount.toLocaleString()}` },
+                { l: "Payment", v: "Wallet (Prepaid)" },
+              ].map((r, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #f8fafc" }}>
+                  <span style={{ fontSize: 13, color: S.gray }}>{r.l}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
+                </div>
+              ))}
+
+              {/* Cancel Order Button */}
+              {!['Delivered', 'Canceled'].includes(order.status) && (
+                <div style={{ paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
+                  <button
+                    onClick={() => setCancelModalOrder(order)}
+                    style={{
+                      width: '100%',
+                      padding: '12px 20px',
+                      background: '#fee2e2',
+                      color: '#991b1b',
+                      border: '1px solid #fecaca',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      transition: 'all 0.2s',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8
+                    }}
+                    onMouseOver={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = '#fecaca';
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = '#fca5a5';
+                    }}
+                    onMouseOut={(e) => {
+                      (e.currentTarget as HTMLButtonElement).style.background = '#fee2e2';
+                      (e.currentTarget as HTMLButtonElement).style.borderColor = '#fecaca';
+                    }}
+                  >
+                    <span style={{ fontSize: 16 }}>🚫</span> Cancel Order
+                  </button>
+                </div>
+              )}
+              {/* Events Timeline */}
+              <div style={{ paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: S.navy, marginBottom: 14 }}>Events</h4>
+                {[
+                  { event: "Created", desc: "New order placed", time: "1:00 PM" },
+                  { event: "Dispatching", desc: "Finding nearest rider", time: "1:00 PM" },
+                  ...(order.status !== "Pending" ? [{ event: "Assigned", desc: "Rider assigned", time: "1:03 PM" }] : []),
+                  ...(order.status === "Done" ? [
+                    { event: "Picked Up", desc: "Package collected", time: "1:15 PM" },
+                    { event: "Delivered", desc: "Delivery complete", time: "1:36 PM" },
+                  ] : []),
+                ].map((ev, i) => (
+                  <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: S.gold, marginTop: 4 }} />
+                      {i < 2 && <div style={{ width: 1, height: 20, background: "#e2e8f0" }} />}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{ev.event}</div>
+                      <div style={{ fontSize: 12, color: S.grayLight }}>{ev.desc} • {ev.time}</div>
                     </div>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: S.gold }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>DROPOFF</div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>{order.dropoff}</div>
-                </div>
-              </div>
-            )}
 
-            {[
-              { l: "Vehicle", v: order.vehicle },
-              { l: "Date", v: order.date },
-              { l: "Amount", v: `₦${order.amount.toLocaleString()}` },
-              { l: "Payment", v: "Wallet (Prepaid)" },
-            ].map((r, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderTop: "1px solid #f8fafc" }}>
-                <span style={{ fontSize: 13, color: S.gray }}>{r.l}</span>
-                <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
-              </div>
-            ))}
+            </div> {/* End Left Column */}
 
-            {/* Cancel Order Button */}
-            {!['Delivered', 'Canceled'].includes(order.status) && (
-              <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
-                <button
-                  onClick={() => setCancelModalOrder(order)}
-                  style={{
-                    width: '100%',
-                    padding: '12px 20px',
-                    background: '#fee2e2',
-                    color: '#991b1b',
-                    border: '1px solid #fecaca',
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'inherit',
-                    transition: 'all 0.2s',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8
-                  }}
-                  onMouseOver={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = '#fecaca';
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#fca5a5';
-                  }}
-                  onMouseOut={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background = '#fee2e2';
-                    (e.currentTarget as HTMLButtonElement).style.borderColor = '#fecaca';
-                  }}
-                >
-                  <span style={{ fontSize: 16 }}>🚫</span> Cancel Order
-                </button>
+            {/* Right Column: Live Location */}
+            <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: 0 }}>Live Location</h4>
+                {order.status === "Pending" && (
+                  <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.goldPale, color: S.gold, fontWeight: 800 }}>WAITING FOR RIDER</span>
+                )}
               </div>
-            )}
-
-            {/* Events Timeline */}
-            <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
-              <h4 style={{ fontSize: 14, fontWeight: 700, color: S.navy, marginBottom: 14 }}>Events</h4>
-              {[
-                { event: "Created", desc: "New order placed", time: "1:00 PM" },
-                { event: "Dispatching", desc: "Finding nearest rider", time: "1:00 PM" },
-                ...(order.status !== "Pending" ? [{ event: "Assigned", desc: "Rider assigned", time: "1:03 PM" }] : []),
-                ...(order.status === "Done" ? [
-                  { event: "Picked Up", desc: "Package collected", time: "1:15 PM" },
-                  { event: "Delivered", desc: "Delivery complete", time: "1:36 PM" },
-                ] : []),
-              ].map((ev, i) => (
-                <div key={i} style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: S.gold, marginTop: 4 }} />
-                    {i < 2 && <div style={{ width: 1, height: 20, background: "#e2e8f0" }} />}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{ev.event}</div>
-                    <div style={{ fontSize: 12, color: S.grayLight }}>{ev.desc} • {ev.time}</div>
-                  </div>
+              {order.pickup && (order.deliveries?.length > 0 || order.dropoff) ? (
+                <div style={{ flex: 1, minHeight: 400, borderRadius: 12, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+                  <DeliveryMapView
+                    pickupAddress={order.pickup}
+                    dropoffs={order.deliveries || [{ address: order.dropoff }]}
+                    vehicle={order.vehicle}
+                    totalDeliveries={order.deliveries?.length || 1}
+                    totalCost={order.amount}
+                    onRouteCalculated={() => { }}
+                  />
                 </div>
-              ))}
+              ) : (
+                <div style={{ flex: 1, minHeight: 400, borderRadius: 12, overflow: "hidden" }}>
+                  <LagosMap orders={[order]} highlightOrder={order.id} mode="live" small={false} showZones={false} />
+                </div>
+              )}
             </div>
+
           </div>
         </div>
 
