@@ -1338,6 +1338,43 @@ class OrderCompleteView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+            # Proximity check for order completion (check final delivery location)
+            # Fetch rider's last known location from the database (since no payload is sent)
+            lat = rider.current_latitude
+            lng = rider.current_longitude
+
+            if lat is None or lng is None:
+                return Response(
+                    {"error": "Rider location not found. Please ensure GPS is active."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            lat = float(lat)
+            lng = float(lng)
+
+            # Find the final delivery (highest sequence)
+            final_delivery = order.deliveries.order_by("-sequence").first()
+            if (
+                final_delivery
+                and final_delivery.dropoff_latitude is not None
+                and final_delivery.dropoff_longitude is not None
+            ):
+                from dispatcher.models import Zone
+
+                dist = Zone.haversine_distance(
+                    lat,
+                    lng,
+                    final_delivery.dropoff_latitude,
+                    final_delivery.dropoff_longitude,
+                )
+                if dist > 0.5:  # 500 meters
+                    return Response(
+                        {
+                            "error": f"You are too far from the final delivery location ({dist:.2f}km). Please move closer."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
             # ── Step 1: COD wallet balance check ─────────────────────────────────
             is_cod = order.payment_method in self.COD_METHODS
             logger.info("Let's see the payment method %s", order.payment_method)
@@ -1387,9 +1424,11 @@ class OrderCompleteView(APIView):
 
             # ── Step 2: Calculate and record rider earnings ───────────────────────
             settings_obj = SystemSettings.objects.first()
-            # SystemSettings stores cod_pct_fee; we repurpose a rider-specific
-            # commission field if it exists — fall back to hard-coded default.
-            commission_pct = settings_obj.commission_pct
+            commission_pct = (
+                settings_obj.commission_pct
+                if settings_obj
+                else self.DEFAULT_COMMISSION_PCT
+            )
 
             order_amount = Decimal(str(order.total_amount))
             commission_amount = (commission_pct / Decimal("100")) * order_amount
@@ -1639,6 +1678,33 @@ class DeliveryCompleteView(APIView):
 
         ser = OrderStatusUpdateSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
+
+        # Proximity check for specific delivery completion
+        lat = ser.validated_data.get("latitude")
+        lng = ser.validated_data.get("longitude")
+
+        if lat is None or lng is None:
+            return Response(
+                {"error": "Latitude and longitude are required to complete delivery."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if (
+            delivery.dropoff_latitude is not None
+            and delivery.dropoff_longitude is not None
+        ):
+            from dispatcher.models import Zone
+
+            dist = Zone.haversine_distance(
+                lat, lng, delivery.dropoff_latitude, delivery.dropoff_longitude
+            )
+            if dist > 0.5:  # 500 meters
+                return Response(
+                    {
+                        "error": f"You are too far from the delivery location ({dist:.2f}km). Please move closer."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         old_status = delivery.status
         delivery.status = "Delivered"

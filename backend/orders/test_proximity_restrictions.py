@@ -49,6 +49,15 @@ class PickupProximityTests(TestCase):
             status="Assigned",
         )
 
+        # Create SystemSettings and Wallet for completion tests
+        from dispatcher.models import SystemSettings
+        from wallet.models import Wallet
+
+        SystemSettings.objects.get_or_create(
+            defaults={"commission_pct": 20, "min_withdrawal_amount": 1000}
+        )
+        Wallet.objects.get_or_create(user=self.rider_user)
+
     def test_pickup_allowed_within_range(self):
         """Test pickup is allowed when within 500m (e.g. 100m away)."""
         url = reverse("orders:order_pickup")
@@ -99,3 +108,66 @@ class PickupProximityTests(TestCase):
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("too far", response.data["error"])
+
+    def test_delivery_complete_proximity(self):
+        """Test DeliveryCompleteView proximity enforcement."""
+        from orders.models import Delivery
+
+        deliv = Delivery.objects.create(
+            order=self.order,
+            dropoff_address="Dropoff",
+            dropoff_latitude=6.45,
+            dropoff_longitude=3.50,
+            receiver_name="Recv",
+            receiver_phone="080",
+        )
+        url = reverse("orders:delivery_deliver", kwargs={"delivery_id": deliv.id})
+
+        # Too far (3.40 vs 3.50 is many km)
+        data = {"latitude": 6.45, "longitude": 3.40}
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("too far", response.data["error"])
+
+        # Close enough
+        data = {"latitude": 6.4501, "longitude": 3.5001}
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_order_complete_proximity(self):
+        """Test OrderCompleteView proximity enforcement."""
+        from orders.models import Delivery
+        from riders.models import RiderLocation
+
+        # Update existing order to have a dropoff location
+        self.order.status = "PickedUp"
+        self.order.save()
+
+        Delivery.objects.create(
+            order=self.order,
+            dropoff_address="Final Dropoff",
+            dropoff_latitude=6.50,
+            dropoff_longitude=3.50,
+            receiver_name="Recv",
+            receiver_phone="080",
+            sequence=2,
+        )
+
+        url = reverse(
+            "order_complete", kwargs={"order_number": self.order.order_number}
+        )
+
+        # 1. Too far
+        self.rider_profile.current_latitude = 6.45
+        self.rider_profile.current_longitude = 3.40
+        self.rider_profile.save()
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("too far", response.data["error"])
+
+        # 2. Close enough
+        self.rider_profile.current_latitude = 6.5001
+        self.rider_profile.current_longitude = 3.5001
+        self.rider_profile.save()
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
