@@ -1,5 +1,24 @@
 from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
 from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride
+
+
+class AssignedRiderFilter(admin.SimpleListFilter):
+    title = _("assigned rider")
+    parameter_name = "has_rider"
+
+    def lookups(self, request, model_admin):
+        return (
+            ("yes", _("Yes")),
+            ("no", _("No")),
+        )
+
+    def queryset(self, request, queryset):
+        if self.value() == "yes":
+            return queryset.filter(rider__isnull=False)
+        if self.value() == "no":
+            return queryset.filter(rider__isnull=True)
+        return queryset
 
 
 class DeliveryInline(admin.TabularInline):
@@ -7,20 +26,36 @@ class DeliveryInline(admin.TabularInline):
 
     model = Delivery
     extra = 0
-    fields = ['sequence', 'pickup_address', 'sender_name', 'sender_phone', 'dropoff_address', 'receiver_name', 'receiver_phone', 'package_type', 'status']
-    readonly_fields = ['sequence']
+    fields = [
+        "sequence",
+        "pickup_address",
+        "sender_name",
+        "sender_phone",
+        "dropoff_address",
+        "receiver_name",
+        "receiver_phone",
+        "package_type",
+        "status",
+    ]
+    readonly_fields = ["sequence"]
 
 
 class OrderLegInline(admin.TabularInline):
     """Inline admin for relay legs within an order."""
+
     model = OrderLeg
     extra = 0
     fields = [
-        'leg_number', 'status', 'rider',
-        'start_relay_node', 'end_relay_node',
-        'distance_km', 'rider_payout', 'hub_pin',
+        "leg_number",
+        "status",
+        "rider",
+        "start_relay_node",
+        "end_relay_node",
+        "distance_km",
+        "rider_payout",
+        "hub_pin",
     ]
-    readonly_fields = ['leg_number', 'hub_pin']
+    readonly_fields = ["leg_number", "hub_pin"]
 
 
 @admin.register(Vehicle)
@@ -62,12 +97,20 @@ class OrderAdmin(admin.ModelAdmin):
         "total_amount",
         "created_at",
     ]
-    list_filter = ["status", "mode", "payment_method", "created_at"]
+    list_filter = [
+        "status",
+        "mode",
+        "payment_method",
+        AssignedRiderFilter,
+        "rider",
+        "created_at",
+    ]
     search_fields = [
         "order_number",
         "id",
         "user__business_name",
         "user__phone",
+        "rider__user__phone",
         "pickup_address",
     ]
     readonly_fields = ["order_number", "created_at", "updated_at"]
@@ -111,21 +154,33 @@ class DeliveryAdmin(admin.ModelAdmin):
     ordering = ["order", "sequence"]
 
     fieldsets = (
-        ('Order Information', {
-            'fields': ('order', 'sequence', 'status')
-        }),
-        ('Pickup Details', {
-            'fields': ('pickup_address', 'pickup_latitude', 'pickup_longitude', 'sender_name', 'sender_phone')
-        }),
-        ('Dropoff Details', {
-            'fields': ('dropoff_address', 'dropoff_latitude', 'dropoff_longitude', 'receiver_name', 'receiver_phone')
-        }),
-        ('Package Information', {
-            'fields': ('package_type', 'notes')
-        }),
-        ('Timestamps', {
-            'fields': ('created_at', 'delivered_at')
-        }),
+        ("Order Information", {"fields": ("order", "sequence", "status")}),
+        (
+            "Pickup Details",
+            {
+                "fields": (
+                    "pickup_address",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                    "sender_name",
+                    "sender_phone",
+                )
+            },
+        ),
+        (
+            "Dropoff Details",
+            {
+                "fields": (
+                    "dropoff_address",
+                    "dropoff_latitude",
+                    "dropoff_longitude",
+                    "receiver_name",
+                    "receiver_phone",
+                )
+            },
+        ),
+        ("Package Information", {"fields": ("package_type", "notes")}),
+        ("Timestamps", {"fields": ("created_at", "delivered_at")}),
     )
 
 
@@ -134,11 +189,17 @@ class OrderLegAdmin(admin.ModelAdmin):
     """Standalone admin view for relay order legs."""
 
     list_display = [
-        'order', 'leg_number', 'status', 'rider',
-        'start_relay_node', 'end_relay_node',
-        'distance_km', 'rider_payout', 'created_at',
+        "order",
+        "leg_number",
+        "status",
+        "rider",
+        "start_relay_node",
+        "end_relay_node",
+        "distance_km",
+        "rider_payout",
+        "created_at",
     ]
-    list_filter = ['status', 'created_at']
-    search_fields = ['order__order_number', 'rider__rider_id', 'hub_pin']
-    readonly_fields = ['id', 'hub_pin', 'created_at']
-    ordering = ['order', 'leg_number']
+    list_filter = ["status", "created_at"]
+    search_fields = ["order__order_number", "rider__rider_id", "hub_pin"]
+    readonly_fields = ["id", "hub_pin", "created_at"]
+    ordering = ["order", "leg_number"]
