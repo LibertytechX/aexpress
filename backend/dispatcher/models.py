@@ -21,7 +21,9 @@ class Vertical(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
-    code = models.CharField(max_length=10, unique=True, help_text="Vertical code (A, B, C, D)")
+    code = models.CharField(
+        max_length=10, unique=True, help_text="Vertical code (A, B, C, D)"
+    )
     lead_name = models.CharField(max_length=100, help_text="Vertical Lead name")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -278,6 +280,12 @@ class VehicleAsset(models.Model):
 
     # ── Status flags ────────────────────────────────────────────────
     is_active = models.BooleanField(default=True, help_text="Available for assignment")
+    amortization_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1200000,
+        help_text="Amortization amount for the vehicle",
+    )
 
     # ── Timestamps ──────────────────────────────────────────────────
     created_at = models.DateTimeField(auto_now_add=True)
@@ -342,7 +350,9 @@ class VehicleTracking(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.vehicle_asset.plate_number} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+        return (
+            f"{self.vehicle_asset.plate_number} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +801,9 @@ class VerticalLead(models.Model):
         db_table = "vertical_leads"
 
     def __str__(self):
-        return f"Lead: {self.user.contact_name or self.user.phone} → {self.vertical.name}"
+        return (
+            f"Lead: {self.user.contact_name or self.user.phone} → {self.vertical.name}"
+        )
 
 
 class ZoneCaptain(models.Model):
@@ -803,9 +815,7 @@ class ZoneCaptain(models.Model):
         on_delete=models.CASCADE,
         related_name="zone_captain_profile",
     )
-    zone = models.OneToOneField(
-        Zone, on_delete=models.CASCADE, related_name="captain"
-    )
+    zone = models.OneToOneField(Zone, on_delete=models.CASCADE, related_name="captain")
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -813,7 +823,9 @@ class ZoneCaptain(models.Model):
         db_table = "zone_captains"
 
     def __str__(self):
-        return f"Captain: {self.user.contact_name or self.user.phone} → {self.zone.name}"
+        return (
+            f"Captain: {self.user.contact_name or self.user.phone} → {self.zone.name}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -825,9 +837,7 @@ class RiderDutyLog(models.Model):
     """Tracks every on/off duty transition for peak-hour analysis."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    rider = models.ForeignKey(
-        Rider, on_delete=models.CASCADE, related_name="duty_logs"
-    )
+    rider = models.ForeignKey(Rider, on_delete=models.CASCADE, related_name="duty_logs")
     went_online = models.DateTimeField()
     went_offline = models.DateTimeField(null=True, blank=True)
     duration_minutes = models.IntegerField(null=True, blank=True)
@@ -923,13 +933,9 @@ class ZoneTarget(models.Model):
     """Monthly order/revenue targets per zone."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    zone = models.ForeignKey(
-        Zone, on_delete=models.CASCADE, related_name="targets"
-    )
+    zone = models.ForeignKey(Zone, on_delete=models.CASCADE, related_name="targets")
     month = models.DateField(help_text="First day of the target month")
-    target_orders = models.IntegerField(
-        default=2000, help_text="5 riders × 400 orders"
-    )
+    target_orders = models.IntegerField(default=2000, help_text="5 riders × 400 orders")
     target_revenue = models.DecimalField(
         max_digits=12, decimal_places=2, default=600000
     )

@@ -2,6 +2,8 @@ import uuid
 from django.db import models
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
+from datetime import date
+from dateutil.relativedelta import relativedelta
 
 
 class RiderAuth(models.Model):
@@ -443,12 +445,27 @@ class RideToOwnEnrollment(models.Model):
 
     def get_orders_done(self):
         from orders.models import Order
+
         return Order.objects.filter(
             rider=self.rider,
             status="Done",
             completed_at__date__gte=self.start_date,
             completed_at__date__lte=self.end_date,
         ).count()
+
+    def get_average_order_amount(self):
+        from orders.models import Order
+        from django.db import models
+        from decimal import Decimal
+
+        avg = Order.objects.filter(
+            rider=self.rider,
+            status="Done",
+            completed_at__date__gte=self.start_date,
+            completed_at__date__lte=self.end_date,
+        ).aggregate(avg_amount=models.Avg("total_amount"))["avg_amount"]
+
+        return round(avg, 2) if avg is not None else Decimal("0.00")
 
     def get_progress(self):
         """Returns a dict with all computed progress fields."""
@@ -457,17 +474,27 @@ class RideToOwnEnrollment(models.Model):
         import math
 
         config = RideToOwnConfig.get_active()
-        total_needed = config.total_orders_target if config else 7800
+        # total_needed = config.total_orders_target if config else 7800
+        amortization_amount = self.vehicle_asset.amortization_amount
+        total_needed = int(round(float(amortization_amount) / 1700))
+        average_order_amount = float(self.get_average_order_amount())
+        new_orders_to_go = (
+            int(round(float(amortization_amount) / average_order_amount))
+            if average_order_amount > 0
+            else 0
+        )
 
         orders_done = self.get_orders_done()
         orders_to_go = max(total_needed - orders_done, 0)
-        pct_complete = round((orders_done / total_needed) * 100, 1) if total_needed else 0
+        pct_complete = (
+            round((orders_done / total_needed) * 100, 1) if total_needed else 0
+        )
 
         today = timezone.now().date()
         days_elapsed = max((today - self.start_date).days, 1)
         days_total = max((self.end_date - self.start_date).days, 1)
         days_remaining = max((self.end_date - today).days, 0)
-        from dateutil.relativedelta import relativedelta
+
         rd = relativedelta(self.end_date, today)
         months_remaining = rd.years * 12 + rd.months + (1 if rd.days > 0 else 0)
 
@@ -479,25 +506,27 @@ class RideToOwnEnrollment(models.Model):
         # Monthly timeline (which months are complete)
         monthly_timeline = []
         for i in range(config.program_duration_months if config else 12):
-            from datetime import date
-            from dateutil.relativedelta import relativedelta
+
             month_start = self.start_date + relativedelta(months=i)
             month_end = month_start + relativedelta(months=1)
             is_complete = today >= month_end
             is_current = month_start <= today < month_end
-            monthly_timeline.append({
-                "month_number": i + 1,
-                "month_label": month_start.strftime("%b"),
-                "is_complete": is_complete,
-                "is_current": is_current,
-            })
+            monthly_timeline.append(
+                {
+                    "month_number": i + 1,
+                    "month_label": month_start.strftime("%b"),
+                    "is_complete": is_complete,
+                    "is_current": is_current,
+                }
+            )
 
         return {
             "orders_done": orders_done,
-            "orders_to_go": orders_to_go,
+            "orders_to_go": new_orders_to_go,
             "total_needed": total_needed,
             "pct_complete": pct_complete,
             "avg_orders_per_day": avg_orders_per_day,
+            "average_order_amount": self.get_average_order_amount(),
             "orders_per_day_needed": orders_per_day_needed,
             "months_remaining": months_remaining,
             "monthly_timeline": monthly_timeline,
@@ -520,9 +549,7 @@ class RiderMonthlyTarget(models.Model):
         on_delete=models.CASCADE,
         related_name="monthly_targets",
     )
-    month = models.DateField(
-        help_text="First day of the target month, e.g. 2026-03-01"
-    )
+    month = models.DateField(help_text="First day of the target month, e.g. 2026-03-01")
     target_earnings = models.DecimalField(
         max_digits=12,
         decimal_places=2,
@@ -567,10 +594,15 @@ class RiderMonthlyTarget(models.Model):
         ).aggregate(total=models.Sum("net_earning"))["total"] or Decimal("0.00")
 
         remaining = max(self.target_earnings - earned, Decimal("0.00"))
-        pct = round(float(earned / self.target_earnings) * 100, 1) if self.target_earnings else 0
+        pct = (
+            round(float(earned / self.target_earnings) * 100, 1)
+            if self.target_earnings
+            else 0
+        )
 
         # Daily orders chart — current week
         from datetime import timedelta
+
         week_start = today - timedelta(days=today.weekday())  # Monday
         daily_chart = []
         for i in range(7):
@@ -586,13 +618,15 @@ class RiderMonthlyTarget(models.Model):
                 color = "amber"
             else:
                 color = "orange"
-            daily_chart.append({
-                "day": day.strftime("%a"),
-                "date": day.isoformat(),
-                "orders": count,
-                "color": color,
-                "is_future": day > today,
-            })
+            daily_chart.append(
+                {
+                    "day": day.strftime("%a"),
+                    "date": day.isoformat(),
+                    "orders": count,
+                    "color": color,
+                    "is_future": day > today,
+                }
+            )
 
         # This week summary
         week_orders_done = Order.objects.filter(
@@ -602,10 +636,13 @@ class RiderMonthlyTarget(models.Model):
             completed_at__date__lte=today,
         ).count()
         days_at_target_this_week = sum(
-            1 for d in daily_chart
+            1
+            for d in daily_chart
             if not d["is_future"] and d["orders"] >= self.target_orders_per_day
         )
-        work_days_left = sum(1 for d in daily_chart if d["is_future"] and d["day"] not in ("Sat", "Sun"))
+        work_days_left = sum(
+            1 for d in daily_chart if d["is_future"] and d["day"] not in ("Sat", "Sun")
+        )
 
         # Days elapsed in month
         days_elapsed = max((today - month_start).days + 1, 1)
@@ -616,14 +653,19 @@ class RiderMonthlyTarget(models.Model):
         milestone_amounts = [50000, 100000, 150000, 200000, float(self.target_earnings)]
         milestones = []
         for amt in milestone_amounts:
-            milestones.append({
-                "amount": amt,
-                "is_reached": float(earned) >= amt,
-                "is_next": float(earned) < amt and all(float(earned) >= m for m in milestone_amounts if m < amt),
-            })
+            milestones.append(
+                {
+                    "amount": amt,
+                    "is_reached": float(earned) >= amt,
+                    "is_next": float(earned) < amt
+                    and all(float(earned) >= m for m in milestone_amounts if m < amt),
+                }
+            )
 
         # Behind / on track
-        expected_by_now = float(self.target_earnings) * (days_elapsed / max((month_end - month_start).days + 1, 1))
+        expected_by_now = float(self.target_earnings) * (
+            days_elapsed / max((month_end - month_start).days + 1, 1)
+        )
         is_behind = float(earned) < expected_by_now * 0.9  # 10% tolerance
 
         return {
@@ -640,10 +682,14 @@ class RiderMonthlyTarget(models.Model):
             "week_summary": {
                 "orders_done": week_orders_done,
                 "target_orders": self.target_orders_per_day * 5,
-                "orders_remaining": max(self.target_orders_per_day * 5 - week_orders_done, 0),
+                "orders_remaining": max(
+                    self.target_orders_per_day * 5 - week_orders_done, 0
+                ),
                 "work_days_left": work_days_left,
                 "days_at_target": days_at_target_this_week,
-                "pct": round(week_orders_done / (self.target_orders_per_day * 5) * 100, 1),
+                "pct": round(
+                    week_orders_done / (self.target_orders_per_day * 5) * 100, 1
+                ),
             },
         }
 
@@ -719,7 +765,9 @@ class Challenge(models.Model):
         help_text="e.g. 'priority_dispatch'",
     )
     metric = models.CharField(max_length=30, choices=Metric.choices)
-    metric_target = models.IntegerField(help_text="Target value to complete the challenge.")
+    metric_target = models.IntegerField(
+        help_text="Target value to complete the challenge."
+    )
     metric_condition = models.JSONField(
         default=dict,
         blank=True,
@@ -797,7 +845,9 @@ class LeaderboardEntry(models.Model):
         on_delete=models.CASCADE,
         related_name="leaderboard_entries",
     )
-    period_type = models.CharField(max_length=15, choices=PeriodType.choices, db_index=True)
+    period_type = models.CharField(
+        max_length=15, choices=PeriodType.choices, db_index=True
+    )
     period_key = models.CharField(
         max_length=20,
         db_index=True,
