@@ -1518,7 +1518,7 @@ export default function AXDispatchPortal() {
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
-          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
+          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
@@ -1559,7 +1559,7 @@ export default function AXDispatchPortal() {
 }
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRider }) {
+function DashboardScreen({ orders, riders, vehicleAssets, activityFeed, onViewOrder, onViewRider }) {
   const [period, setPeriod] = useState("today"); // "today" | "week" | "month"
 
   const now = new Date();
@@ -1591,7 +1591,13 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
   // Fall back to all orders only when "today" yields nothing (legacy date formats)
   const displayOrders = (period === "today" && periodOrders.length === 0) ? orders : periodOrders;
 
-  const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
+  // Active Now = vehicles that have moved >1 km today (from GPS distance_today field)
+  const activeNowVehicles = (vehicleAssets || []).filter(v => {
+    const dist = parseFloat(v.distance_today) || 0;
+    const unit = String(v.unit_of_distance || "km").toLowerCase().trim();
+    const km = unit === "m" ? dist / 1000 : dist;
+    return km > 1;
+  });
   const delivered = displayOrders.filter(o => o.status === "Delivered");
   // Exclude only Cancelled / Failed — Pending, Assigned, In Transit etc. count as earned revenue
   const revenueOrders = displayOrders.filter(o => !["Cancelled", "Failed"].includes(o.status));
@@ -1639,7 +1645,7 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
         <StatCard label={`${periodLabel}'s Orders`} value={displayOrders.length} sub={`${delivered.length} delivered`} />
-        <StatCard label="Active Now" value={active.length} sub={`${orders.filter(o => o.status === "Pending").length} pending`} color={S.gold} />
+        <StatCard label="Active Now" value={activeNowVehicles.length} sub="vehicles moved >1km today" color={S.gold} />
         <StatCard label="Online Riders" value={riders.filter(r => r.status === "online").length} sub={`${riders.filter(r => r.status === "on_delivery").length} on delivery`} color={S.green} />
         <StatCard label={`Revenue · ${periodLabel}`} value={revenueLabel} sub={`${codLabel} COD collected`} color={S.gold} />
       </div>
