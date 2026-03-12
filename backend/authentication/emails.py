@@ -147,7 +147,7 @@ def send_password_reset_email(user):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_API_KEY")
+        api_key = os.getenv("MAILGUN_APIKEY")
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
@@ -275,7 +275,7 @@ def send_mobile_password_reset_email(user, otp):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_API_KEY")
+        api_key = os.getenv("MAILGUN_APIKEY")
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")

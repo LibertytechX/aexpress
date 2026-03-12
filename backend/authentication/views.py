@@ -598,10 +598,10 @@ class ResetPasswordView(APIView):
             # Find user with this token
             user = User.objects.get(password_reset_token=token)
 
-            # Check if token is expired (1 hour)
+            # Check if token is expired (15 mins)
             if user.password_reset_token_created:
                 token_age = timezone.now() - user.password_reset_token_created
-                if token_age > timedelta(hours=1):
+                if token_age > timedelta(minutes=15):
                     return Response(
                         {
                             "success": False,
@@ -645,6 +645,53 @@ class ResetPasswordView(APIView):
                     "error": "An error occurred while resetting your password. Please try again.",
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class VerifyPasswordResetTokenView(APIView):
+    """API endpoint for verifying if a password reset token is valid."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Verify token validity."""
+        token = request.data.get("token")
+
+        if not token:
+            return Response(
+                {"success": False, "error": "Reset token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Find user with this token
+            user = User.objects.get(password_reset_token=token)
+
+            # Check if token is expired (15 mins)
+            if user.password_reset_token_created:
+                token_age = timezone.now() - user.password_reset_token_created
+                if token_age > timedelta(minutes=15):
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Password reset link has expired. Please request a new one.",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Token is valid
+            return Response(
+                {
+                    "success": True,
+                    "message": "Token is valid.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except User.DoesNotExist:
+            return Response(
+                {"success": False, "error": "Invalid or expired reset token."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
 
