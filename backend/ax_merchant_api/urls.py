@@ -35,4 +35,5 @@ urlpatterns = [
     path("api/webhooks/", include("webhooks.urls")),
     path("api/occ/", include("dispatcher.occ_urls")),
     path("api/riders/referrals/", include("referrals.urls")),
+    path("api/chats/", include("chats.urls")),
 ]

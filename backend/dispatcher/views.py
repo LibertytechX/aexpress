@@ -620,6 +620,8 @@ class AblyTokenView(views.APIView):
             "assigned*": ["subscribe"],
             "order*": ["subscribe"],
             "location-update": ["publish", "subscribe"],
+            # Support chat channels — all parties (dispatcher + user) need pub+sub
+            "chat:*": ["publish", "subscribe"],
         }
 
         try:

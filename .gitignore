@@ -18,6 +18,7 @@ build/
 out/
 .nuxt/
 .cache/
+migrations/
 
 # Environment variables
 .env
