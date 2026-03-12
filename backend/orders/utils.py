@@ -12,6 +12,10 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
     """
     Geocode an address using Google Maps Geocoding API.
 
+    Appends ', Lagos, Nigeria' to the address if it does not already contain
+    country context, which improves resolution for bare street addresses that
+    the API cannot locate without state/country disambiguation.
+
     Args:
         address: The address string to geocode
 
@@ -22,6 +26,12 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
 
     if not api_key:
         raise ValueError("GOOGLE_MAPS_API_KEY not configured")
+
+    # Append location context if not already present so that bare street names
+    # resolve correctly (mirrors the Stack Overflow fix for Distance Matrix API).
+    address_lower = address.lower()
+    if 'nigeria' not in address_lower and 'lagos' not in address_lower:
+        address = address.rstrip(', ') + ', Lagos, Nigeria'
 
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {
