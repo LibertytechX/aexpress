@@ -1718,6 +1718,7 @@ function formatOrderDateTime(raw) {
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [search, setSearch] = useState("");
 
   if (selectedId) {
@@ -1726,8 +1727,29 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} />;
   }
 
+  // ── Period boundaries ──────────────────────────────────────────
+  const _now = new Date();
+  const _todayStr = _now.toISOString().slice(0, 10);
+  const _weekStart = new Date(_now);
+  _weekStart.setDate(_now.getDate() - ((_now.getDay() + 6) % 7));
+  _weekStart.setHours(0, 0, 0, 0);
+  const _monthStart = new Date(_now.getFullYear(), _now.getMonth(), 1);
+
+  const inPeriod = (o) => {
+    if (periodFilter === "all") return true;
+    if (!o.created) return false;
+    if (periodFilter === "today") return o.created.startsWith(_todayStr) || o.created.includes(_todayStr);
+    const d = new Date(o.created);
+    if (isNaN(d)) return false;
+    if (periodFilter === "week")  return d >= _weekStart;
+    if (periodFilter === "month") return d >= _monthStart;
+    return true;
+  };
+
+  const periodOrders = orders.filter(inPeriod);
+
   const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
-  const filtered = orders.filter(o => {
+  const filtered = periodOrders.filter(o => {
     if (statusFilter !== "All" && o.status !== statusFilter) return false;
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
     return true;
@@ -1754,14 +1776,35 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     URL.revokeObjectURL(url);
   };
 
+  const PERIOD_OPTS = [
+    { value: "all", label: "All Time" },
+    { value: "today", label: "Today" },
+    { value: "week", label: "This Week" },
+    { value: "month", label: "This Month" },
+  ];
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
         {tabs.map(t => {
-          const cnt = t === "All" ? orders.length : orders.filter(o => o.status === t).length; return (
+          const cnt = t === "All" ? periodOrders.length : periodOrders.filter(o => o.status === t).length; return (
             <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
           );
         })}
+        {/* Period dropdown — sits flush at the end of the tab row */}
+        <select
+          value={periodFilter}
+          onChange={e => setPeriodFilter(e.target.value)}
+          style={{
+            marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
+            border: `1px solid ${periodFilter !== "all" ? S.gold : S.border}`,
+            background: periodFilter !== "all" ? "rgba(232,168,56,0.12)" : S.card,
+            color: periodFilter !== "all" ? S.gold : S.textMuted,
+            fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none",
+          }}
+        >
+          {PERIOD_OPTS.map(p => <option key={p.value} value={p.value} style={{ background: S.card, color: S.text }}>{p.label}</option>)}
+        </select>
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
