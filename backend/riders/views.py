@@ -581,14 +581,7 @@ class RiderOrderHistoryView(APIView):
 
         serializer = RiderOrderSerializer(orders, many=True)
         return Response(
-            {
-                "success": True,
-                "data": serializer.data,
-                "stats": {
-                    "completed": completed_count,
-                    "ridercancelled": ridercancelled_count,
-                },
-            },
+            serializer.data,
             status=status.HTTP_200_OK,
         )
 
