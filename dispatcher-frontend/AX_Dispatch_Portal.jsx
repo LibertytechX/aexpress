@@ -1593,8 +1593,9 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
 
   const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
   const delivered = displayOrders.filter(o => o.status === "Delivered");
-  const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
-  const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
+  // Only count revenue from delivered orders — exclude Cancelled, Failed, etc.
+  const revenue = delivered.reduce((s, o) => s + o.amount + o.codFee, 0);
+  const codTotal = delivered.reduce((s, o) => s + o.cod, 0);
 
   const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
   const revenueLabel = revenue >= 1_000_000
