@@ -150,13 +150,22 @@ export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, tota
       markersRef.current = [];
 
       // Geocode pickup address
-      const geocodeAddress = (address) => {
+      // Appends ', Lagos, Nigeria' only when the address doesn't already contain
+      // location context — mirrors the Stack Overflow fix for the Distance Matrix /
+      // Geocoding API not resolving bare street names without state/country.
+      const geocodeAddress = (address: string) => {
         return new Promise((resolve) => {
-          geocoder.geocode({ address: address + ', Lagos, Nigeria' }, (results, status) => {
+          const lower = address.toLowerCase();
+          const resolved =
+            lower.includes('nigeria') || lower.includes('lagos')
+              ? address
+              : address.replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
+          geocoder.geocode({ address: resolved }, (results, status) => {
             if (status === 'OK' && results[0]) {
               resolve(results[0].geometry.location);
             } else {
-              console.warn(`Geocoding failed for ${address}:`, status);
+              console.warn(`Geocoding failed for "${resolved}":`, status);
               resolve(null);
             }
           });
