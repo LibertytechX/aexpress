@@ -1560,18 +1560,49 @@ export default function AXDispatchPortal() {
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
 function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRider }) {
-  const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
-  const today = orders.filter(o => {
-    if (!o.created) return false;
-    // Handle ISO datetime ("2026-02-22T15:42:00Z") or any string containing today's date
-    return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+  const [period, setPeriod] = useState("today"); // "today" | "week" | "month"
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  // Start-of-week (Monday)
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  weekStart.setHours(0, 0, 0, 0);
+
+  // Start-of-month
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const parseCreated = (o) => {
+    if (!o.created) return null;
+    const d = new Date(o.created);
+    return isNaN(d) ? null : d;
+  };
+
+  const periodOrders = orders.filter(o => {
+    const d = parseCreated(o);
+    if (!d) return false;
+    if (period === "today") return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+    if (period === "week")  return d >= weekStart;
+    if (period === "month") return d >= monthStart;
+    return false;
   });
-  // Fall back to all orders if today filter returns nothing (e.g. older data)
-  const displayOrders = today.length > 0 ? today : orders;
+
+  // Fall back to all orders only when "today" yields nothing (legacy date formats)
+  const displayOrders = (period === "today" && periodOrders.length === 0) ? orders : periodOrders;
+
   const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
   const delivered = displayOrders.filter(o => o.status === "Delivered");
   const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
   const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
+
+  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const revenueLabel = revenue >= 1_000_000
+    ? `₦${(revenue / 1_000_000).toFixed(1)}M`
+    : `₦${(revenue / 1000).toFixed(0)}K`;
+  const codLabel = codTotal >= 1_000_000
+    ? `₦${(codTotal / 1_000_000).toFixed(1)}M`
+    : `₦${(codTotal / 1000).toFixed(0)}K`;
 
   // Color name → S value mapping
   const colorMap = { gold: S.gold, green: S.green, red: S.red, blue: S.blue, purple: S.purple, yellow: S.yellow };
@@ -1589,13 +1620,26 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
     dropoff: truncate(item.metadata?.dropoff || "", 30),
   }));
 
+  const PERIODS = [{ id: "today", label: "Today" }, { id: "week", label: "This Week" }, { id: "month", label: "This Month" }];
+
   return (
     <div>
+      {/* Period toggle */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {PERIODS.map(p => (
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{
+            padding: "6px 16px", borderRadius: 8, border: `1px solid ${period === p.id ? S.gold : S.border}`,
+            background: period === p.id ? `rgba(232,168,56,0.15)` : "transparent",
+            color: period === p.id ? S.gold : S.textMuted, fontSize: 12, fontWeight: 700,
+            cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit",
+          }}>{p.label}</button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-        <StatCard label="Today's Orders" value={displayOrders.length} sub={`${delivered.length} delivered`} />
+        <StatCard label={`${periodLabel}'s Orders`} value={displayOrders.length} sub={`${delivered.length} delivered`} />
         <StatCard label="Active Now" value={active.length} sub={`${orders.filter(o => o.status === "Pending").length} pending`} color={S.gold} />
         <StatCard label="Online Riders" value={riders.filter(r => r.status === "online").length} sub={`${riders.filter(r => r.status === "on_delivery").length} on delivery`} color={S.green} />
-        <StatCard label="Revenue Today" value={`₦${(revenue / 1000).toFixed(0)}K`} sub={`₦${(codTotal / 1000).toFixed(0)}K COD collected`} color={S.gold} />
+        <StatCard label={`Revenue · ${periodLabel}`} value={revenueLabel} sub={`${codLabel} COD collected`} color={S.gold} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
         {/* Live feed */}
