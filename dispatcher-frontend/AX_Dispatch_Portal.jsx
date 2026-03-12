@@ -1733,6 +1733,27 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return true;
   });
 
+  const exportCSV = () => {
+    const esc = v => {
+      const s = v == null ? "" : String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Status"];
+    const rows = filtered.map(o => {
+      const dt = formatOrderDateTime(o.created);
+      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.amount, o.cod, o.codFee, o.status].map(esc);
+    });
+    const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
+    a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div>
       <div style={{ display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
@@ -1747,7 +1768,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <span style={{ opacity: 0.4 }}>{I.search}</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
-        <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV</button>
+        <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
       </div>
 
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
