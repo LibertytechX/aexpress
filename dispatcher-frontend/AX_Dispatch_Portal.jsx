@@ -3868,7 +3868,7 @@ function MessagingScreen() {
     // Subscribe to Ably channel for real-time messages
     const convo = conversations.find(c => c.id === activeId);
     if (convo && ablyRef.current) {
-      const channelName = `chat:${convo.type}:${convo.user_id.id}`;
+      const channelName = `chat:${convo.type}:${convo.participant?.id}`;
       const ch = ablyRef.current.channels.get(channelName);
       channelRef.current = ch;
       ch.subscribe('new_message', (msg) => {
@@ -3921,11 +3921,10 @@ function MessagingScreen() {
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
 
-  const riders = conversations.filter(c => c.type === 'rider');
-  const customers = conversations.filter(c => c.type === 'customer');
+  const riders = conversations.filter(c => c.type === 'riders');
+  const customers = conversations.filter(c => c.type === 'customers');
   const list = tab === 'riders' ? riders : customers;
   const active = conversations.find(c => c.id === activeId) || null;
-  const totalUnread = conversations.reduce((s, c) => s + (c.unread_count || 0), 0);
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
@@ -3954,7 +3953,7 @@ function MessagingScreen() {
               onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ fontSize: 13, fontWeight: ch.unread_count ? 700 : 500 }}>
-                  {ch.user_id?.name || ch.user_id?.phone || 'Unknown'}
+                  {ch.participant?.name || ch.participant?.phone || 'Unknown'}
                 </span>
                 <span style={{ fontSize: 10, color: S.textMuted }}>{fmt(ch.updated_at)}</span>
               </div>
@@ -3979,11 +3978,11 @@ function MessagingScreen() {
           {/* Header */}
           <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
             <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>
-              {(active.user_id?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+              {(active.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
             </div>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{active.user_id?.name || active.user_id?.phone}</div>
-              <div style={{ fontSize: 10, color: S.textMuted }}>{active.type === 'rider' ? 'Rider' : 'Customer'} • {active.user_id?.phone}</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{active.participant?.name || active.participant?.phone}</div>
+              <div style={{ fontSize: 10, color: S.textMuted }}>{active.type === 'riders' ? 'Rider' : 'Customer'} • {active.participant?.phone}</div>
             </div>
           </div>
 
