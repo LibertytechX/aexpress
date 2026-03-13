@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import API, { TokenManager } from '@/lib/api';
 import NotificationSidebar from '@/components/common/NotificationSidebar';
+import FloatingSupportChat from '@/components/common/FloatingSupportChat';
+import MapPickerModal from '@/components/common/MapPickerModal';
 import { useRouter } from 'next/navigation';
 import Logo from '@/components/ui/logo';
 import { LagosMap } from '@/components/map/LagosMap';
@@ -636,6 +638,9 @@ export default function DashboardPage() {
         isOpen={notificationOpen}
         onClose={() => setNotificationOpen(false)}
       />
+
+      {/* Floating Support Chat — persists across all screens */}
+      <FloatingSupportChat />
 
       {/* Mobile overlay */}
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 40 }} />}
@@ -2233,7 +2238,7 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
 }
 
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }: any) {
+function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: any) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -2301,38 +2306,46 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
+      // Bias results towards Lagos using both bounds and component restrictions
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
+
+      // Append "Lagos, Nigeria" to the raw input when not already present.
+      // Bare street names like "15A Kunle Ogunba street lekki phase 1" are only
+      // resolved correctly by the Places Autocomplete API when state/country
+      // context is included in the query (same fix as the geocoding layer).
+      const lower = input.toLowerCase();
+      const searchInput =
+        lower.includes('lagos') || lower.includes('nigeria')
+          ? input
+          : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
       const request = {
-        input: input,
+        input: searchInput,
         componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
-        types: ['address'], // Only addresses
-        // Bias results to Lagos
-        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
-        radius: 50000, // 50km radius
+        bounds: lagosBounds, // Bias to Lagos
       };
 
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
         setLoading(false);
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Filter to only Lagos addresses
-          const lagosResults = predictions.filter(p =>
-            p.description.toLowerCase().includes('lagos')
-          );
-
-          if (lagosResults.length === 0) {
-            setError('No addresses found in Lagos');
-            setSuggestions([]);
-          } else {
-            setSuggestions(lagosResults);
-            setShowDropdown(true);
-            setError(null);
-          }
+          // Results are already scoped to Nigeria + Lagos area via componentRestrictions + bounds.
+          // Don't filter by the word "lagos" in the description — Google Maps frequently omits it
+          // for local area names (e.g. "15a Kunle Ogunba St, Lekki Phase I, Lekki").
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
+          setError(null);
         } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
           setError('No addresses found in Lagos');
           setSuggestions([]);
+          setShowDropdown(false);
         } else {
           setError('Failed to fetch suggestions');
           setSuggestions([]);
+          setShowDropdown(false);
         }
       });
     }, 550); // 550ms debounce
@@ -2428,15 +2441,32 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message + optional map picker CTA */}
       {error && value.length >= 3 && !loading && (
-        <div style={{
-          fontSize: 11,
-          color: '#ef4444',
-          marginTop: 4,
-          paddingLeft: 4
-        }}>
-          {error} - You can still enter address manually
+        <div style={{ marginTop: 5, paddingLeft: 2 }}>
+          <div style={{ fontSize: 11, color: '#ef4444', marginBottom: onOpenMapPicker ? 6 : 0 }}>
+            {error} — you can still type it manually.
+          </div>
+          {onOpenMapPicker && (
+            <button
+              type="button"
+              onClick={onOpenMapPicker}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 12px', borderRadius: 8,
+                border: '1.5px solid #E8A838',
+                background: '#fef3c7',
+                color: '#92400e', fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}
+              className='mb-4'
+              onMouseEnter={e => { (e.currentTarget as any).style.background = '#fde68a'; }}
+              onMouseLeave={e => { (e.currentTarget as any).style.background = '#fef3c7'; }}
+            >
+              📍 Pick on Map
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2878,6 +2908,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [sameAddressError, setSameAddressError] = useState(false);
   const normaliseAddr = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
 
+  // ─── Map address picker ───
+  // tracks which field is currently being picked: null | 'pickup' | 'dropoff'
+  const [mapPickerFor, setMapPickerFor] = useState<null | 'pickup' | 'dropoff'>(null);
+
   // Fires reactively whenever either address changes — guaranteed real-time
   useEffect(() => {
     if (pickupAddress && dropoffAddress && normaliseAddr(pickupAddress) === normaliseAddr(dropoffAddress)) {
@@ -3305,6 +3339,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   return (
     <div style={{ maxWidth: step === 2 ? "100%" : 780, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
 
+      {/* ─── Map picker modal ─── */}
+      {mapPickerFor && (
+        <MapPickerModal
+          onConfirm={(address) => {
+            if (mapPickerFor === 'pickup') setPickupAddress(address);
+            else handleDropoffChange(address);
+            setMapPickerFor(null);
+          }}
+          onClose={() => setMapPickerFor(null)}
+        />
+      )}
+
       {/* ═══ STEP 1: MODE SELECT + FORM ═══ */}
       {step === 1 && (
         <>
@@ -3346,6 +3392,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             <AddressAutocompleteInput
               value={pickupAddress}
               onChange={setPickupAddress}
+              onOpenMapPicker={() => setMapPickerFor('pickup')}
               placeholder="Enter pickup address in Lagos"
               style={{ ...inputStyle, marginBottom: 10 }}
             />
@@ -3365,6 +3412,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <AddressAutocompleteInput
                 value={dropoffAddress}
                 onChange={handleDropoffChange}
+                onOpenMapPicker={() => setMapPickerFor('dropoff')}
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: sameAddressError ? 0 : 10, border: sameAddressError ? '1.5px solid #ef4444' : inputStyle.border }}
               />

@@ -1,0 +1,322 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+/* ─── Lagos Bounds ──────────────────────────────────────────────── */
+const LAGOS_CENTER = { lat: 6.5244, lng: 3.3792 };
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat: number, lng: number) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+
+interface MapPickerModalProps {
+  /** Called when user confirms a location. Receives the resolved address string. */
+  onConfirm: (address: string) => void;
+  /** Called when the user dismisses without picking. */
+  onClose: () => void;
+}
+
+/* ─── MapPickerModal ─────────────────────────────────────────────
+   Full-screen Google Maps modal.
+   - A fixed crosshair pin sits centered on the map container while
+     the user drags the map underneath it.
+   - A debounced reverse-geocode fires after the map stops moving and
+     shows the resolved address in a bottom confirmation bar.
+   - "Use this address" confirms; "Cancel" closes without saving.
+──────────────────────────────────────────────────────────────── */
+export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalProps) {
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapInstanceRef = useRef<any>(null);
+  const geocoderRef = useRef<any>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [resolvedAddress, setResolvedAddress] = useState<string>('');
+  const [resolving, setResolving] = useState(false);
+  const [outsideLagos, setOutsideLagos] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
+
+  // ── Initialise map once panel is mounted ──────────────────────
+  useEffect(() => {
+    const init = () => {
+      if (!mapContainerRef.current || !window.google?.maps) return;
+
+      const map = new window.google.maps.Map(mapContainerRef.current, {
+        center: LAGOS_CENTER,
+        zoom: 14,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        zoomControl: true,
+        clickableIcons: false,
+        styles: [
+          { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+          { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+        ],
+      });
+
+      mapInstanceRef.current = map;
+      geocoderRef.current = new window.google.maps.Geocoder();
+      setMapReady(true);
+
+      // Fire reverse-geocode after map idles (user stopped dragging)
+      map.addListener('idle', () => {
+        const center = map.getCenter();
+        if (!center) return;
+        const lat = center.lat();
+        const lng = center.lng();
+
+        // Debounce
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => {
+          if (!isInLagos(lat, lng)) {
+            setOutsideLagos(true);
+            setResolvedAddress('');
+            setResolving(false);
+            return;
+          }
+          setOutsideLagos(false);
+          setResolving(true);
+
+          geocoderRef.current.geocode(
+            { location: { lat, lng } },
+            (results: any[], status: string) => {
+              setResolving(false);
+              if (status === 'OK' && results[0]) {
+                setResolvedAddress(results[0].formatted_address);
+              } else {
+                // Fallback to lat/lng string
+                setResolvedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+              }
+            }
+          );
+        }, 600);
+      });
+    };
+
+    if (window.google?.maps) {
+      init();
+    } else {
+      window.addEventListener('google-maps-loaded', init, { once: true });
+    }
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
+
+  // Block body scroll while modal is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  const handleConfirm = () => {
+    if (!resolvedAddress || outsideLagos) return;
+    onConfirm(resolvedAddress);
+  };
+
+  return (
+    /* Backdrop */
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 10000,
+        background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(4px)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        padding: 16,
+        animation: 'mpFadeIn 0.2s ease',
+      }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        width: '100%', maxWidth: 680, height: 560,
+        borderRadius: 20, overflow: 'hidden',
+        boxShadow: '0 32px 80px rgba(0,0,0,0.35)',
+        display: 'flex', flexDirection: 'column',
+        background: '#fff',
+        animation: 'mpSlideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+      }}>
+
+        {/* ── Modal header ── */}
+        <div style={{
+          padding: '14px 18px',
+          background: 'linear-gradient(135deg, #1B2A4A 0%, #0f1b33 100%)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10,
+              background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 18, flexShrink: 0,
+            }}>
+              📍
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>Pick Location on Map</div>
+              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>
+                Drag the map to position the pin on your address
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'rgba(255,255,255,0.1)', border: 'none',
+              borderRadius: 8, width: 30, height: 30,
+              cursor: 'pointer', color: 'rgba(255,255,255,0.7)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.2)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.1)')}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+
+        {/* ── Map container ── */}
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          {/* The actual Google Map */}
+          <div ref={mapContainerRef} style={{ width: '100%', height: '100%' }} />
+
+          {/* Fixed crosshair pin — always centered, map moves under it */}
+          <div style={{
+            position: 'absolute', top: '50%', left: '50%',
+            transform: 'translate(-50%, -100%)',
+            pointerEvents: 'none',
+            zIndex: 10,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            filter: outsideLagos ? 'grayscale(1) opacity(0.5)' : 'none',
+            transition: 'filter 0.2s',
+          }}>
+            {/* Pin head */}
+            <div style={{
+              width: 36, height: 36,
+              borderRadius: '50% 50% 50% 0',
+              transform: 'rotate(-45deg)',
+              background: resolving
+                ? '#94a3b8'
+                : outsideLagos ? '#ef4444' : 'linear-gradient(135deg, #E8A838, #F5C563)',
+              border: '3px solid #fff',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'background 0.2s',
+            }}>
+              <div style={{ transform: 'rotate(45deg)', fontSize: 14 }}>
+                {resolving ? '⏳' : outsideLagos ? '⚠️' : '📍'}
+              </div>
+            </div>
+            {/* Pin tail shadow */}
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%',
+              background: 'rgba(0,0,0,0.2)',
+              marginTop: 2,
+              filter: 'blur(2px)',
+            }} />
+          </div>
+
+          {/* Outside-Lagos warning overlay */}
+          {outsideLagos && (
+            <div style={{
+              position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+              background: '#fef2f2', border: '1px solid #fecaca',
+              borderRadius: 10, padding: '8px 14px',
+              fontSize: 12, fontWeight: 600, color: '#dc2626',
+              whiteSpace: 'nowrap', zIndex: 20,
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            }}>
+              ⚠️ Outside Lagos — move map closer to Lagos
+            </div>
+          )}
+
+          {/* "Not loaded" fallback */}
+          {!mapReady && (
+            <div style={{
+              position: 'absolute', inset: 0, background: '#f8fafc',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexDirection: 'column', gap: 12,
+            }}>
+              <div style={{
+                width: 36, height: 36,
+                border: '3px solid #E8A838', borderTopColor: 'transparent',
+                borderRadius: '50%', animation: 'mpSpin 0.7s linear infinite',
+              }} />
+              <span style={{ fontSize: 13, color: '#94a3b8' }}>Loading map…</span>
+            </div>
+          )}
+        </div>
+
+        {/* ── Bottom confirmation bar ── */}
+        <div style={{
+          padding: '14px 18px',
+          borderTop: '1px solid #e2e8f0',
+          background: '#fff',
+          flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>
+              Selected Address
+            </div>
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: '#1B2A4A',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              minHeight: 20,
+            }}>
+              {resolving ? (
+                <span style={{ color: '#94a3b8' }}>Resolving address…</span>
+              ) : outsideLagos ? (
+                <span style={{ color: '#ef4444' }}>Move map to Lagos service area</span>
+              ) : resolvedAddress || (
+                <span style={{ color: '#94a3b8' }}>Drag the map to position the pin</span>
+              )}
+            </div>
+          </div>
+
+          <button
+            onClick={onClose}
+            style={{
+              padding: '10px 18px', borderRadius: 10,
+              border: '1.5px solid #e2e8f0', background: '#fff',
+              fontSize: 13, fontWeight: 600, color: '#64748b',
+              cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleConfirm}
+            disabled={!resolvedAddress || resolving || outsideLagos}
+            style={{
+              padding: '10px 22px', borderRadius: 10,
+              border: 'none',
+              background: (!resolvedAddress || resolving || outsideLagos)
+                ? '#e2e8f0'
+                : 'linear-gradient(135deg, #E8A838, #F5C563)',
+              color: (!resolvedAddress || resolving || outsideLagos)
+                ? '#94a3b8' : '#1B2A4A',
+              fontSize: 13, fontWeight: 700,
+              cursor: (!resolvedAddress || resolving || outsideLagos) ? 'not-allowed' : 'pointer',
+              fontFamily: 'inherit', flexShrink: 0,
+              boxShadow: (!resolvedAddress || resolving || outsideLagos)
+                ? 'none' : '0 4px 12px rgba(232,168,56,0.35)',
+              transition: 'all 0.15s',
+            }}
+          >
+            Use this address ✓
+          </button>
+        </div>
+      </div>
+
+      <style>{`
+        @keyframes mpFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes mpSlideUp { from { opacity: 0; transform: translateY(20px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes mpSpin { to { transform: rotate(360deg); } }
+      `}</style>
+    </div>
+  );
+}

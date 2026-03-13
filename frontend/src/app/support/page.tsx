@@ -31,7 +31,7 @@ export default function SupportPage() {
       setMessages(history);
 
       // Mark read on open
-      ChatsAPI.markRead(convo.id).catch(() => {});
+      ChatsAPI.markRead(convo.id).catch(() => { });
 
       // Subscribe Ably
       const client = new Realtime({ token: tokenData.token });
@@ -93,7 +93,7 @@ export default function SupportPage() {
       <div className="max-w-2xl mx-auto px-4 pt-8 pb-4">
         <h1 className="text-2xl font-bold text-gray-900">Support Chat</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Send us a message and we'll get back to you as soon as possible.
+          Send us a message and we&apos;ll get back to you as soon as possible.
         </p>
       </div>
 
