@@ -1723,6 +1723,24 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
 
+  const handlePayNow = async (order) => {
+    if (order.paymentInfo) {
+      setPaymentOrder(order);
+      return;
+    }
+    setPayLoading(order.id);
+    try {
+      const data = await OrdersAPI.payNow(order.id);
+      const updatedOrder = { ...order, paymentInfo: data.payment_info };
+      onUpdateOrder(order.id, { paymentInfo: data.payment_info });
+      setPaymentOrder(updatedOrder);
+    } catch (e) {
+      alert(e?.message || "Failed to initiate payment");
+    } finally {
+      setPayLoading(null);
+    }
+  };
+
   if (selectedId) {
     const order = orders.find(o => o.id === selectedId);
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
@@ -1784,24 +1802,6 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     { value: "week", label: "This Week" },
     { value: "month", label: "This Month" },
   ];
-
-  const handlePayNow = async (order) => {
-    if (order.paymentInfo) {
-      setPaymentOrder(order);
-      return;
-    }
-    setPayLoading(order.id);
-    try {
-      const data = await OrdersAPI.payNow(order.id);
-      const updatedOrder = { ...order, paymentInfo: data.payment_info };
-      onUpdateOrder(order.id, { paymentInfo: data.payment_info });
-      setPaymentOrder(updatedOrder);
-    } catch (e) {
-      alert(e?.message || "Failed to initiate payment");
-    } finally {
-      setPayLoading(null);
-    }
-  };
 
   return (
     <div>
