@@ -270,6 +270,9 @@ def verify_payment(request):
                         }
                         transaction.save()
 
+                        # Process pending charges if any
+                        wallet.process_pending_charges()
+
                     return Response(
                         {
                             "success": True,
@@ -657,6 +660,9 @@ def paystack_webhook(request):
                             "webhook_data": data,
                         }
                         transaction.save()
+
+                        # Process pending charges if any
+                        wallet.process_pending_charges()
 
                 return Response({"success": True})
 
