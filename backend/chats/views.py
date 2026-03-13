@@ -85,7 +85,7 @@ class ConversationCreateOrGetView(APIView):
         # Return existing active conversation or create a new one
         conversation, created = Conversation.objects.get_or_create(
             user_id=user,
-            type=user_type,
+            type=f"{user_type}s",
             is_active=True,
             defaults={"last_message": "", "unread_count": 0},
         )
@@ -144,6 +144,10 @@ class SendMessageView(APIView):
         user = request.user
         if user == conversation.user_id:
             sender_type = conversation.type  # "customer" or "rider"
+            if sender_type == "customers":
+                sender_type = "customer"
+            elif sender_type == "riders":
+                sender_type = "rider"
         else:
             # Treat anyone else (dispatcher / admin) as agent
             sender_type = "agent"
