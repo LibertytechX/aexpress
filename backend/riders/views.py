@@ -91,18 +91,10 @@ class OrderOfferListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        # Filter by rider's home zone if assigned
-        rider = getattr(request.user, "rider_profile", None)
-        zone_filter = {}
-        if rider and rider.home_zone:
-            zone_filter["zone"] = rider.home_zone
-
+        # now = timezone.now()
         offers = (
             OrderOffer.objects.filter(
-                status="pending",
-                rider__isnull=True,
-                order__status="Pending",
-                **zone_filter,
+                status="pending", rider__isnull=True, order__status="pending"
             )
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
@@ -576,14 +568,8 @@ class RiderOrderHistoryView(APIView):
             rider=rider, status__in=history_statuses
         ).order_by("-created_at")
 
-        completed_count = orders.filter(status="Done").count()
-        ridercancelled_count = orders.filter(status="RiderCanceled").count()
-
         serializer = RiderOrderSerializer(orders, many=True)
-        return Response(
-            serializer.data,
-            status=status.HTTP_200_OK,
-        )
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class RiderOrderDetailView(APIView):
@@ -720,13 +706,11 @@ class RiderTodayTripsView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        now = timezone.now()
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # now = timezone.now()
+        # start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         orders = (
-            Order.objects.filter(
-                rider=rider, status="Done", completed_at__gte=start_date
-            )
+            Order.objects.filter(rider=rider, status="Done")
             .prefetch_related("deliveries")
             .order_by("-completed_at")
         )

@@ -1,6 +1,199 @@
+import logging
+from decimal import Decimal
+
 from django.contrib import admin
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.db.models import Sum
+
+from dispatcher.models import SystemSettings
+from riders.models import RiderEarning, RiderCodRecord
+from riders.notifications import notify_rider
+from wallet.models import Wallet
+
 from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride
+
+logger = logging.getLogger(__name__)
+
+_COD_METHODS = {"cash", "cash_on_pickup", "receiver_pays"}
+_DEFAULT_COMMISSION_PCT = Decimal("20.00")
+
+
+def complete_order_for_rider(modeladmin, request, queryset):
+    """
+    Admin action: force-complete selected orders for their assigned rider.
+
+    Mirrors OrderCompleteView but skips the proximity check. The order must
+    already have an assigned rider. Steps:
+      1. COD wallet balance check & debit (for cash-based orders).
+      2. Calculate commission, create RiderEarning, credit rider wallet.
+      3. Mark pending RiderCodRecord as remitted.
+      4. Mark all deliveries Delivered, advance order status to Done.
+      5. Send push notification to the rider.
+    """
+    completed = 0
+    skipped = []
+
+    for order in queryset.select_related("rider", "rider__user"):
+        order_number = order.order_number
+
+        # ── Guard: must have an assigned rider ────────────────────────────────
+        rider = order.rider
+        if not rider:
+            skipped.append(f"{order_number} (no rider assigned)")
+            continue
+
+        # ── Guard: order must not already be Done ─────────────────────────────
+        if order.status == "Done":
+            skipped.append(f"{order_number} (already Done)")
+            continue
+
+        try:
+            # ── Step 1: COD wallet balance check ──────────────────────────────
+            is_cod = order.payment_method in _COD_METHODS
+            cod_total = Decimal("0.00")
+
+            if is_cod:
+                cod_total = (
+                    order.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"]
+                    or Decimal("0.00")
+                )
+
+                if cod_total > 0:
+                    try:
+                        rider_wallet = Wallet.objects.get(user=rider.user)
+                    except Wallet.DoesNotExist:
+                        skipped.append(
+                            f"{order_number} (rider has no wallet for COD settlement)"
+                        )
+                        continue
+
+                    if not rider_wallet.can_debit(cod_total):
+                        skipped.append(
+                            f"{order_number} (insufficient wallet balance for COD "
+                            f"settlement — required ₦{cod_total}, "
+                            f"available ₦{rider_wallet.balance})"
+                        )
+                        continue
+
+                    rider_wallet.debit(
+                        amount=cod_total,
+                        description=f"COD remittance for order #{order_number}",
+                        reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
+                        metadata={
+                            "order_number": order_number,
+                            "order_id": str(order.id),
+                            "completed_by": "admin_action",
+                        },
+                    )
+
+            # ── Step 2: Calculate and record rider earnings ────────────────────
+            settings_obj = SystemSettings.objects.first()
+            commission_pct = (
+                settings_obj.commission_pct if settings_obj else _DEFAULT_COMMISSION_PCT
+            )
+
+            order_amount = Decimal(str(order.total_amount))
+            commission_amount = (commission_pct / Decimal("100")) * order_amount
+            net_earning = commission_amount
+
+            RiderEarning.objects.get_or_create(
+                order=order,
+                defaults={
+                    "rider": rider,
+                    "base_fare": order_amount,
+                    "commission_pct": commission_pct,
+                    "commission_amount": commission_amount,
+                    "net_earning": commission_amount,
+                    "cod_amount": cod_total,
+                },
+            )
+
+            rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+            rider_wallet_for_credit.credit(
+                amount=commission_amount,
+                description=f"Trip earning for order #{order_number} (admin completion)",
+                reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+                metadata={
+                    "order_number": order_number,
+                    "gross": str(order_amount),
+                    "commission_pct": str(commission_pct),
+                    "net_earning": str(commission_amount),
+                    "completed_by": "admin_action",
+                },
+            )
+
+            # ── Step 3: Mark COD record as remitted ───────────────────────────
+            if is_cod and cod_total > 0:
+                RiderCodRecord.objects.filter(
+                    order=order,
+                    rider=rider,
+                    status=RiderCodRecord.Status.PENDING,
+                ).update(
+                    status=RiderCodRecord.Status.REMITTED,
+                    remitted_at=timezone.now(),
+                )
+
+            # ── Step 4: Mark all deliveries Delivered, advance order to Done ──
+            for d in order.deliveries.exclude(status="Delivered"):
+                d.status = "Delivered"
+                d.delivered_at = timezone.now()
+                d.save(update_fields=["status", "delivered_at"])
+
+            order.status = "Done"
+            if not order.completed_at:
+                order.completed_at = timezone.now()
+            order.save(update_fields=["status", "completed_at", "updated_at"])
+
+            # ── Step 5: Push notification ─────────────────────────────────────
+            try:
+                notify_rider(
+                    rider=rider,
+                    title="Order Completed 🎉",
+                    body=(
+                        f"Order #{order_number} completed. "
+                        f"₦{net_earning} credited to your wallet."
+                    ),
+                    data={
+                        "order_number": order_number,
+                        "net_earning": str(net_earning),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Failed to send completion notification to rider %s: %s",
+                    rider.rider_id,
+                    exc,
+                )
+
+            completed += 1
+            logger.info(
+                "Admin action: order %s completed for rider %s by %s",
+                order_number,
+                rider.rider_id,
+                request.user,
+            )
+
+        except Exception as exc:
+            logger.error(
+                "Admin action: failed to complete order %s — %s", order_number, exc
+            )
+            skipped.append(f"{order_number} (unexpected error: {exc})")
+
+    if completed:
+        modeladmin.message_user(
+            request,
+            f"Successfully completed {completed} order(s).",
+        )
+    if skipped:
+        modeladmin.message_user(
+            request,
+            f"Skipped {len(skipped)} order(s): {', '.join(skipped)}",
+            level="warning",
+        )
+
+
+complete_order_for_rider.short_description = "Complete order for assigned rider (no proximity check)"
 
 
 class AssignedRiderFilter(admin.SimpleListFilter):
@@ -86,6 +279,8 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     """Admin configuration for Order model."""
+
+    actions = [complete_order_for_rider]
 
     list_display = [
         "order_number",
