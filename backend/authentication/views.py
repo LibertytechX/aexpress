@@ -226,16 +226,14 @@ class VerifyOTPView(APIView):
 
     def post(self, request):
         phone = request.data.get("phone")
+        email = request.data.get("email")
         otp = request.data.get("otp")
 
-        if not phone or not otp:
-            return Response(
-                {"success": False, "error": "Phone and OTP are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            user = User.objects.get(phone=phone)
+            if phone:
+                user = User.objects.get(phone=phone)
+            elif email:
+                user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
                 {"success": False, "error": "User with this phone number not found."},
