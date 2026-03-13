@@ -29,7 +29,7 @@ from wallet.models import Wallet
 from wallet.escrow import EscrowManager
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
-import traceback
+from sparky_utils.response import service_response
 
 logger = logging.getLogger(__name__)
 
@@ -1072,11 +1072,10 @@ def _advance_order(request, order_number, new_status, event_desc):
         lng = ser.validated_data.get("longitude")
 
         if lat is None or lng is None:
-            return Response(
-                {
-                    "error": "Latitude and longitude are required to mark order as picked up."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return service_response(
+                status="error",
+                message="Latitude and longitude are required to mark order as picked up.",
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
@@ -1086,11 +1085,10 @@ def _advance_order(request, order_number, new_status, event_desc):
                 lat, lng, order.pickup_latitude, order.pickup_longitude
             )
             if dist > 0.5:  # 500 meters
-                return Response(
-                    {
-                        "error": f"You are too far from the pickup location ({dist:.2f}km). Please move closer."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                return service_response(
+                    status="error",
+                    message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
     old_status = order.status
@@ -1176,9 +1174,10 @@ class OrderPickupView(APIView):
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
-            return Response(
-                {"error": "order_number is required"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return service_response(
+                status="error",
+                message="order_number is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
         return _advance_order(request, order_number, "PickedUp", "Order Picked Up")
@@ -1195,9 +1194,10 @@ class OrderStartView(APIView):
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
-            return Response(
-                {"error": "order_number is required"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return service_response(
+                status="error",
+                message="order_number is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
         # TODO: check if the rider is assigned to this order
 
@@ -1319,23 +1319,27 @@ class OrderCompleteView(APIView):
     def post(self, request, order_number):
         try:
             if not order_number:
-                return Response(
-                    {"error": "order_number is required"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                return service_response(
+                    status="error",
+                    message="order_number is required",
+                    status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
             try:
                 order = Order.objects.get(order_number=order_number)
             except Order.DoesNotExist:
-                return Response(
-                    {"error": "Order not found"}, status=status.HTTP_404_NOT_FOUND
+                return service_response(
+                    status="error",
+                    message="Order not found",
+                    status_code=status.HTTP_404_NOT_FOUND,
                 )
 
             rider = getattr(request.user, "rider_profile", None)
             if not rider:
-                return Response(
-                    {"error": "Rider profile not found."},
-                    status=status.HTTP_403_FORBIDDEN,
+                return service_response(
+                    status="error",
+                    message="Rider profile not found.",
+                    status_code=status.HTTP_403_FORBIDDEN,
                 )
 
             # Proximity check for order completion (check final delivery location)
@@ -1344,9 +1348,10 @@ class OrderCompleteView(APIView):
             lng = rider.current_longitude
 
             if lat is None or lng is None:
-                return Response(
-                    {"error": "Rider location not found. Please ensure GPS is active."},
-                    status=status.HTTP_400_BAD_REQUEST,
+                return service_response(
+                    status="error",
+                    message="Rider location not found. Please ensure GPS is active.",
+                    status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
             lat = float(lat)
@@ -1368,11 +1373,10 @@ class OrderCompleteView(APIView):
                     final_delivery.dropoff_longitude,
                 )
                 if dist > 0.5:  # 500 meters
-                    return Response(
-                        {
-                            "error": f"You are too far from the final delivery location ({dist:.2f}km). Please move closer."
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
+                    return service_response(
+                        status="error",
+                        message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
+                        status_code=status.HTTP_400_BAD_REQUEST,
                     )
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
@@ -1393,22 +1397,17 @@ class OrderCompleteView(APIView):
                     try:
                         rider_wallet = Wallet.objects.get(user=rider.user)
                     except Wallet.DoesNotExist:
-                        return Response(
-                            {
-                                "error": "Rider wallet not found. Cannot process COD payment."
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
+                        return service_response(
+                            status="error",
+                            message="Rider wallet not found. Cannot process COD payment.",
+                            status_code=status.HTTP_400_BAD_REQUEST,
                         )
 
                     if not rider_wallet.can_debit(cod_total):
-                        return Response(
-                            {
-                                "error": (
-                                    f"Insufficient wallet balance for COD settlement. "
-                                    f"Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}"
-                                )
-                            },
-                            status=status.HTTP_400_BAD_REQUEST,
+                        return service_response(
+                            status="error",
+                            message=f"Insufficient wallet balance for COD settlement. Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}",
+                            status_code=status.HTTP_400_BAD_REQUEST,
                         )
 
                     # Debit COD amount from rider wallet

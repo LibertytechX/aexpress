@@ -278,12 +278,60 @@ export const WalletAPI = {
   verifyPayment: async (reference: string) => apiRequest('/wallet/fund/verify/', { method: 'POST', body: JSON.stringify({ reference }) }),
 };
 
+// Chat interfaces
+export interface ChatConversation {
+  id: string;
+  type: 'customer' | 'rider';
+  last_message: string;
+  unread_count: number;
+  is_active: boolean;
+  updated_at: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  conversation: string;
+  sender_type: 'agent' | 'customer' | 'rider';
+  content: string;
+  is_read: boolean;
+  timestamp: string;
+}
+
+export const ChatsAPI = {
+  // Start or retrieve existing support conversation for the logged-in user
+  startConversation: async (): Promise<ChatConversation> =>
+    apiRequest('/chats/conversations/start/', { method: 'POST', body: JSON.stringify({}) }),
+
+  // Load message history
+  getMessages: async (conversationId: string): Promise<ChatMessage[]> =>
+    apiRequest(`/chats/conversations/${conversationId}/messages/`),
+
+  // Send a message
+  sendMessage: async (conversationId: string, content: string): Promise<ChatMessage> =>
+    apiRequest(`/chats/conversations/${conversationId}/messages/send/`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+
+  // Mark all messages as read
+  markRead: async (conversationId: string) =>
+    apiRequest(`/chats/conversations/${conversationId}/read/`, { method: 'POST' }),
+};
+
+export const AblyTokenAPI = {
+  // Get an Ably token — customer uses the dispatcher endpoint with chat capability
+  getToken: async (): Promise<{ token: string }> =>
+    apiRequest('/dispatch/ably-token/'),
+};
+
 // Default export matching original usage
 const API = {
     Auth: AuthAPI,
     Orders: OrdersAPI,
     Wallet: WalletAPI,
-    Token: TokenManager
+    Token: TokenManager,
+    Chats: ChatsAPI,
 };
 
 export default API;

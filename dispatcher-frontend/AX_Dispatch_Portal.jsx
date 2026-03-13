@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -954,15 +954,7 @@ const CUSTOMERS_DATA = [
   { id: "C007", name: "Kola Peters", phone: "08144556677", email: "kpeters@gmail.com", totalOrders: 19, lastOrder: "Feb 14", totalSpent: 345000, favMerchant: "TechZone Gadgets" },
   { id: "C008", name: "Aisha Mohammed", phone: "07055443322", email: "aisha.m@outlook.com", totalOrders: 7, lastOrder: "Feb 11", totalSpent: 78500, favMerchant: "FreshFit Lagos" },
 ];
-const MSG_RIDER = [
-  { id: "R001", name: "Musa Kabiru", unread: 2, lastMsg: "On my way to pickup now", lastTime: "4:05 PM", messages: [{ from: "dispatch", text: "Musa, new order AX-6158260 assigned. Pickup at Sabo Yaba.", time: "3:44 PM" }, { from: "rider", text: "Received. Heading there now.", time: "3:45 PM" }, { from: "rider", text: "Traffic heavy on Third Mainland. ETA 12 mins.", time: "3:50 PM" }, { from: "dispatch", text: "Noted. Customer informed.", time: "3:51 PM" }, { from: "rider", text: "On my way to pickup now", time: "4:05 PM" }] },
-  { id: "R003", name: "Chinedu Okoro", unread: 0, lastMsg: "Package secured, heading out", lastTime: "3:35 PM", messages: [{ from: "dispatch", text: "Chinedu, AX-6158261 for you. Car required — food delivery.", time: "3:28 PM" }, { from: "rider", text: "Copy. 5 mins from Surulere pickup.", time: "3:30 PM" }, { from: "rider", text: "Package secured, heading out", time: "3:35 PM" }] },
-  { id: "R005", name: "Ibrahim Suleiman", unread: 1, lastMsg: "Free for next dispatch", lastTime: "1:15 PM", messages: [{ from: "rider", text: "AX-6158256 delivered. COD collected.", time: "1:10 PM" }, { from: "dispatch", text: "Great work! Settle COD via wallet.", time: "1:12 PM" }, { from: "rider", text: "Done. Free for next dispatch", time: "1:15 PM" }] },
-];
-const MSG_CUSTOMER = [
-  { id: "C001", name: "Adebayo Johnson", unread: 1, lastMsg: "When will my package arrive?", lastTime: "4:08 PM", messages: [{ from: "customer", text: "Hi, I placed AX-6158260. Any update?", time: "4:02 PM" }, { from: "dispatch", text: "Your rider Musa is en route. ETA ~15 min.", time: "4:04 PM" }, { from: "customer", text: "When will my package arrive?", time: "4:08 PM" }] },
-  { id: "C003", name: "Chidi Obi", unread: 0, lastMsg: "Thank you!", lastTime: "3:40 PM", messages: [{ from: "customer", text: "Is my food order on the way?", time: "3:30 PM" }, { from: "dispatch", text: "Yes! Chinedu picked it up. Heading to you now.", time: "3:36 PM" }, { from: "customer", text: "Thank you!", time: "3:40 PM" }] },
-];
+// MSG_RIDER / MSG_CUSTOMER removed — now fetched live from /api/chats/
 
 const Badge = ({ status }) => { const s = STS[status] || { bg: "#f1f5f9", text: "#94A3B8" }; return <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: s.bg, color: s.text, textTransform: "uppercase", letterSpacing: "0.5px" }}>{status}</span>; };
 const StatCard = ({ label, value, sub, color }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: "16px 18px", flex: 1 }}><div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{label}</div><div style={{ fontSize: 24, fontWeight: 800, color: color || S.text, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>{sub && <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>{sub}</div>}</div>);
@@ -1476,7 +1468,7 @@ export default function AXDispatchPortal() {
     { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
-    { id: "messaging", label: "Messaging", icon: I.messaging, count: MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) },
+    { id: "messaging", label: "Messaging", icon: I.messaging, count: 0 },
     { id: "teams", label: "Teams", icon: I.teams, count: dispatchers.length || 0 },
     { id: "settings", label: "Settings", icon: I.settings },
   ];
@@ -3913,46 +3905,257 @@ function CustomersScreen({ data }) {
   );
 }
 
-// ─── MESSAGING ──────────────────────────────────────────────────
+// ─── MESSAGING (Live) ───────────────────────────────────────────
 function MessagingScreen() {
-  const [tab, setTab] = useState("riders");
+  const [tab, setTab] = useState("customers");
+  const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const chats = tab === "riders" ? MSG_RIDER : MSG_CUSTOMER;
-  const active = activeId ? chats.find(c => c.id === activeId) : null;
-  const templates = ["Your order has been picked up. Rider is on the way.", "Rider is ~10 minutes away.", "Slight delay, we apologize.", "Delivered successfully. Thank you!", "Please confirm delivery address."];
+  const [loadingConvos, setLoadingConvos] = useState(true);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [sending, setSending] = useState(false);
+  const ablyRef = useRef(null);
+  const channelRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  const TEMPLATES = [
+    "Your order has been picked up. Rider is on the way.",
+    "Rider is ~10 minutes away.",
+    "Slight delay, we apologize.",
+    "Delivered successfully. Thank you!",
+    "Please confirm your delivery address.",
+  ];
+
+  // ── Load Ably token + init client ───────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    ActivityFeedAPI.getAblyToken().then(({ token }) => {
+      if (cancelled) return;
+      const client = new Realtime({ token });
+      ablyRef.current = client;
+    }).catch(err => console.warn('[Chat] Ably token error:', err));
+    return () => {
+      cancelled = true;
+      channelRef.current?.unsubscribe();
+      ablyRef.current?.close();
+    };
+  }, []);
+
+  // ── Fetch conversation list whenever tab changes ─────────────────
+  const loadConversations = useCallback(async () => {
+    setLoadingConvos(true);
+    setActiveId(null);
+    setMessages([]);
+    try {
+      const data = await ChatsAPI.list({ type: tab });
+      setConversations(data);
+    } catch (e) {
+      console.error('[Chat] loadConversations:', e);
+    } finally {
+      setLoadingConvos(false);
+    }
+  }, [tab]);
+
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  // ── When a conversation is selected, load history + subscribe ───
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+
+    // Unsubscribe from previous channel
+    channelRef.current?.unsubscribe();
+    channelRef.current = null;
+
+    // Load message history
+    setLoadingMsgs(true);
+    ChatsAPI.getMessages(activeId).then(data => {
+      if (!cancelled) setMessages(data);
+    }).finally(() => { if (!cancelled) setLoadingMsgs(false); });
+
+    // Mark as read
+    ChatsAPI.markRead(activeId).then(() => {
+      setConversations(prev => prev.map(c =>
+        c.id === activeId ? { ...c, unread_count: 0 } : c
+      ));
+    }).catch(() => {});
+
+    // Subscribe to Ably channel for real-time messages
+    const convo = conversations.find(c => c.id === activeId);
+    if (convo && ablyRef.current) {
+      const channelName = `chat:${convo.type}:${convo.user_id.id}`;
+      const ch = ablyRef.current.channels.get(channelName);
+      channelRef.current = ch;
+      ch.subscribe('new_message', (msg) => {
+        if (cancelled) return;
+        const d = msg.data;
+        setMessages(prev => [
+          ...prev,
+          { id: d.id, sender_type: d.sender_type, content: d.content, timestamp: d.timestamp, is_read: false },
+        ]);
+        // Update sidebar preview
+        setConversations(prev => prev.map(c =>
+          c.id === d.conversation_id
+            ? { ...c, last_message: d.content, unread_count: d.sender_type !== 'agent' ? c.unread_count + 1 : c.unread_count }
+            : c
+        ));
+      });
+    }
+
+    return () => { cancelled = true; channelRef.current?.unsubscribe(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
+
+  // ── Auto-scroll to bottom when messages change ──────────────────
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ── Send ────────────────────────────────────────────────────────
+  const sendMessage = async () => {
+    const content = input.trim();
+    if (!content || !activeId || sending) return;
+    setSending(true);
+    setInput('');
+    try {
+      const msg = await ChatsAPI.sendMessage(activeId, content);
+      // Optimistically append (Ably will also deliver it but dedup by id is fine)
+      setMessages(prev => {
+        if (prev.find(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      setConversations(prev => prev.map(c =>
+        c.id === activeId ? { ...c, last_message: content } : c
+      ));
+    } catch (e) {
+      console.error('[Chat] sendMessage:', e);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const fmt = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
+
+  const riders = conversations.filter(c => c.type === 'rider');
+  const customers = conversations.filter(c => c.type === 'customer');
+  const list = tab === 'riders' ? riders : customers;
+  const active = conversations.find(c => c.id === activeId) || null;
+  const totalUnread = conversations.reduce((s, c) => s + (c.unread_count || 0), 0);
+
   return (
     <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+      {/* Sidebar */}
       <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", borderBottom: `1px solid ${S.border}` }}>
-          {[{ id: "riders", l: "Riders", c: MSG_RIDER.reduce((s, m) => s + m.unread, 0) }, { id: "customers", l: "Customers", c: MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) }].map(t => (<button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); }} style={{ flex: 1, padding: "12px 0", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, borderBottom: tab === t.id ? `2px solid ${S.gold}` : "2px solid transparent", color: tab === t.id ? S.gold : S.textMuted, background: "transparent" }}>{t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff", fontWeight: 700 }}>{t.c}</span>}</button>))}
+          {[
+            { id: "customers", l: "Customers", c: customers.reduce((s, c) => s + (c.unread_count || 0), 0) },
+            { id: "riders", l: "Riders", c: riders.reduce((s, c) => s + (c.unread_count || 0), 0) },
+          ].map(t => (
+            <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); }}
+              style={{ flex: 1, padding: "12px 0", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, borderBottom: tab === t.id ? `2px solid ${S.gold}` : "2px solid transparent", color: tab === t.id ? S.gold : S.textMuted, background: "transparent" }}>
+              {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff", fontWeight: 700 }}>{t.c}</span>}
+            </button>
+          ))}
         </div>
         <div style={{ flex: 1, overflowY: "auto" }}>
-          {chats.map(ch => (<div key={ch.id} onClick={() => setActiveId(ch.id)} style={{ padding: "12px 14px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", background: activeId === ch.id ? S.goldPale : "transparent", transition: "background 0.12s" }} onMouseEnter={e => { if (activeId !== ch.id) e.currentTarget.style.background = S.borderLight; }} onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ fontSize: 13, fontWeight: ch.unread ? 700 : 500 }}>{ch.name}</span><span style={{ fontSize: 10, color: S.textMuted }}>{ch.lastTime}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: ch.unread ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{ch.lastMsg}</span>{ch.unread > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: S.gold, color: "#fff", minWidth: 16, textAlign: "center" }}>{ch.unread}</span>}</div>
-          </div>))}
+          {loadingConvos ? (
+            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>
+          ) : list.length === 0 ? (
+            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No conversations</div>
+          ) : list.map(ch => (
+            <div key={ch.id} onClick={() => setActiveId(ch.id)}
+              style={{ padding: "12px 14px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", background: activeId === ch.id ? S.goldPale : "transparent", transition: "background 0.12s" }}
+              onMouseEnter={e => { if (activeId !== ch.id) e.currentTarget.style.background = S.borderLight; }}
+              onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontSize: 13, fontWeight: ch.unread_count ? 700 : 500 }}>
+                  {ch.user_id?.name || ch.user_id?.phone || 'Unknown'}
+                </span>
+                <span style={{ fontSize: 10, color: S.textMuted }}>{fmt(ch.updated_at)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, color: ch.unread_count ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>
+                  {ch.last_message || '—'}
+                </span>
+                {ch.unread_count > 0 && (
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: S.gold, color: "#fff", minWidth: 16, textAlign: "center" }}>
+                    {ch.unread_count}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
-      {active ? (<div style={{ display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>{active.name.split(" ").map(n => n[0]).join("")}</div>
-          <div><div style={{ fontSize: 14, fontWeight: 700 }}>{active.name}</div><div style={{ fontSize: 10, color: S.textMuted }}>{tab === "riders" ? "Rider" : "Customer"} • {active.id}</div></div>
+
+      {/* Chat area */}
+      {active ? (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {/* Header */}
+          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>
+              {(active.user_id?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{active.user_id?.name || active.user_id?.phone}</div>
+              <div style={{ fontSize: 10, color: S.textMuted }}>{active.type === 'rider' ? 'Rider' : 'Customer'} • {active.user_id?.phone}</div>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {loadingMsgs ? (
+              <div style={{ textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading messages…</div>
+            ) : messages.map(m => {
+              const isAgent = m.sender_type === 'agent';
+              return (
+                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start" }}>
+                  <div style={{ maxWidth: "65%", padding: "10px 14px", borderRadius: 12, borderBottomRightRadius: isAgent ? 4 : 12, borderBottomLeftRadius: isAgent ? 12 : 4, background: isAgent ? S.goldPale : S.borderLight, fontSize: 12, lineHeight: 1.5 }}>
+                    <div>{m.content}</div>
+                    <div style={{ fontSize: 9, color: S.textMuted, marginTop: 4, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Quick replies */}
+          <div style={{ padding: "8px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 6, overflowX: "auto" }}>
+            {TEMPLATES.slice(0, 3).map((t, i) => (
+              <button key={i} onClick={() => setInput(t)}
+                style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.borderLight, color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}>
+                {t.substring(0, 32)}…
+              </button>
+            ))}
+          </div>
+
+          {/* Input */}
+          <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 8 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+              placeholder="Type a message…"
+              style={{ flex: 1, background: S.borderLight, border: `1px solid ${S.border}`, borderRadius: 8, padding: "0 14px", height: 40, color: S.text, fontSize: 12, fontFamily: "inherit", outline: "none" }}
+            />
+            <button onClick={sendMessage} disabled={sending || !input.trim()}
+              style={{ width: 40, height: 40, borderRadius: 8, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {I.send}
+            </button>
+          </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {active.messages.map((m, i) => { const d = m.from === "dispatch"; return (<div key={i} style={{ display: "flex", justifyContent: d ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "65%", padding: "10px 14px", borderRadius: 12, borderBottomRightRadius: d ? 4 : 12, borderBottomLeftRadius: d ? 12 : 4, background: d ? S.goldPale : S.borderLight, fontSize: 12, lineHeight: 1.5 }}><div>{m.text}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 4, textAlign: d ? "right" : "left" }}>{m.time}</div></div></div>); })}
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 40, opacity: 0.2 }}>💬</div>
+          <div style={{ fontSize: 14, color: S.textMuted }}>Select a conversation</div>
         </div>
-        <div style={{ padding: "8px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 6, overflowX: "auto" }}>
-          {templates.slice(0, 3).map((t, i) => (<button key={i} onClick={() => setInput(t)} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.borderLight, color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 10, whiteSpace: "nowrap" }}>{t.substring(0, 30)}...</button>))}
-        </div>
-        <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 8 }}>
-          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Type a message..." style={{ flex: 1, background: S.borderLight, border: `1px solid ${S.border}`, borderRadius: 8, padding: "0 14px", height: 40, color: S.text, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-          <button style={{ width: 40, height: 40, borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>{I.send}</button>
-        </div>
-      </div>) : (<div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}><div style={{ fontSize: 40, opacity: 0.2 }}>💬</div><div style={{ fontSize: 14, color: S.textMuted }}>Select a conversation</div></div>)}
+      )}
     </div>
   );
 }
+
 
 // ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
 const inputStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 10, padding: "0 12px", height: 40, fontSize: 14, fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy, outline: "none" };
