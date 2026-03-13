@@ -25,8 +25,9 @@ from .serializers import (
 from .permissions import IsRider
 from dispatcher.models import Rider
 from dispatcher.utils import emit_activity
-from wallet.models import Wallet
+from wallet.models import Wallet, Charge
 from wallet.escrow import EscrowManager
+from wallet.corebanking_service import create_virtual_account
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
 from sparky_utils.response import service_response
@@ -551,6 +552,71 @@ class BulkImportView(APIView):
                 "order": order_serializer.data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class OrderPayNowView(APIView):
+    """
+    API endpoint to initiate the 'Pay Now' flow for an order.
+    - Retrieves or creates the user's virtual account.
+    - Populates the order's payment_info field.
+    - Creates a pending Charge record in the wallet app.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request, order_number):
+        try:
+            order = Order.objects.get(order_number=order_number, user=request.user)
+        except Order.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if order.payment_status == "Paid":
+            return Response(
+                {"success": False, "message": "Order is already paid."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Get or create virtual account
+        try:
+            virtual_account = create_virtual_account(request.user)
+            order.payment_info = {
+                "account_number": virtual_account.account_number,
+                "account_name": virtual_account.account_name,
+                "bank_name": virtual_account.bank_name,
+                "bank_code": virtual_account.bank_code,
+            }
+            order.save(update_fields=["payment_info"])
+        except Exception as e:
+            logger.error(f"Failed to create virtual account for pay-now: {e}")
+            return Response(
+                {"success": False, "message": "Failed to generate payment information."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        # Create or update pending charge
+        charge, created = Charge.objects.get_or_create(
+            user=request.user,
+            order=order,
+            defaults={"amount": order.total_amount, "status": "pending"},
+        )
+        if not created:
+            charge.amount = order.total_amount
+            charge.status = "pending"
+            charge.save()
+
+        return Response(
+            {
+                "success": True,
+                "message": "Payment information generated. Please transfer the total amount to the virtual account provided.",
+                "payment_info": order.payment_info,
+                "total_amount": str(order.total_amount),
+            },
+            status=status.HTTP_200_OK,
         )
 
 

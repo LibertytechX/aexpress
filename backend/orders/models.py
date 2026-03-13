@@ -337,6 +337,7 @@ class Order(models.Model):
 
     # Additional info
     notes = models.TextField(blank=True)
+    payment_info = models.JSONField(null=True, blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
 

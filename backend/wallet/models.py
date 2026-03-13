@@ -1,6 +1,11 @@
 from django.db import models
 from django.conf import settings
 import uuid
+import logging
+from django.db import transaction as db_transaction
+
+logger = logging.getLogger(__name__)
+
 
 class Wallet(models.Model):
     """
@@ -37,7 +42,48 @@ class Wallet(models.Model):
             metadata=metadata
         )
 
+        # Process pending charges after credit
+        self.process_pending_charges()
+
         return self.balance
+
+    def process_pending_charges(self):
+        """Check for and process any pending charges for this user"""
+        from .models import Charge  # Local import to be safe
+        charges = Charge.objects.filter(user=self.user, status='pending').order_by('created_at')
+        
+        for charge in charges:
+            if self.balance >= charge.amount:
+                try:
+                    with db_transaction.atomic():
+                        # Use a more specific reference for the debit
+                        debit_ref = f"CHRG-{charge.id.hex[:12].upper()}"
+                        
+                        # Debit the wallet
+                        self.debit(
+                            amount=charge.amount,
+                            description=f"Auto-debit for Order {charge.order.order_number}",
+                            reference=debit_ref,
+                            metadata={"charge_id": str(charge.id), "order_number": charge.order.order_number}
+                        )
+                        
+                        # Update charge status
+                        charge.status = 'completed'
+                        charge.save()
+                        
+                        # Update order payment status
+                        order = charge.order
+                        order.payment_status = 'Paid'
+                        order.save(update_fields=['payment_status'])
+                        
+                        logger.info(f"Auto-debited charge {charge.id} for order {order.order_number}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-debit charge {charge.id}: {e}")
+            else:
+                # Not enough balance to cover this charge, and since we order by created_at,
+                # we might want to stop or continue to smaller charges. 
+                # For now, let's continue to see if smaller charges can be covered.
+                continue
 
     def debit(self, amount, description="", reference="", metadata=None):
         """Debit wallet and create transaction record"""
@@ -259,3 +305,35 @@ class WebhookLog(models.Model):
         self.processing_completed_at = timezone.now()
         self.error_message = reason
         self.save(update_fields=['status', 'processing_completed_at', 'error_message', 'updated_at'])
+
+
+
+
+class Charge(models.Model):
+    """
+    Charge model - Tracks pending payments for orders.
+    When a user hits 'pay-now', a charge is created.
+    When the wallet is funded, pending charges are automatically debited.
+    """
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('canceled', 'Canceled'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='charges')
+    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, related_name='charges')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'charges'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Charge {self.amount} for Order {self.order.order_number} ({self.status})"
