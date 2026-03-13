@@ -14,6 +14,12 @@ export interface UIOrder {
   deliveries: any[];
   mode: string;
   payment_method: string;
+  payment_info: null | {
+    account_number: string;
+    account_name: string;
+    bank_name: string;
+    bank_code: string;
+  };
 }
 
 export interface UITransaction {
@@ -81,7 +87,8 @@ export const transformOrders = (apiOrders: any[]): UIOrder[] => {
     merchant: order.user_business_name,
     deliveries: order.deliveries,
     mode: order.mode,
-    payment_method: order.payment_method
+    payment_method: order.payment_method,
+    payment_info: order.payment_info ?? null,
   }));
 };
 

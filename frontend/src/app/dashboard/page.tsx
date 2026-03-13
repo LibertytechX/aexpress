@@ -385,7 +385,8 @@ export default function DashboardPage() {
       merchant: order.user_business_name,
       deliveries: order.deliveries,
       mode: order.mode,
-      payment_method: order.payment_method
+      payment_method: order.payment_method,
+      payment_info: order.payment_info ?? null,
     }));
   };
 
@@ -4033,6 +4034,36 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
+  // Pay-now modal state
+  const [payNowOrder, setPayNowOrder] = useState<any>(null);   // the order being paid
+  const [payNowLoading, setPayNowLoading] = useState(false);
+  const [payNowInfo, setPayNowInfo] = useState<any>(null);     // virtual account from API
+  const [payNowError, setPayNowError] = useState<string | null>(null);
+  const [payNowCopied, setPayNowCopied] = useState(false);
+
+  const openPayNow = async (order) => {
+    setPayNowOrder(order);
+    setPayNowInfo(null);
+    setPayNowError(null);
+    setPayNowCopied(false);
+    setPayNowLoading(true);
+    try {
+      const res = await API.Orders.payNow(order.order_number);
+      setPayNowInfo(res.payment_info);
+    } catch (e: any) {
+      setPayNowError(e.message || 'Failed to generate payment info. Please try again.');
+    } finally {
+      setPayNowLoading(false);
+    }
+  };
+
+  const closePayNow = () => {
+    setPayNowOrder(null);
+    setPayNowInfo(null);
+    setPayNowError(null);
+    setPayNowLoading(false);
+  };
+
   // Helper function to get vehicle icon
   const getVehicleIcon = (vehicleName) => {
     if (!vehicleName) return Icons.bike;
@@ -4189,6 +4220,29 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                   <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
                 </div>
               ))}
+
+              {/* ── Pay Now Button ── */}
+              {order.payment_info === null && !['Done', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled'].includes(order.status) && (
+                <div style={{ paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
+                  <button
+                    onClick={() => openPayNow(order)}
+                    style={{
+                      width: '100%', padding: '13px 20px',
+                      background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+                      color: '#1B2A4A', border: 'none', borderRadius: 10,
+                      fontSize: 14, fontWeight: 800, cursor: 'pointer',
+                      fontFamily: 'inherit', display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', gap: 8,
+                      boxShadow: '0 4px 14px rgba(232,168,56,0.4)',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as any).style.boxShadow = '0 6px 20px rgba(232,168,56,0.55)'}
+                    onMouseLeave={e => (e.currentTarget as any).style.boxShadow = '0 4px 14px rgba(232,168,56,0.4)'}
+                  >
+                    💳 Pay Now — ₦{order.amount.toLocaleString()}
+                  </button>
+                </div>
+              )}
 
               {/* Cancel Order Button */}
               {!['Delivered', 'Canceled'].includes(order.status) && (
@@ -4378,6 +4432,156 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     </>
                   ) : "Yes, Cancel"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Pay Now Modal ── */}
+        {payNowOrder && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1100,
+              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(6px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+              animation: 'fadeIn 0.2s ease',
+            }}
+            onMouseDown={e => { if (e.target === e.currentTarget) closePayNow(); }}
+          >
+            <div style={{
+              background: '#fff', borderRadius: 24, width: '100%', maxWidth: 420,
+              overflow: 'hidden', boxShadow: '0 32px 80px rgba(0,0,0,0.25)',
+              animation: 'scaleUp 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+            }}>
+              {/* Header */}
+              <div style={{
+                padding: '20px 24px',
+                background: 'linear-gradient(135deg, #1B2A4A 0%, #0f1b33 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12,
+                    background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                  }}>🏦</div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Bank Transfer</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>Order #{payNowOrder.order_number}</div>
+                  </div>
+                </div>
+                <button onClick={closePayNow} style={{
+                  background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8,
+                  width: 30, height: 30, cursor: 'pointer', color: 'rgba(255,255,255,0.7)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+                }}>×</button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '24px 24px 8px' }}>
+                {payNowLoading && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '32px 0', gap: 14 }}>
+                    <div style={{
+                      width: 40, height: 40,
+                      border: '4px solid #E8A838', borderTopColor: 'transparent',
+                      borderRadius: '50%', animation: 'spin 0.7s linear infinite',
+                    }} />
+                    <span style={{ fontSize: 13, color: '#94a3b8', fontWeight: 500 }}>Generating payment details…</span>
+                  </div>
+                )}
+
+                {payNowError && !payNowLoading && (
+                  <div style={{
+                    background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
+                    padding: '14px 16px', fontSize: 13, color: '#dc2626', fontWeight: 600,
+                    display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16,
+                  }}>
+                    <span style={{ fontSize: 18 }}>⚠️</span>
+                    <span>{payNowError}</span>
+                  </div>
+                )}
+
+                {payNowInfo && !payNowLoading && (
+                  <>
+                    {/* Amount banner */}
+                    <div style={{
+                      background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                      border: '1px solid #fbbf24', borderRadius: 14,
+                      padding: '16px 20px', marginBottom: 20,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Total Amount Due</div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: '#1B2A4A' }}>₦{payNowOrder.amount.toLocaleString()}</div>
+                      </div>
+                      <div style={{ fontSize: 32 }}>💰</div>
+                    </div>
+
+                    {/* Account details */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                      {/* Bank */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Bank</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{payNowInfo.bank_name}</div>
+                        </div>
+                        <span style={{ fontSize: 24 }}>🏛️</span>
+                      </div>
+
+                      {/* Account number + copy */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Account Number</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: '#1B2A4A', letterSpacing: 2 }}>{payNowInfo.account_number}</div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(payNowInfo.account_number);
+                            setPayNowCopied(true);
+                            setTimeout(() => setPayNowCopied(false), 2000);
+                          }}
+                          style={{
+                            padding: '6px 12px', borderRadius: 8, flexShrink: 0,
+                            border: '1.5px solid ' + (payNowCopied ? '#10b981' : '#e2e8f0'),
+                            background: payNowCopied ? '#d1fae5' : '#fff',
+                            color: payNowCopied ? '#065f46' : '#1B2A4A',
+                            fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
+                          }}
+                        >{payNowCopied ? '✓ Copied' : '📋 Copy'}</button>
+                      </div>
+
+                      {/* Account name */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Account Name</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{payNowInfo.account_name}</div>
+                      </div>
+                    </div>
+
+                    {/* Instruction */}
+                    <div style={{
+                      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12,
+                      padding: '12px 16px', display: 'flex', gap: 10, marginBottom: 8,
+                    }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
+                      <div style={{ fontSize: 12, color: '#1e40af', lineHeight: 1.55 }}>
+                        Transfer exactly <strong>₦{payNowOrder.amount.toLocaleString()}</strong> to the account above.
+                        Your order will be confirmed automatically once payment is verified.
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '12px 24px 24px' }}>
+                <button
+                  onClick={closePayNow}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 12, border: 'none',
+                    background: 'linear-gradient(135deg, #1B2A4A, #243554)',
+                    color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >Done</button>
               </div>
             </div>
           </div>
