@@ -292,9 +292,9 @@ export default function DashboardPage() {
     }
   }, [screen]);
 
-  // Load orders when dashboard is shown
+  // Load orders when dashboard or orders screen is shown
   useEffect(() => {
-    if (screen === "dashboard" && currentUser) {
+    if ((screen === "dashboard" || screen === "orders") && currentUser) {
       loadOrders();
       loadWalletBalance();
     }
@@ -4233,15 +4233,14 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                   {/* decorative circle */}
                   <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: 'rgba(232,168,56,0.07)' }} />
 
-                  {/* Avatar */}
+                  {/* Bike icon avatar */}
                   <div style={{
-                    width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                    width: 52, height: 52, borderRadius: 14, flexShrink: 0,
                     background: 'linear-gradient(135deg, #E8A838, #F5C563)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18, fontWeight: 800, color: '#1B2A4A',
                     boxShadow: '0 4px 12px rgba(232,168,56,0.35)',
                   }}>
-                    {order.rider_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class=""><circle cx="18.5" cy="17.5" r="3.5"></circle><circle cx="5.5" cy="17.5" r="3.5"></circle><circle cx="15" cy="5" r="1"></circle><path d="M12 17.5V14l-3-3 4-3 2 3h2" class=""></path></svg>
                   </div>
 
                   {/* Info */}
@@ -4254,23 +4253,28 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                         fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
                         letterSpacing: 0.5, border: '1px solid rgba(232,168,56,0.25)',
                       }}>#{order.rider_code}</span>
-                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>{order.rider_phone}</span>
+                      <span style={{ fontSize: 14, color: '#fff', fontWeight: 600 }}>{order.rider_phone}</span>
                     </div>
                   </div>
 
-                  {/* Call button */}
+                  {/* Call button — solid green, white icon */}
                   <a
                     href={`tel:${order.rider_phone}`}
                     style={{
-                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
-                      background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+                      width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                      background: '#10b981',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 18, textDecoration: 'none', transition: 'all 0.15s',
+                      textDecoration: 'none', transition: 'all 0.15s',
+                      boxShadow: '0 4px 12px rgba(16,185,129,0.4)',
                     }}
-                    onMouseEnter={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.3)'}
-                    onMouseLeave={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.15)'}
+                    onMouseEnter={e => { (e.currentTarget as any).style.background = '#059669'; (e.currentTarget as any).style.boxShadow = '0 6px 16px rgba(16,185,129,0.55)'; }}
+                    onMouseLeave={e => { (e.currentTarget as any).style.background = '#10b981'; (e.currentTarget as any).style.boxShadow = '0 4px 12px rgba(16,185,129,0.4)'; }}
                     title={`Call ${order.rider_name}`}
-                  >📞</a>
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.4a16 16 0 0 0 6 6l.86-.87a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21.5 16h.42a2 2 0 0 1 .08.92z" />
+                    </svg>
+                  </a>
                 </div>
               )}
 
