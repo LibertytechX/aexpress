@@ -387,6 +387,9 @@ export default function DashboardPage() {
       mode: order.mode,
       payment_method: order.payment_method,
       payment_info: order.payment_info ?? null,
+      rider_name: order.rider_name || null,
+      rider_code: order.rider_code || null,
+      rider_phone: order.rider_phone || null,
     }));
   };
 
@@ -4215,6 +4218,59 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     <div style={{ fontSize: 11, color: S.grayLight, fontWeight: 600 }}>DROPOFF</div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>{order.dropoff}</div>
                   </div>
+                </div>
+              )}
+
+              {/* ── Rider Card ── */}
+              {order.rider_name && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #1B2A4A 0%, #0f1b33 100%)',
+                  borderRadius: 14, padding: '16px 18px',
+                  display: 'flex', alignItems: 'center', gap: 14,
+                  boxShadow: '0 4px 20px rgba(27,42,74,0.18)',
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  {/* decorative circle */}
+                  <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: 'rgba(232,168,56,0.07)' }} />
+
+                  {/* Avatar */}
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                    background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 18, fontWeight: 800, color: '#1B2A4A',
+                    boxShadow: '0 4px 12px rgba(232,168,56,0.35)',
+                  }}>
+                    {order.rider_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Your Rider</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{order.rider_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <span style={{
+                        background: 'rgba(232,168,56,0.18)', color: '#E8A838',
+                        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                        letterSpacing: 0.5, border: '1px solid rgba(232,168,56,0.25)',
+                      }}>#{order.rider_code}</span>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>{order.rider_phone}</span>
+                    </div>
+                  </div>
+
+                  {/* Call button */}
+                  <a
+                    href={`tel:${order.rider_phone}`}
+                    style={{
+                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                      background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 18, textDecoration: 'none', transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.3)'}
+                    onMouseLeave={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.15)'}
+                    title={`Call ${order.rider_name}`}
+                  >📞</a>
                 </div>
               )}
 
