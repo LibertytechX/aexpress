@@ -25,7 +25,7 @@ def send_verification_email(user, otp=None):
     """
     try:
         # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_API_KEY")
+        api_key = os.getenv("MAILGUN_APIKEY")
         domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
@@ -369,6 +369,465 @@ def get_mobile_password_reset_email_template(
             </td>
         </tr>
     </table>
+</body>
+</html>
+"""
+
+
+def send_onboarding_email(user):
+    """
+    Sends a premium onboarding email to the user after successful OTP verification.
+    """
+    try:
+        # Get Mailgun credentials from environment
+        api_key = os.getenv("MAILGUN_APIKEY")
+        domain = os.getenv("MAILGUN_DOMAIN")
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+
+        if not api_key or not domain:
+            logger.error("Mailgun credentials not configured")
+            return False
+
+        # Create HTML email template
+        # Use first_name if available, else contact_name
+        first_name = user.first_name or (
+            user.contact_name.split()[0] if user.contact_name else "Merchant"
+        )
+        html_content = get_onboarding_email_template(first_name)
+
+        # Create text email content
+        text_content = f"Hi {first_name},\n\nWelcome to Assured Express! We're thrilled to have you on board. Your account is live and your dashboard is ready — you can start requesting deliveries right now.\n\nBest regards,\nThe Assured Express Team"
+
+        # Send email via Mailgun
+        response = requests.post(
+            f"https://api.mailgun.net/v3/{domain}/messages",
+            auth=("api", api_key),
+            data={
+                "from": f"{from_name} <{from_email}>",
+                "to": [user.email],
+                "subject": "Welcome to Assured Express 🎉",
+                "html": html_content,
+                "text": text_content,
+            },
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Onboarding email sent to {user.email}")
+            return True
+        else:
+            logger.error(f"Mailgun error sending onboarding email: {response.text}")
+            return False
+
+    except Exception as e:
+        logger.error(f"Error sending onboarding email: {str(e)}")
+        return False
+
+
+def get_onboarding_email_template(name):
+    """
+    Returns the HTML template for the onboarding email.
+    """
+    return f"""
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no">
+  <title>Welcome to Assured Express 🎉</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
+    body {{ margin: 0 !important; padding: 0 !important; }}
+    img {{ border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }}
+    table {{ border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }}
+    @media screen and (max-width: 600px) {{
+      .email-shell   {{ width: 100% !important; border-radius: 0 !important; }}
+      .mobile-pad    {{ padding: 32px 24px !important; }}
+      .mobile-h1     {{ font-size: 28px !important; }}
+      .hero-pad      {{ padding: 44px 24px 36px !important; }}
+      .feat-row td   {{ display: block !important; width: 100% !important; }}
+      .cta-btn       {{ padding: 15px 32px !important; font-size: 15px !important; }}
+      .footer-pad    {{ padding: 32px 24px 28px !important; }}
+    }}
+  </style>
+</head>
+
+<body style="margin:0;padding:0;background-color:#ECEAE5;font-family:'Outfit',sans-serif;">
+
+<!-- HIDDEN PREVIEW TEXT -->
+<div style="display:none;font-size:1px;color:#ECEAE5;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+  You're officially part of a smarter, safer delivery network. Welcome aboard! 🎉&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</div>
+
+<!-- PAGE WRAPPER -->
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ECEAE5;">
+<tr><td align="center" style="padding:36px 16px;">
+
+  <!-- [EMAIL CARD] -->
+  <table class="email-shell" role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"
+    style="max-width:600px;border-radius:24px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,0.14);">
+
+
+    <!-- AMBER TOP BAR -->
+    <tr>
+      <td style="background-color:#FBB12F;height:5px;font-size:0;line-height:0;">&nbsp;</td>
+    </tr>
+
+
+    <!-- HERO HEADER -->
+    <tr>
+      <td class="hero-pad" align="center" style="background-color:#141C2E;padding:56px 48px 48px;">
+
+        <!-- Logo -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 32px;">
+          <tr>
+            <td align="center" style="background-color:#FBB12F;border-radius:22px;padding:3px;line-height:0;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="background-color:#141C2E;border-radius:19px;width:94px;height:94px;vertical-align:middle;">
+                    <img src="https://res.cloudinary.com/djfz912mh/image/upload/v1773395665/logo2_szdqnh.png"
+                         alt="Assured Express" width="80" height="80"
+                         style="display:block;width:80px;height:80px;border-radius:14px;margin:7px auto;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Badge -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 22px;">
+          <tr>
+            <td align="center" style="border:1px solid rgba(251,177,47,0.45);border-radius:100px;padding:6px 18px;background-color:rgba(251,177,47,0.1);">
+              <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.13em;text-transform:uppercase;color:#FBB12F;">
+                ✦&nbsp; Account Activated
+              </span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- H1 -->
+        <h1 class="mobile-h1" style="font-family:'Outfit',sans-serif;font-size:38px;font-weight:800;line-height:1.18;color:#FFFFFF;margin:0 0 16px;letter-spacing:-0.8px;">
+          Welcome to<br>
+          <span style="color:#FBB12F;">Assured</span> Express
+        </h1>
+
+        <!-- Subtitle -->
+        <p style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:400;color:rgba(255,255,255,0.55);margin:0 auto;line-height:1.75;max-width:380px;">
+          Nigeria's trusted logistics partner for merchants who care about getting goods to customers safely and on time.
+        </p>
+
+      </td>
+    </tr>
+
+
+    <!-- BODY -->
+    <tr>
+      <td class="mobile-pad" style="background-color:#FFFFFF;padding:48px 44px 0;">
+
+        <!-- Greeting -->
+        <p style="font-family:'Outfit',sans-serif;font-size:21px;font-weight:700;color:#141C2E;margin:0 0 12px;">
+          Hi {name}, 👋
+        </p>
+        <p style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:400;color:#5A6680;line-height:1.85;margin:0 0 40px;">
+          We're thrilled to have you on board! Your account is live and your dashboard is ready — you can start requesting deliveries right now. Here's everything at your fingertips:
+        </p>
+
+        <!-- Section label row -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:18px;">
+          <tr>
+            <td style="white-space:nowrap;vertical-align:middle;padding-right:12px;">
+              <span style="font-family:'Outfit',sans-serif;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.16em;color:#A0AABB;">What you can do right now</span>
+            </td>
+            <td width="100%" style="vertical-align:middle;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+                <tr><td style="height:2px;background-color:#FBB12F;border-radius:2px;opacity:0.35;font-size:0;">&nbsp;</td></tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        <!-- FEATURE 1 -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="margin-bottom:10px;border-radius:16px;border:1.5px solid #EEF2FA;background-color:#F8FAFF;overflow:hidden;">
+          <tr>
+            <td style="width:72px;padding:20px 0 20px 18px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:46px;height:46px;background-color:#FBB12F;border-radius:13px;font-size:22px;line-height:46px;text-align:center;vertical-align:middle;">
+                    🚀
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="padding:20px 12px;vertical-align:middle;">
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#141C2E;margin:0 0 4px;">Request a Delivery in Minutes</p>
+              <p style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:400;color:#6B7A99;margin:0;line-height:1.65;">Log in and dispatch your first order — it takes less than 2 minutes to get started.</p>
+            </td>
+            <td style="width:38px;padding-right:16px;text-align:center;vertical-align:middle;">
+              <span style="font-family:sans-serif;font-size:20px;font-weight:700;color:#FBB12F;">›</span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- FEATURE 2 -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="margin-bottom:10px;border-radius:16px;border:1.5px solid #EEF2FA;background-color:#F8FAFF;overflow:hidden;">
+          <tr>
+            <td style="width:72px;padding:20px 0 20px 18px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:46px;height:46px;background-color:#00B67A;border-radius:13px;font-size:22px;line-height:46px;text-align:center;vertical-align:middle;">
+                    📍
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="padding:20px 12px;vertical-align:middle;">
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#141C2E;margin:0 0 4px;">Real-Time Shipment Tracking</p>
+              <p style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:400;color:#6B7A99;margin:0;line-height:1.65;">Follow every package from pickup to doorstep — live, accurate, and fully transparent.</p>
+            </td>
+            <td style="width:38px;padding-right:16px;text-align:center;vertical-align:middle;">
+              <span style="font-family:sans-serif;font-size:20px;font-weight:700;color:#00B67A;">›</span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- FEATURE 3 -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="margin-bottom:10px;border-radius:16px;border:1.5px solid #EEF2FA;background-color:#F8FAFF;overflow:hidden;">
+          <tr>
+            <td style="width:72px;padding:20px 0 20px 18px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:46px;height:46px;background-color:#141C2E;border-radius:13px;font-size:22px;line-height:46px;text-align:center;vertical-align:middle;">
+                    🌍
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="padding:20px 12px;vertical-align:middle;">
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#141C2E;margin:0 0 4px;">Reach Customers Everywhere</p>
+              <p style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:400;color:#6B7A99;margin:0;line-height:1.65;">Lagos and beyond — we handle the last mile so your customers always get their orders.</p>
+            </td>
+            <td style="width:38px;padding-right:16px;text-align:center;vertical-align:middle;">
+              <span style="font-family:sans-serif;font-size:20px;font-weight:700;color:#141C2E;">›</span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- FEATURE 4 -->
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="border-radius:16px;border:1.5px solid #EEF2FA;background-color:#F8FAFF;overflow:hidden;">
+          <tr>
+            <td style="width:72px;padding:20px 0 20px 18px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:46px;height:46px;background-color:#FBB12F;border-radius:13px;font-size:22px;line-height:46px;text-align:center;vertical-align:middle;">
+                    💬
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="padding:20px 12px;vertical-align:middle;">
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#141C2E;margin:0 0 4px;">Dedicated Merchant Support</p>
+              <p style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:400;color:#6B7A99;margin:0;line-height:1.65;">Our support team is always ready to help you — any time, any issue, any question.</p>
+            </td>
+            <td style="width:38px;padding-right:16px;text-align:center;vertical-align:middle;">
+              <span style="font-family:sans-serif;font-size:20px;font-weight:700;color:#FBB12F;">›</span>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+
+
+    <!-- CTA BLOCK -->
+    <tr>
+      <td class="mobile-pad" style="background-color:#FFFFFF;padding:36px 44px;">
+
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="width:6px;background-color:#FBB12F;">&nbsp;</td>
+            <td align="center" style="background-color:#141C2E;padding:40px 36px;">
+              <div style="font-size:42px;line-height:1;margin-bottom:16px;">🎯</div>
+              <h2 style="font-family:'Outfit',sans-serif;font-size:22px;font-weight:800;color:#FFFFFF;margin:0 0 10px;letter-spacing:-0.3px;">
+                Your dashboard is <span style="color:#FBB12F;">ready.</span>
+              </h2>
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:400;color:rgba(255,255,255,0.5);margin:0 auto 30px;line-height:1.75;max-width:340px;">
+                Log in now and request your first delivery in under 2 minutes.<br>Your customers are waiting!
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto;">
+                <tr>
+                  <td align="center" style="border-radius:100px;background-color:#FBB12F;">
+                    <a href="https://send.axpress.net" target="_blank" class="cta-btn"
+                      style="font-family:'Outfit',sans-serif;font-size:16px;font-weight:700;color:#141C2E;text-decoration:none;display:inline-block;padding:17px 48px;border-radius:100px;letter-spacing:0.02em;">
+                      Go to My Dashboard &nbsp;→
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-family:'Outfit',sans-serif;font-size:11px;color:rgba(255,255,255,0.25);margin:20px 0 0;letter-spacing:0.06em;">
+                🔒 &nbsp;SECURE &nbsp;·&nbsp; TRUSTED &nbsp;·&nbsp; ALWAYS ON
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </td>
+    </tr>
+
+
+    <!-- SUPPORT STRIP -->
+    <tr>
+      <td class="mobile-pad" style="background-color:#FFFFFF;padding:0 44px 36px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0"
+          style="border-radius:16px;background-color:#F0FBF6;border:1.5px solid #C2EDD8;overflow:hidden;">
+          <tr>
+            <td style="width:70px;padding:18px 0 18px 18px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:44px;height:44px;background-color:#00B67A;border-radius:12px;font-size:22px;line-height:44px;text-align:center;vertical-align:middle;">
+                    🛟
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="padding:18px 12px;vertical-align:middle;">
+              <p style="font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#141C2E;margin:0 0 3px;">We're here whenever you need us</p>
+              <p style="font-family:'Outfit',sans-serif;font-size:13px;color:#6B7A99;margin:0;line-height:1.55;">Reach out anytime — we love hearing from our merchants.</p>
+            </td>
+            <td style="width:80px;padding-right:16px;text-align:right;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin-left:auto;">
+                <tr>
+                  <td style="background-color:#D3F5E6;border:1px solid #A2E6C4;border-radius:100px;padding:5px 11px;">
+                    <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;color:#007A52;">● Online</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+
+    <!-- CLOSING MESSAGE -->
+    <tr>
+      <td class="mobile-pad" style="background-color:#FFFFFF;padding:0 44px 48px;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:28px;">
+          <tr><td style="height:1px;background-color:#EEF2FA;font-size:0;line-height:0;">&nbsp;</td></tr>
+        </table>
+        <p style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:400;color:#5A6680;line-height:1.85;margin:0 0 18px;">
+          If you have any questions or need help getting started, don't hesitate to reach out — we're here for you every step of the way.
+        </p>
+        <p style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:400;color:#5A6680;line-height:1.85;margin:0 0 30px;">
+          Welcome to the <strong style="color:#141C2E;font-weight:700;">Assured Express family!</strong> 🎉
+        </p>
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td style="width:52px;padding-right:14px;vertical-align:middle;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="width:46px;height:46px;background-color:#FBB12F;border-radius:13px;font-size:22px;line-height:46px;text-align:center;vertical-align:middle;">
+                    ✉️
+                  </td>
+                </tr>
+              </table>
+            </td>
+            <td style="vertical-align:middle;">
+              <strong style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:700;color:#141C2E;display:block;line-height:1.4;">The Assured Express Team</strong>
+              <span style="font-family:'Outfit',sans-serif;font-size:13px;font-weight:400;color:#A0AABB;">Nigeria's Trusted Logistics Partner</span>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+
+
+    <!-- FOOTER -->
+    <tr>
+      <td style="background-color:#0D1424;padding:0;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td style="background-color:#FBB12F;height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        </table>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td class="footer-pad" align="center" style="padding:40px 44px 36px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 14px;">
+                <tr>
+                  <td align="center" style="background-color:#FBB12F;border-radius:16px;padding:2px;line-height:0;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td align="center" style="background-color:#0D1424;border-radius:14px;width:56px;height:56px;vertical-align:middle;">
+                          <img src="https://res.cloudinary.com/djfz912mh/image/upload/v1773395665/logo2_szdqnh.png"
+                               alt="AX" width="46" height="46"
+                               style="display:block;width:46px;height:46px;border-radius:10px;margin:5px auto;">
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:800;color:#FFFFFF;margin:0 0 4px;letter-spacing:-0.3px;">
+                Assured Express
+              </p>
+              <p style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:0.12em;color:rgba(255,255,255,0.3);margin:0 0 28px;">
+                Delivering Trust, One Package at a Time
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 28px;">
+                <tr>
+                  <td align="center" style="padding-bottom:8px;">
+                    <a href="tel:+2347070890979"
+                      style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      📞 &nbsp;+234 707 089 0979
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding-bottom:8px;">
+                    <a href="mailto:support@axpress.net" style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      ✉ &nbsp;support@axpress.net
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <a href="https://send.axpress.net" target="_blank"
+                      style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      🌐 &nbsp;send.axpress.net
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:20px;">
+                <tr><td style="height:1px;background-color:rgba(255,255,255,0.08);font-size:0;line-height:0;">&nbsp;</td></tr>
+              </table>
+              <p style="font-family:'Outfit',sans-serif;font-size:11px;color:rgba(255,255,255,0.22);line-height:1.9;margin:0;">
+                © 2025 Assured Express. All rights reserved.<br>
+                You're receiving this because you created a merchant account on Assured Express.<br>
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Unsubscribe</a>
+                &nbsp;·&nbsp;
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Privacy Policy</a>
+                &nbsp;·&nbsp;
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Terms</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</td></tr>
+</table>
 </body>
 </html>
 """
