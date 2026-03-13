@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import API, { TokenManager } from '@/lib/api';
 import NotificationSidebar from '@/components/common/NotificationSidebar';
+import FloatingSupportChat from '@/components/common/FloatingSupportChat';
+import MapPickerModal from '@/components/common/MapPickerModal';
 import { useRouter } from 'next/navigation';
 import Logo from '@/components/ui/logo';
 import { LagosMap } from '@/components/map/LagosMap';
@@ -383,7 +385,11 @@ export default function DashboardPage() {
       merchant: order.user_business_name,
       deliveries: order.deliveries,
       mode: order.mode,
-      payment_method: order.payment_method
+      payment_method: order.payment_method,
+      payment_info: order.payment_info ?? null,
+      rider_name: order.rider_name || null,
+      rider_code: order.rider_code || null,
+      rider_phone: order.rider_phone || null,
     }));
   };
 
@@ -636,6 +642,9 @@ export default function DashboardPage() {
         isOpen={notificationOpen}
         onClose={() => setNotificationOpen(false)}
       />
+
+      {/* Floating Support Chat — persists across all screens */}
+      <FloatingSupportChat />
 
       {/* Mobile overlay */}
       {sidebarOpen && <div onClick={() => setSidebarOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 40 }} />}
@@ -2233,7 +2242,7 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
 }
 
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }: any) {
+function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: any) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -2301,38 +2310,46 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     }
 
     debounceTimer.current = setTimeout(() => {
+      // Bias results towards Lagos using both bounds and component restrictions
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
+
+      // Append "Lagos, Nigeria" to the raw input when not already present.
+      // Bare street names like "15A Kunle Ogunba street lekki phase 1" are only
+      // resolved correctly by the Places Autocomplete API when state/country
+      // context is included in the query (same fix as the geocoding layer).
+      const lower = input.toLowerCase();
+      const searchInput =
+        lower.includes('lagos') || lower.includes('nigeria')
+          ? input
+          : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
       const request = {
-        input: input,
+        input: searchInput,
         componentRestrictions: { country: 'ng' }, // Restrict to Nigeria
-        types: ['address'], // Only addresses
-        // Bias results to Lagos
-        location: new window.google.maps.LatLng(6.5244, 3.3792), // Lagos coordinates
-        radius: 50000, // 50km radius
+        bounds: lagosBounds, // Bias to Lagos
       };
 
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
         setLoading(false);
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Filter to only Lagos addresses
-          const lagosResults = predictions.filter(p =>
-            p.description.toLowerCase().includes('lagos')
-          );
-
-          if (lagosResults.length === 0) {
-            setError('No addresses found in Lagos');
-            setSuggestions([]);
-          } else {
-            setSuggestions(lagosResults);
-            setShowDropdown(true);
-            setError(null);
-          }
+          // Results are already scoped to Nigeria + Lagos area via componentRestrictions + bounds.
+          // Don't filter by the word "lagos" in the description — Google Maps frequently omits it
+          // for local area names (e.g. "15a Kunle Ogunba St, Lekki Phase I, Lekki").
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
+          setError(null);
         } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
           setError('No addresses found in Lagos');
           setSuggestions([]);
+          setShowDropdown(false);
         } else {
           setError('Failed to fetch suggestions');
           setSuggestions([]);
+          setShowDropdown(false);
         }
       });
     }, 550); // 550ms debounce
@@ -2428,15 +2445,32 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message + optional map picker CTA */}
       {error && value.length >= 3 && !loading && (
-        <div style={{
-          fontSize: 11,
-          color: '#ef4444',
-          marginTop: 4,
-          paddingLeft: 4
-        }}>
-          {error} - You can still enter address manually
+        <div style={{ marginTop: 5, paddingLeft: 2 }}>
+          <div style={{ fontSize: 11, color: '#ef4444', marginBottom: onOpenMapPicker ? 6 : 0 }}>
+            {error} — you can still type it manually.
+          </div>
+          {onOpenMapPicker && (
+            <button
+              type="button"
+              onClick={onOpenMapPicker}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 12px', borderRadius: 8,
+                border: '1.5px solid #E8A838',
+                background: '#fef3c7',
+                color: '#92400e', fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}
+              className='mb-4'
+              onMouseEnter={e => { (e.currentTarget as any).style.background = '#fde68a'; }}
+              onMouseLeave={e => { (e.currentTarget as any).style.background = '#fef3c7'; }}
+            >
+              📍 Pick on Map
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -2878,6 +2912,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [sameAddressError, setSameAddressError] = useState(false);
   const normaliseAddr = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
 
+  // ─── Map address picker ───
+  // tracks which field is currently being picked: null | 'pickup' | 'dropoff'
+  const [mapPickerFor, setMapPickerFor] = useState<null | 'pickup' | 'dropoff'>(null);
+
   // Fires reactively whenever either address changes — guaranteed real-time
   useEffect(() => {
     if (pickupAddress && dropoffAddress && normaliseAddr(pickupAddress) === normaliseAddr(dropoffAddress)) {
@@ -3305,6 +3343,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   return (
     <div style={{ maxWidth: step === 2 ? "100%" : 780, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
 
+      {/* ─── Map picker modal ─── */}
+      {mapPickerFor && (
+        <MapPickerModal
+          onConfirm={(address) => {
+            if (mapPickerFor === 'pickup') setPickupAddress(address);
+            else handleDropoffChange(address);
+            setMapPickerFor(null);
+          }}
+          onClose={() => setMapPickerFor(null)}
+        />
+      )}
+
       {/* ═══ STEP 1: MODE SELECT + FORM ═══ */}
       {step === 1 && (
         <>
@@ -3346,6 +3396,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             <AddressAutocompleteInput
               value={pickupAddress}
               onChange={setPickupAddress}
+              onOpenMapPicker={() => setMapPickerFor('pickup')}
               placeholder="Enter pickup address in Lagos"
               style={{ ...inputStyle, marginBottom: 10 }}
             />
@@ -3365,6 +3416,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <AddressAutocompleteInput
                 value={dropoffAddress}
                 onChange={handleDropoffChange}
+                onOpenMapPicker={() => setMapPickerFor('dropoff')}
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: sameAddressError ? 0 : 10, border: sameAddressError ? '1.5px solid #ef4444' : inputStyle.border }}
               />
@@ -3985,6 +4037,45 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
+  // Pay-now modal state
+  const [payNowOrder, setPayNowOrder] = useState<any>(null);   // the order being paid
+  const [payNowLoading, setPayNowLoading] = useState(false);
+  const [payNowInfo, setPayNowInfo] = useState<any>(null);     // virtual account from API
+  const [payNowError, setPayNowError] = useState<string | null>(null);
+  const [payNowCopied, setPayNowCopied] = useState(false);
+
+  const openPayNow = async (order) => {
+    setPayNowOrder(order);
+    setPayNowInfo(null);
+    setPayNowError(null);
+    setPayNowCopied(false);
+
+    // If we already have the virtual account details, show them directly
+    if (order.payment_info) {
+      setPayNowInfo(order.payment_info);
+      setPayNowLoading(false);
+      return;
+    }
+
+    // Otherwise call the endpoint to generate them
+    setPayNowLoading(true);
+    try {
+      const res = await API.Orders.payNow(order.order_number);
+      setPayNowInfo(res.payment_info);
+    } catch (e: any) {
+      setPayNowError(e.message || 'Failed to generate payment info. Please try again.');
+    } finally {
+      setPayNowLoading(false);
+    }
+  };
+
+  const closePayNow = () => {
+    setPayNowOrder(null);
+    setPayNowInfo(null);
+    setPayNowError(null);
+    setPayNowLoading(false);
+  };
+
   // Helper function to get vehicle icon
   const getVehicleIcon = (vehicleName) => {
     if (!vehicleName) return Icons.bike;
@@ -4130,6 +4221,59 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                 </div>
               )}
 
+              {/* ── Rider Card ── */}
+              {order.rider_name && (
+                <div style={{
+                  background: 'linear-gradient(135deg, #1B2A4A 0%, #0f1b33 100%)',
+                  borderRadius: 14, padding: '16px 18px',
+                  display: 'flex', alignItems: 'center', gap: 14,
+                  boxShadow: '0 4px 20px rgba(27,42,74,0.18)',
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  {/* decorative circle */}
+                  <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: 'rgba(232,168,56,0.07)' }} />
+
+                  {/* Avatar */}
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 14, flexShrink: 0,
+                    background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 18, fontWeight: 800, color: '#1B2A4A',
+                    boxShadow: '0 4px 12px rgba(232,168,56,0.35)',
+                  }}>
+                    {order.rider_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                  </div>
+
+                  {/* Info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3 }}>Your Rider</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{order.rider_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <span style={{
+                        background: 'rgba(232,168,56,0.18)', color: '#E8A838',
+                        fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6,
+                        letterSpacing: 0.5, border: '1px solid rgba(232,168,56,0.25)',
+                      }}>#{order.rider_code}</span>
+                      <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>{order.rider_phone}</span>
+                    </div>
+                  </div>
+
+                  {/* Call button */}
+                  <a
+                    href={`tel:${order.rider_phone}`}
+                    style={{
+                      width: 40, height: 40, borderRadius: 12, flexShrink: 0,
+                      background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 18, textDecoration: 'none', transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.3)'}
+                    onMouseLeave={e => (e.currentTarget as any).style.background = 'rgba(16,185,129,0.15)'}
+                    title={`Call ${order.rider_name}`}
+                  >📞</a>
+                </div>
+              )}
+
               {[
                 { l: "Vehicle", v: order.vehicle },
                 { l: "Date", v: order.date },
@@ -4141,6 +4285,38 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                   <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{r.v}</span>
                 </div>
               ))}
+
+              {/* ── Generate Payment / View Payment Details Button ── always visible ── */}
+              {(
+                <div style={{ paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
+                  <button
+                    onClick={() => openPayNow(order)}
+                    style={{
+                      width: '100%', padding: '13px 20px',
+                      background: order.payment_info
+                        ? 'linear-gradient(135deg, #1B2A4A, #243554)'
+                        : 'linear-gradient(135deg, #E8A838, #F5C563)',
+                      color: order.payment_info ? '#fff' : '#1B2A4A',
+                      border: 'none', borderRadius: 10,
+                      fontSize: 14, fontWeight: 800, cursor: 'pointer',
+                      fontFamily: 'inherit', display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', gap: 8,
+                      boxShadow: order.payment_info
+                        ? '0 4px 14px rgba(27,42,74,0.25)'
+                        : '0 4px 14px rgba(232,168,56,0.4)',
+                      transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => (e.currentTarget as any).style.opacity = '0.9'}
+                    onMouseLeave={e => (e.currentTarget as any).style.opacity = '1'}
+                  >
+                    {order.payment_info ? (
+                      <>👁️ View Payment Details</>
+                    ) : (
+                      <>💳 Generate Payment — ₦{order.amount.toLocaleString()}</>
+                    )}
+                  </button>
+                </div>
+              )}
 
               {/* Cancel Order Button */}
               {!['Delivered', 'Canceled'].includes(order.status) && (
@@ -4330,6 +4506,156 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     </>
                   ) : "Yes, Cancel"}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Pay Now Modal ── */}
+        {payNowOrder && (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1100,
+              background: 'rgba(15,23,42,0.65)', backdropFilter: 'blur(6px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+              animation: 'fadeIn 0.2s ease',
+            }}
+            onMouseDown={e => { if (e.target === e.currentTarget) closePayNow(); }}
+          >
+            <div style={{
+              background: '#fff', borderRadius: 24, width: '100%', maxWidth: 420,
+              overflow: 'hidden', boxShadow: '0 32px 80px rgba(0,0,0,0.25)',
+              animation: 'scaleUp 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+            }}>
+              {/* Header */}
+              <div style={{
+                padding: '20px 24px',
+                background: 'linear-gradient(135deg, #1B2A4A 0%, #0f1b33 100%)',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 12,
+                    background: 'linear-gradient(135deg, #E8A838, #F5C563)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                  }}>🏦</div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Bank Transfer</div>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', marginTop: 1 }}>Order #{payNowOrder.order_number}</div>
+                  </div>
+                </div>
+                <button onClick={closePayNow} style={{
+                  background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: 8,
+                  width: 30, height: 30, cursor: 'pointer', color: 'rgba(255,255,255,0.7)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
+                }}>×</button>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: '24px 24px 8px' }}>
+                {payNowLoading && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '32px 0', gap: 14 }}>
+                    <div style={{
+                      width: 40, height: 40,
+                      border: '4px solid #E8A838', borderTopColor: 'transparent',
+                      borderRadius: '50%', animation: 'spin 0.7s linear infinite',
+                    }} />
+                    <span style={{ fontSize: 13, color: '#94a3b8', fontWeight: 500 }}>Generating payment details…</span>
+                  </div>
+                )}
+
+                {payNowError && !payNowLoading && (
+                  <div style={{
+                    background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
+                    padding: '14px 16px', fontSize: 13, color: '#dc2626', fontWeight: 600,
+                    display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 16,
+                  }}>
+                    <span style={{ fontSize: 18 }}>⚠️</span>
+                    <span>{payNowError}</span>
+                  </div>
+                )}
+
+                {payNowInfo && !payNowLoading && (
+                  <>
+                    {/* Amount banner */}
+                    <div style={{
+                      background: 'linear-gradient(135deg, #fef3c7, #fde68a)',
+                      border: '1px solid #fbbf24', borderRadius: 14,
+                      padding: '16px 20px', marginBottom: 20,
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    }}>
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Total Amount Due</div>
+                        <div style={{ fontSize: 28, fontWeight: 800, color: '#1B2A4A' }}>₦{payNowOrder.amount.toLocaleString()}</div>
+                      </div>
+                      <div style={{ fontSize: 32 }}>💰</div>
+                    </div>
+
+                    {/* Account details */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+                      {/* Bank */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Bank</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{payNowInfo.bank_name}</div>
+                        </div>
+                        <span style={{ fontSize: 24 }}>🏛️</span>
+                      </div>
+
+                      {/* Account number + copy */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Account Number</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: '#1B2A4A', letterSpacing: 2 }}>{payNowInfo.account_number}</div>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(payNowInfo.account_number);
+                            setPayNowCopied(true);
+                            setTimeout(() => setPayNowCopied(false), 2000);
+                          }}
+                          style={{
+                            padding: '6px 12px', borderRadius: 8, flexShrink: 0,
+                            border: '1.5px solid ' + (payNowCopied ? '#10b981' : '#e2e8f0'),
+                            background: payNowCopied ? '#d1fae5' : '#fff',
+                            color: payNowCopied ? '#065f46' : '#1B2A4A',
+                            fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.2s',
+                          }}
+                        >{payNowCopied ? '✓ Copied' : '📋 Copy'}</button>
+                      </div>
+
+                      {/* Account name */}
+                      <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, padding: '12px 16px' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2 }}>Account Name</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: '#1B2A4A' }}>{payNowInfo.account_name}</div>
+                      </div>
+                    </div>
+
+                    {/* Instruction */}
+                    <div style={{
+                      background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12,
+                      padding: '12px 16px', display: 'flex', gap: 10, marginBottom: 8,
+                    }}>
+                      <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
+                      <div style={{ fontSize: 12, color: '#1e40af', lineHeight: 1.55 }}>
+                        Transfer exactly <strong>₦{payNowOrder.amount.toLocaleString()}</strong> to the account above.
+                        Your order will be confirmed automatically once payment is verified.
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '12px 24px 24px' }}>
+                <button
+                  onClick={closePayNow}
+                  style={{
+                    width: '100%', padding: '13px', borderRadius: 12, border: 'none',
+                    background: 'linear-gradient(135deg, #1B2A4A, #243554)',
+                    color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >Done</button>
               </div>
             </div>
           </div>

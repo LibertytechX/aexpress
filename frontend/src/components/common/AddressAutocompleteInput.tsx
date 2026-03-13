@@ -21,9 +21,11 @@ interface AddressAutocompleteInputProps {
   placeholder?: string;
   style?: React.CSSProperties;
   disabled?: boolean;
+  /** If provided, a "Pick on Map" button is shown when no autocomplete results are found. */
+  onOpenMapPicker?: () => void;
 }
 
-export default function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled }: AddressAutocompleteInputProps) {
+export default function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: AddressAutocompleteInputProps) {
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -95,13 +97,24 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     }
 
     debounceTimer.current = setTimeout(() => {
-      // Bias results towards Lagos (bounds is a preference, not a hard filter for AutocompleteService)
+      // Bias results towards Lagos using both bounds + location
       const lagosBounds = new window.google.maps.LatLngBounds(
         new window.google.maps.LatLng(6.25, 2.70),
         new window.google.maps.LatLng(6.75, 3.95)
       );
+
+      // Append "Lagos, Nigeria" to the raw input when not already present.
+      // This is the same fix used in the geocoding layer — bare street names like
+      // "15a Kunle Ogunba St Lekki Phase 1" are resolved by the API only when
+      // state/country context is included in the query.
+      const lower = input.toLowerCase();
+      const searchInput =
+        lower.includes('lagos') || lower.includes('nigeria')
+          ? input
+          : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
       const request = {
-        input,
+        input: searchInput,
         bounds: lagosBounds,
         componentRestrictions: { country: 'ng' },
       };
@@ -109,20 +122,13 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
       autocompleteService.current.getPlacePredictions(request, (predictions: any[], status: string) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
-          const lagosOnly = predictions.filter(p =>
-            p.terms?.some((t: any) => /lagos/i.test(t.value)) ||
-            /lagos/i.test(p.description)
-          );
-          if (lagosOnly.length > 0) {
-            setSuggestions(lagosOnly.slice(0, 8));
-            setShowDropdown(true);
-            setError(null);
-          } else {
-            setSuggestions([]);
-            setShowDropdown(false);
-            setError('Address not found in Lagos — we only deliver within Lagos State.');
-          }
+          // All results are already scoped to Nigeria via componentRestrictions + Lagos bounds.
+          // Avoid filtering by the word "lagos" in the description because Google often omits
+          // it for local area names (e.g. "15a Kunle Ogunba St, Lekki Phase I, Lekki").
+          // Geocode-based Lagos bounds validation happens on selection as a safety net.
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
+          setError(null);
         } else {
           setSuggestions([]);
           setShowDropdown(false);
@@ -239,15 +245,31 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
         </div>
       )}
 
-      {/* Error message */}
+      {/* Error message + optional map picker CTA */}
       {error && value.length >= 3 && !loading && (
-        <div style={{
-          fontSize: 11,
-          color: '#ef4444',
-          marginTop: 4,
-          paddingLeft: 4
-        }}>
-          {error} - You can still enter address manually
+        <div style={{ marginTop: 5, paddingLeft: 2 }}>
+          <div style={{ fontSize: 11, color: '#ef4444', marginBottom: onOpenMapPicker ? 6 : 0 }}>
+            {error} — you can still type it manually.
+          </div>
+          {onOpenMapPicker && (
+            <button
+              type="button"
+              onClick={onOpenMapPicker}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 12px', borderRadius: 8,
+                border: '1.5px solid #E8A838',
+                background: '#fef3c7',
+                color: '#92400e', fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fde68a'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#fef3c7'; }}
+            >
+              📍 Pick on Map
+            </button>
+          )}
         </div>
       )}
     </div>

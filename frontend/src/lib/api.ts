@@ -264,6 +264,7 @@ export const OrdersAPI = {
   getOrderDetails: async (orderNumber: string) => apiRequest(`/orders/${orderNumber}/`, { method: 'GET' }),
   getOrderStats: async () => apiRequest('/orders/stats/', { method: 'GET' }),
   cancelOrder: async (orderNumber: string, reason = 'Canceled by merchant') => apiRequest(`/orders/cancel/${orderNumber}/`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  payNow: async (orderNumber: string) => apiRequest(`/orders/${orderNumber}/pay-now/`, { method: 'POST' }),
 };
 
 export const WalletAPI = {

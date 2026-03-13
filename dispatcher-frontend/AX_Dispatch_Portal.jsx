@@ -1510,7 +1510,7 @@ export default function AXDispatchPortal() {
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
-          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
+          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
@@ -1551,19 +1551,58 @@ export default function AXDispatchPortal() {
 }
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRider }) {
-  const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
-  const today = orders.filter(o => {
-    if (!o.created) return false;
-    // Handle ISO datetime ("2026-02-22T15:42:00Z") or any string containing today's date
-    return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+function DashboardScreen({ orders, riders, vehicleAssets, activityFeed, onViewOrder, onViewRider }) {
+  const [period, setPeriod] = useState("today"); // "today" | "week" | "month"
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  // Start-of-week (Monday)
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  weekStart.setHours(0, 0, 0, 0);
+
+  // Start-of-month
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const parseCreated = (o) => {
+    if (!o.created) return null;
+    const d = new Date(o.created);
+    return isNaN(d) ? null : d;
+  };
+
+  const periodOrders = orders.filter(o => {
+    const d = parseCreated(o);
+    if (!d) return false;
+    if (period === "today") return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+    if (period === "week")  return d >= weekStart;
+    if (period === "month") return d >= monthStart;
+    return false;
   });
-  // Fall back to all orders if today filter returns nothing (e.g. older data)
-  const displayOrders = today.length > 0 ? today : orders;
-  const active = orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status));
+
+  // Fall back to all orders only when "today" yields nothing (legacy date formats)
+  const displayOrders = (period === "today" && periodOrders.length === 0) ? orders : periodOrders;
+
+  // Active Now = vehicles that have moved >1 km today (from GPS distance_today field)
+  const activeNowVehicles = (vehicleAssets || []).filter(v => {
+    const dist = parseFloat(v.distance_today) || 0;
+    const unit = String(v.unit_of_distance || "km").toLowerCase().trim();
+    const km = unit === "m" ? dist / 1000 : dist;
+    return km > 1;
+  });
   const delivered = displayOrders.filter(o => o.status === "Delivered");
-  const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
-  const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
+  // Exclude only Cancelled / Failed — Pending, Assigned, In Transit etc. count as earned revenue
+  const revenueOrders = displayOrders.filter(o => !["Cancelled", "Failed"].includes(o.status));
+  const revenue = revenueOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
+  const codTotal = revenueOrders.reduce((s, o) => s + o.cod, 0);
+
+  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const revenueLabel = revenue >= 1_000_000
+    ? `₦${(revenue / 1_000_000).toFixed(1)}M`
+    : `₦${(revenue / 1000).toFixed(0)}K`;
+  const codLabel = codTotal >= 1_000_000
+    ? `₦${(codTotal / 1_000_000).toFixed(1)}M`
+    : `₦${(codTotal / 1000).toFixed(0)}K`;
 
   // Color name → S value mapping
   const colorMap = { gold: S.gold, green: S.green, red: S.red, blue: S.blue, purple: S.purple, yellow: S.yellow };
@@ -1581,13 +1620,26 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
     dropoff: truncate(item.metadata?.dropoff || "", 30),
   }));
 
+  const PERIODS = [{ id: "today", label: "Today" }, { id: "week", label: "This Week" }, { id: "month", label: "This Month" }];
+
   return (
     <div>
+      {/* Period toggle */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {PERIODS.map(p => (
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{
+            padding: "6px 16px", borderRadius: 8, border: `1px solid ${period === p.id ? S.gold : S.border}`,
+            background: period === p.id ? `rgba(232,168,56,0.15)` : "transparent",
+            color: period === p.id ? S.gold : S.textMuted, fontSize: 12, fontWeight: 700,
+            cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit",
+          }}>{p.label}</button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-        <StatCard label="Today's Orders" value={displayOrders.length} sub={`${delivered.length} delivered`} />
-        <StatCard label="Active Now" value={active.length} sub={`${orders.filter(o => o.status === "Pending").length} pending`} color={S.gold} />
+        <StatCard label={`${periodLabel}'s Orders`} value={displayOrders.length} sub={`${delivered.length} delivered`} />
+        <StatCard label="Active Now" value={activeNowVehicles.length} sub="vehicles moved >1km today" color={S.gold} />
         <StatCard label="Online Riders" value={riders.filter(r => r.status === "online").length} sub={`${riders.filter(r => r.status === "on_delivery").length} on delivery`} color={S.green} />
-        <StatCard label="Revenue Today" value={`₦${(revenue / 1000).toFixed(0)}K`} sub={`₦${(codTotal / 1000).toFixed(0)}K COD collected`} color={S.gold} />
+        <StatCard label={`Revenue · ${periodLabel}`} value={revenueLabel} sub={`${codLabel} COD collected`} color={S.gold} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
         {/* Live feed */}
@@ -1666,6 +1718,7 @@ function formatOrderDateTime(raw) {
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [search, setSearch] = useState("");
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
@@ -1676,12 +1729,61 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />;
   }
 
+  // ── Period boundaries ──────────────────────────────────────────
+  const _now = new Date();
+  const _todayStr = _now.toISOString().slice(0, 10);
+  const _weekStart = new Date(_now);
+  _weekStart.setDate(_now.getDate() - ((_now.getDay() + 6) % 7));
+  _weekStart.setHours(0, 0, 0, 0);
+  const _monthStart = new Date(_now.getFullYear(), _now.getMonth(), 1);
+
+  const inPeriod = (o) => {
+    if (periodFilter === "all") return true;
+    if (!o.created) return false;
+    if (periodFilter === "today") return o.created.startsWith(_todayStr) || o.created.includes(_todayStr);
+    const d = new Date(o.created);
+    if (isNaN(d)) return false;
+    if (periodFilter === "week")  return d >= _weekStart;
+    if (periodFilter === "month") return d >= _monthStart;
+    return true;
+  };
+
+  const periodOrders = orders.filter(inPeriod);
+
   const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
-  const filtered = orders.filter(o => {
+  const filtered = periodOrders.filter(o => {
     if (statusFilter !== "All" && o.status !== statusFilter) return false;
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
     return true;
   });
+
+  const exportCSV = () => {
+    const esc = v => {
+      const s = v == null ? "" : String(v);
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Status"];
+    const rows = filtered.map(o => {
+      const dt = formatOrderDateTime(o.created);
+      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.amount, o.cod, o.codFee, o.status].map(esc);
+    });
+    const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
+    a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const PERIOD_OPTS = [
+    { value: "all", label: "All Time" },
+    { value: "today", label: "Today" },
+    { value: "week", label: "This Week" },
+    { value: "month", label: "This Month" },
+  ];
 
   const handlePayNow = async (order) => {
     if (order.paymentInfo) {
@@ -1703,19 +1805,33 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
         {tabs.map(t => {
-          const cnt = t === "All" ? orders.length : orders.filter(o => o.status === t).length; return (
+          const cnt = t === "All" ? periodOrders.length : periodOrders.filter(o => o.status === t).length; return (
             <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
           );
         })}
+        {/* Period dropdown — sits flush at the end of the tab row */}
+        <select
+          value={periodFilter}
+          onChange={e => setPeriodFilter(e.target.value)}
+          style={{
+            marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
+            border: `1px solid ${periodFilter !== "all" ? S.gold : S.border}`,
+            background: periodFilter !== "all" ? "rgba(232,168,56,0.12)" : S.card,
+            color: periodFilter !== "all" ? S.gold : S.textMuted,
+            fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none",
+          }}
+        >
+          {PERIOD_OPTS.map(p => <option key={p.value} value={p.value} style={{ background: S.card, color: S.text }}>{p.label}</option>)}
+        </select>
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
         <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
           <span style={{ opacity: 0.4 }}>{I.search}</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
-        <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV</button>
+        <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
       </div>
 
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
