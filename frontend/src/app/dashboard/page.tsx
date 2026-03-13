@@ -4230,8 +4230,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                 </div>
               ))}
 
-              {/* ── Pay Now / View Payment Details Button ── */}
-              {!['Done', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled'].includes(order.status) && (
+              {/* ── Generate Payment / View Payment Details Button ── always visible ── */}
+              {(
                 <div style={{ paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
                   <button
                     onClick={() => openPayNow(order)}
@@ -4256,7 +4256,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     {order.payment_info ? (
                       <>👁️ View Payment Details</>
                     ) : (
-                      <>💳 Pay Now — ₦{order.amount.toLocaleString()}</>
+                      <>💳 Generate Payment — ₦{order.amount.toLocaleString()}</>
                     )}
                   </button>
                 </div>
