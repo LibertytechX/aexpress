@@ -23,6 +23,7 @@ from .views import (
     OrderArrivedView,
     OrderCompleteView,
     OrderStatusChangeView,
+    OrderPayNowView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -97,6 +98,7 @@ urlpatterns = [
         name="rider_cancel_order",
     ),
     path("cancel/<str:order_number>/", CancelOrderView.as_view(), name="cancel_order"),
+    path("<str:order_number>/pay-now/", OrderPayNowView.as_view(), name="order_pay_now"),
     # Generic order detail (must come last to avoid matching specific endpoints)
     path("<str:order_number>/", OrderDetailView.as_view(), name="order_detail"),
 ]
