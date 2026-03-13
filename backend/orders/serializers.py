@@ -103,6 +103,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "distance_km",
             "duration_minutes",
             "status",
+            "payment_info",
             "created_at",
             "updated_at",
             "scheduled_pickup_time",
