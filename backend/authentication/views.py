@@ -295,12 +295,6 @@ class ResendOTPView(APIView):
         phone = request.data.get("phone")
         email = request.data.get("email")
 
-        if not phone:
-            return Response(
-                {"success": False, "error": "Phone number is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
             if phone:
                 user = User.objects.get(phone=phone)
