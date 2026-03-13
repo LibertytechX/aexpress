@@ -624,3 +624,40 @@ export const DispatchersAPI = {
 };
 
 
+// ─── CHATS ───────────────────────────────────────────────────────
+export const ChatsAPI = {
+    // Dispatcher: list all conversations (sidebar)
+    async list({ type } = {}) {
+        const qs = type ? `?type=${type}` : '';
+        const res = await fetchWithAuth(`/chats/conversations/${qs}`);
+        if (!res.ok) throw new Error('Failed to fetch conversations');
+        return await res.json();
+    },
+
+    // Load message history for a conversation
+    async getMessages(conversationId) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/messages/`);
+        if (!res.ok) throw new Error('Failed to fetch messages');
+        return await res.json();
+    },
+
+    // Send a message (agent or user side)
+    async sendMessage(conversationId, content) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/messages/send/`, {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to send message'));
+        return data;
+    },
+
+    // Mark all messages in a conversation as read (resets unread_count to 0)
+    async markRead(conversationId) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/read/`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error('Failed to mark read');
+        return await res.json();
+    },
+};
