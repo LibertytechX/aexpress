@@ -568,7 +568,7 @@ class OrderPayNowView(APIView):
     @transaction.atomic
     def post(self, request, order_number):
         try:
-            order = Order.objects.get(order_number=order_number, user=request.user)
+            order = Order.objects.get(order_number=order_number)
         except Order.DoesNotExist:
             return Response(
                 {"success": False, "message": "Order not found."},
@@ -594,7 +594,10 @@ class OrderPayNowView(APIView):
         except Exception as e:
             logger.error(f"Failed to create virtual account for pay-now: {e}")
             return Response(
-                {"success": False, "message": "Failed to generate payment information."},
+                {
+                    "success": False,
+                    "message": "Failed to generate payment information.",
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
