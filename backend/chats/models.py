@@ -12,8 +12,8 @@ class Conversation(models.Model):
     """
 
     TYPE_CHOICES = (
-        ("customer", "Customer"),
-        ("rider", "Rider"),
+        ("customers", "Customers"),
+        ("riders", "Riders"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
