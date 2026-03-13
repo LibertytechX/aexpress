@@ -53,9 +53,9 @@ class Message(models.Model):
     """
 
     SENDER_TYPE_CHOICES = (
-        ("agent", "Agent"),
-        ("customer", "Customer"),
-        ("rider", "Rider"),
+        ("agent", "agent"),
+        ("customer", "customer"),
+        ("rider", "rider"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
