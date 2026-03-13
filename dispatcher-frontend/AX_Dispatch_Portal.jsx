@@ -1667,11 +1667,13 @@ function formatOrderDateTime(raw) {
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [search, setSearch] = useState("");
+  const [paymentOrder, setPaymentOrder] = useState(null);
+  const [payLoading, setPayLoading] = useState(null);
 
   if (selectedId) {
     const order = orders.find(o => o.id === selectedId);
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
-    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} />;
+    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />;
   }
 
   const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
@@ -1680,6 +1682,24 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
     return true;
   });
+
+  const handlePayNow = async (order) => {
+    if (order.paymentInfo) {
+      setPaymentOrder(order);
+      return;
+    }
+    setPayLoading(order.id);
+    try {
+      const data = await OrdersAPI.payNow(order.id);
+      const updatedOrder = { ...order, paymentInfo: data.payment_info };
+      onUpdateOrder(order.id, { paymentInfo: data.payment_info });
+      setPaymentOrder(updatedOrder);
+    } catch (e) {
+      alert(e?.message || "Failed to initiate payment");
+    } finally {
+      setPayLoading(null);
+    }
+  };
 
   return (
     <div>
@@ -1699,14 +1719,14 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       </div>
 
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
+        <div style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 100px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Payment</span><span>Status</span>
         </div>
         <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
           {filtered.map(o => {
             const dt = formatOrderDateTime(o.created);
             return (
-              <div key={o.id} onClick={() => onSelect(o.id)} style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 100px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
                 <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
                 <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
@@ -1718,6 +1738,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                   {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
                 </div>
                 <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
+                <div>
+                  <button onClick={(e) => { e.stopPropagation(); handlePayNow(o); }} style={{ padding: "4px 8px", borderRadius: 6, border: "none", background: o.paymentInfo ? S.greenBg : S.goldPale, color: o.paymentInfo ? S.green : S.gold, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+                    {payLoading === o.id ? "..." : (o.paymentInfo ? "View Details" : "Pay Now")}
+                  </button>
+                </div>
                 <Badge status={o.status} />
               </div>
             );
@@ -1725,12 +1750,13 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
         </div>
       </div>
+      {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
     </div>
   );
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20 }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -1976,6 +2002,34 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD fee</span><span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.codFee.toLocaleString()}</span></div>
               </>}
               {!editPrice && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, borderTop: `1px solid ${S.border}`, paddingTop: 6, marginTop: 4 }}><span>Wallet charged</span><span style={{ fontFamily: "'Space Mono',monospace" }}>₦{(order.amount + order.codFee).toLocaleString()}</span></div>}
+            </div>
+
+            {/* PAYMENT INFORMATION */}
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Payment Information</span>
+                <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.yellowBg, color: order.payment_status === "Paid" ? S.green : S.yellow, fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "PENDING"}</span>
+              </div>
+              
+              {order.paymentInfo ? (
+                <div>
+                  <div style={{ background: S.borderLight, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: S.textDim, marginBottom: 2 }}>{order.paymentInfo.bank_name || "Wema Bank"}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{order.paymentInfo.account_number}</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: S.text, marginTop: 2 }}>{order.paymentInfo.account_name}</div>
+                  </div>
+                  <button onClick={() => onPayNow(order)} style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    {I.dashboard} View Account Details
+                  </button>
+                </div>
+              ) : (
+                <div style={{ textAlign: "center", padding: "10px 0" }}>
+                  <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 12 }}>Virtual account not yet generated for this order.</div>
+                  <button onClick={() => onPayNow(order)} disabled={payLoading === order.id} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", cursor: payLoading === order.id ? "not-allowed" : "pointer", background: payLoading === order.id ? S.border : `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>
+                    {payLoading === order.id ? "Generating..." : "Pay Now (Generate Account)"}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -5783,6 +5837,58 @@ function AddDispatcherModal({ onClose, onCreated }) {
               {submitting ? "Creating..." : "Add Dispatcher"}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PAYMENT DETAILS MODAL ────────────────────────────────────────
+function PaymentDetailsModal({ order, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const info = order.paymentInfo || {};
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(info.account_number);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, backdropFilter: "blur(3px)" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: 400, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.2s ease" }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Payment Details</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Order {order.id}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: `1px solid ${S.border}`, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: S.textMuted }}>{I.x}</button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          <div style={{ background: S.goldPale, border: `1.5px dashed ${S.gold}40`, borderRadius: 12, padding: 20, textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 14 }}>Transfer to this account</div>
+            
+            <div style={{ fontSize: 14, color: S.textDim, marginBottom: 4 }}>{info.bank_name || "Wema Bank"}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace", marginBottom: 6 }}>{info.account_number || "—"}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>{info.account_name || "—"}</div>
+
+            <button onClick={handleCopy} style={{ marginTop: 16, padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.gold}40`, background: "#fff", color: S.gold, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, transition: "all 0.2s" }}>
+              {copied ? <>{I.check} Copied!</> : <>{I.copy} Copy Account Number</>}
+            </button>
+          </div>
+
+          <div style={{ background: S.borderLight, borderRadius: 12, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: S.textDim }}>Total Amount</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{(order.amount + (order.codFee || 0)).toLocaleString()}</span>
+          </div>
+
+          <div style={{ marginTop: 20, padding: "10px 14px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}20`, fontSize: 11, color: S.blue, lineHeight: 1.5 }}>
+            💡 Your order will be automatically marked as <b>Paid</b> once your wallet is funded with the exact amount.
+          </div>
+
+          <button onClick={onClose} style={{ width: "100%", marginTop: 20, padding: "12px 0", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", background: S.navy, color: "#fff", fontWeight: 700, fontSize: 13 }}>Done</button>
         </div>
       </div>
     </div>

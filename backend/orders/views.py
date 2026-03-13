@@ -568,7 +568,7 @@ class OrderPayNowView(APIView):
     @transaction.atomic
     def post(self, request, order_number):
         try:
-            order = Order.objects.get(order_number=order_number, user=request.user)
+            order = Order.objects.get(order_number=order_number,)
         except Order.DoesNotExist:
             return Response(
                 {"success": False, "message": "Order not found."},

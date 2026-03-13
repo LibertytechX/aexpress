@@ -11,8 +11,11 @@ class Wallet(models.Model):
     """
     Wallet model - One wallet per user
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='wallet')
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wallet"
+    )
     balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
 
     # Timestamps
@@ -20,8 +23,8 @@ class Wallet(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'wallets'
-        ordering = ['-created_at']
+        db_table = "wallets"
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.user.business_name} - ₦{self.balance}"
@@ -33,13 +36,13 @@ class Wallet(models.Model):
 
         Transaction.objects.create(
             wallet=self,
-            type='credit',
+            type="credit",
             amount=amount,
             description=description,
             reference=reference,
             balance_after=self.balance,
-            status='completed',
-            metadata=metadata
+            status="completed",
+            metadata=metadata,
         )
 
         # Process pending charges after credit
@@ -50,38 +53,46 @@ class Wallet(models.Model):
     def process_pending_charges(self):
         """Check for and process any pending charges for this user"""
         from .models import Charge  # Local import to be safe
-        charges = Charge.objects.filter(user=self.user, status='pending').order_by('created_at')
-        
+
+        charges = Charge.objects.filter(user=self.user, status="pending").order_by(
+            "created_at"
+        )
+
         for charge in charges:
             if self.balance >= charge.amount:
                 try:
                     with db_transaction.atomic():
                         # Use a more specific reference for the debit
                         debit_ref = f"CHRG-{charge.id.hex[:12].upper()}"
-                        
+
                         # Debit the wallet
                         self.debit(
                             amount=charge.amount,
                             description=f"Auto-debit for Order {charge.order.order_number}",
                             reference=debit_ref,
-                            metadata={"charge_id": str(charge.id), "order_number": charge.order.order_number}
+                            metadata={
+                                "charge_id": str(charge.id),
+                                "order_number": charge.order.order_number,
+                            },
                         )
-                        
+
                         # Update charge status
-                        charge.status = 'completed'
+                        charge.status = "completed"
                         charge.save()
-                        
+
                         # Update order payment status
                         order = charge.order
-                        order.payment_status = 'Paid'
-                        order.save(update_fields=['payment_status'])
-                        
-                        logger.info(f"Auto-debited charge {charge.id} for order {order.order_number}")
+                        order.payment_status = "Paid"
+                        order.save(update_fields=["payment_status"])
+
+                        logger.info(
+                            f"Auto-debited charge {charge.id} for order {order.order_number}"
+                        )
                 except Exception as e:
                     logger.error(f"Failed to auto-debit charge {charge.id}: {e}")
             else:
                 # Not enough balance to cover this charge, and since we order by created_at,
-                # we might want to stop or continue to smaller charges. 
+                # we might want to stop or continue to smaller charges.
                 # For now, let's continue to see if smaller charges can be covered.
                 continue
 
@@ -95,13 +106,13 @@ class Wallet(models.Model):
 
         Transaction.objects.create(
             wallet=self,
-            type='debit',
+            type="debit",
             amount=amount,
             description=description,
             reference=reference,
             balance_after=self.balance,
-            status='completed',
-            metadata=metadata
+            status="completed",
+            metadata=metadata,
         )
 
         return self.balance
@@ -115,20 +126,23 @@ class Transaction(models.Model):
     """
     Transaction model - Records all wallet transactions
     """
+
     TRANSACTION_TYPE_CHOICES = [
-        ('credit', 'Credit'),
-        ('debit', 'Debit'),
+        ("credit", "Credit"),
+        ("debit", "Debit"),
     ]
 
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-        ('reversed', 'Reversed'),
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("reversed", "Reversed"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    wallet = models.ForeignKey(Wallet, on_delete=models.CASCADE, related_name='transactions')
+    wallet = models.ForeignKey(
+        Wallet, on_delete=models.CASCADE, related_name="transactions"
+    )
 
     # Transaction details
     type = models.CharField(max_length=10, choices=TRANSACTION_TYPE_CHOICES)
@@ -137,14 +151,18 @@ class Transaction(models.Model):
     reference = models.CharField(max_length=100, unique=True, db_index=True)
 
     # Balance tracking
-    balance_before = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    balance_before = models.DecimalField(
+        max_digits=12, decimal_places=2, null=True, blank=True
+    )
     balance_after = models.DecimalField(max_digits=12, decimal_places=2)
 
     # Status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
 
     # Paystack integration
-    paystack_reference = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    paystack_reference = models.CharField(
+        max_length=100, null=True, blank=True, db_index=True
+    )
     paystack_status = models.CharField(max_length=50, null=True, blank=True)
 
     # Metadata
@@ -155,11 +173,11 @@ class Transaction(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'transactions'
-        ordering = ['-created_at']
+        db_table = "transactions"
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['-created_at']),
-            models.Index(fields=['wallet', '-created_at']),
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["wallet", "-created_at"]),
         ]
 
     def __str__(self):
@@ -182,24 +200,27 @@ class VirtualAccount(models.Model):
     VirtualAccount model - One Wema Bank virtual account per user (permanent)
     Created via CoreBanking (LibertyPay) API on first wallet funding via transfer.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name='virtual_account'
+        related_name="virtual_account",
     )
     account_number = models.CharField(max_length=20, unique=True, db_index=True)
     account_name = models.CharField(max_length=255)
     bank_name = models.CharField(max_length=100, default="Wema Bank")
     bank_code = models.CharField(max_length=10, default="000017")
     # ID returned by CoreBanking API for this virtual account
-    corebanking_account_id = models.CharField(max_length=100, unique=True, db_index=True)
+    corebanking_account_id = models.CharField(
+        max_length=100, unique=True, db_index=True
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'virtual_accounts'
-        ordering = ['-created_at']
+        db_table = "virtual_accounts"
+        ordering = ["-created_at"]
 
     def __str__(self):
         return f"{self.user.business_name} - {self.account_number} ({self.bank_name})"
@@ -210,28 +231,35 @@ class WebhookLog(models.Model):
     WebhookLog model - Stores all incoming webhook calls for audit and debugging.
     Records are created BEFORE processing to ensure we never lose webhook data.
     """
+
     WEBHOOK_SOURCE_CHOICES = [
-        ('corebanking', 'CoreBanking (LibertyPay)'),
-        ('paystack', 'Paystack'),
+        ("corebanking", "CoreBanking (LibertyPay)"),
+        ("paystack", "Paystack"),
     ]
 
     STATUS_CHOICES = [
-        ('received', 'Received'),
-        ('processing', 'Processing'),
-        ('processed', 'Processed'),
-        ('failed', 'Failed'),
-        ('skipped', 'Skipped'),
+        ("received", "Received"),
+        ("processing", "Processing"),
+        ("processed", "Processed"),
+        ("failed", "Failed"),
+        ("skipped", "Skipped"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    source = models.CharField(max_length=20, choices=WEBHOOK_SOURCE_CHOICES, db_index=True)
+    source = models.CharField(
+        max_length=20, choices=WEBHOOK_SOURCE_CHOICES, db_index=True
+    )
 
     # Raw webhook data
     payload = models.JSONField(help_text="Complete webhook payload as received")
-    headers = models.JSONField(null=True, blank=True, help_text="HTTP headers from webhook request")
+    headers = models.JSONField(
+        null=True, blank=True, help_text="HTTP headers from webhook request"
+    )
 
     # Processing status
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='received', db_index=True)
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="received", db_index=True
+    )
     processing_started_at = models.DateTimeField(null=True, blank=True)
     processing_completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -241,15 +269,23 @@ class WebhookLog(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name='webhook_logs',
-        help_text="Transaction created from this webhook (if any)"
+        related_name="webhook_logs",
+        help_text="Transaction created from this webhook (if any)",
     )
-    error_message = models.TextField(null=True, blank=True, help_text="Error message if processing failed")
-    error_traceback = models.TextField(null=True, blank=True, help_text="Full error traceback for debugging")
+    error_message = models.TextField(
+        null=True, blank=True, help_text="Error message if processing failed"
+    )
+    error_traceback = models.TextField(
+        null=True, blank=True, help_text="Full error traceback for debugging"
+    )
 
     # Webhook metadata
-    transaction_reference = models.CharField(max_length=100, null=True, blank=True, db_index=True)
-    recipient_account_number = models.CharField(max_length=20, null=True, blank=True, db_index=True)
+    transaction_reference = models.CharField(
+        max_length=100, null=True, blank=True, db_index=True
+    )
+    recipient_account_number = models.CharField(
+        max_length=20, null=True, blank=True, db_index=True
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
 
     # Signature verification
@@ -261,13 +297,13 @@ class WebhookLog(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'webhook_logs'
-        ordering = ['-created_at']
+        db_table = "webhook_logs"
+        ordering = ["-created_at"]
         indexes = [
-            models.Index(fields=['-created_at']),
-            models.Index(fields=['source', '-created_at']),
-            models.Index(fields=['status', '-created_at']),
-            models.Index(fields=['transaction_reference']),
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["source", "-created_at"]),
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["transaction_reference"]),
         ]
 
     def __str__(self):
@@ -276,37 +312,61 @@ class WebhookLog(models.Model):
     def mark_processing(self):
         """Mark webhook as being processed"""
         from django.utils import timezone
-        self.status = 'processing'
+
+        self.status = "processing"
         self.processing_started_at = timezone.now()
-        self.save(update_fields=['status', 'processing_started_at', 'updated_at'])
+        self.save(update_fields=["status", "processing_started_at", "updated_at"])
 
     def mark_processed(self, transaction=None):
         """Mark webhook as successfully processed"""
         from django.utils import timezone
-        self.status = 'processed'
+
+        self.status = "processed"
         self.processing_completed_at = timezone.now()
         if transaction:
             self.transaction = transaction
-        self.save(update_fields=['status', 'processing_completed_at', 'transaction', 'updated_at'])
+        self.save(
+            update_fields=[
+                "status",
+                "processing_completed_at",
+                "transaction",
+                "updated_at",
+            ]
+        )
 
     def mark_failed(self, error_message, error_traceback=None):
         """Mark webhook as failed with error details"""
         from django.utils import timezone
-        self.status = 'failed'
+
+        self.status = "failed"
         self.processing_completed_at = timezone.now()
         self.error_message = error_message
         self.error_traceback = error_traceback
-        self.save(update_fields=['status', 'processing_completed_at', 'error_message', 'error_traceback', 'updated_at'])
+        self.save(
+            update_fields=[
+                "status",
+                "processing_completed_at",
+                "error_message",
+                "error_traceback",
+                "updated_at",
+            ]
+        )
 
     def mark_skipped(self, reason):
         """Mark webhook as skipped with reason"""
         from django.utils import timezone
-        self.status = 'skipped'
+
+        self.status = "skipped"
         self.processing_completed_at = timezone.now()
         self.error_message = reason
-        self.save(update_fields=['status', 'processing_completed_at', 'error_message', 'updated_at'])
-
-
+        self.save(
+            update_fields=[
+                "status",
+                "processing_completed_at",
+                "error_message",
+                "updated_at",
+            ]
+        )
 
 
 class Charge(models.Model):
@@ -315,25 +375,34 @@ class Charge(models.Model):
     When a user hits 'pay-now', a charge is created.
     When the wallet is funded, pending charges are automatically debited.
     """
+
     STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('completed', 'Completed'),
-        ('failed', 'Failed'),
-        ('canceled', 'Canceled'),
+        ("pending", "Pending"),
+        ("completed", "Completed"),
+        ("failed", "Failed"),
+        ("canceled", "Canceled"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='charges')
-    order = models.ForeignKey('orders.Order', on_delete=models.CASCADE, related_name='charges')
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="charges"
+    )
+    order = models.ForeignKey(
+        "orders.Order", on_delete=models.CASCADE, related_name="charges"
+    )
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
-    
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = 'charges'
-        ordering = ['-created_at']
+        db_table = "charges"
+        ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Charge {self.amount} for Order {self.order.order_number} ({self.status})"
+        return (
+            f"Charge {self.amount} for Order {self.order.order_number} ({self.status})"
+        )

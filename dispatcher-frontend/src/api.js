@@ -274,6 +274,7 @@ const normalizeOrder = (o) => ({
     vehicle: o.vehicle || 'Bike',
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',
+    paymentInfo: o.payment_info || null,
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
@@ -371,6 +372,15 @@ export const OrdersAPI = {
         try { data = await res.json(); } catch (e) { throw new Error('Failed to generate relay route'); }
         if (!res.ok) throw data || new Error('Failed to generate relay route');
         return normalizeOrder(data);
+    },
+
+    async payNow(orderNumber) {
+        const res = await fetchWithAuth(`/orders/${orderNumber}/pay-now/`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to initiate payment'));
+        return data;
     }
 };
 
