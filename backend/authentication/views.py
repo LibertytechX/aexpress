@@ -293,15 +293,13 @@ class ResendOTPView(APIView):
 
     def post(self, request):
         phone = request.data.get("phone")
-
-        if not phone:
-            return Response(
-                {"success": False, "error": "Phone number is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        email = request.data.get("email")
 
         try:
-            user = User.objects.get(phone=phone)
+            if phone:
+                user = User.objects.get(phone=phone)
+            elif email:
+                user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
                 {"success": False, "error": "User with this phone number not found."},
