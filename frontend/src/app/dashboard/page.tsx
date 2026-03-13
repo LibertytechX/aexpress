@@ -4046,6 +4046,15 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
     setPayNowInfo(null);
     setPayNowError(null);
     setPayNowCopied(false);
+
+    // If we already have the virtual account details, show them directly
+    if (order.payment_info) {
+      setPayNowInfo(order.payment_info);
+      setPayNowLoading(false);
+      return;
+    }
+
+    // Otherwise call the endpoint to generate them
     setPayNowLoading(true);
     try {
       const res = await API.Orders.payNow(order.order_number);
@@ -4221,25 +4230,34 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                 </div>
               ))}
 
-              {/* ── Pay Now Button ── */}
-              {order.payment_info === null && !['Done', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled'].includes(order.status) && (
+              {/* ── Pay Now / View Payment Details Button ── */}
+              {!['Done', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled'].includes(order.status) && (
                 <div style={{ paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
                   <button
                     onClick={() => openPayNow(order)}
                     style={{
                       width: '100%', padding: '13px 20px',
-                      background: 'linear-gradient(135deg, #E8A838, #F5C563)',
-                      color: '#1B2A4A', border: 'none', borderRadius: 10,
+                      background: order.payment_info
+                        ? 'linear-gradient(135deg, #1B2A4A, #243554)'
+                        : 'linear-gradient(135deg, #E8A838, #F5C563)',
+                      color: order.payment_info ? '#fff' : '#1B2A4A',
+                      border: 'none', borderRadius: 10,
                       fontSize: 14, fontWeight: 800, cursor: 'pointer',
                       fontFamily: 'inherit', display: 'flex', alignItems: 'center',
                       justifyContent: 'center', gap: 8,
-                      boxShadow: '0 4px 14px rgba(232,168,56,0.4)',
+                      boxShadow: order.payment_info
+                        ? '0 4px 14px rgba(27,42,74,0.25)'
+                        : '0 4px 14px rgba(232,168,56,0.4)',
                       transition: 'all 0.15s',
                     }}
-                    onMouseEnter={e => (e.currentTarget as any).style.boxShadow = '0 6px 20px rgba(232,168,56,0.55)'}
-                    onMouseLeave={e => (e.currentTarget as any).style.boxShadow = '0 4px 14px rgba(232,168,56,0.4)'}
+                    onMouseEnter={e => (e.currentTarget as any).style.opacity = '0.9'}
+                    onMouseLeave={e => (e.currentTarget as any).style.opacity = '1'}
                   >
-                    💳 Pay Now — ₦{order.amount.toLocaleString()}
+                    {order.payment_info ? (
+                      <>👁️ View Payment Details</>
+                    ) : (
+                      <>💳 Pay Now — ₦{order.amount.toLocaleString()}</>
+                    )}
                   </button>
                 </div>
               )}
