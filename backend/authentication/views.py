@@ -19,6 +19,7 @@ from .emails import (
     send_mobile_password_reset_email,
 )
 from .services import OTPService
+from .tasks import send_onboarding_email_task
 import logging
 from django.db import models
 
@@ -260,6 +261,13 @@ class VerifyOTPView(APIView):
         user.email_verified = True
         user.otp = None  # Clear OTP after verification
         user.save(update_fields=["phone_verified", "email_verified", "otp"])
+
+        # Send onboarding email via Celery
+        try:
+            send_onboarding_email_task.delay(user.id)
+            logger.info(f"Triggered onboarding email task for user {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to trigger onboarding email task: {str(e)}")
 
         # Generate tokens for immediate login
         refresh = RefreshToken.for_user(user)
