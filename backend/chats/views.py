@@ -27,6 +27,7 @@ def _publish_to_ably(channel_name: str, event: str, data: dict):
 
     async def _publish():
         from ably import AblyRest
+
         client = AblyRest(api_key)
         channel = client.channels.get(channel_name)
         await channel.publish(event, data)
@@ -107,7 +108,9 @@ class MessageListView(generics.ListAPIView):
 
     def get_queryset(self):
         conversation_pk = self.kwargs["pk"]
-        return Message.objects.filter(conversation_id=conversation_pk).order_by("timestamp")
+        return Message.objects.filter(conversation_id=conversation_pk).order_by(
+            "timestamp"
+        )
 
 
 class SendMessageView(APIView):
@@ -127,11 +130,15 @@ class SendMessageView(APIView):
         try:
             conversation = Conversation.objects.select_related("user_id").get(pk=pk)
         except Conversation.DoesNotExist:
-            return Response({"error": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "Conversation not found."}, status=status.HTTP_404_NOT_FOUND
+            )
 
         content = request.data.get("content", "").strip()
         if not content:
-            return Response({"error": "content is required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "content is required."}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Determine sender_type from the authenticated user
         user = request.user
@@ -183,9 +190,9 @@ class MarkReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, pk):
-        updated = Message.objects.filter(
-            conversation_id=pk, is_read=False
-        ).update(is_read=True)
+        updated = Message.objects.filter(conversation_id=pk, is_read=False).update(
+            is_read=True
+        )
 
         Conversation.objects.filter(pk=pk).update(unread_count=0)
 
