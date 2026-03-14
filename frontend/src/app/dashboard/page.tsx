@@ -2074,7 +2074,7 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
       {/* Welcome */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
         <div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: S.navy, margin: 0 }}>Good afternoon, {currentUser?.contact_name?.split(' ')[0] + " " + currentUser?.contact_name?.split(' ')[1] || "User"}</h2>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: S.navy, margin: 0 }}>{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night'; })()}, {currentUser?.contact_name?.split(' ')[0] || "User"}</h2>
           <p style={{ color: S.gray, fontSize: 14, margin: "4px 0 0" }}>Here&apos;s your delivery overview</p>
         </div>
         <button onClick={onNewOrder} style={{
