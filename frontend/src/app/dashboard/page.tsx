@@ -2038,6 +2038,7 @@ function VerifyEmailScreen({ token, onComplete }) {
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
 function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onGoOrders, currentUser, onResendVerification }) {
+  const isMobile = useWindowWidth() < 640;
   const recentOrders = orders.slice(0, 4);
   const delivered = orders.filter(o => o.status === "Done").length;
   const pending = orders.filter(o => o.status === "Pending" || o.status === "Assigned" || o.status === "Started").length;
@@ -2072,19 +2073,26 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
   return (
     <div style={{ animation: "fadeIn 0.3s ease" }}>
       {/* Welcome */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-        <div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, color: S.navy, margin: 0 }}>{(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night'; })()}, {currentUser?.contact_name?.split(' ')[0] || "User"}</h2>
-          <p style={{ color: S.gray, fontSize: 14, margin: "4px 0 0" }}>Here&apos;s your delivery overview</p>
+      <div style={{ marginBottom: isMobile ? 20 : 24 }}>
+        {/* Top row: greeting + button */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 12 }}>
+            <h2 style={{ fontSize: isMobile ? 18 : 20, fontWeight: 700, color: S.navy, margin: 0, lineHeight: 1.3 }}>
+              {(() => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good night'; })()}, {currentUser?.contact_name?.split(' ')[0] || "User"}
+            </h2>
+            <p style={{ color: S.gray, fontSize: isMobile ? 12 : 14, margin: "4px 0 0" }}>Here&apos;s your delivery overview</p>
+          </div>
+          <button onClick={onNewOrder} style={{
+            padding: isMobile ? "8px 14px" : "10px 20px",
+            borderRadius: 10, border: "none", cursor: "pointer", flexShrink: 0,
+            background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy,
+            fontWeight: 700, fontSize: isMobile ? 12 : 14, fontFamily: "inherit",
+            display: "flex", alignItems: "center", gap: 6,
+            boxShadow: "0 4px 12px rgba(232,168,56,0.25)"
+          }}>
+            {Icons.newOrder} {isMobile ? "New" : "New Delivery"}
+          </button>
         </div>
-        <button onClick={onNewOrder} style={{
-          padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer",
-          background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy,
-          fontWeight: 700, fontSize: 14, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8,
-          boxShadow: "0 4px 12px rgba(232,168,56,0.25)"
-        }}>
-          {Icons.newOrder} New Delivery
-        </button>
       </div>
 
       {/* Email Verification Banner */}
@@ -2095,11 +2103,12 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
       />
 
       {/* Stat Cards */}
-      {/* Stat Cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 20, marginBottom: 32 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(240px, 1fr))", gap: isMobile ? 10 : 20, marginBottom: isMobile ? 20 : 32 }}>
         {cards.map((c, i) => (
           <div key={i} className="group" style={{
-            background: c.bg, borderRadius: 20, padding: "24px", border: i === 0 ? "none" : `1px solid ${S.border}`,
+            background: c.bg, borderRadius: isMobile ? 14 : 20,
+            padding: isMobile ? "16px" : "24px",
+            border: i === 0 ? "none" : `1px solid ${S.border}`,
             boxShadow: i === 0 ? "0 10px 30px rgba(47, 55, 88, 0.15)" : "0 4px 6px rgba(0,0,0,0.02)",
             position: "relative", overflow: "hidden", transition: "transform 0.2s, box-shadow 0.2s"
           }}>
@@ -2135,9 +2144,9 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
               </>
             )}
 
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: isMobile ? 10 : 16 }}>
               <div style={{
-                width: 40, height: 40, borderRadius: 12,
+                width: isMobile ? 32 : 40, height: isMobile ? 32 : 40, borderRadius: 12,
                 background: i === 0 ? "rgba(255,255,255,0.1)" : S.grayBg,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 color: i === 0 ? S.gold : S.navy
@@ -2154,9 +2163,9 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
               )}
             </div>
 
-            <div style={{ fontSize: 13, fontWeight: 600, color: i === 0 ? "rgba(255,255,255,0.6)" : S.gray, marginBottom: 4 }}>{c.label}</div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: c.color, fontFamily: "'Outfit', sans-serif", marginBottom: 4 }}>{c.value}</div>
-            <div style={{ fontSize: 12, color: i === 0 ? "rgba(255,255,255,0.4)" : S.grayLight }}>{c.sub}</div>
+            <div style={{ fontSize: isMobile ? 11 : 13, fontWeight: 600, color: i === 0 ? "rgba(255,255,255,0.6)" : S.gray, marginBottom: 4 }}>{c.label}</div>
+            <div style={{ fontSize: isMobile ? 20 : 28, fontWeight: 700, color: c.color, fontFamily: "'Outfit', sans-serif", marginBottom: 4 }}>{c.value}</div>
+            <div style={{ fontSize: isMobile ? 10 : 12, color: i === 0 ? "rgba(255,255,255,0.4)" : S.grayLight }}>{c.sub}</div>
 
             {c.action && (
               <button onClick={c.onAction} style={{
@@ -2172,8 +2181,7 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
       </div>
 
       {/* Quick Actions */}
-      {/* Quick Actions */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 28 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: isMobile ? 8 : 12, marginBottom: isMobile ? 20 : 28 }}>
         {[
           { label: "Send Package", icon: Icons.bike, action: onNewOrder },
           { label: "Fund Wallet", icon: Icons.wallet, action: onFund },
@@ -2181,12 +2189,13 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
           { label: "Get Support", icon: Icons.support, action: () => { } },
         ].map((a, i) => (
           <button key={i} onClick={a.action} style={{
-            background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "16px", cursor: "pointer",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 8, fontFamily: "inherit",
-            transition: "all 0.2s"
+            background: "#fff", border: "1px solid #e2e8f0", borderRadius: isMobile ? 10 : 12,
+            padding: isMobile ? "12px 6px" : "16px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 5 : 8,
+            fontFamily: "inherit", transition: "all 0.2s"
           }}>
             <div style={{ color: S.gold }}>{a.icon}</div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{a.label}</span>
+            <span style={{ fontSize: isMobile ? 10 : 13, fontWeight: 600, color: S.navy, textAlign: "center", lineHeight: 1.2 }}>{a.label}</span>
           </button>
         ))}
       </div>
@@ -2200,40 +2209,46 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
         {recentOrders.map((order, i) => {
           const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
           return (
-            <div key={order.id} onClick={() => onViewOrder(order.id)} style={{
-              padding: "14px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
-              borderBottom: i < recentOrders.length - 1 ? "1px solid #f8fafc" : "none",
-              transition: "background 0.15s"
-            }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
+          <div key={order.id} onClick={() => onViewOrder(order.id)} style={{
+            padding: isMobile ? "12px 14px" : "14px 20px",
+            display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, cursor: "pointer",
+            borderBottom: i < recentOrders.length - 1 ? "1px solid #f8fafc" : "none",
+            transition: "background 0.15s"
+          }}
+            onMouseEnter={e => (e.currentTarget as any).style.background = "#fafbfc"}
+            onMouseLeave={e => (e.currentTarget as any).style.background = "transparent"}
+          >
+            {!isMobile && (
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold, flexShrink: 0 }}>
                 {getVehicleIcon(order.vehicle)}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: S.navy }}>#{order.id}</span>
-                  {order.mode && (() => {
-                    const modeBadge = getModeBadge(order.mode);
-                    return (
-                      <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: modeBadge.bg, color: modeBadge.color }}>
-                        {modeBadge.label}
-                      </span>
-                    );
-                  })()}
-                  {order.deliveries && order.deliveries.length > 1 && (
-                    <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#f1f5f9", color: S.navy }}>
-                      {order.deliveries.length} stops
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
+                <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 600, color: S.navy }}>#{order.id}</span>
+                {order.mode && (() => {
+                  const modeBadge = getModeBadge(order.mode);
+                  return (
+                    <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: modeBadge.bg, color: modeBadge.color }}>
+                      {modeBadge.label}
                     </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: S.grayLight, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {order.pickup} → {order.deliveries && order.deliveries.length > 1 ? `${order.deliveries.length} locations` : order.dropoff}
-                </div>
+                  );
+                })()}
+                {order.deliveries && order.deliveries.length > 1 && (
+                  <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#f1f5f9", color: S.navy }}>
+                    {order.deliveries.length} stops
+                  </span>
+                )}
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
-                <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: st.bg, color: st.text }}>{st.label}</span>
+              <div style={{ fontSize: 11, color: S.grayLight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {order.pickup} → {order.deliveries && order.deliveries.length > 1 ? `${order.deliveries.length} locations` : order.dropoff}
               </div>
             </div>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 6, background: st.bg, color: st.text }}>{st.label}</span>
+            </div>
+          </div>
           );
         })}
       </div>
@@ -2849,8 +2864,20 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
   );
 }
 
+// ─── Responsive hook ───────────────────────────────────────────
+function useWindowWidth() {
+  const [width, setWidth] = useState(() => typeof window !== 'undefined' ? window.innerWidth : 1200);
+  useEffect(() => {
+    const handler = () => setWidth(window.innerWidth);
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
+  return width;
+}
+
 // ─── NEW ORDER SCREEN ───────────────────────────────────────────
 function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
+  const isMobile = useWindowWidth() < 640;
   // ─── Mode: "quick" | "multi" | "bulk" ───
   const [mode, setMode] = useState("quick");
 
@@ -3359,39 +3386,43 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       {step === 1 && (
         <>
           {/* Mode Selector */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <div style={{ display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 14 : 20 }}>
             {modeConfig.map(m => (
               <button key={m.id} onClick={() => setMode(m.id)} style={{
-                flex: 1, padding: "14px 12px", borderRadius: 12, cursor: "pointer", fontFamily: "inherit",
+                flex: 1,
+                padding: isMobile ? "10px 6px" : "14px 12px",
+                borderRadius: isMobile ? 10 : 12,
+                cursor: "pointer", fontFamily: "inherit",
                 border: mode === m.id ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
                 background: mode === m.id ? S.goldPale : "#fff",
                 transition: "all 0.2s"
               }}>
-                <div style={{ fontSize: 22, marginBottom: 4 }}>{m.icon}</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>{m.label}</div>
-                <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>{m.desc}</div>
+                <div style={{ fontSize: isMobile ? 18 : 22, marginBottom: isMobile ? 2 : 4 }}>{m.icon}</div>
+                <div style={{ fontSize: isMobile ? 11 : 14, fontWeight: 700, color: S.navy, lineHeight: 1.2 }}>{m.label}</div>
+                {!isMobile && <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>{m.desc}</div>}
               </button>
             ))}
           </div>
 
           {/* ── Pickup (shared across all modes) ── */}
-          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} />
-                <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: 0 }}>Pickup Location</h3>
-              </div>
-              {/* Saved addresses quick pick */}
-              <div style={{ display: "flex", gap: 6 }}>
-                {savedAddresses.map(sa => (
-                  <button key={sa.label} onClick={() => setPickupAddress(sa.address)} style={{
-                    padding: "4px 10px", borderRadius: 8, border: "1px solid #e2e8f0", background: pickupAddress === sa.address ? S.goldPale : "#f8fafc",
-                    cursor: "pointer", fontSize: 11, fontWeight: 600, color: S.navy, fontFamily: "inherit"
-                  }}>
-                    {sa.icon} {sa.label}
-                  </button>
-                ))}
-              </div>
+          <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: isMobile ? 14 : 20, marginBottom: 14 }}>
+            {/* Label row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green, flexShrink: 0 }} />
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: 0 }}>Pickup Location</h3>
+            </div>
+            {/* Saved addresses quick pick — own row on mobile */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {savedAddresses.map(sa => (
+                <button key={sa.label} onClick={() => setPickupAddress(sa.address)} style={{
+                  padding: isMobile ? "4px 8px" : "4px 10px",
+                  borderRadius: 8, border: "1px solid #e2e8f0",
+                  background: pickupAddress === sa.address ? S.goldPale : "#f8fafc",
+                  cursor: "pointer", fontSize: isMobile ? 10 : 11, fontWeight: 600, color: S.navy, fontFamily: "inherit"
+                }}>
+                  {sa.icon} {sa.label}
+                </button>
+              ))}
             </div>
             <AddressAutocompleteInput
               value={pickupAddress}
@@ -3400,7 +3431,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               placeholder="Enter pickup address in Lagos"
               style={{ ...inputStyle, marginBottom: 10 }}
             />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
               <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={inputStyle} />
               <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={inputStyle} />
             </div>
@@ -3548,7 +3579,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 </div>
               )}
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10, marginBottom: 10 }}>
                 <div style={{ position: 'relative' }}>
                   <input
                     value={receiverName}
@@ -3623,7 +3654,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                         placeholder="Delivery address"
                         style={{ ...inputStyle, marginBottom: 8 }}
                       />
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 100px", gap: 8 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 100px", gap: 8 }}>
                         <input value={drop.name} onChange={e => updateDrop(drop.id, "name", e.target.value)}
                           placeholder="Receiver name" style={inputStyle} />
                         <input value={drop.phone} onChange={e => updateDrop(drop.id, "phone", e.target.value)}
@@ -3658,7 +3689,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               </div>
 
               {/* Action buttons: Snap, Upload, Paste */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: 10, marginBottom: 16 }}>
                 <button onClick={handleSnap} style={{
                   padding: "20px 12px", borderRadius: 12, border: "2px dashed #e2e8f0",
                   background: scanning ? S.goldPale : "#fafbfc", cursor: "pointer", fontFamily: "inherit", textAlign: "center",
@@ -3790,7 +3821,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           {/* ── Vehicle Selection (shared) ── */}
           <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 14 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Vehicle</h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 8 }}>
               {vehicles.map(v => {
                 console.log(vehicles, "vehicles")
                 const isSelected = vehicle === v.id;
@@ -3848,13 +3879,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           {/* ── Sticky bottom: Summary + Continue ── */}
           <div style={{
             background: "#fff", borderRadius: 14, border: `2px solid ${canProceed ? S.gold : "#e2e8f0"}`,
-            padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: isMobile ? "12px 14px" : "16px 20px",
+            display: "flex", flexDirection: isMobile ? "column" : "row",
+            alignItems: isMobile ? "stretch" : "center",
+            justifyContent: "space-between", gap: isMobile ? 10 : 0,
             transition: "all 0.3s"
           }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ fontSize: 13, color: S.gray }}>
-                  <span style={{ fontWeight: 700, color: S.navy, fontSize: 20 }}>{totalDeliveries}</span>
+                  <span style={{ fontWeight: 700, color: S.navy, fontSize: isMobile ? 17 : 20 }}>{totalDeliveries}</span>
                   <span style={{ marginLeft: 4 }}>{totalDeliveries === 1 ? "delivery" : "deliveries"}</span>
                 </div>
                 {totalDeliveries > 0 && (
@@ -3897,7 +3931,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
       {/* ═══ STEP 2: REVIEW + MAP ═══ */}
       {step === 2 && (
-        <div style={{ display: "flex", gap: 20, animation: "fadeIn 0.3s ease" }}>
+        <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 16 : 20, animation: "fadeIn 0.3s ease" }}>
           {/* LEFT — Order review */}
           <div style={{ flex: 1, minWidth: 0 }}>
             {/* Pickup summary */}
@@ -4031,6 +4065,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, onRefresh }) {
+  const isMobile = useWindowWidth() < 640;
   const [filter, setFilter] = useState("all");
   const [cancelModalOrder, setCancelModalOrder] = useState<any>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -4160,7 +4195,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
             <span style={{ padding: "6px 14px", borderRadius: 8, background: st.bg, color: st.text, fontSize: 13, fontWeight: 700 }}>{st.label}</span>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, padding: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: isMobile ? 16 : 24, padding: isMobile ? 16 : 24 }}>
             {/* Left Column: Order Details */}
             <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
               {/* Pickup Address */}
@@ -4730,44 +4765,72 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
           const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
           return (
             <div key={order.id} onClick={() => onSelectOrder(order.id)} style={{
-              padding: "16px 20px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+              padding: isMobile ? "12px 14px" : "16px 20px",
+              display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, cursor: "pointer",
               borderBottom: i < filtered.length - 1 ? "1px solid #f8fafc" : "none",
-            }}>
-              <div style={{ width: 42, height: 42, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
-                {getVehicleIcon(order.vehicle)}
-              </div>
+              transition: "background 0.15s",
+            }}
+              onMouseEnter={e => (e.currentTarget as any).style.background = "#fafbfc"}
+              onMouseLeave={e => (e.currentTarget as any).style.background = "transparent"}
+            >
+              {/* Vehicle icon — hide on very small screens */}
+              {!isMobile && (
+                <div style={{ width: 42, height: 42, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold, flexShrink: 0 }}>
+                  {getVehicleIcon(order.vehicle)}
+                </div>
+              )}
+
+              {/* Middle: order info */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>#{order.id}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: st.bg, color: st.text }}>{st.label}</span>
+                {/* Row 1: order number + badges */}
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
+                  <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: S.navy }}>#{order.id}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 6, background: st.bg, color: st.text, flexShrink: 0 }}>{st.label}</span>
                   {order.mode && (() => {
                     const modeBadge = getModeBadge(order.mode);
                     return (
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: modeBadge.bg, color: modeBadge.color }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 6, background: modeBadge.bg, color: modeBadge.color, flexShrink: 0 }}>
                         {modeBadge.label}
                       </span>
                     );
                   })()}
                   {order.deliveries && order.deliveries.length > 1 && (
-                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: "#f1f5f9", color: S.navy }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 6, background: "#f1f5f9", color: S.navy, flexShrink: 0 }}>
                       {order.deliveries.length} stops
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 12, color: S.grayLight, marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ color: S.green }}>{Icons.pin}</span> {order.pickup}
-                  <span style={{ margin: "0 4px" }}>→</span>
-                  <span style={{ color: S.gold }}>{Icons.pin}</span>
-                  {order.deliveries && order.deliveries.length > 1
-                    ? `${order.deliveries.length} locations`
-                    : order.dropoff}
+
+                {/* Row 2: pickup (truncated) */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+                  <span style={{ color: S.green, flexShrink: 0, lineHeight: 1 }}>{Icons.pin}</span>
+                  <span style={{ fontSize: 11, color: S.grayLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {order.pickup}
+                  </span>
+                </div>
+
+                {/* Row 3: dropoff (truncated) */}
+                <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden", marginTop: 2 }}>
+                  <span style={{ color: S.gold, flexShrink: 0, lineHeight: 1 }}>{Icons.pin}</span>
+                  <span style={{ fontSize: 11, color: S.grayLight, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {order.deliveries && order.deliveries.length > 1
+                      ? `${order.deliveries.length} locations`
+                      : order.dropoff}
+                  </span>
                 </div>
               </div>
+
+              {/* Right: amount + date */}
               <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
-                <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2, display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
-                  {Icons.clock} {order.date}
-                </div>
+                <div style={{ fontSize: isMobile ? 13 : 15, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
+                {!isMobile && (
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2, display: "flex", alignItems: "center", gap: 4, justifyContent: "flex-end" }}>
+                    {Icons.clock} {order.date}
+                  </div>
+                )}
+                {isMobile && (
+                  <div style={{ fontSize: 10, color: S.grayLight, marginTop: 1 }}>{order.date.split(',')[0]}</div>
+                )}
               </div>
             </div>
           );
