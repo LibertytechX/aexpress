@@ -275,6 +275,7 @@ const normalizeOrder = (o) => ({
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',
     paymentInfo: o.payment_info || null,
+    charge: o.charge || null,
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
@@ -283,6 +284,9 @@ const normalizeOrder = (o) => ({
     suggestedRiderId: o.suggested_rider_id || null,
     distance: o.distance || null,
     time: o.time || null,
+    waitingTime: o.waiting_time || null,
+    deliveryTime: o.delivery_time || null,
+    totalOrderTime: o.total_order_time || null,
     pricePerKm: o.price_per_km != null ? parseFloat(o.price_per_km) : null,
     pickupLat: o.pickup_lat || null,
     pickupLng: o.pickup_lng || null,

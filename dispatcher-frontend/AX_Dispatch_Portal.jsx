@@ -2231,10 +2231,10 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       const s = v == null ? "" : String(v);
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Status"];
+    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Status"];
     const rows = filtered.map(o => {
       const dt = formatOrderDateTime(o.created);
-      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.amount, o.cod, o.codFee, o.status].map(esc);
+      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.status].map(esc);
     });
     const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -2286,20 +2286,23 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       </div>
 
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 100px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Payment</span><span>Status</span>
+        <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>Status</span>
         </div>
         <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
           {filtered.map(o => {
             const dt = formatOrderDateTime(o.created);
             return (
-              <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "110px 105px 1fr 1fr 1.2fr 130px 80px 70px 100px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
                 <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
                 <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
                 <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
                 <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
                 <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+                <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
+                <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
                   {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
@@ -2586,6 +2589,23 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     <div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{order.paymentInfo.account_number}</div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: S.text, marginTop: 2 }}>{order.paymentInfo.account_name}</div>
                   </div>
+                  {order.charge && (
+                    <div style={{ background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: "uppercase" }}>Charge Trx</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: order.charge.status === "completed" ? S.greenBg : (order.charge.status === "failed" ? S.redBg : S.yellowBg), color: order.charge.status === "completed" ? S.green : (order.charge.status === "failed" ? S.red : S.yellow), fontWeight: 700 }}>{order.charge.status.toUpperCase()}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 11, color: S.textMuted }}>Amount</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{order.charge.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {order.charge.created_at && (
+                        <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>
+                          {new Date(order.charge.created_at).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button onClick={() => onPayNow(order)} style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                     {I.dashboard} View Account Details
                   </button>
