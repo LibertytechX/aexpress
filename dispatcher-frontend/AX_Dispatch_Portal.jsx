@@ -64,8 +64,18 @@ const haversineKm = (lat1, lng1, lat2, lng2) => {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
+// ─── STALE ALERT AUDIO ──────────────────────────────────────────
+const playStaleAlertChime = () => playChime([
+  { freq: 440, start: 0, dur: 0.3 },     // A4
+  { freq: 523, start: 0.3, dur: 0.3 },   // C5
+  { freq: 440, start: 0.6, dur: 0.3 },   // A4
+  { freq: 523, start: 0.9, dur: 0.3 },   // C5
+  { freq: 659, start: 1.2, dur: 0.8 },   // E5 sustained
+]);
+
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
+  warning: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   dashboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>,
   orders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16h6" /><path d="M19 13v6" /><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><path d="m7.5 4.27 9 5.15" /><polyline points="3.29 7 12 12 20.71 7" /><line x1="12" y1="22" x2="12" y2="12" /></svg>,
   riders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18.5" cy="17.5" r="3.5" /><circle cx="5.5" cy="17.5" r="3.5" /><circle cx="15" cy="5" r="1" /><path d="M12 17.5V14l-3-3 4-3 2 3h2" /></svg>,
@@ -960,12 +970,53 @@ const Badge = ({ status }) => { const s = STS[status] || { bg: "#f1f5f9", text: 
 const StatCard = ({ label, value, sub, color }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: "16px 18px", flex: 1 }}><div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{label}</div><div style={{ fontSize: 24, fontWeight: 800, color: color || S.text, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>{sub && <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>{sub}</div>}</div>);
 const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
-// ─── LOGIN SCREEN ───────────────────────────────────────────────
+// ─── LOGIN SCREEN (Modern Redesign) ──────────────────────────────────
 function LoginScreen({ onLogin, onForgotPassword }) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  // Resize listener for responsive breakpoints
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isDesktop = windowWidth >= 1024; // lg breakpoint
+
+  const slides = [
+    {
+      title: "Fleet Command",
+      subtitle: "Active Deployments",
+      description: "Monitor all live active deployments, relays, and rider positions in real-time across the entire network.",
+      stats: [{ value: "89+", label: "Active Riders", color: "#FBB12F" }, { value: "12min", label: "Avg. Dispatch", color: "#00B67A" }]
+    },
+    {
+      title: "Intelligent Routing",
+      subtitle: "Instant Matching",
+      description: "Our proprietary algorithm seamlessly connects incoming orders to the most optimal relay nodes instantly.",
+      stats: [{ value: "98%", label: "Match Rate", color: "#00B67A" }, { value: "<2s", label: "Processing", color: "#FBB12F" }]
+    },
+    {
+      title: "Command Center",
+      subtitle: "Unified Control",
+      description: "Oversee merchant relations, emergency overrides, and multi-drop tracking all from one unified portal.",
+      stats: [{ value: "2K+", label: "Merchants", color: "#FBB12F" }, { value: "24/7", label: "Uptime", color: "#00B67A" }]
+    }
+  ];
+
+  // Auto-advance slides
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentSlide(prev => (prev + 1) % slides.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [slides.length]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -981,31 +1032,307 @@ function LoginScreen({ onLogin, onForgotPassword }) {
     }
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') handleSubmit(e);
+  };
+
+  // SVGs for inputs and trust badges
+  const PhoneIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>;
+  const LockIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
+  const EyeIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>;
+  const EyeOffIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+  const ShieldIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
+  const ZapIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
+  const PackageIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>;
+  const LoaderIcon = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>;
+  const ArrowRightIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>;
+
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <div style={{ width: 380, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontWeight: 800, fontSize: 22, color: S.navy, fontFamily: "'Space Mono',monospace", marginBottom: 16 }}>AX</div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>Dispatch Portal</h1>
-          <p style={{ color: S.muted, fontSize: 14, marginTop: 4 }}>Sign in to continue</p>
+    <div style={{ minHeight: "100vh", width: "100%", display: "flex", background: "#fff", fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", overflow: "hidden" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+      
+      {/* ─── LEFT PANEL (desktop only) ─── */}
+      {isDesktop && (
+        <div style={{ width: "55%", position: "relative", overflow: "hidden", background: "#2F3758", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "48px", zIndex: 0 }}>
+          {/* Animated Background Elements */}
+          <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+            {/* Dot Grid */}
+            <div style={{ position: "absolute", inset: 0, opacity: 0.05, backgroundImage: "radial-gradient(#ffffff 1.5px, transparent 1.5px)", backgroundSize: "40px 40px" }} />
+            {/* Blurs */}
+            <div style={{ position: "absolute", bottom: "-10%", left: "-20%", width: 800, height: 800, background: "rgba(0,182,122,0.05)", filter: "blur(120px)", borderRadius: "50%" }} />
+            <div style={{ position: "absolute", top: "-20%", right: "-10%", width: 600, height: 600, background: "rgba(251,177,47,0.05)", filter: "blur(100px)", borderRadius: "50%" }} />
+            {/* Rings */}
+            <div style={{ position: "absolute", top: "-5%", right: "-5%", width: 400, height: 400, border: "2px dashed rgba(255,255,255,0.1)", borderRadius: "50%", animation: "spinReverse 30s linear infinite" }} />
+            <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 600, height: 600, border: "1px solid rgba(255,255,255,0.05)", borderRadius: "50%", animation: "spin 40s linear infinite" }} />
+          </div>
+
+          <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 12, animation: "fadeInUp 0.6s ease" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, boxShadow: `0 4px 12px ${S.gold}40` }}>
+              <span style={{ fontWeight: 900, fontSize: 16, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
+            </div>
+            <div>
+               <p style={{ color: "#fff", fontWeight: 800, fontSize: 13, letterSpacing: "1px", margin: 0 }}>ASSURED XPRESS</p>
+               <p style={{ color: S.gold, fontSize: 9, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
+            </div>
+          </div>
+
+          <div style={{ position: "relative", zIndex: 10, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 540, paddingBottom: 80 }}>
+            {/* Slide Content */}
+            <div style={{ minHeight: 180, animation: "fadeInUp 0.5s ease" }} key={currentSlide}>
+              <h1 style={{ color: "#fff", fontSize: 44, fontWeight: 800, lineHeight: 1.1, margin: "0 0 16px 0" }}>
+                {slides[currentSlide].title} <br />
+                <span style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)` }}>
+                  {slides[currentSlide].subtitle}
+                </span>
+              </h1>
+              <p style={{ color: "#cbd5e1", fontSize: 17, lineHeight: 1.6, margin: "0 0 24px 0", maxWidth: 440, height: 80 }}>
+                {slides[currentSlide].description}
+              </p>
+              <div style={{ display: "flex", gap: 32, paddingTop: 16 }}>
+                {slides[currentSlide].stats.map((stat, i) => (
+                  <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontSize: 26, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
+                    <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Slide Navigation Dots */}
+            <div style={{ display: "flex", gap: 8, marginTop: 40 }}>
+              {slides.map((_, idx) => (
+                <button 
+                  key={idx} 
+                  onClick={() => setCurrentSlide(idx)}
+                  style={{ 
+                    height: 6, width: currentSlide === idx ? 32 : 8, 
+                    borderRadius: 3, padding: 0, border: "none",
+                    background: currentSlide === idx ? S.gold : "#475569", 
+                    cursor: "pointer", transition: "all 0.3s ease" 
+                  }} 
+                />
+              ))}
+            </div>
+          </div>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Phone Number</label>
-            <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+234..." style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+      )}
+
+      {/* ─── RIGHT PANEL / MOBILE FULL PAGE ─── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", position: "relative", overflow: "hidden" }}>
+        
+        {/* Mobile Header Hero (Hidden on Desktop) */}
+        {!isDesktop && (
+          <div style={{ position: "relative", width: "100%", minHeight: 280, overflow: "hidden", background: "#1e2540" }}>
+             {/* Abstract Background for Mobile Hero */}
+             <div style={{ position: "absolute", inset: 0, opacity: 0.12, backgroundImage: "radial-gradient(rgba(255,255,255,0.8) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+             <div style={{ position: "absolute", top: "-30%", right: "-20%", width: 320, height: 320, background: "radial-gradient(circle, rgba(251,177,47,0.25) 0%, transparent 70%)", borderRadius: "50%" }} />
+             <div style={{ position: "absolute", bottom: "-20%", left: "-10%", width: 280, height: 280, background: "radial-gradient(circle, rgba(0,182,122,0.2) 0%, transparent 70%)", borderRadius: "50%" }} />
+
+             <div style={{ padding: "24px 24px 40px 24px", position: "relative", zIndex: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(to bottom right, ${S.gold}, #F5C563)`, boxShadow: `0 4px 12px ${S.gold}4d` }}>
+                    <span style={{ fontWeight: 900, fontSize: 14, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
+                  </div>
+                  <div>
+                    <p style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: "1.5px", margin: 0 }}>ASSURED XPRESS</p>
+                    <p style={{ color: S.gold, fontSize: 8, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
+                  </div>
+                </div>
+
+                <div key={currentSlide} style={{ animation: "fadeInUp 0.4s ease" }}>
+                  <h1 style={{ color: "#fff", fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 4px 0" }}>{slides[currentSlide].title}</h1>
+                  <h2 style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)`, fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 20px 0" }}>{slides[currentSlide].subtitle}</h2>
+                  
+                  <div style={{ display: "flex", gap: 20 }}>
+                    {slides[currentSlide].stats.map((stat, i) => (
+                      <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+                        <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
+                        <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 6, marginTop: 24 }}>
+                  {slides.map((_, idx) => (
+                    <button 
+                      key={idx} 
+                      onClick={() => setCurrentSlide(idx)}
+                      style={{ 
+                        height: 4, width: currentSlide === idx ? 24 : 6, 
+                        borderRadius: 2, padding: 0, border: "none",
+                        background: currentSlide === idx ? S.gold : "rgba(255,255,255,0.3)", 
+                        cursor: "pointer", transition: "all 0.3s ease" 
+                      }} 
+                    />
+                  ))}
+                </div>
+             </div>
+             
+             {/* Wave mask at bottom */}
+             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 32, background: "#fff", borderRadius: "40px 40px 0 0" }} />
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
-          </div>
-          <div style={{ textAlign: "right", marginBottom: 24 }}>
-            <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", color: S.gold, fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Forgot Password?</button>
-          </div>
-          {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
-          <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1 }}>{loading ? "Signing in..." : "Sign In"}</button>
-        </form>
+        )}
+
+        {/* Form Container */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: isDesktop ? "center" : "flex-start", alignItems: "center", padding: isDesktop ? 32 : "16px 24px 32px 24px", position: "relative" }}>
+           
+           {/* Desktop Subtle BG accents */}
+           {isDesktop && (
+             <div style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
+               <div style={{ position: "absolute", top: "-10%", right: "-20%", width: 300, height: 300, background: "rgba(251,177,47,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+               <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 400, height: 400, background: "rgba(0,182,122,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+             </div>
+           )}
+
+           <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 10 }}>
+              
+              <div style={{ marginBottom: 28 }}>
+                <h2 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 700, color: S.navy, margin: "0 0 4px 0" }}>Control Access 👋</h2>
+                <p style={{ color: S.textMuted, fontSize: 14, margin: 0 }}>Authorize entry into dispatch control.</p>
+              </div>
+
+              {error && (
+                <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fee2e2", borderRadius: 12, display: "flex", alignItems: "center", gap: 12, color: "#dc2626", fontSize: 14, marginBottom: 24, animation: "fadeInDown 0.3s ease" }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+                  {error}
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                
+                {/* Phone Field */}
+                <div>
+                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 6 }}>Phone Number</label>
+                  <div style={{ position: "relative" }}>
+                    {/* Icon */}
+                    <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                      {PhoneIcon}
+                    </div>
+                    {/* Prefix */}
+                    <div style={{ position: "absolute", left: 48, top: "50%", transform: "translateY(-50%)", fontSize: 14, fontWeight: 500, color: "#64748b", borderRight: "1px solid #e2e8f0", paddingRight: 12, zIndex: 10, display: "flex", alignItems: "center", height: 20 }}>
+                      +234
+                    </div>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        if (val.length <= 11) setPhone(val);
+                      }}
+                      onKeyPress={handleKeyPress}
+                      placeholder="8099999999"
+                      required
+                      style={{ 
+                        width: "100%", padding: "14px 16px 14px 96px", 
+                        background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0", 
+                        borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy, 
+                        outline: "none", transition: "all 0.2s", fontFamily: "inherit" 
+                      }}
+                      onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                      onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Password</label>
+                    <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", fontSize: 13, fontWeight: 600, color: S.gold, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Forgot password?</button>
+                  </div>
+                  <div style={{ position: "relative" }}>
+                    {/* Icon */}
+                    <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                      {LockIcon}
+                    </div>
+                    <input
+                      type={showPass ? "text" : "password"}
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      onKeyPress={handleKeyPress}
+                      placeholder="Enter your password"
+                      required
+                      style={{ 
+                        width: "100%", padding: "14px 48px 14px 52px", 
+                        background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0", 
+                        borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy, 
+                        outline: "none", transition: "all 0.2s", fontFamily: "inherit" 
+                      }}
+                      onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                      onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                    />
+                    <button 
+                      type="button" 
+                      onClick={() => setShowPass(!showPass)} 
+                      style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#94a3b8", cursor: "pointer", padding: 0 }}
+                    >
+                      {showPass ? EyeOffIcon : EyeIcon}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Submit Button */}
+                <button 
+                  type="submit" 
+                  disabled={loading} 
+                  style={{ 
+                    marginTop: 8, width: "100%", padding: "16px", borderRadius: 12, border: "none",
+                    background: S.navy, color: "#fff", fontSize: 15, fontWeight: 700,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    cursor: loading ? "not-allowed" : "pointer", position: "relative", overflow: "hidden",
+                    opacity: loading ? 0.8 : 1, transition: "background 0.2s", fontFamily: "inherit",
+                    boxShadow: "0 8px 16px rgba(47,55,88,0.2)"
+                  }}
+                  onMouseEnter={e => { if(!loading) e.currentTarget.style.background = "#232a45"; }}
+                  onMouseLeave={e => { if(!loading) e.currentTarget.style.background = S.navy; }}
+                >
+                  <span style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                    {loading ? <>{LoaderIcon} Accessing Control...</> : <>Enter Command Center {ArrowRightIcon}</>}
+                  </span>
+                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: S.gold }} />
+                </button>
+              </form>
+
+              {/* Mobile Trust Badges */}
+              {!isDesktop && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 24 }}>
+                    <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+                    <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>Secured Platform</span>
+                    <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "center", gap: 24 }}>
+                    {[
+                      { icon: ShieldIcon, label: "Internal SSL" },
+                      { icon: ZapIcon, label: "Live Sockets" },
+                      { icon: PackageIcon, label: "Admin Rights" }
+                    ].map((badge, i) => (
+                      <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(47,55,88,0.05)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(47,55,88,0.6)" }}>
+                          {badge.icon}
+                        </div>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: "#94a3b8" }}>{badge.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+           </div>
+           
+           {/* Footer */}
+           <div style={{ position: "absolute", bottom: 16, width: "100%", textAlign: "center", fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
+             &copy; {new Date().getFullYear()} Assured Xpress Operations.
+           </div>
+        </div>
       </div>
+      
+      <style dangerouslySetInnerHTML={{__html:`
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes spinReverse { 100% { transform: rotate(-360deg); } }
+      `}} />
     </div>
   );
 }
@@ -1155,6 +1482,42 @@ export default function AXDispatchPortal() {
   const [activityFeed, setActivityFeed] = useState([]);
   const [commissionPct, setCommissionPct] = useState(20);
   const ablyRef = useRef(null);
+
+  const [showStaleModal, setShowStaleModal] = useState(false);
+  const [staleOrders, setStaleOrders] = useState([]);
+  const lastStaleChimeTime = useRef(0);
+
+  // Periodic Stale Check (every 30 seconds) checks if any order has been pending > 7 mins.
+  // Plays the chime immediately if newly found, and then repeats the chime every 7 mins while they persist.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const checkStale = () => {
+      const nowMs = Date.now();
+      const STALE_THRESHOLD_MS = 7 * 60 * 1000; // 7 minutes
+      
+      const stale = orders.filter(o => {
+        if (o.status !== "Pending") return false;
+        const createdMs = new Date(o.created).getTime();
+        return (nowMs - createdMs) > STALE_THRESHOLD_MS;
+      });
+
+      setStaleOrders(stale);
+
+      // Trigger audio if we have stale orders AND (it's the first time OR 7+ mins since last alert)
+      if (stale.length > 0) {
+        if (nowMs - lastStaleChimeTime.current >= STALE_THRESHOLD_MS) {
+          playStaleAlertChime();
+          lastStaleChimeTime.current = nowMs;
+        }
+      } else {
+        lastStaleChimeTime.current = 0; // reset
+      }
+    };
+
+    checkStale(); // run immediately
+    const interval = setInterval(checkStale, 30000);
+    return () => clearInterval(interval);
+  }, [orders, isAuthenticated]);
 
   // Initialize event logs when orders change
   const initEventLogs = (ordersList) => {
@@ -1521,6 +1884,33 @@ export default function AXDispatchPortal() {
           {screen === "teams" && <TeamsScreen dispatchers={dispatchers} onDispatcherCreated={(d) => setDispatchers(p => [d, ...p])} />}
         </div>
       </main>
+      
+      {/* ─── GLOBAL PENDING STALENESS ALERT ─── */}
+      {staleOrders.length > 0 && (
+        <button 
+          onClick={() => setShowStaleModal(true)}
+          style={{
+            position: "fixed", bottom: 32, right: 32, zIndex: 900,
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 20px",
+            background: S.gold, color: S.navy, border: "none", borderRadius: 32,
+            boxShadow: `0 8px 32px ${S.gold}60`, cursor: "pointer", animation: "stalePulseGlobal 2.5s infinite"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ animation: "spin 4s linear infinite", display: "inline-block" }}>{I.warning}</span>
+            <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "inherit" }}>{staleOrders.length} Stale Orders</span>
+          </div>
+        </button>
+      )}
+
+      {showStaleModal && (
+        <StaleOrdersModal 
+          staleOrders={staleOrders} 
+          onClose={() => setShowStaleModal(false)}
+          onViewOrder={(id) => navTo("orders", id)}
+        />
+      )}
+
       {showCreateOrder && <CreateOrderModal riders={riders} merchants={merchants} onClose={() => setShowCreateOrder(false)} onOrderCreated={(created) => {
         const newOrder = {
           id: created.id || "N/A",
@@ -1546,6 +1936,13 @@ export default function AXDispatchPortal() {
         };
         setOrders(p => [newOrder, ...p]);
       }} />}
+      <style dangerouslySetInnerHTML={{__html:`
+        @keyframes stalePulseGlobal {
+          0% { box-shadow: 0 0 0 0 rgba(232,168,56,0.5); }
+          70% { box-shadow: 0 0 0 16px rgba(232,168,56,0); }
+          100% { box-shadow: 0 0 0 0 rgba(232,168,56,0); }
+        }
+      `}} />
     </div>
   );
 }
@@ -1715,6 +2112,60 @@ function formatOrderDateTime(raw) {
   return { date: parts[0] || raw, time: parts[1] || "" };
 }
 
+// ─── STALE ORDERS MODAL ───────────────────────────────────────────
+function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
+        
+        {/* Header */}
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: S.redBg }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(239,68,68,0.15)", color: S.red, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {I.warning}
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.red }}>Stale Pending Orders</h3>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: S.textDim }}>These orders have been unassigned for more than 7 minutes.</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.red, padding: 4 }}>{I.x}</button>
+        </div>
+
+        {/* List */}
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {staleOrders.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "32px 0", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>No stale orders. You're all caught up!</div>
+          ) : (
+             staleOrders.map(o => {
+               // Calculate exactly how many minutes they are stale
+               const mins = Math.floor((new Date() - new Date(o.created)) / 60000);
+               return (
+                 <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px", border: `1px solid ${S.border}`, borderRadius: 12, background: S.bg }}>
+                   <div>
+                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                       <span style={{ fontSize: 14, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+                       <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>{mins} mins ago</span>
+                     </div>
+                     <div style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{o.merchant}</div>
+                     <div style={{ fontSize: 11, color: S.textDim }}>{o.pickup.split(',')[0]} → {o.dropoff.split(',')[0]}</div>
+                   </div>
+                   <button 
+                     onClick={() => { onClose(); onViewOrder(o.id); }} 
+                     style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: S.navy, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
+                   >
+                     View & Assign
+                   </button>
+                 </div>
+               )
+             })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
 function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
   const [statusFilter, setStatusFilter] = useState("All");
@@ -1866,6 +2317,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
         </div>
       </div>
+
       {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
     </div>
   );
