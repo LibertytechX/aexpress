@@ -78,6 +78,7 @@ class OrderSerializer(serializers.ModelSerializer):
     rider_code = serializers.SerializerMethodField()
     rider_name = serializers.SerializerMethodField()
     rider_phone = serializers.SerializerMethodField()
+    charge = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
@@ -112,6 +113,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "cod_amount",
             "deliveries",
             "delivery_count",
+            "charge",
         ]
         read_only_fields = ["id", "order_number", "created_at", "updated_at"]
 
@@ -161,6 +163,16 @@ class OrderSerializer(serializers.ModelSerializer):
         rider = self._get_rider(obj)
         user = getattr(rider, "user", None) if rider else None
         return getattr(user, "phone", None) if user else None
+
+    def get_charge(self, obj):
+        charge = obj.charges.first()
+        if charge:
+            return {
+                "amount": float(charge.amount),
+                "status": charge.status,
+                "created_at": charge.created_at.isoformat(),
+            }
+        return None
 
 
 class QuickSendSerializer(serializers.Serializer):

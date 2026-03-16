@@ -2134,6 +2134,23 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     <div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{order.paymentInfo.account_number}</div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: S.text, marginTop: 2 }}>{order.paymentInfo.account_name}</div>
                   </div>
+                  {order.charge && (
+                    <div style={{ background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: "uppercase" }}>Charge Trx</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: order.charge.status === "completed" ? S.greenBg : (order.charge.status === "failed" ? S.redBg : S.yellowBg), color: order.charge.status === "completed" ? S.green : (order.charge.status === "failed" ? S.red : S.yellow), fontWeight: 700 }}>{order.charge.status.toUpperCase()}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 11, color: S.textMuted }}>Amount</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{order.charge.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {order.charge.created_at && (
+                        <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>
+                          {new Date(order.charge.created_at).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <button onClick={() => onPayNow(order)} style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                     {I.dashboard} View Account Details
                   </button>

@@ -241,6 +241,7 @@ class QuickSendView(APIView):
 
         if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
             from .tasks import create_order_charge
+
             create_order_charge.delay(order.id)
 
         return Response(
@@ -398,6 +399,7 @@ class MultiDropView(APIView):
 
         if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
             from .tasks import create_order_charge
+
             create_order_charge.delay(order.id)
 
         return Response(
@@ -555,6 +557,7 @@ class BulkImportView(APIView):
 
         if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
             from .tasks import create_order_charge
+
             create_order_charge.delay(order.id)
 
         return Response(
@@ -595,7 +598,7 @@ class OrderPayNowView(APIView):
 
         # Get or create virtual account
         try:
-            virtual_account = create_virtual_account(request.user)
+            virtual_account = create_virtual_account(order.user)
             order.payment_info = {
                 "account_number": virtual_account.account_number,
                 "account_name": virtual_account.account_name,
@@ -615,7 +618,7 @@ class OrderPayNowView(APIView):
 
         # Create or update pending charge
         charge, created = Charge.objects.get_or_create(
-            user=request.user,
+            user=order.user,
             order=order,
             defaults={"amount": order.total_amount, "status": "pending"},
         )
@@ -1193,6 +1196,7 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     # Trigger transactional emails
     from orders.marketing_tasks import send_transactional_email
+
     if new_status == "Started":
         send_transactional_email.delay("F1", str(order.id))
     elif new_status == "Done":
@@ -1807,8 +1811,9 @@ class DeliveryCompleteView(APIView):
             order.status = "Done"
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
-            
+
             from orders.marketing_tasks import send_transactional_email
+
             send_transactional_email.delay("F2", str(order.id))
 
             # Trigger order-completed webhook in background

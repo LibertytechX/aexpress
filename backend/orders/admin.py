@@ -54,10 +54,9 @@ def complete_order_for_rider(modeladmin, request, queryset):
             cod_total = Decimal("0.00")
 
             if is_cod:
-                cod_total = (
-                    order.deliveries.aggregate(Sum("cod_amount"))["cod_amount__sum"]
-                    or Decimal("0.00")
-                )
+                cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
+                    "cod_amount__sum"
+                ] or Decimal("0.00")
 
                 if cod_total > 0:
                     try:
@@ -193,7 +192,9 @@ def complete_order_for_rider(modeladmin, request, queryset):
         )
 
 
-complete_order_for_rider.short_description = "Complete order for assigned rider (no proximity check)"
+complete_order_for_rider.short_description = (
+    "Complete order for assigned rider (no proximity check)"
+)
 
 
 class AssignedRiderFilter(admin.SimpleListFilter):
@@ -312,7 +313,10 @@ class OrderAdmin(admin.ModelAdmin):
     ordering = ["-created_at"]
 
     fieldsets = (
-        ("Order Information", {"fields": ("order_number", "user", "mode", "status")}),
+        (
+            "Order Information",
+            {"fields": ("order_number", "user", "mode", "status", "rider")},
+        ),
         (
             "Pickup Details",
             {"fields": ("pickup_address", "sender_name", "sender_phone")},
