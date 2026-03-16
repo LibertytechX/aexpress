@@ -1,0 +1,68 @@
+# Development Rules & Standards
+
+### 1. Coding Style (Python)
+- **Type Hinting:** Mandatory for all function signatures and class attributes.
+- **Docstrings:** Use Google-style docstrings for any public-facing method.
+- **Imports:** Use absolute imports for all modules and always put imports at the top of the file.
+
+### 2. API Standards (DRF)
+- Use Serializers for validation, not just for output.
+- Use the `ServiceException` class for consistent serializer validation error handling, and use the `exception_advice` decorator to handle exceptions, and return consistent service responses `service_response`, this is the `service_response` function from `sparky_utils.response`.
+```
+## Example usage
+<!-- ServiceException -->
+class CryptoPaymentSerializer(serializers.Serializer):
+    amount = serializers.FloatField(required=False)
+    pay_currency = serializers.CharField(max_length=10, required=False)
+
+    def validate(self, attrs):
+        amount = attrs.get("amount")
+        currency = attrs.get("pay_currency")
+        if not amount or not currency:
+            raise ServiceException(
+                status_code=400, message="Amount and currency are required"
+            )
+        if amount <= 0:
+            raise ServiceException(
+                status_code=400, message="Amount must be greater than 0"
+            )
+        if amount < 50 and attrs.get("pay_currency") == "btc":
+            raise ServiceException(
+                status_code=400, message="Amount must be greater than 50 USD for btc"
+            )
+        return attrs
+
+<!-- exception_advice and service response -->
+@exception_advice()
+    def post(self, request, *args, **kwargs):
+        data = request.data
+        chat_id = data.get("chat_id")
+        print(chat_id)
+        message_id = data.get("message_id")
+        db_ref = db.reference(f"/")
+        chats_ref = db_ref.child(chat_id)
+        message_ref = chats_ref.child(message_id)
+        message = message_ref.get()
+        print(message)
+        # TODO Will process the message with AI and add the AI message
+        chats_ref.push(
+            {
+                "text": "Changed Named",
+                "userType": "AI",
+                "timestamp": datetime.now().isoformat(),
+                "username": "GetLinkedAI",
+            }
+        )
+        return service_response(
+            status="success",
+            message="Chat AI",
+            data={},
+            status_code=200,
+        )
+```
+- Prefer `ModelSerializer` unless the logic is highly custom.
+- Use `APIView` or `ViewSet` for API views, but always prefer `APIView`
+
+
+### 3. Running Commands
+- Active venv in the backend directory `/Users/ayo/Liberty/aexpress/backend` using `source venv/bin/activate`

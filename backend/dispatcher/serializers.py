@@ -255,6 +255,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "notes",
             "timeline",
             "customer",
+            "payment_info",
             "customerPhone",
             "vehicle",
             # Relay routing details (populated for relay orders)
@@ -703,6 +704,11 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             distance_km=distance_km,
             duration_minutes=duration_minutes,
         )
+
+        payment_method = self.initial_data.get("payment_method")
+        if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
+            from orders.tasks import create_order_charge
+            create_order_charge.delay(order.id)
 
         return order
 

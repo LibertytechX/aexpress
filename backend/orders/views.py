@@ -239,6 +239,10 @@ class QuickSendView(APIView):
 
         threading.Thread(target=_trigger_created, daemon=True).start()
 
+        if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
+            from .tasks import create_order_charge
+            create_order_charge.delay(order.id)
+
         return Response(
             {
                 "success": True,
@@ -392,6 +396,10 @@ class MultiDropView(APIView):
 
         threading.Thread(target=_trigger_multi_created, daemon=True).start()
 
+        if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
+            from .tasks import create_order_charge
+            create_order_charge.delay(order.id)
+
         return Response(
             {
                 "success": True,
@@ -544,6 +552,10 @@ class BulkImportView(APIView):
                 logger.error(f"Failed to trigger order-created webhook: {e}")
 
         threading.Thread(target=_trigger_bulk_created, daemon=True).start()
+
+        if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
+            from .tasks import create_order_charge
+            create_order_charge.delay(order.id)
 
         return Response(
             {
@@ -1179,6 +1191,13 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     order.save(update_fields=update_fields)
 
+    # Trigger transactional emails
+    from orders.marketing_tasks import send_transactional_email
+    if new_status == "Started":
+        send_transactional_email.delay("F1", str(order.id))
+    elif new_status == "Done":
+        send_transactional_email.delay("F2", str(order.id))
+
     # Trigger order-completed webhook in background if status is Done
     if new_status == "Done":
 
@@ -1561,6 +1580,9 @@ class OrderCompleteView(APIView):
                     f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
                 )
 
+            # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
+            # but we can rely on `_advance_order` to handle it cleanly.
+
             return _advance_order(
                 request, order_number, "Done", "Order Completed (All Deliveries)"
             )
@@ -1785,6 +1807,9 @@ class DeliveryCompleteView(APIView):
             order.status = "Done"
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
+            
+            from orders.marketing_tasks import send_transactional_email
+            send_transactional_email.delay("F2", str(order.id))
 
             # Trigger order-completed webhook in background
             def _trigger_delivery_completed():

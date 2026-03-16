@@ -536,6 +536,76 @@ def corebanking_webhook(request):
             )
             return Response({"success": True})
 
+        # Check if it's a COD Remission
+        if transaction_reference.startswith("COD-"):
+            from riders.models import RiderCodRecord
+            from django.utils import timezone
+            
+            try:
+                cod_record = RiderCodRecord.objects.get(payment_ref=transaction_reference)
+                
+                # If already remitted/verified, skip
+                if cod_record.status in [RiderCodRecord.Status.REMITTED, RiderCodRecord.Status.VERIFIED]:
+                    logger.info(
+                        f"CoreBanking webhook skipped - COD transaction {transaction_reference} already remitted - Log ID: {webhook_log.id}"
+                    )
+                    webhook_log.mark_skipped(
+                        f"COD Transaction {transaction_reference} already remitted"
+                    )
+                    return Response({"success": True})
+                    
+                merchant_user = cod_record.order.user
+                wallet, _ = Wallet.objects.get_or_create(user=merchant_user)
+                
+                webhook_metadata = {
+                    "source": "corebanking_webhook",
+                    "webhook_log_id": str(webhook_log.id),
+                    "webhook_payload": data,
+                    "transaction_type": data.get("transaction_type"),
+                    "settlement_status": data.get("settlement_status"),
+                    "payer_account_name": payer_name,
+                    "payer_account_number": data.get("payer_account_number"),
+                    "recipient_account_number": recipient_account_number,
+                    "transaction_date": data.get("transaction_date"),
+                    "settlement_date": data.get("settlement_date"),
+                    "is_cod_remission": True,
+                }
+                
+                with db_transaction.atomic():
+                    wallet.credit(
+                        amount=Decimal(str(amount)),
+                        description=f"COD Remission from Rider for Order #{cod_record.order.order_number}",
+                        reference=transaction_reference,
+                        metadata=webhook_metadata,
+                    )
+                    
+                    cod_record.status = RiderCodRecord.Status.REMITTED
+                    cod_record.remitted_at = timezone.now()
+                    cod_record.save(update_fields=["status", "remitted_at"])
+                    
+                    transaction = Transaction.objects.get(reference=transaction_reference)
+                    webhook_log.mark_processed(transaction=transaction)
+                    
+                logger.info(
+                    f"CoreBanking webhook processed COD successfully - ₦{amount} credited to {merchant_user.business_name} - Log ID: {webhook_log.id}"
+                )
+                return Response({"success": True})
+                
+            except RiderCodRecord.DoesNotExist:
+                logger.error(
+                    f"CoreBanking webhook - COD record {transaction_reference} not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed(
+                    f"COD record {transaction_reference} not found"
+                )
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "COD record not found"},
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         # Find the merchant via virtual account
         try:
             virtual_account = VirtualAccount.objects.select_related("user").get(

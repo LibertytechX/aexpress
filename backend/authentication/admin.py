@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Address
+from .models import User, Address, MerchantEmailLog
 
 
 @admin.register(User)
@@ -91,3 +91,14 @@ class AddressAdmin(admin.ModelAdmin):
         return obj.address[:50] + "..." if len(obj.address) > 50 else obj.address
 
     address_preview.short_description = "Address"
+
+
+@admin.register(MerchantEmailLog)
+class MerchantEmailLogAdmin(admin.ModelAdmin):
+    """Admin configuration for MerchantEmailLog model."""
+
+    list_display = ["merchant", "template_code", "sent_at"]
+    list_filter = ["template_code", "sent_at"]
+    search_fields = ["merchant__business_name", "merchant__phone", "merchant__email", "template_code"]
+    ordering = ["-sent_at"]
+    readonly_fields = ["sent_at"]

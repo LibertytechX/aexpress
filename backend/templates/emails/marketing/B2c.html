@@ -1,0 +1,23 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>This will be our last check-in for a while — we don't want to fill your inbox, and we respect your time.</p>
+
+<p>But before we go quiet, we want to leave you with this:</p>
+
+<p>Every day that goes by without a reliable logistics partner is a day your customers are taking a gamble on their order. And in Nigeria's market, one bad experience can cost you a customer — and everyone they know.</p>
+
+<p>Your Assured Express account is still here, still ready, and still waiting to help you deliver — safely and on time.</p>
+
+<p>When you're ready to start, we'll be ready too.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">▶ Start Delivering When You're Ready</a>
+</div>
+
+<p>And if you ever want to share feedback, ask a question, or just talk business — our door is always open.</p>
+
+<p>Wishing you growth,</p>
+{% endblock %}

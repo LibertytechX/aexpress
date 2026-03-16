@@ -10,6 +10,9 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db.models import Q
 from django.db import transaction
 
+from wallet.corebanking_service import generate_one_time_account
+from sparky_utils.response import service_response
+
 from .serializers import (
     RiderLoginSerializer,
     RiderMeSerializer,
@@ -163,7 +166,7 @@ class OrderOfferAcceptView(APIView):
             order.save(update_fields=["rider", "status", "updated_at"])
 
             # 4. COD Logic
-            if order.payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
+            if order.collect_on_delivery:
                 RiderCodRecord.objects.create(
                     rider=rider,
                     order=order,
@@ -928,3 +931,88 @@ class RiderNotificationMarkReadView(APIView):
                 {"success": False, "message": "Notification not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class GenerateCODAccountView(APIView):
+    """
+    API endpoint to generate a one-time Wema Bank account for COD remission.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, order_id):
+        try:
+            rider = getattr(request.user, "rider_profile", None)
+            if not rider:
+                return service_response(
+                    status="error",
+                    message="Rider profile not found.",
+                    data={},
+                    status_code=404,
+                )
+
+            from uuid import UUID
+            lookup_filter = Q(order__order_number=order_id)
+            try:
+                UUID(order_id)
+                lookup_filter |= Q(order__id=order_id)
+            except ValueError:
+                pass
+
+            cod_record = RiderCodRecord.objects.filter(lookup_filter, rider=rider).order_by("-created_at").first()
+            if not cod_record:
+                return service_response(
+                    status="error",
+                    message="COD record not found.",
+                    data={},
+                    status_code=404,
+                )
+
+            if cod_record.status != RiderCodRecord.Status.PENDING:
+                return service_response(
+                    status="error",
+                    message=f"COD record is not pending. Status is {cod_record.status}.",
+                    data={},
+                    status_code=400,
+                )
+
+            if cod_record.payment_info:
+                return service_response(
+                    status="success",
+                    message="Payment info already exists.",
+                    data=cod_record.payment_info,
+                    status_code=200,
+                )
+
+            # Generate reference
+            payment_ref = f"COD-{cod_record.id.hex[:10].upper()}"
+
+            success, account_data = generate_one_time_account(payment_ref)
+            if success:
+                cod_record.payment_ref = payment_ref
+                cod_record.payment_info = account_data
+                cod_record.save(update_fields=["payment_ref", "payment_info"])
+
+                return service_response(
+                    status="success",
+                    message="One-time account generated successfully.",
+                    data=account_data,
+                    status_code=200,
+                )
+            else:
+                return service_response(
+                    status="error",
+                    message="Failed to generate one-time account.",
+                    data=account_data,
+                    status_code=400,
+                )
+
+        except Exception as e:
+            logger.error(f"Error generating COD account: {e}", exc_info=True)
+            return service_response(
+                status="error",
+                message=str(e),
+                data={},
+                status_code=500,
+            )
+

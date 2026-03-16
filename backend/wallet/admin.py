@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Wallet, Transaction, VirtualAccount, WebhookLog
+from .models import Wallet, Transaction, VirtualAccount, WebhookLog, Charge
 
 @admin.register(Wallet)
 class WalletAdmin(admin.ModelAdmin):
@@ -115,3 +115,21 @@ class WebhookLogAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         """Disable manual creation of webhook logs"""
         return False
+
+
+@admin.register(Charge)
+class ChargeAdmin(admin.ModelAdmin):
+    list_display = ['id', 'user', 'order', 'amount', 'status', 'created_at']
+    list_filter = ['status', 'created_at']
+    search_fields = ['user__email', 'user__phone', 'user__business_name', 'order__order_number', 'id']
+    readonly_fields = ['id', 'created_at', 'updated_at']
+    ordering = ['-created_at']
+
+    fieldsets = (
+        ('Charge Information', {
+            'fields': ('id', 'user', 'order', 'amount', 'status')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'updated_at')
+        }),
+    )

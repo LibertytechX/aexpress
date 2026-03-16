@@ -1,0 +1,33 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Let us tell you a short story.</p>
+
+<p>Meet Adaeze. She runs a small fashion business in Lagos — beautiful pieces, loyal customers, and a reputation she'd spent years building.</p>
+
+<p>One day, a customer ordered a dress for her sister's wedding. The delivery was late. The package arrived damaged. The customer never came back — and neither did the three friends she would have referred.</p>
+
+<p>Adaeze didn't lose a delivery. She lost trust.</p>
+
+<p>That story is one we've heard too many times. And it's the reason Assured Express was built.</p>
+
+<p>We've seen firsthand that customer satisfaction doesn't end at checkout — it ends at the doorstep. A product can be perfect, but if it arrives late, damaged, or with no communication? Your customer remembers the experience, not the product.</p>
+
+<p>What we believe at Assured Express:</p>
+<ul>
+    <li>Safe delivery protects your goods and your reputation</li>
+    <li>Timely delivery shows your customers they matter</li>
+    <li>Real-time tracking keeps everyone informed and at ease</li>
+    <li>Every fulfilled order is a vote of confidence in your brand</li>
+</ul>
+
+<p>You've already taken the first step by joining us. Now let's make sure every delivery you send tells your customers: this merchant cares about me.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🚀 Make My First Delivery Count</a>
+</div>
+
+<p>We're in your corner — always.</p>
+{% endblock %}
