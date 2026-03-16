@@ -940,7 +940,7 @@ class GenerateCODAccountView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
-    def post(self, request, record_id):
+    def post(self, request, order_id):
         try:
             rider = getattr(request.user, "rider_profile", None)
             if not rider:
@@ -951,9 +951,16 @@ class GenerateCODAccountView(APIView):
                     status_code=404,
                 )
 
+            from uuid import UUID
+            lookup_filter = Q(order__order_number=order_id)
             try:
-                cod_record = RiderCodRecord.objects.get(id=record_id, rider=rider)
-            except RiderCodRecord.DoesNotExist:
+                UUID(order_id)
+                lookup_filter |= Q(order__id=order_id)
+            except ValueError:
+                pass
+
+            cod_record = RiderCodRecord.objects.filter(lookup_filter, rider=rider).order_by("-created_at").first()
+            if not cod_record:
                 return service_response(
                     status="error",
                     message="COD record not found.",

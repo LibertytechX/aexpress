@@ -1,78 +1,226 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            color: #333333;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        .container {
-            background-color: #ffffff;
-            border-radius: 8px;
-            padding: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
-            border: 1px solid #eaeaea;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-        .header h1 {
-            color: #2b3a4a;
-            margin: 0;
-            font-size: 24px;
-        }
-        .content {
-            font-size: 16px;
-        }
-        .button {
-            display: inline-block;
-            background-color: #0066cc;
-            color: #ffffff !important;
-            text-decoration: none;
-            padding: 12px 24px;
-            border-radius: 6px;
-            font-weight: 600;
-            margin: 20px 0;
-        }
-        .footer {
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid #eaeaea;
-            font-size: 14px;
-            color: #666666;
-            text-align: center;
-        }
-        ul {
-            padding-left: 20px;
-        }
-        li {
-            margin-bottom: 10px;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="x-apple-disable-message-reformatting">
+  <meta name="format-detection" content="telephone=no,address=no,email=no,date=no,url=no">
+  <title>{% block subject %}Assured Express{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style type="text/css">
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&display=swap');
+    body { margin: 0 !important; padding: 0 !important; }
+    img { border: 0; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+    table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    
+    /* Global styles for our markdown-like content blocks from django templates */
+    .content-block p {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      color: #5A6680;
+      line-height: 1.85;
+      margin: 0 0 16px;
+    }
+    .content-block h1, .content-block h2, .content-block h3, .content-block h4 {
+      font-family: 'Outfit', sans-serif;
+      color: #141C2E;
+      margin: 24px 0 12px;
+    }
+    .content-block h3 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .content-block ul {
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      font-weight: 400;
+      color: #5A6680;
+      line-height: 1.85;
+      padding-left: 20px;
+      margin: 0 0 24px;
+    }
+    .content-block li {
+      margin-bottom: 8px;
+    }
+    .content-block strong {
+      color: #141C2E;
+      font-weight: 700;
+    }
+    .content-block a.button {
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: #141C2E !important;
+      background-color: #FBB12F;
+      text-decoration: none;
+      display: inline-block;
+      padding: 17px 48px;
+      border-radius: 100px;
+      letter-spacing: 0.02em;
+    }
+    
+    @media screen and (max-width: 600px) {
+      .email-shell   { width: 100% !important; border-radius: 0 !important; }
+      .mobile-pad    { padding: 32px 24px !important; }
+      .mobile-h1     { font-size: 28px !important; }
+      .hero-pad      { padding: 44px 24px 36px !important; }
+      .feat-row td   { display: block !important; width: 100% !important; }
+      .cta-btn, .content-block a.button { padding: 15px 32px !important; font-size: 15px !important; }
+      .footer-pad    { padding: 32px 24px 28px !important; }
+    }
+  </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h2>Assured Express</h2>
+
+<body style="margin:0;padding:0;background-color:#ECEAE5;font-family:'Outfit',sans-serif;">
+
+<!-- HIDDEN PREVIEW TEXT -->
+<div style="display:none;font-size:1px;color:#ECEAE5;line-height:1px;max-height:0;max-width:0;opacity:0;overflow:hidden;">
+  {% block preview_text %}Assured Express Update{% endblock %}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+</div>
+
+<!-- PAGE WRAPPER -->
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ECEAE5;">
+<tr><td align="center" style="padding:36px 16px;">
+
+  <!-- [EMAIL CARD] -->
+  <table class="email-shell" role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"
+    style="max-width:600px;border-radius:24px;overflow:hidden;box-shadow:0 12px 48px rgba(0,0,0,0.14);">
+
+    <!-- AMBER TOP BAR -->
+    <tr>
+      <td style="background-color:#FBB12F;height:5px;font-size:0;line-height:0;">&nbsp;</td>
+    </tr>
+
+    <!-- HERO HEADER -->
+    <tr>
+      <td class="hero-pad" align="center" style="background-color:#141C2E;padding:56px 48px 48px;">
+        <!-- Logo -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 32px;">
+          <tr>
+            <td align="center" style="background-color:#FBB12F;border-radius:22px;padding:3px;line-height:0;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                <tr>
+                  <td align="center" style="background-color:#141C2E;border-radius:19px;width:94px;height:94px;vertical-align:middle;">
+                    <img src="https://res.cloudinary.com/djfz912mh/image/upload/v1773395665/logo2_szdqnh.png"
+                         alt="Assured Express" width="80" height="80"
+                         style="display:block;width:80px;height:80px;border-radius:14px;margin:7px auto;">
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Badge -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 22px;">
+          <tr>
+            <td align="center" style="border:1px solid rgba(251,177,47,0.45);border-radius:100px;padding:6px 18px;background-color:rgba(251,177,47,0.1);">
+              <span style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:700;letter-spacing:0.13em;text-transform:uppercase;color:#FBB12F;">
+                {% block hero_badge %}✦&nbsp; Merchant Update{% endblock hero_badge %}
+              </span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- H1 -->
+        <h1 class="mobile-h1" style="font-family:'Outfit',sans-serif;font-size:38px;font-weight:800;line-height:1.18;color:#FFFFFF;margin:0 0 16px;letter-spacing:-0.8px;">
+          {% block hero_title %}<span style="color:#FBB12F;">Assured</span> Express{% endblock hero_title %}
+        </h1>
+
+        <!-- Subtitle -->
+        <p style="font-family:'Outfit',sans-serif;font-size:15px;font-weight:400;color:rgba(255,255,255,0.55);margin:0 auto;line-height:1.75;max-width:380px;">
+          {% block hero_subtitle %}Nigeria's trusted logistics partner for merchants who care about getting goods to customers safely and on time.{% endblock hero_subtitle %}
+        </p>
+      </td>
+    </tr>
+
+    <!-- BODY -->
+    <tr>
+      <td class="mobile-pad" style="background-color:#FFFFFF;padding:48px 44px 48px;">
+        <div class="content-block">
+          {% block content %}{% endblock %}
         </div>
-        <div class="content">
-            {% block content %}{% endblock %}
-        </div>
-        <div class="footer">
-            <p>The Assured Express Team</p>
-            <p>
-                📞 +234 707 089 0979<br>
-                ✉ assuredxpressng@gmail.com<br>
-                🌐 <a href="https://send.axpress.net" style="color: #666;">https://send.axpress.net</a>
-            </p>
-        </div>
-    </div>
+      </td>
+    </tr>
+
+    <!-- FOOTER -->
+    <tr>
+      <td style="background-color:#0D1424;padding:0;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr><td style="background-color:#FBB12F;height:3px;font-size:0;line-height:0;">&nbsp;</td></tr>
+        </table>
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td class="footer-pad" align="center" style="padding:40px 44px 36px;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 14px;">
+                <tr>
+                  <td align="center" style="background-color:#FBB12F;border-radius:16px;padding:2px;line-height:0;">
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                      <tr>
+                        <td align="center" style="background-color:#0D1424;border-radius:14px;width:56px;height:56px;vertical-align:middle;">
+                          <img src="https://res.cloudinary.com/djfz912mh/image/upload/v1773395665/logo2_szdqnh.png"
+                               alt="AX" width="46" height="46"
+                               style="display:block;width:46px;height:46px;border-radius:10px;margin:5px auto;">
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+              <p style="font-family:'Outfit',sans-serif;font-size:18px;font-weight:800;color:#FFFFFF;margin:0 0 4px;letter-spacing:-0.3px;">
+                Assured Express
+              </p>
+              <p style="font-family:'Outfit',sans-serif;font-size:11px;font-weight:400;text-transform:uppercase;letter-spacing:0.12em;color:rgba(255,255,255,0.3);margin:0 0 28px;">
+                Delivering Trust, One Package at a Time
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 auto 28px;">
+                <tr>
+                  <td align="center" style="padding-bottom:8px;">
+                    <a href="tel:+2347070890979"
+                      style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      📞 &nbsp;+234 707 089 0979
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center" style="padding-bottom:8px;">
+                    <a href="mailto:support@axpress.net" style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      ✉ &nbsp;support@axpress.net
+                    </a>
+                  </td>
+                </tr>
+                <tr>
+                  <td align="center">
+                    <a href="https://send.axpress.net" target="_blank"
+                      style="font-family:'Outfit',sans-serif;font-size:12px;font-weight:500;color:rgba(255,255,255,0.55);text-decoration:none;display:inline-block;padding:7px 18px;border-radius:100px;border:1px solid rgba(255,255,255,0.14);">
+                      🌐 &nbsp;send.axpress.net
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin-bottom:20px;">
+                <tr><td style="height:1px;background-color:rgba(255,255,255,0.08);font-size:0;line-height:0;">&nbsp;</td></tr>
+              </table>
+              <p style="font-family:'Outfit',sans-serif;font-size:11px;color:rgba(255,255,255,0.22);line-height:1.9;margin:0;">
+                © 2025 Assured Express. All rights reserved.<br>
+                You're receiving this because you created a merchant account on Assured Express.<br>
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Unsubscribe</a>
+                &nbsp;·&nbsp;
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Privacy Policy</a>
+                &nbsp;·&nbsp;
+                <a href="#" style="color:rgba(251,177,47,0.5);text-decoration:none;">Terms</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</td></tr>
+</table>
 </body>
 </html>
