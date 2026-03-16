@@ -2209,46 +2209,46 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
         {recentOrders.map((order, i) => {
           const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
           return (
-          <div key={order.id} onClick={() => onViewOrder(order.id)} style={{
-            padding: isMobile ? "12px 14px" : "14px 20px",
-            display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, cursor: "pointer",
-            borderBottom: i < recentOrders.length - 1 ? "1px solid #f8fafc" : "none",
-            transition: "background 0.15s"
-          }}
-            onMouseEnter={e => (e.currentTarget as any).style.background = "#fafbfc"}
-            onMouseLeave={e => (e.currentTarget as any).style.background = "transparent"}
-          >
-            {!isMobile && (
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold, flexShrink: 0 }}>
-                {getVehicleIcon(order.vehicle)}
-              </div>
-            )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
-                <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 600, color: S.navy }}>#{order.id}</span>
-                {order.mode && (() => {
-                  const modeBadge = getModeBadge(order.mode);
-                  return (
-                    <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: modeBadge.bg, color: modeBadge.color }}>
-                      {modeBadge.label}
+            <div key={order.id} onClick={() => onViewOrder(order.id)} style={{
+              padding: isMobile ? "12px 14px" : "14px 20px",
+              display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, cursor: "pointer",
+              borderBottom: i < recentOrders.length - 1 ? "1px solid #f8fafc" : "none",
+              transition: "background 0.15s"
+            }}
+              onMouseEnter={e => (e.currentTarget as any).style.background = "#fafbfc"}
+              onMouseLeave={e => (e.currentTarget as any).style.background = "transparent"}
+            >
+              {!isMobile && (
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold, flexShrink: 0 }}>
+                  {getVehicleIcon(order.vehicle)}
+                </div>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: isMobile ? 13 : 14, fontWeight: 600, color: S.navy }}>#{order.id}</span>
+                  {order.mode && (() => {
+                    const modeBadge = getModeBadge(order.mode);
+                    return (
+                      <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: modeBadge.bg, color: modeBadge.color }}>
+                        {modeBadge.label}
+                      </span>
+                    );
+                  })()}
+                  {order.deliveries && order.deliveries.length > 1 && (
+                    <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#f1f5f9", color: S.navy }}>
+                      {order.deliveries.length} stops
                     </span>
-                  );
-                })()}
-                {order.deliveries && order.deliveries.length > 1 && (
-                  <span style={{ fontSize: 9, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: "#f1f5f9", color: S.navy }}>
-                    {order.deliveries.length} stops
-                  </span>
-                )}
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: S.grayLight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {order.pickup} → {order.deliveries && order.deliveries.length > 1 ? `${order.deliveries.length} locations` : order.dropoff}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: S.grayLight, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {order.pickup} → {order.deliveries && order.deliveries.length > 1 ? `${order.deliveries.length} locations` : order.dropoff}
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 6, background: st.bg, color: st.text }}>{st.label}</span>
               </div>
             </div>
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, color: S.navy }}>₦{order.amount.toLocaleString()}</div>
-              <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 6, background: st.bg, color: st.text }}>{st.label}</span>
-            </div>
-          </div>
           );
         })}
       </div>
@@ -2917,6 +2917,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [routeError, setRouteError] = useState(null);
 
+  // ─── Early price estimation (Multi-drop) ───
+  const [multiFares, setMultiFares] = useState(null);
+  const [calculatingMultiRoute, setCalculatingMultiRoute] = useState(false);
+  const [multiRouteError, setMultiRouteError] = useState(null);
+
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
@@ -3112,6 +3117,75 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   ]);
   const nextDropId = useRef(2);
 
+  // ─── Calculate route for multi-drop price estimation ───
+  useEffect(() => {
+    if (mode !== 'multi' || !pickupAddress) {
+      setMultiFares(null);
+      setMultiRouteError(null);
+      setCalculatingMultiRoute(false);
+      return;
+    }
+
+    const validDrops = drops.filter(d => d.address.trim() && d.address.length > 5);
+    if (validDrops.length === 0) {
+      setMultiFares(null);
+      setMultiRouteError(null);
+      setCalculatingMultiRoute(false);
+      return;
+    }
+
+    setCalculatingMultiRoute(true);
+    setMultiRouteError(null);
+
+    const calculateMultiFares = async () => {
+      console.log('🔄 Starting multi route calculation for pricing...', { pickupAddress, validDrops });
+      try {
+        if (typeof google === 'undefined' || !google.maps) {
+          setMultiRouteError('Maps not loaded');
+          setCalculatingMultiRoute(false);
+          return;
+        }
+
+        const geocoder = new google.maps.Geocoder();
+        const geocode = (address: string) => new Promise((resolve, reject) => {
+          geocoder.geocode({ address }, (results: any, status: any) => {
+            if (status === 'OK' && results[0]) {
+              const loc = results[0].geometry.location;
+              resolve({ lat: loc.lat(), lng: loc.lng() });
+            } else {
+              reject(new Error(`Geocode failed for ${address}`));
+            }
+          });
+        });
+
+        // Geocode pickup and all drops
+        const pickupCoords = await geocode(pickupAddress);
+        const deliveriesCoords = await Promise.all(validDrops.map(d => geocode(d.address)));
+
+        const payload = {
+          mode: 'multi',
+          pickup: pickupCoords,
+          deliveries: deliveriesCoords
+        };
+
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          setMultiFares(res);
+        } else {
+          setMultiRouteError("Failed to calculate multi-drop prices");
+        }
+      } catch (err: any) {
+        console.error("Multi-drop pricing error:", err);
+        setMultiRouteError(err.message || "Error calculating pricing");
+      } finally {
+        setCalculatingMultiRoute(false);
+      }
+    };
+
+    const timeoutId = setTimeout(calculateMultiFares, 1500);
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, drops]);
+
   // ─── Route information state (for pricing) ───
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
@@ -3284,8 +3358,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     return pricing.base_fare;
   };
 
-  const unitCost = calculateCost();
-  const totalCost = totalDeliveries * unitCost;
+  let unitCost = calculateCost();
+  let totalCost = totalDeliveries * unitCost;
+
+  if (mode === 'multi' && multiFares?.vehicles?.[vehicle]) {
+    totalCost = multiFares.vehicles[vehicle].price;
+    unitCost = totalDeliveries > 0 ? Math.round(totalCost / totalDeliveries) : 0;
+  }
 
   // ─── Review & Confirm ───
   const quickValid = mode !== 'quick' || (
@@ -3374,8 +3453,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       {mapPickerFor && (
         <MapPickerModal
           onConfirm={(address) => {
-            if (mapPickerFor === 'pickup') setPickupAddress(address);
-            else handleDropoffChange(address);
+            if (mapPickerFor === 'pickup') {
+              setPickupAddress(address);
+            } else if (mapPickerFor === 'dropoff') {
+              handleDropoffChange(address);
+              //@ts-ignore
+            } else if (mapPickerFor.startsWith('drop-')) {
+              //@ts-ignore
+              const dropIdStr = mapPickerFor.split('-')[1];
+              const dropId = parseInt(dropIdStr, 10);
+              if (!isNaN(dropId)) {
+                updateDrop(dropId, "address", address);
+              }
+            }
             setMapPickerFor(null);
           }}
           onClose={() => setMapPickerFor(null)}
@@ -3651,6 +3741,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                       <AddressAutocompleteInput
                         value={drop.address}
                         onChange={(value) => updateDrop(drop.id, "address", value)}
+                        //@ts-ignore
+                        onOpenMapPicker={() => setMapPickerFor(`drop-${drop.id}`)}
                         placeholder="Delivery address"
                         style={{ ...inputStyle, marginBottom: 8 }}
                       />
@@ -3677,6 +3769,118 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               }}>
                 <span style={{ fontSize: 20, lineHeight: 1 }}>+</span> Add another delivery
               </button>
+
+              {/* ═══ MULTI ESTIMATION BANNER ═══ */}
+              {pickupAddress && drops.some(d => d.address.trim().length > 5) && (
+                <div style={{
+                  background: "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)",
+                  borderRadius: 12,
+                  padding: 16,
+                  marginBottom: 14,
+                  border: "1px solid #fbbf24"
+                }}>
+                  {calculatingMultiRoute ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 20,
+                        height: 20,
+                        border: "3px solid #f59e0b",
+                        borderTopColor: "transparent",
+                        borderRadius: "50%",
+                        animation: "spin 0.8s linear infinite"
+                      }} />
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
+                        Calculating route and prices...
+                      </span>
+                    </div>
+                  ) : multiRouteError ? (
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626" }}>
+                      ⚠️ {multiRouteError}
+                    </div>
+                  ) : multiFares?.vehicles ? (
+                    <div>
+                      <div style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        marginBottom: 12
+                      }}>
+                        <h4 style={{
+                          fontSize: 13,
+                          fontWeight: 700,
+                          color: "#92400e",
+                          margin: 0
+                        }}>
+                          💰 Estimated Multi-drop Totals
+                        </h4>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: "#b45309",
+                          background: "#fef3c7",
+                          padding: "2px 8px",
+                          borderRadius: 6
+                        }}>
+                          📏 {multiFares.vehicles["Bike"]?.distance_km}km • 🕐 {multiFares.vehicles["Bike"]?.duration_minutes}min
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                        {["Bike", "Car", "Van"].map(vehicleName => {
+                          const vehicleData = multiFares.vehicles[vehicleName];
+                          const price = vehicleData ? vehicleData.price : null;
+                          const isSelected = vehicle === vehicleName;
+                          const isComingSoon = vehicleName === "Car" || vehicleName === "Van";
+
+                          return (
+                            <div
+                              key={vehicleName}
+                              onClick={() => !isComingSoon && setVehicle(vehicleName)}
+                              style={{
+                                background: isSelected && !isComingSoon ? "#fff" : "#fef3c7",
+                                border: isSelected && !isComingSoon ? "2px solid #f59e0b" : "1px solid #fbbf24",
+                                borderRadius: 10,
+                                padding: "10px 8px",
+                                textAlign: "center",
+                                cursor: isComingSoon ? "not-allowed" : "pointer",
+                                transition: "all 0.2s ease",
+                                boxShadow: isSelected && !isComingSoon ? "0 2px 8px rgba(245, 158, 11, 0.3)" : "none",
+                                opacity: isComingSoon ? 0.72 : 1,
+                                position: "relative"
+                              }}
+                            >
+                              {isComingSoon && (
+                                <div style={{
+                                  position: "absolute", top: 4, right: 4,
+                                  background: "#d1d5db", color: "#6b7280",
+                                  fontSize: 7, fontWeight: 700, padding: "1px 4px",
+                                  borderRadius: 3, textTransform: "uppercase", letterSpacing: 0.3
+                                }}>Soon</div>
+                              )}
+                              <div style={{ fontSize: 11, fontWeight: 700, color: isComingSoon ? "#a8a29e" : "#92400e", marginBottom: 4 }}>
+                                {vehicleName === "Bike" ? "🏍️" : vehicleName === "Car" ? "🚗" : "🚐"} {vehicleName}
+                              </div>
+                              <div style={{ fontSize: 16, fontWeight: 800, color: isComingSoon ? "#a8a29e" : "#b45309" }}>
+                                ₦{price?.toLocaleString() || "—"}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div style={{
+                        fontSize: 10,
+                        color: "#92400e",
+                        marginTop: 8,
+                        textAlign: "center",
+                        fontStyle: "italic"
+                      }}>
+                        Click a vehicle to select it
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
             </>
           )}
 
@@ -3823,20 +4027,26 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             <h3 style={{ fontSize: 14, fontWeight: 700, color: S.navy, margin: "0 0 12px" }}>Vehicle</h3>
             <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)", gap: 8 }}>
               {vehicles.map(v => {
-                console.log(vehicles, "vehicles")
                 const isSelected = vehicle === v.id;
-                const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
-                const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
+
+                const hasEarlyQuick = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
+                const hasEarlyMulti = mode === 'multi' && multiFares?.vehicles?.[v.id];
+                const hasEarly = hasEarlyQuick || hasEarlyMulti;
+
+                const isCalculating = (mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute) ||
+                  (mode === 'multi' && calculatingMultiRoute);
 
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
-                console.log(baseFare, "baseFare")
 
-                const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
-                console.log(earlyPrice, "earlyPrice")
+                let earlyPrice = null;
+                if (hasEarlyQuick) {
+                  earlyPrice = calculateEarlyPrice(v.id);
+                } else if (hasEarlyMulti) {
+                  earlyPrice = multiFares.vehicles[v.id].price;
+                }
 
                 const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
 
-                console.log(displayPrice, "displayPrice")
                 return (
                   <button
                     key={v.id}
@@ -3868,7 +4078,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                       {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
                     </div>
                     <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
-                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
+                      {isCalculating ? '' : (hasEarly ? 'Estimated Total' : 'Base fare')}
                     </div>
                   </button>
                 );
@@ -3957,25 +4167,33 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               </div>
 
               <div style={{ maxHeight: 300, overflowY: "auto" }}>
-                {getActiveDropoffs().map((d, idx) => (
-                  <div key={idx} style={{
-                    display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
-                    borderBottom: idx < totalDeliveries - 1 ? "1px solid #f1f5f9" : "none"
-                  }}>
-                    <div style={{
-                      width: 26, height: 26, borderRadius: "50%", background: S.goldPale,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 11, fontWeight: 800, color: S.gold, flexShrink: 0
-                    }}>{idx + 1}</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.address}</div>
-                      <div style={{ fontSize: 11, color: S.grayLight }}>{d.name}{d.phone ? ` • ${d.phone}` : ""}</div>
+                {getActiveDropoffs().map((d, idx) => {
+                  let dropPrice = unitCost;
+                  if (mode === 'multi' && multiFares?.vehicles?.[vehicle]?.drop_details?.[idx]) {
+                    const specificFare = multiFares.vehicles[vehicle].drop_details[idx].fares[vehicle];
+                    if (specificFare) dropPrice = specificFare;
+                  }
+
+                  return (
+                    <div key={idx} style={{
+                      display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
+                      borderBottom: idx < totalDeliveries - 1 ? "1px solid #f1f5f9" : "none"
+                    }}>
+                      <div style={{
+                        width: 26, height: 26, borderRadius: "50%", background: S.goldPale,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 11, fontWeight: 800, color: S.gold, flexShrink: 0
+                      }}>{idx + 1}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.address}</div>
+                        <div style={{ fontSize: 11, color: S.grayLight }}>{d.name}{d.phone ? ` • ${d.phone}` : ""}</div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: S.navy, flexShrink: 0 }}>
+                        ₦{dropPrice.toLocaleString()}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy, flexShrink: 0 }}>
-                      ₦{unitCost.toLocaleString()}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total */}

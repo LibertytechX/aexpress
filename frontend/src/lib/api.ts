@@ -252,6 +252,7 @@ export const OrdersAPI = {
   createQuickSend: async (orderData: any) => apiRequest('/orders/quick-send/', { method: 'POST', body: JSON.stringify(orderData) }),
   createMultiDrop: async (orderData: any) => apiRequest('/orders/multi-drop/', { method: 'POST', body: JSON.stringify(orderData) }),
   createBulkImport: async (orderData: any) => apiRequest('/orders/bulk-import/', { method: 'POST', body: JSON.stringify(orderData) }),
+  bulkCalculateFare: async (data: any) => apiRequest('/orders/bulk-calculate-fare/', { method: 'POST', body: JSON.stringify(data) }),
   getOrders: async (filters: any = {}) => {
     const params = new URLSearchParams();
     if (filters.status) params.append('status', filters.status);
