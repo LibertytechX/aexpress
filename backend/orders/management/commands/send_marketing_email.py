@@ -3,31 +3,42 @@ from django.core.management.base import BaseCommand, CommandError
 from authentication.models import User
 from orders.marketing_tasks import _send_marketing_email
 
+
 class Command(BaseCommand):
-    help = 'Sends a specific marketing email template to a merchant by their phone number'
+    help = (
+        "Sends a specific marketing email template to a merchant by their phone number"
+    )
 
     def add_arguments(self, parser):
-        parser.add_argument('phone', type=str, help='The phone number of the merchant')
-        parser.add_argument('template_code', type=str, help='The code of the marketing template to send (e.g. A2, C1, E1)')
-        
+        parser.add_argument("phone", type=str, help="The phone number of the merchant")
+        parser.add_argument(
+            "template_code",
+            type=str,
+            help="The code of the marketing template to send (e.g. A2, C1, E1)",
+        )
+
         # Optional arguments
         parser.add_argument(
-            '--force',
-            action='store_true',
-            help='Force sending the email even if it was already sent (ignores idempotency check in some cases)',
+            "--force",
+            action="store_true",
+            help="Force sending the email even if it was already sent (ignores idempotency check in some cases)",
         )
 
     def handle(self, *args, **options):
-        phone = options['phone']
-        template_code = options['template_code'].upper()
-        
+        phone = options["phone"]
+        template_code = options["template_code"]
+
         try:
             merchant = User.objects.get(phone=phone, usertype="Merchant")
         except User.DoesNotExist:
             raise CommandError(f'Merchant with phone "{phone}" does not exist.')
-            
-        self.stdout.write(self.style.WARNING(f'Attempting to send {template_code} to {merchant.first_name or merchant.contact_name} ({phone})...'))
-        
+
+        self.stdout.write(
+            self.style.WARNING(
+                f"Attempting to send {template_code} to {merchant.first_name or merchant.contact_name} ({phone})..."
+            )
+        )
+
         # We define a basic catch-all subject mapping for testing
         # Transactional emails normally require an order context. We'll provide a dummy one if it's F1 or F2.
         subject_map = {
@@ -45,13 +56,13 @@ class Command(BaseCommand):
             "E1": "Your Weekly Delivery Report 📊",
             "E2": "See What You're Missing This Week on Assured Express 👀",
             "F1": "Your delivery is on the move! 🚚",
-            "F2": "✅ Delivery Completed! has arrived"
+            "F2": "✅ Delivery Completed! has arrived",
         }
-        
+
         subject = subject_map.get(template_code, f"Assured Express: {template_code}")
-        
+
         context = {}
-        
+
         # Dummy context for specific templates if needed during manual test
         if template_code.startswith("E") and template_code == "E1":
             context = {
@@ -69,23 +80,34 @@ class Command(BaseCommand):
                 order_number = "TEST-123"
                 notes = "Test Package"
                 pickup_address = "Test Pickup"
+
                 class _Rider:
                     class _User:
-                        def get_full_name(self): return "Test Rider"
+                        def get_full_name(self):
+                            return "Test Rider"
+
                         phone = "0000000000"
+
                     user = _User()
+
                 rider = _Rider()
+
             class DummyDelivery:
                 dropoff_address = "Test Dropoff"
-                
-            context = {
-                "order": DummyOrder(),
-                "delivery": DummyDelivery()
-            }
-            
+
+            context = {"order": DummyOrder(), "delivery": DummyDelivery()}
+
         success = _send_marketing_email(merchant, template_code, subject, context)
-        
+
         if success:
-            self.stdout.write(self.style.SUCCESS(f'Successfully sent template "{template_code}" to merchant {phone}.'))
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f'Successfully sent template "{template_code}" to merchant {phone}.'
+                )
+            )
         else:
-            self.stdout.write(self.style.ERROR(f'Failed to send template "{template_code}" to merchant {phone}. Note: it may have already been sent. Check the logs.'))
+            self.stdout.write(
+                self.style.ERROR(
+                    f'Failed to send template "{template_code}" to merchant {phone}. Note: it may have already been sent. Check the logs.'
+                )
+            )
