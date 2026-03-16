@@ -88,7 +88,7 @@ urlpatterns = [
         name="rider-notification-mark-read",
     ),
     path(
-        "cod/<uuid:record_id>/generate-account/",
+        "cod/<str:order_id>/generate-account/",
         GenerateCODAccountView.as_view(),
         name="rider-cod-generate-account",
     ),
