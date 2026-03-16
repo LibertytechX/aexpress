@@ -82,7 +82,7 @@ ROOT_URLCONF = "ax_merchant_api.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -342,6 +342,14 @@ CELERY_BEAT_SCHEDULE = {
     "flag-ghost-riders": {
         "task": "dispatcher.tasks.flag_ghost_riders",
         "schedule": crontab(minute="*/15"),
+    },
+    "marketing-daily-drip": {
+        "task": "orders.marketing_tasks.process_daily_drip_campaigns",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "marketing-weekly-reports": {
+        "task": "orders.marketing_tasks.process_weekly_monday_reports",
+        "schedule": crontab(day_of_week=1, hour=9, minute=0),  # Monday 9 AM
     },
 }
 

@@ -1,0 +1,29 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Quick question: Do you know exactly how much profit your business made last month?</p>
+
+<p>If the answer is 'not exactly' — you're not alone. Most growing merchants in Nigeria are managing finances manually, in notebooks or spreadsheets. It works. But it's not efficient — and it's holding your business back.</p>
+
+<p><strong>Introducing: Assured Express Accounting Suite 📊</strong></p>
+
+<p>Coming soon to your merchant dashboard:</p>
+<ul>
+    <li>🧾 <strong>Invoicing & Billing</strong> — Create and send professional invoices in seconds</li>
+    <li>💸 <strong>Expense Tracking</strong> — Know where every naira goes</li>
+    <li>📈 <strong>Profit & Loss Reports</strong> — See exactly how your business is performing</li>
+    <li>🏛️ <strong>Tax & Compliance</strong> — Stay on the right side of FIRS with zero stress</li>
+    <li>📋 <strong>Financial Reports</strong> — Monthly, quarterly, annual — at a glance</li>
+    <li>👨‍💼 <strong>Payroll & Staff Pay</strong> — Manage staff payments directly from your dashboard</li>
+</ul>
+
+<p>Assured Express is becoming your all-in-one business partner. The more you use the platform now, the more your data works for you when these tools launch.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 I'm Ready for My Business Dashboard</a>
+</div>
+
+<p>The future of your business starts here.</p>
+{% endblock %}

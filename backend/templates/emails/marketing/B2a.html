@@ -1,0 +1,25 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>It's been a while and we genuinely miss having you!</p>
+
+<p>We know running a business gets busy. But here's the thing: your customers are still out there, still waiting for a seamless delivery experience that makes them come back.</p>
+
+<p>Whatever slowed you down, we're here to make it easy to get back on track.</p>
+<ul>
+    <li>Seamless delivery requests in under 60 seconds</li>
+    <li>Real-time tracking for every single shipment</li>
+    <li>Merchant support that actually picks up the phone</li>
+    <li>A platform built for Nigerian merchants who want to grow</li>
+</ul>
+
+<p>Come back and place a delivery today.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🔄 Resume My Deliveries</a>
+</div>
+
+<p>We're still here — and we're rooting for you.</p>
+{% endblock %}

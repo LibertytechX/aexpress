@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import transaction
 from .models import Order
 from riders.models import OrderOffer
+from wallet.models import Charge
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,12 @@ def process_order_proximity(self, order_id):
 
     # 3. Calculate estimated earnings (using commission_pct from SystemSettings)
     from dispatcher.models import SystemSettings
+
     settings = SystemSettings.objects.first()
-    commission_factor = Decimal(str(settings.commission_pct / 100)) if settings else Decimal("0.2")
-    
+    commission_factor = (
+        Decimal(str(settings.commission_pct / 100)) if settings else Decimal("0.2")
+    )
+
     total_amount = Decimal(str(order.total_amount or 0))
     estimated_earnings = (total_amount * commission_factor).quantize(Decimal("0.01"))
 
@@ -88,3 +92,20 @@ def process_order_proximity(self, order_id):
             f"process_order_proximity: Failed to create OrderOffer for {order.order_number}: {e}"
         )
         raise self.retry(exc=e)
+
+
+@shared_task
+def create_order_charge(order_id):
+    try:
+        order = Order.objects.get(id=order_id)
+        charge = Charge.objects.create(
+            user=order.user,
+            order=order,
+            amount=order.total_amount,
+            status="pending",
+        )
+        return charge
+    except Exception as e:
+        logger.error(
+            f"create_order_charge: Failed to create charge for Order {order_id}: {e}"
+        )
