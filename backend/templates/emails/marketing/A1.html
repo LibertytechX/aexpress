@@ -1,0 +1,27 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"Merchant" }},</p>
+
+<p>Welcome aboard! 🎉</p>
+
+<p>We're thrilled to have you join Assured Express — Nigeria's trusted logistics partner for merchants who care about getting goods to customers safely and on time.</p>
+
+<p>Here's what you can start doing <strong>RIGHT NOW</strong>:</p>
+<ul>
+    <li>Request your first delivery in minutes — just log in and get started</li>
+    <li>Track every shipment in real time from pickup to doorstep</li>
+    <li>Reach customers across Lagos and beyond with confidence</li>
+    <li>Enjoy dedicated merchant support whenever you need it</li>
+</ul>
+
+<p>Your dashboard is ready and waiting.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">👉 Go to My Dashboard</a>
+</div>
+
+<p>If you have any questions, don't hesitate to reach out — we're here for you.</p>
+
+<p>Welcome to the Assured Express family!</p>
+{% endblock %}

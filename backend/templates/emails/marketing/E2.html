@@ -1,0 +1,23 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Happy Monday! Every week, we send our active merchants a detailed delivery report.</p>
+
+<p>This week, we thought you should see what's been happening on the platform but you are yet to make deliveries.</p>
+
+<h3>💭 What Could This Look Like for You?</h3>
+
+<p>If you had sent just 10 deliveries last week, your orders would have been fulfilled and your items safely delivered to your customers.</p>
+
+<p>That's peace of mind at the end of every business day!</p>
+
+<p>Your account is ready. Your first delivery is one click away.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🚀 Start My First Delivery Today</a>
+</div>
+
+<p>Looking forward to welcoming you back,</p>
+{% endblock %}

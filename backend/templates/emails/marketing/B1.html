@@ -1,0 +1,25 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>You're all set up on Assured Express — great start! But we noticed you haven't placed your first delivery request yet.</p>
+
+<p>Every day you delay is a day your customers are waiting longer, or at risk of receiving goods that weren't handled with care.</p>
+
+<p>With Assured Express, you get:</p>
+<ul>
+    <li>Peace of mind — we handle the logistics, you focus on selling</li>
+    <li>Reliable, safe delivery so your goods arrive in perfect condition</li>
+    <li>A professional delivery experience that builds trust with your customers</li>
+    <li>Fast turnaround times to keep your business moving</li>
+</ul>
+
+<p>Your competitors are already using smarter logistics. Don't be left behind.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🚚 Request My First Delivery</a>
+</div>
+
+<p>Need help? Our team is one call away.</p>
+{% endblock %}

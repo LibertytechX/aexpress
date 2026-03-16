@@ -109,6 +109,8 @@ class RiderCodRecord(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
+    payment_ref = models.CharField(max_length=255, blank=True, default="")
+    payment_info = models.JSONField(blank=True, null=True)
     remitted_at = models.DateTimeField(null=True, blank=True)
     verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)

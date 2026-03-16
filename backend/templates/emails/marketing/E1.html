@@ -1,0 +1,35 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Happy Monday! 🌟 Here's your weekly delivery report from Assured Express.</p>
+
+<h3>📦 Your Delivery Summary — {{ start_date }} to {{ end_date }}</h3>
+<ul>
+    <li>Total Deliveries Requested: <strong>{{ total_requested }}</strong></li>
+    <li>Successfully Delivered: <strong>{{ total_delivered }}</strong></li>
+    <li>Delivery Success Rate: <strong>{{ success_rate }}%</strong></li>
+</ul>
+
+<h3>🏆 Highlights This Week</h3>
+<ul>
+    <li>Most Active Day: <strong>{{ most_active_day }}</strong></li>
+    <li>Top Delivery Zone: <strong>{{ top_delivery_zone }}</strong></li>
+</ul>
+
+<h3>💡 Tips for This Week</h3>
+<ul>
+    <li>Consider scheduling more deliveries on {{ most_active_day }}</li>
+    <li>Keep up the great work in {{ top_delivery_zone }}</li>
+    <li>Your success rate is {{ success_rate }}% — reach out if you'd like support improving this</li>
+</ul>
+
+<p>You're doing great! Keep the momentum going this week.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📦 Request More Deliveries This Week</a>
+</div>
+
+<p>To your continued success,</p>
+{% endblock %}

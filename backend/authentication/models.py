@@ -157,3 +157,20 @@ class Address(models.Model):
                 raise ValidationError("Maximum of 3 addresses allowed per user.")
 
         super().save(*args, **kwargs)
+
+class MerchantEmailLog(models.Model):
+    """Tracks which marketing/drip emails have been sent to a merchant."""
+    
+    merchant = models.ForeignKey(User, on_delete=models.CASCADE, related_name="marketing_email_logs")
+    template_code = models.CharField(max_length=50, help_text="e.g. A1, B1, C2")
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "merchant_email_logs"
+        unique_together = [("merchant", "template_code")]
+        indexes = [
+            models.Index(fields=["template_code"]),
+        ]
+
+    def __str__(self):
+        return f"{self.merchant.get_full_name()} - {self.template_code} at {self.sent_at}"

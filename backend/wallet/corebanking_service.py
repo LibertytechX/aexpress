@@ -7,6 +7,7 @@ to the merchant's wallet via webhook.
 """
 import random
 import logging
+from typing import Tuple
 
 import requests
 from django.conf import settings
@@ -160,4 +161,39 @@ def create_virtual_account(user):
     except requests.RequestException as e:
         logger.error('CoreBanking virtual account request error: %s', e)
         raise Exception(f'CoreBanking connection error: {str(e)}')
+
+
+def generate_one_time_account(ref: str) -> Tuple[bool, dict]:
+    """
+    Generate a one-time Wema Bank virtual account for cash collection via CoreBanking API.
+    """
+    try:
+        url = f"{settings.COREBANKING_BASE_URL}/api/v1/core/one_time_account/"
+        payload = {"request_reference": ref, "provider": "WEMA_BANK"}
+        
+        access_token = login()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=30)
+        
+        # Retry once on 401
+        if response.status_code == 401:
+            cache.delete(COREBANKING_TOKEN_CACHE_KEY)
+            access_token = login()
+            headers["Authorization"] = f"Bearer {access_token}"
+            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            
+        response_data = response.json()
+        logger.info(f"One-time account generation response for {ref}: {response_data}")
+        
+        if response.status_code == 200 and response_data.get("status") == "success":
+            return True, response_data.get("data", {})
+            
+        return False, response_data
+    except Exception as e:
+        logger.error(f"Generate one-time account failed: {repr(e)}")
+        return False, {}
 

@@ -1,0 +1,33 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Did you know? Research shows that 84% of customers say they won't shop with a brand again after a bad delivery experience.</p>
+
+<p>In Nigeria, where word-of-mouth travels fast and trust is everything, your delivery partner is a direct extension of your brand.</p>
+
+<p>When a customer receives their order on time and in perfect condition:</p>
+<ul>
+    <li>They trust you more</li>
+    <li>They leave good reviews</li>
+    <li>They refer friends and family</li>
+    <li>They come back — again and again</li>
+</ul>
+
+<p>And when they don't? They go to your competitor — and they take their network with them.</p>
+
+<p>Assured Express was built specifically so merchants like you never have to worry about that. We handle the complexity of last-mile logistics so you can do what you do best: growing your business.</p>
+
+<blockquote style="border-left: 4px solid #eaeaea; padding-left: 15px; font-style: italic; color: #555;">
+"Since I started using Assured Express, my customers are happier and I've had far fewer complaints. It's made such a difference." — A merchant in Lagos
+</blockquote>
+
+<p>Ready to give your customers an experience they'll rave about?</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🌟 Deliver the Experience They Deserve</a>
+</div>
+
+<p>With you all the way,</p>
+{% endblock %}
