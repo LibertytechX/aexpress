@@ -213,6 +213,10 @@ class OrderSerializer(serializers.ModelSerializer):
     timeline = serializers.SerializerMethodField()
     price_per_km = serializers.SerializerMethodField()
     events = OrderEventSerializer(many=True, read_only=True)
+    
+    waiting_time = serializers.SerializerMethodField()
+    delivery_time = serializers.SerializerMethodField()
+    total_order_time = serializers.SerializerMethodField()
 
     # Relay routing (async)
     routing_status = serializers.CharField(read_only=True)
@@ -271,6 +275,9 @@ class OrderSerializer(serializers.ModelSerializer):
             "relay_legs",
             "price_per_km",
             "events",
+            "waiting_time",
+            "delivery_time",
+            "total_order_time",
         ]
 
     def get_pickup_lat(self, obj):
@@ -415,6 +422,28 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
+
+    def _format_timedelta(self, td):
+        if not td: return None
+        minutes = int(td.total_seconds() / 60)
+        if minutes < 60:
+            return f"{minutes} mins"
+        else:
+            hours = minutes // 60
+            mins = minutes % 60
+            return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+
+    def get_waiting_time(self, obj):
+        if not getattr(obj, "assigned_at", None): return None
+        return self._format_timedelta(obj.assigned_at - obj.created_at)
+
+    def get_delivery_time(self, obj):
+        if not getattr(obj, "assigned_at", None) or not getattr(obj, "completed_at", None): return None
+        return self._format_timedelta(obj.completed_at - obj.assigned_at)
+
+    def get_total_order_time(self, obj):
+        if not getattr(obj, "completed_at", None): return None
+        return self._format_timedelta(obj.completed_at - obj.created_at)
 
 
 class OrderPriceUpdateSerializer(serializers.Serializer):

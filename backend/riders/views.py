@@ -942,24 +942,11 @@ class GenerateCODAccountView(APIView):
 
     def post(self, request, order_id):
         try:
-            rider = getattr(request.user, "rider_profile", None)
-            if not rider:
-                return service_response(
-                    status="error",
-                    message="Rider profile not found.",
-                    data={},
-                    status_code=404,
-                )
+            # get the order
+            order = Order.objects.get(order_number=order_id)
+            rider = order.rider
 
-            from uuid import UUID
-            lookup_filter = Q(order__order_number=order_id)
-            try:
-                UUID(order_id)
-                lookup_filter |= Q(order__id=order_id)
-            except ValueError:
-                pass
-
-            cod_record = RiderCodRecord.objects.filter(lookup_filter, rider=rider).order_by("-created_at").first()
+            cod_record = RiderCodRecord.objects.filter(order=order, rider=rider).order_by("-created_at").first()
             if not cod_record:
                 return service_response(
                     status="error",

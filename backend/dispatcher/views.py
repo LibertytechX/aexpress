@@ -265,6 +265,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             rider = Rider.objects.get(rider_id=rider_id)
             order.rider = rider
             order.status = "Assigned"
+            if not getattr(order, "assigned_at", None):
+                order.assigned_at = timezone.now()
             order.save()
             rider_name = getattr(rider.user, "contact_name", None) or getattr(
                 rider.user, "phone", "Unknown"
@@ -339,6 +341,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Keep timestamps consistent with rider-app completion flows.
         update_fields = ["status", "updated_at"]
+        if new_status == "Assigned" and not getattr(order, "assigned_at", None):
+            order.assigned_at = now
+            update_fields.append("assigned_at")
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
