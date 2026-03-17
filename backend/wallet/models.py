@@ -1,3 +1,4 @@
+import traceback
 from django.db import models
 from django.conf import settings
 import uuid
@@ -34,11 +35,11 @@ class Wallet(models.Model):
         """Credit wallet and create transaction record"""
         # Lock the wallet row to prevent race conditions
         wallet = self.__class__.objects.select_for_update().get(pk=self.pk)
-        
+
         previous_balance = wallet.balance
         wallet.balance += amount
         wallet.save()
-        
+
         # Update current instance to reflect the new balance
         self.balance = wallet.balance
 
@@ -98,8 +99,10 @@ class Wallet(models.Model):
                             f"Auto-debited charge {charge.id} for order {order.order_number}"
                         )
                 except Exception as e:
+                    traceback.print_exc()
                     logger.error(f"Failed to auto-debit charge {charge.id}: {e}")
             else:
+                logger.info("No charges found for the user")
                 # Not enough balance to cover this charge, and since we order by created_at,
                 # we might want to stop or continue to smaller charges.
                 # For now, let's continue to see if smaller charges can be covered.
@@ -113,11 +116,11 @@ class Wallet(models.Model):
 
         if wallet.balance < amount:
             raise ValueError("Insufficient wallet balance")
-            
+
         previous_balance = wallet.balance
         wallet.balance -= amount
         wallet.save()
-        
+
         # Update current instance to reflect the new balance
         self.balance = wallet.balance
 
