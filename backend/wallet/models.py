@@ -34,7 +34,7 @@ class Wallet(models.Model):
     def credit(self, amount, description="", reference="", metadata=None):
         """Credit wallet and create transaction record"""
         # Lock the wallet row to prevent race conditions
-        wallet = self.__class__.objects.select_for_update().get(pk=self.pk)
+        wallet = Wallet.objects.select_for_update().get(id=self.id)
 
         previous_balance = wallet.balance
         wallet.balance += amount
@@ -114,7 +114,7 @@ class Wallet(models.Model):
     def debit(self, amount, description="", reference="", metadata=None):
         """Debit wallet and create transaction record"""
         # Lock the wallet row to prevent race conditions
-        wallet = self.__class__.objects.select_for_update().get(pk=self.pk)
+        wallet = Wallet.objects.select_for_update().get(id=self.id)
 
         if wallet.balance < amount:
             raise ValueError("Insufficient wallet balance")
