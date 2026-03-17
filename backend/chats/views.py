@@ -31,6 +31,7 @@ def _publish_to_ably(channel_name: str, event: str, data: dict):
         client = AblyRest(api_key)
         channel = client.channels.get(channel_name)
         await channel.publish(event, data)
+        await client.close()
 
     try:
         asyncio.run(_publish())
