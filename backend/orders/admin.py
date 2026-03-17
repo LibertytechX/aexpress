@@ -323,7 +323,10 @@ class OrderAdmin(admin.ModelAdmin):
         ),
         ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount")}),
         ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
-        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+        (
+            "Timestamps",
+            {"fields": ("created_at", "updated_at", "completed_at", "assigned_at")},
+        ),
     )
 
     inlines = [DeliveryInline, OrderLegInline]

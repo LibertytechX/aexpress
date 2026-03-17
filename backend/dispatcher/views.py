@@ -5,7 +5,15 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from .models import Rider, ActivityFeed, Zone, RelayNode, VehicleAsset, Vertical, RiderDutyLog
+from .models import (
+    Rider,
+    ActivityFeed,
+    Zone,
+    RelayNode,
+    VehicleAsset,
+    Vertical,
+    RiderDutyLog,
+)
 from .serializers import (
     RiderSerializer,
     ZoneSerializer,
@@ -85,9 +93,7 @@ class RiderViewSet(viewsets.ModelViewSet):
             if rider.status != Rider.Status.ONLINE:
                 rider.go_online()
                 # Open a new duty log entry
-                RiderDutyLog.objects.create(
-                    rider=rider, went_online=timezone.now()
-                )
+                RiderDutyLog.objects.create(rider=rider, went_online=timezone.now())
             return Response({"status": "success", "message": "Rider is now online"})
         elif status_val == Rider.Status.OFFLINE:
             if rider.status != Rider.Status.OFFLINE:
@@ -104,9 +110,7 @@ class RiderViewSet(viewsets.ModelViewSet):
                     open_log.duration_minutes = int(
                         (now - open_log.went_online).total_seconds() / 60
                     )
-                    open_log.save(
-                        update_fields=["went_offline", "duration_minutes"]
-                    )
+                    open_log.save(update_fields=["went_offline", "duration_minutes"])
             return Response({"status": "success", "message": "Rider is now offline"})
         else:
             return Response(
@@ -163,7 +167,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         .select_related("user", "rider", "rider__user")
         .prefetch_related("deliveries")
     )
-    from .serializers import OrderSerializer, OrderCreateSerializer, OrderPriceUpdateSerializer
+    from .serializers import (
+        OrderSerializer,
+        OrderCreateSerializer,
+        OrderPriceUpdateSerializer,
+    )
 
     serializer_class = OrderSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -265,8 +273,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             rider = Rider.objects.get(rider_id=rider_id)
             order.rider = rider
             order.status = "Assigned"
-            if not getattr(order, "assigned_at", None):
-                order.assigned_at = timezone.now()
+            # if not getattr(order, "assigned_at", None):
+            order.assigned_at = timezone.now()
             order.save()
             rider_name = getattr(rider.user, "contact_name", None) or getattr(
                 rider.user, "phone", "Unknown"
@@ -333,7 +341,6 @@ class OrderViewSet(viewsets.ModelViewSet):
                 {"error": f"Invalid status. Choose from: {list(STATUS_MAP.keys())}"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
 
         old_status = order.status
         now = timezone.now()

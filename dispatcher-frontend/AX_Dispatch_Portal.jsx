@@ -4441,6 +4441,7 @@ function MessagingScreen() {
   const [loadingConvos, setLoadingConvos] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
+  const [ablyClient, setAblyClient] = useState(null);
   const ablyRef = useRef(null);
   const channelRef = useRef(null);
   const bottomRef = useRef(null);
@@ -4460,6 +4461,7 @@ function MessagingScreen() {
       if (cancelled) return;
       const client = new Realtime({ token });
       ablyRef.current = client;
+      setAblyClient(client);
     }).catch(err => console.warn('[Chat] Ably token error:', err));
     return () => {
       cancelled = true;
@@ -4509,9 +4511,9 @@ function MessagingScreen() {
 
     // Subscribe to Ably channel for real-time messages
     const convo = conversations.find(c => c.id === activeId);
-    if (convo && ablyRef.current) {
+    if (convo && ablyClient) {
       const channelName = `chat:${convo.type}:${convo.participant?.id}`;
-      const ch = ablyRef.current.channels.get(channelName);
+      const ch = ablyClient.channels.get(channelName);
       channelRef.current = ch;
       ch.subscribe('new_message', (msg) => {
         if (cancelled) return;
@@ -4531,7 +4533,7 @@ function MessagingScreen() {
 
     return () => { cancelled = true; channelRef.current?.unsubscribe(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId]);
+  }, [activeId, ablyClient]);
 
   // ── Auto-scroll to bottom when messages change ──────────────────
   useEffect(() => {
