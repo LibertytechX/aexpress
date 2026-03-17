@@ -233,6 +233,7 @@ class OrderSerializer(serializers.ModelSerializer):
     dropoff_lng = serializers.SerializerMethodField()
 
     relay_legs = serializers.SerializerMethodField()
+    charge = serializers.SerializerMethodField()
 
     class Meta:
         from orders.models import Order
@@ -278,6 +279,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "waiting_time",
             "delivery_time",
             "total_order_time",
+            "charge",
         ]
 
     def get_pickup_lat(self, obj):
@@ -445,6 +447,15 @@ class OrderSerializer(serializers.ModelSerializer):
         if not getattr(obj, "completed_at", None): return None
         return self._format_timedelta(obj.completed_at - obj.created_at)
 
+    def get_charge(self, obj):
+        charge = obj.charges.first()
+        if charge:
+            return {
+                "amount": float(charge.amount),
+                "status": charge.status,
+                "created_at": charge.created_at.isoformat(),
+            }
+        return None
 
 class OrderPriceUpdateSerializer(serializers.Serializer):
     """Write serializer for dispatcher price edits (Order.total_amount).
