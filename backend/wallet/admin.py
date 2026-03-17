@@ -225,7 +225,7 @@ class ChargeAdmin(admin.ModelAdmin):
 
             try:
                 wallet = charge.user.wallet
-                
+
                 with db_transaction.atomic():
                     # Debit the wallet
                     debit_ref = f"CHRG-ADM-{charge.id.hex[:10].upper()}"
@@ -256,7 +256,7 @@ class ChargeAdmin(admin.ModelAdmin):
                 logger.error(traceback.format_exc())
                 self.message_user(
                     request,
-                    f"Error processing charge {charge.id} for {charge.user.business_name}: {str(e)}",
+                    f"Error processing charge {charge.id} for {charge.user.business_name}: {str(e)} - {wallet.balance}",
                     level=messages.ERROR,
                 )
 

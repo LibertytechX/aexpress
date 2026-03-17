@@ -1011,6 +1011,12 @@ class CancelOrderView(APIView):
         order.updated_at = timezone.now()
         order.save()
 
+        # Cancel related charges
+        charges = order.charges.filter(status__in=["pending", "failed"])
+        for charge in charges:
+            charge.status = "canceled"
+            charge.save()
+
         # Trigger order-cancelled webhook in background
         def _trigger_cancelled():
             try:
