@@ -24,11 +24,34 @@ class WalletAdmin(admin.ModelAdmin):
     @admin.action(description="Settle pending charges for selected wallets")
     def settle_pending_charges(self, request, queryset):
         """Settle pending charges for the selected wallets."""
+        from django.contrib import messages
+        import traceback
+        import logging
+
+        logger = logging.getLogger(__name__)
+        success_count = 0
+        error_count = 0
+
         for wallet in queryset:
-            wallet.process_pending_charges()
-        self.message_user(
-            request, f"Triggered charge settlement for {queryset.count()} wallets."
-        )
+            try:
+                wallet.process_pending_charges()
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                print("hit an error!")
+                logger.error(f"Error settling charges for wallet {wallet.id}: {e}")
+                logger.error(traceback.format_exc())
+                self.message_user(
+                    request,
+                    f"Error settling charges for {wallet.user.business_name}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if success_count > 0:
+            self.message_user(
+                request,
+                f"Successfully triggered charge settlement for {success_count} wallets.",
+            )
 
     def virtual_account_number(self, obj):
         """Display the associated virtual account number if it exists."""
