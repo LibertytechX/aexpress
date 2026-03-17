@@ -3339,18 +3339,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation.
-    if (step === 2 && routeDistance && routeDuration) {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
-    }
-
-    // Step 1 (Quick Send): if we already calculated an early route, use it
+    // Quick Send ALL STEPS: always use early route so prices match step 1
     if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
       const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
       if (tiered !== null) return tiered;
       return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
+    }
+
+    // Step 2 uses the full route (map) calculation (fallback for other modes when no multiFares)
+    if (step === 2 && routeDistance && routeDuration) {
+      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
     }
 
     // Fallback: floor fee for tiered, or base fare for simple
@@ -3389,8 +3389,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       payMethod: payMethod,
       notes: notes,
       // Include route information for pricing calculation
-      distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0
+      distance_km: mode === 'quick' && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
+      duration_minutes: mode === 'quick' && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
     };
 
     // Debug: Log order data
