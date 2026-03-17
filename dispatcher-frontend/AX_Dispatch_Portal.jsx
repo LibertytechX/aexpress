@@ -2231,10 +2231,10 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       const s = v == null ? "" : String(v);
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Status"];
+    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Payment Status", "Status"];
     const rows = filtered.map(o => {
       const dt = formatOrderDateTime(o.created);
-      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.status].map(esc);
+      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
     });
     const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -2285,16 +2285,21 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
       </div>
 
-      <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>Status</span>
-        </div>
-        <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
-          {filtered.map(o => {
-            const dt = formatOrderDateTime(o.created);
-            return (
-              <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+      <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 1200 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 110px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>Payment Status</span><span>Status</span>
+            </div>
+            <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+              {filtered.map(o => {
+                const dt = formatOrderDateTime(o.created);
+                const psLower = (o.payment_status || "").toLowerCase();
+                const psStyle = psLower === "paid" || psLower === "success" ? { bg: S.greenBg, text: S.green } : psLower === "pending" ? { bg: S.goldPale, text: S.gold } : psLower === "failed" || psLower === "cancelled" ? { bg: S.redBg, text: S.red } : { bg: S.borderLight, text: S.textMuted };
+
+                return (
+                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 110px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
                 <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
                 <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
                 <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
@@ -2313,11 +2318,16 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                     {payLoading === o.id ? "..." : (o.paymentInfo ? "View Details" : "Pay Now")}
                   </button>
                 </div>
+                <div>
+                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 12, background: psStyle.bg, color: psStyle.text, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{o.payment_status || "—"}</span>
+                </div>
                 <Badge status={o.status} />
               </div>
             );
           })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2407,6 +2417,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 18, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{order.id}</span>
           <Badge status={order.status} />
           <span style={{ fontSize: 12, color: S.textMuted }}>{order.created}</span>
+          <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.yellowBg, color: order.payment_status === "Paid" ? S.green : S.yellow, fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "PENDING"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>

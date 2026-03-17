@@ -275,6 +275,7 @@ const normalizeOrder = (o) => ({
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',
     paymentInfo: o.payment_info || null,
+    payment_status: o.payment_status || null,
     charge: o.charge || null,
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
