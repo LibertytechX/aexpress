@@ -163,7 +163,8 @@ class OrderOfferAcceptView(APIView):
             # 3. Order Assignment
             order.rider = rider
             order.status = "Assigned"
-            order.save(update_fields=["rider", "status", "updated_at"])
+            order.assigned_at = timezone.now()
+            order.save(update_fields=["rider", "status", "assigned_at", "updated_at"])
 
             # 4. COD Logic
             if order.collect_on_delivery:
@@ -946,7 +947,11 @@ class GenerateCODAccountView(APIView):
             order = Order.objects.get(order_number=order_id)
             rider = order.rider
 
-            cod_record = RiderCodRecord.objects.filter(order=order, rider=rider).order_by("-created_at").first()
+            cod_record = (
+                RiderCodRecord.objects.filter(order=order, rider=rider)
+                .order_by("-created_at")
+                .first()
+            )
             if not cod_record:
                 return service_response(
                     status="error",
@@ -1002,4 +1007,3 @@ class GenerateCODAccountView(APIView):
                 data={},
                 status_code=500,
             )
-
