@@ -67,6 +67,7 @@ class Wallet(models.Model):
         charges = Charge.objects.filter(user=self.user, status="pending").order_by(
             "created_at"
         )
+        print("let's see the charges: ", charges)
 
         for charge in charges:
             if self.balance >= charge.amount:
@@ -101,6 +102,7 @@ class Wallet(models.Model):
                 except Exception as e:
                     traceback.print_exc()
                     logger.error(f"Failed to auto-debit charge {charge.id}: {e}")
+                    raise e
             else:
                 logger.info("No charges found for the user")
                 # Not enough balance to cover this charge, and since we order by created_at,
