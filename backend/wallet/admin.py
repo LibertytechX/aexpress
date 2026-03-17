@@ -196,8 +196,73 @@ class ChargeAdmin(admin.ModelAdmin):
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["-created_at"]
+    actions = ["debit_and_complete_charge"]
 
     fieldsets = (
         ("Charge Information", {"fields": ("id", "user", "order", "amount", "status")}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+    @admin.action(description="Debit wallet, complete charge, and set order to paid")
+    def debit_and_complete_charge(self, request, queryset):
+        from django.contrib import messages
+        from django.db import transaction as db_transaction
+        import logging
+        import traceback
+
+        logger = logging.getLogger(__name__)
+        success_count = 0
+        error_count = 0
+
+        for charge in queryset:
+            if charge.status == "completed":
+                self.message_user(
+                    request,
+                    f"Charge {charge.id} is already completed. Skipping.",
+                    level=messages.WARNING,
+                )
+                continue
+
+            try:
+                wallet = charge.user.wallet
+                
+                with db_transaction.atomic():
+                    # Debit the wallet
+                    debit_ref = f"CHRG-ADM-{charge.id.hex[:10].upper()}"
+                    wallet.debit(
+                        amount=charge.amount,
+                        description=f"Admin manual debit for Order {charge.order.order_number}",
+                        reference=debit_ref,
+                        metadata={
+                            "charge_id": str(charge.id),
+                            "order_number": charge.order.order_number,
+                            "admin_action": True,
+                        },
+                    )
+
+                    # Update charge status
+                    charge.status = "completed"
+                    charge.save()
+
+                    # Update order payment status
+                    order = charge.order
+                    order.payment_status = "Paid"
+                    order.save(update_fields=["payment_status"])
+
+                    success_count += 1
+            except Exception as e:
+                error_count += 1
+                logger.error(f"Failed to manually direct debit charge {charge.id}: {e}")
+                logger.error(traceback.format_exc())
+                self.message_user(
+                    request,
+                    f"Error processing charge {charge.id} for {charge.user.business_name}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if success_count > 0:
+            self.message_user(
+                request,
+                f"Successfully debited and completed {success_count} charges.",
+                level=messages.SUCCESS,
+            )
