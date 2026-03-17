@@ -76,7 +76,7 @@ class ConversationCreateOrGetView(APIView):
         user = request.user
         user_type = user.usertype.lower()  # e.g. "customer", "rider"
 
-        if user_type not in ("customer", "rider"):
+        if user_type not in ("customer", "rider", "merchant"):
             return Response(
                 {"error": "Only customers and riders can open a conversation."},
                 status=status.HTTP_403_FORBIDDEN,
