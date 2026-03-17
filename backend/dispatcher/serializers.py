@@ -1,5 +1,13 @@
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode, VehicleAsset, Vertical
+from .models import (
+    Rider,
+    DispatcherProfile,
+    ActivityFeed,
+    Zone,
+    RelayNode,
+    VehicleAsset,
+    Vertical,
+)
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
@@ -213,7 +221,7 @@ class OrderSerializer(serializers.ModelSerializer):
     timeline = serializers.SerializerMethodField()
     price_per_km = serializers.SerializerMethodField()
     events = OrderEventSerializer(many=True, read_only=True)
-    
+
     waiting_time = serializers.SerializerMethodField()
     delivery_time = serializers.SerializerMethodField()
     total_order_time = serializers.SerializerMethodField()
@@ -263,6 +271,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "payment_info",
             "customerPhone",
             "vehicle",
+            "payment_status",
             # Relay routing details (populated for relay orders)
             "is_relay_order",
             "routing_status",
@@ -337,15 +346,15 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_status(self, obj):
         order_map = {
-            "Pending":          "Pending",
-            "Assigned":         "Assigned",
-            "PickedUp":         "Picked Up",   # rider app can set this directly
-            "Started":          "In Transit",
-            "Arrived":          "At Dropoff",  # rider is at the dropoff location
-            "Done":             "Delivered",
+            "Pending": "Pending",
+            "Assigned": "Assigned",
+            "PickedUp": "Picked Up",  # rider app can set this directly
+            "Started": "In Transit",
+            "Arrived": "At Dropoff",  # rider is at the dropoff location
+            "Done": "Delivered",
             "CustomerCanceled": "Cancelled",
-            "RiderCanceled":    "Cancelled",
-            "Failed":           "Failed",
+            "RiderCanceled": "Cancelled",
+            "Failed": "Failed",
         }
         order_status = order_map.get(obj.status, "Pending")
 
@@ -360,8 +369,8 @@ class OrderSerializer(serializers.ModelSerializer):
                 delivery_map = {
                     "InTransit": "In Transit",
                     "Delivered": "Delivered",
-                    "Failed":    "Failed",
-                    "Canceled":  "Cancelled",
+                    "Failed": "Failed",
+                    "Canceled": "Cancelled",
                 }
                 delivery_status = delivery_map.get(first.status)
                 if delivery_status:
@@ -426,7 +435,8 @@ class OrderSerializer(serializers.ModelSerializer):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
 
     def _format_timedelta(self, td):
-        if not td: return None
+        if not td:
+            return None
         minutes = int(td.total_seconds() / 60)
         if minutes < 60:
             return f"{minutes} mins"
@@ -436,15 +446,20 @@ class OrderSerializer(serializers.ModelSerializer):
             return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
 
     def get_waiting_time(self, obj):
-        if not getattr(obj, "assigned_at", None): return None
+        if not getattr(obj, "assigned_at", None):
+            return None
         return self._format_timedelta(obj.assigned_at - obj.created_at)
 
     def get_delivery_time(self, obj):
-        if not getattr(obj, "assigned_at", None) or not getattr(obj, "completed_at", None): return None
+        if not getattr(obj, "assigned_at", None) or not getattr(
+            obj, "completed_at", None
+        ):
+            return None
         return self._format_timedelta(obj.completed_at - obj.assigned_at)
 
     def get_total_order_time(self, obj):
-        if not getattr(obj, "completed_at", None): return None
+        if not getattr(obj, "completed_at", None):
+            return None
         return self._format_timedelta(obj.completed_at - obj.created_at)
 
     def get_charge(self, obj):
@@ -456,6 +471,7 @@ class OrderSerializer(serializers.ModelSerializer):
                 "created_at": charge.created_at.isoformat(),
             }
         return None
+
 
 class OrderPriceUpdateSerializer(serializers.Serializer):
     """Write serializer for dispatcher price edits (Order.total_amount).
@@ -484,9 +500,7 @@ class OrderPriceUpdateSerializer(serializers.Serializer):
             val = Decimal(str(val)).quantize(Decimal("0.01"))
         except Exception:
             # DecimalField normally prevents this, but keep a friendly error.
-            raise serializers.ValidationError(
-                {"amount": "Invalid amount."}
-            )
+            raise serializers.ValidationError({"amount": "Invalid amount."})
 
         attrs["amount"] = val
         return attrs
@@ -748,6 +762,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         payment_method = self.initial_data.get("payment_method")
         if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
             from orders.tasks import create_order_charge
+
             create_order_charge.delay(order.id)
 
         return order
@@ -782,9 +797,7 @@ class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
         merchant = validated_data["merchant"]
         vehicle = validated_data["vehicle"]
         defaults = {
-            k: v
-            for k, v in validated_data.items()
-            if k not in ("merchant", "vehicle")
+            k: v for k, v in validated_data.items() if k not in ("merchant", "vehicle")
         }
         obj, _ = MerchantPricingOverride.objects.update_or_create(
             merchant=merchant, vehicle=vehicle, defaults=defaults
@@ -934,7 +947,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
     home_zone = serializers.PrimaryKeyRelatedField(
-        queryset=Zone.objects.all(), required=False, allow_null=True,
+        queryset=Zone.objects.all(),
+        required=False,
+        allow_null=True,
         help_text="Relay network zone to assign this rider to.",
     )
     driving_license_number = serializers.CharField(required=False, max_length=50)

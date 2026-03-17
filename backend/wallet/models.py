@@ -29,10 +29,18 @@ class Wallet(models.Model):
     def __str__(self):
         return f"{self.user.business_name} - ₦{self.balance}"
 
+    @db_transaction.atomic
     def credit(self, amount, description="", reference="", metadata=None):
         """Credit wallet and create transaction record"""
-        self.balance += amount
-        self.save()
+        # Lock the wallet row to prevent race conditions
+        wallet = self.__class__.objects.select_for_update().get(pk=self.pk)
+        
+        previous_balance = wallet.balance
+        wallet.balance += amount
+        wallet.save()
+        
+        # Update current instance to reflect the new balance
+        self.balance = wallet.balance
 
         Transaction.objects.create(
             wallet=self,
@@ -40,6 +48,7 @@ class Wallet(models.Model):
             amount=amount,
             description=description,
             reference=reference,
+            balance_before=previous_balance,
             balance_after=self.balance,
             status="completed",
             metadata=metadata,
@@ -96,13 +105,21 @@ class Wallet(models.Model):
                 # For now, let's continue to see if smaller charges can be covered.
                 continue
 
+    @db_transaction.atomic
     def debit(self, amount, description="", reference="", metadata=None):
         """Debit wallet and create transaction record"""
-        if self.balance < amount:
-            raise ValueError("Insufficient wallet balance")
+        # Lock the wallet row to prevent race conditions
+        wallet = self.__class__.objects.select_for_update().get(pk=self.pk)
 
-        self.balance -= amount
-        self.save()
+        if wallet.balance < amount:
+            raise ValueError("Insufficient wallet balance")
+            
+        previous_balance = wallet.balance
+        wallet.balance -= amount
+        wallet.save()
+        
+        # Update current instance to reflect the new balance
+        self.balance = wallet.balance
 
         Transaction.objects.create(
             wallet=self,
@@ -110,6 +127,7 @@ class Wallet(models.Model):
             amount=amount,
             description=description,
             reference=reference,
+            balance_before=previous_balance,
             balance_after=self.balance,
             status="completed",
             metadata=metadata,
