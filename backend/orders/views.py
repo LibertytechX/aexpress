@@ -1470,7 +1470,7 @@ class OrderCompleteView(APIView):
                     final_delivery.dropoff_latitude,
                     final_delivery.dropoff_longitude,
                 )
-                if dist > 0.5:  # 500 meters
+                if dist > 1.5:  # 1500 meters
                     return service_response(
                         status="error",
                         message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
