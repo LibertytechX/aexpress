@@ -1174,7 +1174,7 @@ def _advance_order(request, order_number, new_status, event_desc):
             dist = Zone.haversine_distance(
                 lat, lng, order.pickup_latitude, order.pickup_longitude
             )
-            if dist > 0.5:  # 500 meters
+            if dist > 1.5:  # 1500 meters
                 return service_response(
                     status="error",
                     message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
