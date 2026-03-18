@@ -36,7 +36,7 @@ export default function SupportPage() {
       // Subscribe Ably
       const client = new Realtime({ token: tokenData.token });
       ablyRef.current = client;
-      const channelName = `chat:customer:${(convo as any).user_id?.id || ''}`;
+      const channelName = `chat:${convo.type}:${(convo as any).participant?.id || ''}`;
       const ch = client.channels.get(channelName);
       channelRef.current = ch;
       ch.subscribe('new_message', (msg: any) => {

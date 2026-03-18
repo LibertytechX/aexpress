@@ -2350,6 +2350,11 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [relayError, setRelayError] = useState("");
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
+  
+  const [showCODModal, setShowCODModal] = useState(false);
+  const [codLoading, setCodLoading] = useState(false);
+  const [codData, setCodData] = useState(null);
+  const [codError, setCodError] = useState("");
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
@@ -2380,6 +2385,21 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       setPriceError(e?.error || e?.detail || e?.message || "Failed to update price");
     } finally {
       setPriceSaving(false);
+    }
+  };
+
+  const handleGenerateCOD = async () => {
+    setCodLoading(true);
+    setCodError("");
+    try {
+      const res = await OrdersAPI.generateCODAccount(order.id);
+      setCodData(res.data?.account_details || null);
+      setShowCODModal(true);
+    } catch (e) {
+      setCodError(e?.message || e?.error || "Failed to generate COD account");
+      setShowCODModal(true);
+    } finally {
+      setCodLoading(false);
     }
   };
 
@@ -2422,6 +2442,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {order.cod > 0 && (
+             <button 
+               onClick={handleGenerateCOD} 
+               disabled={codLoading}
+               style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "none", background: S.gold, color: "#fff", cursor: codLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, fontFamily: "inherit", opacity: codLoading ? 0.7 : 1, transition: "all 0.2s ease", boxShadow: "0 2px 8px rgba(245,158,11,0.25)" }}
+               onMouseEnter={e => !codLoading && (e.currentTarget.style.background = "#D97706")}
+               onMouseLeave={e => !codLoading && (e.currentTarget.style.background = S.gold)}
+             >
+               <span style={{ fontSize: 14 }}>💵</span> {codLoading ? "Generating..." : "Generate COD Account"}
+             </button>
+          )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
           {!isTerminal && <button onClick={() => onChangeStatus(order.id, "Cancelled")} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
@@ -2470,13 +2501,13 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       )}
 
       {/* COD Instruction Banner — visible to dispatchers/riders */}
-      {order.collectOnDelivery && (
+      {order.cod > 0 && (
         <div style={{ background: "rgba(245,158,11,0.08)", border: "1.5px solid rgba(245,158,11,0.35)", borderRadius: 14, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ fontSize: 28, flexShrink: 0 }}>💵</span>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", marginBottom: 2 }}>Cash on Delivery — Rider must collect from customer</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", marginBottom: 2 }}>Cash on Delivery (COD)</div>
             <div style={{ fontSize: 13, color: "#92400E" }}>
-              Collect <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>₦{(order.cod || 0).toLocaleString()}</span> in cash from the customer at the delivery point on behalf of the merchant.
+              Collect <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>₦{(order.cod || 0).toLocaleString()}</span> on behalf of the merchant.
             </div>
           </div>
         </div>
@@ -2961,6 +2992,13 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           </div>
         </div>
       </div>
+      {showCODModal && (
+        <CODAccountModal 
+          codData={codData} 
+          error={codError} 
+          onClose={() => setShowCODModal(false)} 
+        />
+      )}
     </div>
   );
 }

@@ -386,6 +386,15 @@ export const OrdersAPI = {
         const data = await res.json();
         if (!res.ok) throw (data || new Error('Failed to initiate payment'));
         return data;
+    },
+
+    async generateCODAccount(orderNumber) {
+        const res = await fetchWithAuth(`/riders/cod/${orderNumber}/generate-account/`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to generate COD account'));
+        return data;
     }
 };
 
