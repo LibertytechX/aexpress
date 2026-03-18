@@ -2878,6 +2878,7 @@ function useWindowWidth() {
 // ─── NEW ORDER SCREEN ───────────────────────────────────────────
 function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const isMobile = useWindowWidth() < 640;
+  const [isSubmitting, setIsSubmitting] = useState(false);
   // ─── Mode: "quick" | "multi" | "bulk" ───
   const [mode, setMode] = useState("quick");
 
@@ -3372,53 +3373,60 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   );
   const canProceed = !!pickupAddress && totalDeliveries > 0 && quickValid;
 
-  const handleConfirmAll = () => {
-    const deliveries = getActiveDropoffs();
+  const handleConfirmAll = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
 
-    // Debug: Log route data
-    console.log('🚀 handleConfirmAll called!');
-    console.log('📏 Route data:', { routeDistance, routeDuration });
+    try {
+      const deliveries = getActiveDropoffs();
 
-    // Prepare order data based on mode
-    const orderData: any = {
-      mode: mode,
-      pickup: pickupAddress,
-      senderName: senderName,
-      senderPhone: senderPhone,
-      vehicle: vehicle,
-      payMethod: payMethod,
-      notes: notes,
-      // Include route information for pricing calculation
-      distance_km: mode === 'quick' && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
-      duration_minutes: mode === 'quick' && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
-    };
+      // Debug: Log route data
+      console.log('🚀 handleConfirmAll called!');
+      console.log('📏 Route data:', { routeDistance, routeDuration });
 
-    // Debug: Log order data
-    console.log('📦 Order data being sent:', orderData);
-    console.log('💰 Pricing data:', {
-      distance_km: orderData.distance_km,
-      duration_minutes: orderData.duration_minutes,
-      vehicle: orderData.vehicle
-    });
+      // Prepare order data based on mode
+      const orderData: any = {
+        mode: mode,
+        pickup: pickupAddress,
+        senderName: senderName,
+        senderPhone: senderPhone,
+        vehicle: vehicle,
+        payMethod: payMethod,
+        notes: notes,
+        // Include route information for pricing calculation
+        distance_km: mode === 'quick' && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
+        duration_minutes: mode === 'quick' && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
+      };
 
-    if (mode === 'quick') {
-      // Quick Send - single delivery
-      orderData.dropoff = dropoffAddress;
-      orderData.receiverName = receiverName;
-      orderData.receiverPhone = receiverPhone;
-      orderData.packageType = drops[0]?.pkg || 'Box';
-    } else if (mode === 'multi' || mode === 'bulk') {
-      // Multi-Drop or Bulk Import - multiple deliveries
-      orderData.deliveries = deliveries.map(d => ({
-        dropoff_address: d.address,
-        receiver_name: d.name,
-        receiver_phone: d.phone,
-        package_type: d.pkg || 'Box',
-        notes: d.notes || ''
-      }));
+      // Debug: Log order data
+      console.log('📦 Order data being sent:', orderData);
+      console.log('💰 Pricing data:', {
+        distance_km: orderData.distance_km,
+        duration_minutes: orderData.duration_minutes,
+        vehicle: orderData.vehicle
+      });
+
+      if (mode === 'quick') {
+        // Quick Send - single delivery
+        orderData.dropoff = dropoffAddress;
+        orderData.receiverName = receiverName;
+        orderData.receiverPhone = receiverPhone;
+        orderData.packageType = drops[0]?.pkg || 'Box';
+      } else if (mode === 'multi' || mode === 'bulk') {
+        // Multi-Drop or Bulk Import - multiple deliveries
+        orderData.deliveries = deliveries.map(d => ({
+          dropoff_address: d.address,
+          receiver_name: d.name,
+          receiver_phone: d.phone,
+          package_type: d.pkg || 'Box',
+          notes: d.notes || ''
+        }));
+      }
+
+      await onPlaceOrder(orderData);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    onPlaceOrder(orderData);
   };
 
   // ─── Saved addresses for quick pick ───
@@ -4249,15 +4257,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 flex: 1, height: 48, border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600,
                 cursor: "pointer", background: "#fff", color: S.navy, fontFamily: "inherit"
               }}>← Back</button>
-              <button onClick={handleConfirmAll} style={{
-                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              <button onClick={handleConfirmAll} disabled={isSubmitting} style={{
+                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: isSubmitting ? "not-allowed" : "pointer",
+                background: isSubmitting ? "#e2e8f0" : `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: isSubmitting ? "#94a3b8" : S.navy, fontFamily: "inherit",
+                boxShadow: isSubmitting ? "none" : "0 4px 12px rgba(232,168,56,0.3)",
+                transition: "all 0.2s"
               }}>
-                {totalDeliveries === 1
+                {isSubmitting ? "Processing..." : (totalDeliveries === 1
                   ? `Create Order — ₦${totalCost.toLocaleString()}`
                   : `Create ${totalDeliveries} Orders — ₦${totalCost.toLocaleString()}`
-                }
+                )}
               </button>
             </div>
           </div>

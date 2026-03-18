@@ -1,5 +1,6 @@
 
 const API_BASE_URL = 'https://www.orders.axpress.net/api';
+// const API_BASE_URL = 'http://147.182.251.211/api';
 
 // --- Interfaces ---
 
@@ -56,10 +57,10 @@ export interface Transaction {
 }
 
 export interface Vehicle {
-    name: string;
-    base_fare: number;
-    rate_per_km: number;
-    rate_per_minute: number;
+  name: string;
+  base_fare: number;
+  rate_per_km: number;
+  rate_per_minute: number;
 }
 
 // --- Token Management ---
@@ -144,7 +145,7 @@ async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): 
 
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-    
+
     // Handle 204 No Content
     if (response.status === 204) return { success: true } as any;
 
@@ -248,7 +249,7 @@ export const AuthAPI = {
 };
 
 export const OrdersAPI = {
-  getVehicles: async () => apiRequest<{success: boolean, vehicles: Vehicle[]}>('/orders/vehicles/', { method: 'GET' }),
+  getVehicles: async () => apiRequest<{ success: boolean, vehicles: Vehicle[] }>('/orders/vehicles/', { method: 'GET' }),
   createQuickSend: async (orderData: any) => apiRequest('/orders/quick-send/', { method: 'POST', body: JSON.stringify(orderData) }),
   createMultiDrop: async (orderData: any) => apiRequest('/orders/multi-drop/', { method: 'POST', body: JSON.stringify(orderData) }),
   createBulkImport: async (orderData: any) => apiRequest('/orders/bulk-import/', { method: 'POST', body: JSON.stringify(orderData) }),
@@ -329,11 +330,11 @@ export const AblyTokenAPI = {
 
 // Default export matching original usage
 const API = {
-    Auth: AuthAPI,
-    Orders: OrdersAPI,
-    Wallet: WalletAPI,
-    Token: TokenManager,
-    Chats: ChatsAPI,
+  Auth: AuthAPI,
+  Orders: OrdersAPI,
+  Wallet: WalletAPI,
+  Token: TokenManager,
+  Chats: ChatsAPI,
 };
 
 export default API;
