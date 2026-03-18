@@ -11,6 +11,9 @@ from .models import (
 from authentication.serializers import UserSerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
+from datetime import datetime, timedelta
+from django.core.cache import cache
+from .models import VehicleTracking
 
 User = get_user_model()
 
@@ -120,6 +123,7 @@ class RiderSerializer(serializers.ModelSerializer):
     joined = serializers.DateTimeField(
         source="created_at", format="%Y-%m-%d", read_only=True
     )
+    total_yesterday_order_distance = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -142,7 +146,29 @@ class RiderSerializer(serializers.ModelSerializer):
             "current_latitude",
             "current_longitude",
             "last_location_update",
+            "total_yesterday_order_distance",
         ]
+
+    def get_total_yesterday_order_distance(self, obj):
+        yesterday = datetime.now() - timedelta(days=1)
+        cache_key = (
+            f"total_yesterday_order_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        )
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return cached_distance
+
+        # get the riders yesterdays order
+        orders = obj.rider_orders.filter(created_at__date=yesterday.date())
+        total_distance = 0
+        for order in orders:
+            if order.distance_km is not None:
+                total_distance += order.distance_km
+
+        # cache for 24 hours
+        cache.set(cache_key, total_distance, 60 * 60 * 24)
+        return total_distance
 
     def get_vehicle(self, obj):
         if obj.vehicle_type:
@@ -1158,6 +1184,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         read_only=True,
         default=0,
     )
+    yesterday_distance = serializers.SerializerMethodField()
 
     class Meta:
         model = VehicleAsset
@@ -1191,8 +1218,33 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "assigned_rider",
             "created_at",
             "updated_at",
+            "yesterday_distance",
         ]
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
+
+    def get_yesterday_distance(self, obj):
+
+        yesterday = datetime.now() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return cached_distance
+
+        # get all yesterdays vehicle tracking entries
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset=obj, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            distance = last_entry.travelled - first_entry.travelled
+
+        # Cache for 24 hours
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return distance
 
     def get_assigned_rider(self, obj):
         # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
