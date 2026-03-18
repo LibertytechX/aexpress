@@ -70,11 +70,22 @@ class RiderAdmin(admin.ModelAdmin):
         "vehicle_asset",
         "rating",
         "total_deliveries",
+        "is_active",
     )
-    list_filter = ("status", "home_zone", "vehicle_type", "vehicle_asset__vehicle_type")
+    list_filter = ("status", "home_zone", "vehicle_type", "vehicle_asset__vehicle_type", "is_active")
     search_fields = ("user__username", "user__email", "rider_id", "user__phone")
     autocomplete_fields = ("vehicle_asset", "home_zone")
-    actions = ["assign_zone"]
+    actions = ["assign_zone", "soft_delete_riders"]
+
+    @admin.action(description="Soft delete selected riders")
+    def soft_delete_riders(self, request, queryset):
+        from django.contrib import messages
+        updated_count = queryset.update(is_active=False)
+        self.message_user(
+            request,
+            f"Successfully soft deleted {updated_count} riders.",
+            level=messages.SUCCESS,
+        )
 
     @admin.action(description="Assign selected riders to a zone")
     def assign_zone(self, request, queryset):
