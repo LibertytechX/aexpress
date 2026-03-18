@@ -188,6 +188,7 @@ export const RidersAPI = {
             currentOrder: r.current_order || null,
             todayOrders: r.todayOrders || 0,
             todayEarnings: r.todayEarnings || 0,
+            total_yesterday_order_distance: r.total_yesterday_order_distance,
             rating: parseFloat(r.rating) || 4.5,
             totalDeliveries: r.total_deliveries || 0,
             completionRate: r.completionRate || 95,

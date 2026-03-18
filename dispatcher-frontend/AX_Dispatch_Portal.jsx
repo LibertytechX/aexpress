@@ -1680,7 +1680,16 @@ export default function AXDispatchPortal() {
             prev.forEach(v => { map[v.id] = v; });
             // Merge-patch: spread existing state first so any field the Ably payload
             // omits is preserved (e.g. orders_today from the REST API initial load).
-            incoming.forEach(v => { map[v.id] = { ...(map[v.id] || {}), ...v }; });
+            incoming.forEach(v => { 
+              const existing = map[v.id] || {};
+              const merged = { ...existing, ...v };
+              // Protect fields from being overwritten by null/omitted telemetry
+              if (v.yesterday_distance === null && existing.yesterday_distance != null) merged.yesterday_distance = existing.yesterday_distance;
+              if (v.orders_today === null && existing.orders_today != null) merged.orders_today = existing.orders_today;
+              if (v.total_distance === null && existing.total_distance != null) merged.total_distance = existing.total_distance;
+              if (v.distance_today === null && existing.distance_today != null) merged.distance_today = existing.distance_today;
+              map[v.id] = merged; 
+            });
             return Object.values(map);
           });
         });
@@ -3607,12 +3616,12 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
             </button>
           </div>
 	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
 	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(r => (
-	                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+	                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name.split(" ").map(n => n[0]).join("")}</div>
@@ -3624,6 +3633,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
                   <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
                   <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{r.total_yesterday_order_distance ? `${r.total_yesterday_order_distance} km` : "—"}</span>
                   <span style={{ fontSize: 12, color: S.gold }}>⭐ {r.rating}</span>
                 </div>
               ))}
@@ -4037,7 +4047,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-		  const gridCols = "70px 90px 60px 60px 60px 80px 110px 110px 80px 90px 80px";
+		  const gridCols = "70px 90px 60px 60px 60px 80px 110px 110px 120px 80px 90px 80px";
 	  const fmtDistance = (raw, unit) => {
 	    if (raw === null || raw === undefined || raw === "") return "—";
 	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -4071,7 +4081,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
 		          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
 	            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
+		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
 	            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
 	              {filtered.map(v => (
@@ -4084,6 +4094,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
 	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
 	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
+	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
 		                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : fmtDistance(v.orders_today, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
