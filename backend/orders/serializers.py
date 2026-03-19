@@ -1,5 +1,8 @@
 from django.db import models
 from rest_framework import serializers
+from sparky_utils.exceptions import ServiceException
+from django.utils import timezone
+from datetime import timedelta
 from .models import Order, Delivery, Vehicle
 from authentication.serializers import UserSerializer
 
