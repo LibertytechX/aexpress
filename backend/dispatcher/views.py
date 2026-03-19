@@ -186,6 +186,15 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-created_at")
+
+        paid_compete = self.request.query_params.get("paid_complete")
+        unpaid_complete = self.request.query_params.get("unpaid_complete")
+
+        if paid_compete:
+            qs = qs.filter(payment_status="Paid", status="Done")
+        if unpaid_complete:
+            qs = qs.filter(payment_status="Pending", status="Done")
+
         # Always prefetch relay legs so the list endpoint returns them too.
         # This keeps relayLegs alive through 60-second auto-refreshes.
         return qs.prefetch_related(
@@ -207,11 +216,20 @@ class OrderViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
         from datetime import timedelta
         from orders.models import Order
-        
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
-        if Order.objects.filter(user=request.user, created_at__gte=one_minute_ago).exists():
+        if Order.objects.filter(
+            user=request.user, created_at__gte=one_minute_ago
+        ).exists():
             return DRFResponse(
-                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another order."]}},
+                {
+                    "success": False,
+                    "errors": {
+                        "non_field_errors": [
+                            "Please wait a minute before creating another order."
+                        ]
+                    },
+                },
                 status=drf_status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
