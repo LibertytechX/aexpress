@@ -72,14 +72,21 @@ class RiderAdmin(admin.ModelAdmin):
         "total_deliveries",
         "is_active",
     )
-    list_filter = ("status", "home_zone", "vehicle_type", "vehicle_asset__vehicle_type", "is_active")
-    search_fields = ("user__username", "user__email", "rider_id", "user__phone")
+    list_filter = (
+        "status",
+        "home_zone",
+        "vehicle_type",
+        "vehicle_asset__vehicle_type",
+        "is_active",
+    )
+    search_fields = ("user__first_name", "user__email", "rider_id", "user__phone")
     autocomplete_fields = ("vehicle_asset", "home_zone")
     actions = ["assign_zone", "soft_delete_riders"]
 
     @admin.action(description="Soft delete selected riders")
     def soft_delete_riders(self, request, queryset):
         from django.contrib import messages
+
         updated_count = queryset.update(is_active=False)
         self.message_user(
             request,
@@ -139,7 +146,7 @@ class RiderAdmin(admin.ModelAdmin):
 @admin.register(DispatcherProfile)
 class DispatcherProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "created_at")
-    search_fields = ("user__username", "user__email", "user__phone")
+    search_fields = ("user__first_name", "user__email", "user__phone")
 
 
 @admin.register(Merchant)
