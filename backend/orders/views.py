@@ -84,6 +84,16 @@ class QuickSendView(APIView):
     @transaction.atomic
     def post(self, request):
         """Create a Quick Send order with single delivery."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        one_minute_ago = timezone.now() - timedelta(minutes=1)
+        if Order.objects.filter(user=request.user, mode="quick", created_at__gte=one_minute_ago).exists():
+            return Response(
+                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Quick Send order."]}},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         serializer = QuickSendSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -262,6 +272,16 @@ class MultiDropView(APIView):
     @transaction.atomic
     def post(self, request):
         """Create a Multi-Drop order with multiple deliveries."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        one_minute_ago = timezone.now() - timedelta(minutes=1)
+        if Order.objects.filter(user=request.user, mode="multi", created_at__gte=one_minute_ago).exists():
+            return Response(
+                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Multi-Drop order."]}},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         serializer = MultiDropSerializer(data=request.data)
 
         if not serializer.is_valid():
@@ -420,6 +440,16 @@ class BulkImportView(APIView):
     @transaction.atomic
     def post(self, request):
         """Create a Bulk Import order with multiple deliveries."""
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        one_minute_ago = timezone.now() - timedelta(minutes=1)
+        if Order.objects.filter(user=request.user, mode="bulk", created_at__gte=one_minute_ago).exists():
+            return Response(
+                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Bulk Import order."]}},
+                status=status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+
         serializer = BulkImportSerializer(data=request.data)
 
         if not serializer.is_valid():

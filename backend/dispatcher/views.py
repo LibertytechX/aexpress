@@ -204,6 +204,16 @@ class OrderViewSet(viewsets.ModelViewSet):
         """Override create to return full OrderSerializer data after creation."""
         from rest_framework.response import Response as DRFResponse
         from rest_framework import status as drf_status
+        from django.utils import timezone
+        from datetime import timedelta
+        from orders.models import Order
+        
+        one_minute_ago = timezone.now() - timedelta(minutes=1)
+        if Order.objects.filter(user=request.user, created_at__gte=one_minute_ago).exists():
+            return DRFResponse(
+                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another order."]}},
+                status=drf_status.HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         serializer = self.OrderCreateSerializer(
             data=request.data, context={"request": request}

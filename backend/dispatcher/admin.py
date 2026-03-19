@@ -79,7 +79,13 @@ class RiderAdmin(admin.ModelAdmin):
         "vehicle_asset__vehicle_type",
         "is_active",
     )
-    search_fields = ("user__first_name", "user__email", "rider_id", "user__phone")
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "user__email",
+        "rider_id",
+        "user__phone",
+    )
     autocomplete_fields = ("vehicle_asset", "home_zone")
     actions = ["assign_zone", "soft_delete_riders"]
 
@@ -146,7 +152,12 @@ class RiderAdmin(admin.ModelAdmin):
 @admin.register(DispatcherProfile)
 class DispatcherProfileAdmin(admin.ModelAdmin):
     list_display = ("user", "created_at")
-    search_fields = ("user__first_name", "user__email", "user__phone")
+    search_fields = (
+        "user__first_name",
+        "user__last_name",
+        "user__email",
+        "user__phone",
+    )
 
 
 @admin.register(Merchant)
