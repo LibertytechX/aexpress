@@ -393,15 +393,12 @@ function DeliveryRouteMap({ order, rider }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+      directionsRendererRef.current = new window.google.maps.Polyline({
         map: map,
-        suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#E8A838',
-          strokeWeight: 4,
-          strokeOpacity: 0.7,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
-        }
+        strokeColor: '#E8A838',
+        strokeWeight: 4,
+        strokeOpacity: 0.7,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
       });
       setMapReady(true);
     };
@@ -439,7 +436,7 @@ function DeliveryRouteMap({ order, rider }) {
       // Clear previous markers and route
       markersRef.current.forEach(m => m.setMap(null));
       markersRef.current = [];
-      if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] });
+      if (directionsRendererRef.current) directionsRendererRef.current.setPath([]);
 
       const [pickupLoc, dropoffLoc] = await Promise.all([
         geocodeAddr(order.pickup),
@@ -473,24 +470,17 @@ function DeliveryRouteMap({ order, rider }) {
         }));
       }
 
-      // Draw route
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc,
-        destination: dropoffLoc,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        if (status === 'OK') {
-          directionsRendererRef.current.setDirections(result);
-        } else {
-          // Route failed — just fit bounds to markers
-          const bounds = new window.google.maps.LatLngBounds();
-          bounds.extend(pickupLoc);
-          bounds.extend(dropoffLoc);
-          if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
-          map.fitBounds(bounds, { padding: 40 });
-        }
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setPath([pickupLoc, dropoffLoc]);
+      }
+      
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(pickupLoc);
+      bounds.extend(dropoffLoc);
+      if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
+      map.fitBounds(bounds, { padding: 40 });
+      setMapStatus('ready');
     })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
   }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
 
@@ -534,12 +524,10 @@ function RelayRouteMap({ order, riders }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      rendererRef.current = new window.google.maps.DirectionsRenderer({
-        map, suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
-        }
+      rendererRef.current = new window.google.maps.Polyline({
+        map,
+        strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
       });
       setMapReady(true);
     };
@@ -567,7 +555,7 @@ function RelayRouteMap({ order, riders }) {
     });
     (async () => {
       markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
-      if (rendererRef.current) rendererRef.current.setDirections({ routes: [] });
+      if (rendererRef.current) rendererRef.current.setPath([]);
 
       // Resolve pickup coordinates
       const pickupLoc = (order.pickupLat && order.pickupLng)
@@ -597,15 +585,12 @@ function RelayRouteMap({ order, riders }) {
       intermediateNodes.forEach(n => bounds.extend({ lat: n.lat, lng: n.lng }));
       map.fitBounds(bounds, { padding: 50 });
 
-      // Draw route through all waypoints
-      const waypoints = intermediateNodes.map(n => ({ location: new window.google.maps.LatLng(n.lat, n.lng), stopover: true }));
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc, destination: dropoffLoc, waypoints,
-        travelMode: window.google.maps.TravelMode.DRIVING, optimizeWaypoints: false,
-      }, (result, status) => {
-        if (status === 'OK' && rendererRef.current) rendererRef.current.setDirections(result);
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      const allPathNodes = [pickupLoc, ...intermediateNodes.map(n => new window.google.maps.LatLng(n.lat, n.lng)), dropoffLoc];
+      if (rendererRef.current) {
+        rendererRef.current.setPath(allPathNodes);
+      }
+      setMapStatus('ready');
 
       // Pickup marker (📦)
       markersRef.current.push(new window.google.maps.Marker({

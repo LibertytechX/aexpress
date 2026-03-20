@@ -2530,11 +2530,11 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
       offset = (offset + speed) % 200; // Reset after 200px (2 complete cycles)
 
       if (directionsRendererRef.current) {
-        const polylineOptions = directionsRendererRef.current.get('polylineOptions');
-        if (polylineOptions && polylineOptions.icons) {
+        const icons = directionsRendererRef.current.get('icons');
+        if (icons && icons.length > 0) {
           // Update the offset of the pulse icon
-          polylineOptions.icons[0].offset = offset + 'px';
-          directionsRendererRef.current.setOptions({ polylineOptions });
+          icons[0].offset = offset + 'px';
+          directionsRendererRef.current.set('icons', icons);
         }
       }
     }, 50); // Update every 50ms for smooth animation (~20 fps)
@@ -2570,28 +2570,25 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
 
       mapInstanceRef.current = map;
 
-      // Initialize directions renderer with burnt orange color and animated pulse
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+      // Initialize polyline with burnt orange color and animated pulse
+      directionsRendererRef.current = new window.google.maps.Polyline({
         map: map,
-        suppressMarkers: true, // We'll add custom markers
-        polylineOptions: {
-          strokeColor: '#E8A838', // Burnt orange to match app theme (S.gold)
-          strokeWeight: 4,
-          strokeOpacity: 0.7,
-          icons: [{
-            icon: {
-              path: window.google.maps.SymbolPath.CIRCLE,
-              scale: 4,
-              fillColor: '#ffffff',
-              fillOpacity: 0.8,
-              strokeColor: '#ffffff',
-              strokeWeight: 2,
-              strokeOpacity: 0.6
-            },
-            offset: '0%',
-            repeat: '100px'
-          }]
-        }
+        strokeColor: '#E8A838', // Burnt orange to match app theme (S.gold)
+        strokeWeight: 4,
+        strokeOpacity: 0.7,
+        icons: [{
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 4,
+            fillColor: '#ffffff',
+            fillOpacity: 0.8,
+            strokeColor: '#ffffff',
+            strokeWeight: 2,
+            strokeOpacity: 0.6
+          },
+          offset: '0%',
+          repeat: '100px'
+        }]
       });
     };
 
@@ -2699,89 +2696,48 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
 
         // Draw route if we have pickup and at least one dropoff
         if (pickupLocation && dropoffLocations.length > 0 && directionsRendererRef.current) {
-          const directionsService = new window.google.maps.DirectionsService();
-
-          // Prepare waypoints for multi-stop route
-          const waypoints = dropoffLocations.slice(0, -1).map(d => ({
-            location: d.location,
-            stopover: true
-          }));
-
-          const request = {
-            origin: pickupLocation,
-            destination: dropoffLocations[dropoffLocations.length - 1].location,
-            waypoints: waypoints,
-            travelMode: window.google.maps.TravelMode.DRIVING,
-            optimizeWaypoints: true
-          };
-
-          directionsService.route(request, (result, status) => {
-            if (status === 'OK') {
-              directionsRendererRef.current.setDirections(result);
-
-              // Extract distance and duration from route
-              if (result.routes && result.routes[0] && result.routes[0].legs) {
-                let totalDistanceMeters = 0;
-                let totalDurationSeconds = 0;
-                let totalDurationInTrafficSeconds = 0;
-                let hasTrafficData = false;
-
-                // Sum up all legs (for multi-stop routes)
-                result.routes[0].legs.forEach(leg => {
-                  if (leg.distance && leg.distance.value) {
-                    totalDistanceMeters += leg.distance.value;
-                  }
-                  if (leg.duration && leg.duration.value) {
-                    totalDurationSeconds += leg.duration.value;
-                  }
-                  if (leg.duration_in_traffic && leg.duration_in_traffic.value) {
-                    totalDurationInTrafficSeconds += leg.duration_in_traffic.value;
-                    hasTrafficData = true;
-                  }
-                });
-
-                // Convert to user-friendly units
-                const distanceKm = (totalDistanceMeters / 1000).toFixed(1); // kilometers with 1 decimal
-                const durationMin = Math.round(totalDurationSeconds / 60); // minutes
-                const durationInTrafficMin = hasTrafficData ? Math.round(totalDurationInTrafficSeconds / 60) : null;
-
-                // Update state
-                setRouteDistance(parseFloat(distanceKm));
-                setRouteDuration(durationMin);
-                setRouteDurationInTraffic(durationInTrafficMin);
-
-                // Notify parent component of route calculation
-                if (onRouteCalculated) {
-                  onRouteCalculated(parseFloat(distanceKm), durationMin);
+          const distanceMatrixService = new window.google.maps.DistanceMatrixService();
+          const allLocations = [pickupLocation, ...dropoffLocations.map(d => d.location)];
+          
+          // Draw standard straight line
+          directionsRendererRef.current.setPath(allLocations);
+          directionsRendererRef.current.setMap(mapInstanceRef.current);
+          
+          // Generate origin-destination pairs for each leg
+          const origins = allLocations.slice(0, -1);
+          const destinations = allLocations.slice(1);
+          
+          distanceMatrixService.getDistanceMatrix({
+            origins: origins,
+            destinations: destinations,
+            travelMode: window.google.maps.TravelMode.DRIVING
+          }, (response, status) => {
+            if (status === window.google.maps.DistanceMatrixStatus.OK && response) {
+              let totalDistanceMeters = 0;
+              let totalDurationSeconds = 0;
+              
+              for (let i = 0; i < origins.length; i++) {
+                const element = response.rows[i]?.elements[i];
+                if (element && element.status === 'OK') {
+                  totalDistanceMeters += element.distance.value;
+                  totalDurationSeconds += element.duration.value;
                 }
               }
-
-              // Re-apply polyline options with icons after setDirections
-              // (setDirections replaces the polyline, losing our custom icons)
-              const polylineOptions = {
-                strokeColor: '#E8A838',
-                strokeWeight: 4,
-                strokeOpacity: 0.7,
-                icons: [{
-                  icon: {
-                    path: window.google.maps.SymbolPath.CIRCLE,
-                    scale: 4,
-                    fillColor: '#ffffff',
-                    fillOpacity: 0.8,
-                    strokeColor: '#ffffff',
-                    strokeWeight: 2,
-                    strokeOpacity: 0.6
-                  },
-                  offset: '0%',
-                  repeat: '100px'
-                }]
-              };
-              directionsRendererRef.current.setOptions({ polylineOptions });
-
-              // Start animated pulse effect
+              
+              const distanceKm = (totalDistanceMeters / 1000).toFixed(1);
+              const durationMin = Math.round(totalDurationSeconds / 60);
+              
+              setRouteDistance(parseFloat(distanceKm));
+              setRouteDuration(durationMin);
+              setRouteDurationInTraffic(null); // Basic Matrix API doesn't support live traffic details
+              
+              if (onRouteCalculated && totalDistanceMeters > 0) {
+                onRouteCalculated(parseFloat(distanceKm), durationMin);
+              }
+              
               startPulseAnimation();
             } else {
-              console.warn('Directions request failed:', status);
+              console.warn('Distance Matrix request failed:', status);
             }
           });
         }
@@ -3035,45 +2991,38 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           return;
         }
 
-        // Use Google Maps Directions API to calculate route
-        const directionsService = new google.maps.DirectionsService();
+        // Use Google Maps Distance Matrix API to calculate route cheaply
+        const distanceMatrixService = new google.maps.DistanceMatrixService();
 
         const request = {
-          origin: pickupAddress,
-          destination: dropoffAddress,
-          travelMode: google.maps.TravelMode.DRIVING,
-          drivingOptions: {
-            departureTime: new Date(),
-            trafficModel: google.maps.TrafficModel.BEST_GUESS
-          }
+          origins: [pickupAddress],
+          destinations: [dropoffAddress],
+          travelMode: google.maps.TravelMode.DRIVING
         };
 
-        console.log('📡 Sending directions request...', request);
+        console.log('📡 Sending distance matrix request...', request);
 
-        directionsService.route(request, (result, status) => {
-          console.log('📥 Directions response:', { status, result });
+        distanceMatrixService.getDistanceMatrix(request, (response, status) => {
+          console.log('📥 Distance matrix response:', { status, response });
 
-          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
-            const route = result.routes[0];
-            let totalDistance = 0;
-            let totalDuration = 0;
+          if (status === google.maps.DistanceMatrixStatus.OK && response?.rows[0]?.elements[0]) {
+            const element = response.rows[0].elements[0];
+            if (element.status === 'OK') {
+              const distanceKm = (element.distance.value / 1000).toFixed(1);
+              const durationMin = Math.ceil(element.duration.value / 60);
 
-            // Sum up all legs
-            route.legs.forEach(leg => {
-              totalDistance += leg.distance.value; // in meters
-              totalDuration += leg.duration_in_traffic?.value || leg.duration.value; // in seconds
-            });
+              setEarlyRouteDistance(parseFloat(distanceKm));
+              setEarlyRouteDuration(durationMin);
+              setCalculatingRoute(false);
 
-            const distanceKm = (totalDistance / 1000).toFixed(1);
-            const durationMin = Math.ceil(totalDuration / 60);
-
-            setEarlyRouteDistance(parseFloat(distanceKm));
-            setEarlyRouteDuration(durationMin);
-            setCalculatingRoute(false);
-
-            console.log('✅ Early route calculated:', { distanceKm, durationMin });
+              console.log('✅ Early route calculated (Matrix):', { distanceKm, durationMin });
+            } else {
+              console.error('❌ Route distance calculation failed within matrix:', element.status);
+              setRouteError('Could not find a route between these addresses');
+              setCalculatingRoute(false);
+            }
           } else {
-            console.error('❌ Route calculation failed:', status);
+            console.error('❌ Distance matrix request failed:', status);
             setRouteError('Unable to calculate route');
             setCalculatingRoute(false);
           }
