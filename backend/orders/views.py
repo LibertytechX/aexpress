@@ -86,11 +86,20 @@ class QuickSendView(APIView):
         """Create a Quick Send order with single delivery."""
         from django.utils import timezone
         from datetime import timedelta
-        
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
-        if Order.objects.filter(user=request.user, mode="quick", created_at__gte=one_minute_ago).exists():
+        if Order.objects.filter(
+            user=request.user, mode="quick", created_at__gte=one_minute_ago
+        ).exists():
             return Response(
-                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Quick Send order."]}},
+                {
+                    "success": False,
+                    "errors": {
+                        "non_field_errors": [
+                            "Please wait a minute before creating another Quick Send order."
+                        ]
+                    },
+                },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
@@ -274,11 +283,20 @@ class MultiDropView(APIView):
         """Create a Multi-Drop order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
-        
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
-        if Order.objects.filter(user=request.user, mode="multi", created_at__gte=one_minute_ago).exists():
+        if Order.objects.filter(
+            user=request.user, mode="multi", created_at__gte=one_minute_ago
+        ).exists():
             return Response(
-                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Multi-Drop order."]}},
+                {
+                    "success": False,
+                    "errors": {
+                        "non_field_errors": [
+                            "Please wait a minute before creating another Multi-Drop order."
+                        ]
+                    },
+                },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
@@ -442,11 +460,20 @@ class BulkImportView(APIView):
         """Create a Bulk Import order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
-        
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
-        if Order.objects.filter(user=request.user, mode="bulk", created_at__gte=one_minute_ago).exists():
+        if Order.objects.filter(
+            user=request.user, mode="bulk", created_at__gte=one_minute_ago
+        ).exists():
             return Response(
-                {"success": False, "errors": {"non_field_errors": ["Please wait a minute before creating another Bulk Import order."]}},
+                {
+                    "success": False,
+                    "errors": {
+                        "non_field_errors": [
+                            "Please wait a minute before creating another Bulk Import order."
+                        ]
+                    },
+                },
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
 
@@ -1508,46 +1535,46 @@ class OrderCompleteView(APIView):
                     )
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
-            is_cod = order.payment_method in self.COD_METHODS
+            # is_cod = order.payment_method in self.COD_METHODS
             logger.info("Let's see the payment method %s", order.payment_method)
             logger.info("Let's see the payment methods %s", self.COD_METHODS)
             cod_total = Decimal("0.00")
 
-            if is_cod:
-                # Sum COD across all deliveries for this order
-                from django.db.models import Sum
+            # if is_cod:
+            #     # Sum COD across all deliveries for this order
+            #     from django.db.models import Sum
 
-                cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
-                    "cod_amount__sum"
-                ] or Decimal("0.00")
+            #     cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
+            #         "cod_amount__sum"
+            #     ] or Decimal("0.00")
 
-                if cod_total > 0:
-                    try:
-                        rider_wallet = Wallet.objects.get(user=rider.user)
-                    except Wallet.DoesNotExist:
-                        return service_response(
-                            status="error",
-                            message="Rider wallet not found. Cannot process COD payment.",
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                        )
+            #     if cod_total > 0:
+            #         try:
+            #             rider_wallet = Wallet.objects.get(user=rider.user)
+            #         except Wallet.DoesNotExist:
+            #             return service_response(
+            #                 status="error",
+            #                 message="Rider wallet not found. Cannot process COD payment.",
+            #                 status_code=status.HTTP_400_BAD_REQUEST,
+            #             )
 
-                    if not rider_wallet.can_debit(cod_total):
-                        return service_response(
-                            status="error",
-                            message=f"Insufficient wallet balance for COD settlement. Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}",
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                        )
+            #         if not rider_wallet.can_debit(cod_total):
+            #             return service_response(
+            #                 status="error",
+            #                 message=f"Insufficient wallet balance for COD settlement. Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}",
+            #                 status_code=status.HTTP_400_BAD_REQUEST,
+            #             )
 
-                    # Debit COD amount from rider wallet
-                    rider_wallet.debit(
-                        amount=cod_total,
-                        description=f"COD remittance for order #{order_number}",
-                        reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
-                        metadata={
-                            "order_number": order_number,
-                            "order_id": str(order.id),
-                        },
-                    )
+            #         # Debit COD amount from rider wallet
+            #         rider_wallet.debit(
+            #             amount=cod_total,
+            #             description=f"COD remittance for order #{order_number}",
+            #             reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
+            #             metadata={
+            #                 "order_number": order_number,
+            #                 "order_id": str(order.id),
+            #             },
+            #         )
 
             # ── Step 2: Calculate and record rider earnings ───────────────────────
             settings_obj = SystemSettings.objects.first()
@@ -1589,13 +1616,13 @@ class OrderCompleteView(APIView):
             )
 
             # ── Step 3: Mark COD record as remitted ──────────────────────────────
-            if is_cod and cod_total > 0:
-                RiderCodRecord.objects.filter(
-                    order=order, rider=rider, status=RiderCodRecord.Status.PENDING
-                ).update(
-                    status=RiderCodRecord.Status.REMITTED,
-                    remitted_at=timezone.now(),
-                )
+            # if order.collect_on_delivery:
+            #     RiderCodRecord.objects.filter(
+            #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+            #     ).update(
+            #         status=RiderCodRecord.Status.REMITTED,
+            #         remitted_at=timezone.now(),
+            #     )
 
             # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
             deliveries = order.deliveries.exclude(status="Delivered")

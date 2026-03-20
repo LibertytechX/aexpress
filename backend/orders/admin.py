@@ -50,41 +50,8 @@ def complete_order_for_rider(modeladmin, request, queryset):
 
         try:
             # ── Step 1: COD wallet balance check ──────────────────────────────
-            is_cod = order.payment_method in _COD_METHODS
+            # is_cod = order.payment_method in _COD_METHODS
             cod_total = Decimal("0.00")
-
-            if is_cod:
-                cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
-                    "cod_amount__sum"
-                ] or Decimal("0.00")
-
-                if cod_total > 0:
-                    try:
-                        rider_wallet = Wallet.objects.get(user=rider.user)
-                    except Wallet.DoesNotExist:
-                        skipped.append(
-                            f"{order_number} (rider has no wallet for COD settlement)"
-                        )
-                        continue
-
-                    if not rider_wallet.can_debit(cod_total):
-                        skipped.append(
-                            f"{order_number} (insufficient wallet balance for COD "
-                            f"settlement — required ₦{cod_total}, "
-                            f"available ₦{rider_wallet.balance})"
-                        )
-                        continue
-
-                    rider_wallet.debit(
-                        amount=cod_total,
-                        description=f"COD remittance for order #{order_number}",
-                        reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
-                        metadata={
-                            "order_number": order_number,
-                            "order_id": str(order.id),
-                            "completed_by": "admin_action",
-                        },
-                    )
 
             # ── Step 2: Calculate and record rider earnings ────────────────────
             settings_obj = SystemSettings.objects.first()
@@ -94,7 +61,7 @@ def complete_order_for_rider(modeladmin, request, queryset):
 
             order_amount = Decimal(str(order.total_amount))
             commission_amount = (commission_pct / Decimal("100")) * order_amount
-            net_earning = commission_amount
+            # net_earning = commission_amount
 
             RiderEarning.objects.get_or_create(
                 order=order,
@@ -107,31 +74,6 @@ def complete_order_for_rider(modeladmin, request, queryset):
                     "cod_amount": cod_total,
                 },
             )
-
-            rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
-            rider_wallet_for_credit.credit(
-                amount=commission_amount,
-                description=f"Trip earning for order #{order_number} (admin completion)",
-                reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
-                metadata={
-                    "order_number": order_number,
-                    "gross": str(order_amount),
-                    "commission_pct": str(commission_pct),
-                    "net_earning": str(commission_amount),
-                    "completed_by": "admin_action",
-                },
-            )
-
-            # ── Step 3: Mark COD record as remitted ───────────────────────────
-            if is_cod and cod_total > 0:
-                RiderCodRecord.objects.filter(
-                    order=order,
-                    rider=rider,
-                    status=RiderCodRecord.Status.PENDING,
-                ).update(
-                    status=RiderCodRecord.Status.REMITTED,
-                    remitted_at=timezone.now(),
-                )
 
             # ── Step 4: Mark all deliveries Delivered, advance order to Done ──
             for d in order.deliveries.exclude(status="Delivered"):
@@ -151,11 +93,11 @@ def complete_order_for_rider(modeladmin, request, queryset):
                     title="Order Completed 🎉",
                     body=(
                         f"Order #{order_number} completed. "
-                        f"₦{net_earning} credited to your wallet."
+                        # f"₦{net_earning} credited to your wallet."
                     ),
                     data={
                         "order_number": order_number,
-                        "net_earning": str(net_earning),
+                        # "net_earning": str(net_earning),
                     },
                 )
             except Exception as exc:
