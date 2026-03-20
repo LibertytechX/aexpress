@@ -368,7 +368,7 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
+const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" }, "Paid Complete": { bg: S.greenBg, text: S.green }, "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red } };
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -2233,9 +2233,17 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 
   const periodOrders = orders.filter(inPeriod);
 
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Cancelled", "Failed"];
+  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
   const filtered = periodOrders.filter(o => {
-    if (statusFilter !== "All" && o.status !== statusFilter) return false;
+    if (statusFilter !== "All") {
+      if (statusFilter === "Paid Complete") {
+        if (o.status !== "Delivered" || o.payment_status !== "Paid") return false;
+      } else if (statusFilter === "Unpaid Complete") {
+        if (o.status !== "Delivered" || (o.payment_status && o.payment_status !== "Pending")) return false;
+      } else {
+        if (o.status !== statusFilter) return false;
+      }
+    }
     if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
     return true;
   });
@@ -2272,7 +2280,13 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
         {tabs.map(t => {
-          const cnt = t === "All" ? periodOrders.length : periodOrders.filter(o => o.status === t).length; return (
+          let cnt = 0;
+          if (t === "All") cnt = periodOrders.length;
+          else if (t === "Paid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && o.payment_status === "Paid").length;
+          else if (t === "Unpaid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && (!o.payment_status || o.payment_status === "Pending")).length;
+          else cnt = periodOrders.filter(o => o.status === t).length;
+          
+          return (
             <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
           );
         })}
