@@ -2204,7 +2204,12 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   if (selectedId) {
     const order = orders.find(o => o.id === selectedId);
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
-    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />;
+    return (
+      <>
+        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
+        {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
+      </>
+    );
   }
 
   // ── Period boundaries ──────────────────────────────────────────
@@ -2240,7 +2245,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       const s = v == null ? "" : String(v);
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "Payment Status", "Status"];
+    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
     const rows = filtered.map(o => {
       const dt = formatOrderDateTime(o.created);
       return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
@@ -2297,17 +2302,18 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
         <div style={{ overflowX: "auto" }}>
           <div style={{ minWidth: 1200 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 110px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>Payment Status</span><span>Status</span>
+            <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>PAID</span><span>Status</span>
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
               {filtered.map(o => {
                 const dt = formatOrderDateTime(o.created);
                 const psLower = (o.payment_status || "").toLowerCase();
                 const psStyle = psLower === "paid" || psLower === "success" ? { bg: S.greenBg, text: S.green } : psLower === "pending" ? { bg: S.goldPale, text: S.gold } : psLower === "failed" || psLower === "cancelled" ? { bg: S.redBg, text: S.red } : { bg: S.borderLight, text: S.textMuted };
+                const isPaid = psLower === "paid" || psLower === "success";
 
                 return (
-                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 90px 110px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
                     <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
                 <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
                 <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
@@ -2323,12 +2329,20 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 </div>
                 <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
                 <div>
-                  <button onClick={(e) => { e.stopPropagation(); handlePayNow(o); }} style={{ padding: "4px 8px", borderRadius: 6, border: "none", background: o.paymentInfo ? S.greenBg : S.goldPale, color: o.paymentInfo ? S.green : S.gold, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
-                    {payLoading === o.id ? "..." : (o.paymentInfo ? "View Details" : "Pay Now")}
+                  <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+                    <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
                   </button>
                 </div>
                 <div>
-                  <span style={{ display: "inline-block", padding: "4px 10px", borderRadius: 12, background: psStyle.bg, color: psStyle.text, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>{o.payment_status || "—"}</span>
+                  {isPaid ? (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+                      <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+                    </div>
+                  ) : (
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+                      <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+                    </div>
+                  )}
                 </div>
                 <Badge status={o.status} />
               </div>
@@ -2446,7 +2460,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 18, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{order.id}</span>
           <Badge status={order.status} />
           <span style={{ fontSize: 12, color: S.textMuted }}>{order.created}</span>
-          <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.yellowBg, color: order.payment_status === "Paid" ? S.green : S.yellow, fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "PENDING"}</span>
+          <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>
@@ -2630,7 +2644,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Payment Information</span>
-                <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.yellowBg, color: order.payment_status === "Paid" ? S.green : S.yellow, fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "PENDING"}</span>
+                <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
               </div>
               
               {order.paymentInfo ? (
