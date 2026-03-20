@@ -60,7 +60,7 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
 
 def calculate_route(origin: Dict[str, float], destinations: List[Dict[str, float]]) -> Optional[Dict]:
     """
-    Calculate route distance and duration using Google Maps Directions API.
+    Calculate route total distance and duration using Google Maps Distance Matrix API.
 
     Args:
         origin: Dictionary with 'lat' and 'lng' keys for pickup location
@@ -74,46 +74,50 @@ def calculate_route(origin: Dict[str, float], destinations: List[Dict[str, float
     if not api_key:
         raise ValueError("GOOGLE_MAPS_API_KEY not configured")
 
-    # Format origin
-    origin_str = f"{origin['lat']},{origin['lng']}"
+    if not destinations:
+        return {'distance_km': 0.0, 'duration_minutes': 0}
 
-    # Format destination (last point in the route)
-    destination_str = f"{destinations[-1]['lat']},{destinations[-1]['lng']}"
+    # Build sequence of points: origin -> destinations[0] -> destinations[1] -> ... -> destinations[-1]
+    points = [origin] + destinations
 
-    # Format waypoints (all points except the last one)
-    waypoints = []
-    if len(destinations) > 1:
-        for dest in destinations[:-1]:
-            waypoints.append(f"{dest['lat']},{dest['lng']}")
+    # We want distances for: points[0]->points[1], points[1]->points[2], ..., points[n-1]->points[n]
+    # By passing all sources as origins and all targets as destinations,
+    # we can pick out the diagonal elements of the resulting matrix.
+    origins = points[:-1]
+    targets = points[1:]
 
-    url = "https://maps.googleapis.com/maps/api/directions/json"
+    origins_str = "|".join([f"{p['lat']},{p['lng']}" for p in origins])
+    destinations_str = "|".join([f"{p['lat']},{p['lng']}" for p in targets])
+
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     params = {
-        'origin': origin_str,
-        'destination': destination_str,
+        'origins': origins_str,
+        'destinations': destinations_str,
         'key': api_key,
-        'optimize': 'true'  # Optimize waypoint order
     }
-
-    if waypoints:
-        params['waypoints'] = 'optimize:true|' + '|'.join(waypoints)
 
     try:
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
 
-        if data['status'] == 'OK' and len(data['routes']) > 0:
-            route = data['routes'][0]
-
-            # Sum up all legs
+        if data.get('status') == 'OK':
             total_distance_meters = 0
             total_duration_seconds = 0
 
-            for leg in route['legs']:
-                total_distance_meters += leg['distance']['value']
-                total_duration_seconds += leg['duration']['value']
+            # data['rows'] contains the results for each origin
+            # For each step i, we want the distance from origins[i] to targets[i]
+            for i in range(len(origins)):
+                elements = data['rows'][i]['elements']
+                # The targets were passed in the same order, so elements[i] corresponds to targets[i]
+                element = elements[i]
 
-            # Convert to km and minutes
+                if element.get('status') == 'OK':
+                    total_distance_meters += element['distance']['value']
+                    total_duration_seconds += element['duration']['value']
+                else:
+                    return None  # Unreachable route or other error for this leg
+
             distance_km = round(total_distance_meters / 1000, 2)
             duration_minutes = round(total_duration_seconds / 60, 0)
 

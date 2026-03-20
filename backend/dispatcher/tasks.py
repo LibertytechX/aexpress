@@ -299,24 +299,25 @@ def _directions_legs(origin, points):
     if not points:
         return []
 
-    origin_str = f"{origin['lat']},{origin['lng']}"
-    destination_str = f"{points[-1]['lat']},{points[-1]['lng']}"
-    waypoints = points[:-1]
+    all_points = [origin] + points
+    origins = all_points[:-1]
+    targets = all_points[1:]
+
+    origins_str = "|".join([f"{p['lat']},{p['lng']}" for p in origins])
+    destinations_str = "|".join([f"{p['lat']},{p['lng']}" for p in targets])
 
     params = {
-        "origin": origin_str,
-        "destination": destination_str,
+        "origins": origins_str,
+        "destinations": destinations_str,
         "key": api_key,
     }
-    if waypoints:
-        params["waypoints"] = "|".join([f"{p['lat']},{p['lng']}" for p in waypoints])
 
     # 1-hour cache for identical waypoint chains
     try:
         from django.core.cache import cache
 
         cache_key = "relay_route_legs:" + "->".join(
-            [origin_str] + [f"{p['lat']},{p['lng']}" for p in points]
+            [f"{origin['lat']},{origin['lng']}"] + [f"{p['lat']},{p['lng']}" for p in points]
         )
         cached = cache.get(cache_key)
         if cached:
@@ -324,20 +325,27 @@ def _directions_legs(origin, points):
     except Exception:
         cache_key = None
 
-    url = "https://maps.googleapis.com/maps/api/directions/json"
+    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     resp = requests.get(url, params=params, timeout=10)
     resp.raise_for_status()
     data = resp.json()
 
-    if data.get("status") != "OK" or not data.get("routes"):
+    if data.get("status") != "OK":
         return None
 
-    legs = data["routes"][0].get("legs") or []
     out = []
-    for leg in legs:
-        d_km = (leg["distance"]["value"] or 0) / 1000.0
-        t_min = int(round((leg["duration"]["value"] or 0) / 60.0))
-        out.append((round(d_km, 2), t_min))
+    for i in range(len(origins)):
+        try:
+            elements = data["rows"][i]["elements"]
+            element = elements[i]
+            if element.get("status") == "OK":
+                d_km = (element["distance"]["value"] or 0) / 1000.0
+                t_min = int(round((element["duration"]["value"] or 0) / 60.0))
+                out.append((round(d_km, 2), t_min))
+            else:
+                return None
+        except (IndexError, KeyError):
+            return None
 
     if cache_key:
         try:
