@@ -30,6 +30,7 @@ migrations/
 .env.server
 .env.production
 backend/deploy/.env*
+__pycache__/
 
 # IDE
 .vscode/

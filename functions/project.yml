@@ -1,0 +1,13 @@
+packages:
+  - name: routing
+    environment:
+      GOOGLE_MAPS_API_KEY: "${GOOGLE_MAPS_API_KEY}"
+    actions:
+      - name: calculate_single
+        runtime: python:3.11
+        main: main
+        web: true
+      - name: calculate_multiple
+        runtime: python:3.11
+        main: main
+        web: true
