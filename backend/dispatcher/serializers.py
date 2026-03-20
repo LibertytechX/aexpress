@@ -4,6 +4,7 @@ from .models import (
     DispatcherProfile,
     ActivityFeed,
     Zone,
+    ZoneTarget,
     RelayNode,
     VehicleAsset,
     Vertical,
@@ -1134,12 +1135,15 @@ class ActivityFeedSerializer(serializers.ModelSerializer):
 
 class ZoneSerializer(serializers.ModelSerializer):
     relay_nodes_count = serializers.SerializerMethodField()
+    vertical_name = serializers.CharField(source="vertical.name", read_only=True)
 
     class Meta:
         model = Zone
         fields = [
             "id",
             "name",
+            "vertical",
+            "vertical_name",
             "center_lat",
             "center_lng",
             "radius_km",
@@ -1151,6 +1155,26 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_relay_nodes_count(self, obj):
         return obj.relay_nodes.count()
+
+
+class ZoneTargetSerializer(serializers.ModelSerializer):
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = ZoneTarget
+        fields = [
+            "id",
+            "zone",
+            "zone_name",
+            "month",
+            "target_orders",
+            "target_revenue",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_month(self, value):
+        """Ensure month is always the first day of the month."""
+        return value.replace(day=1)
 
 
 class RelayNodeSerializer(serializers.ModelSerializer):

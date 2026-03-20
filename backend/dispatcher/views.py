@@ -4,6 +4,9 @@ import datetime
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.settings import api_settings
+
+from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from .models import (
     Rider,
@@ -815,6 +818,10 @@ class ZoneViewSet(viewsets.ModelViewSet):
 
     queryset = Zone.objects.all().order_by("name")
     serializer_class = ZoneSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
 
@@ -898,4 +905,8 @@ class VerticalViewSet(viewsets.ModelViewSet):
 
     queryset = Vertical.objects.all().prefetch_related("zones").order_by("code")
     serializer_class = VerticalSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
