@@ -8,6 +8,19 @@ def main(args):
         return {
             "body": {"success": False, "error": "GOOGLE_MAPS_API_KEY not configured"}
         }
+    allowed_domains = os.environ.get("ALLOWED_DOMAINS", "").split(",")
+    headers = args.get("__ow_headers", {})
+
+    request_origin = headers.get("referer")
+
+    if request_origin not in allowed_domains:
+        return {
+            "statusCode": 401,
+            "body": {
+                "success": False,
+                "error": "Unauthorized.",
+            },
+        }
 
     origin = args.get("origin")
     destinations = args.get("destinations", [])

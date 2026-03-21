@@ -1,6 +1,8 @@
 import os
 import requests
 
+# ALLOWED_DOMAINS = ["https://dispatcherx.axpress.net", "https://send.axpress.net"]
+
 
 def main(args):
     api_key = os.environ.get("GOOGLE_MAPS_API_KEY")
@@ -9,6 +11,13 @@ def main(args):
             "body": {"success": False, "error": "GOOGLE_MAPS_API_KEY not configured"}
         }
 
+    allowed_domains = os.environ.get("ALLOWED_DOMAINS", "").split(",")
+    headers = args.get("__ow_headers", {})
+
+    request_origin = headers.get("origin")
+
+    if request_origin not in allowed_domains:
+        return {"statusCode": 401, "body": {"success": False, "error": "Unauthorized."}}
     origin = args.get("origin")
     destination = args.get("destination")
 
