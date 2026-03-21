@@ -38,7 +38,7 @@ from .models import (
     ZoneCaptain,
     ZoneTarget,
 )
-from .permissions import HasOCCReadScope
+from .permissions import HasOCCReadScope, HasOCCWriteScope
 
 # Vertical color mapping
 VERTICAL_COLORS = {
@@ -1354,3 +1354,130 @@ class OCCOrderAnalyticsView(APIView):
                 "by_hour": by_hour_list,
             }
         )
+
+
+# ---------------------------------------------------------------------------
+# Zone Target management (CRUD)
+# ---------------------------------------------------------------------------
+
+
+class OCCZoneTargetListCreateView(APIView):
+    """
+    GET  — List zone targets, filterable by ?zone=<uuid>&month=YYYY-MM-DD
+    POST — Create a new zone target.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [HasOCCReadScope()]
+        return [HasOCCWriteScope()]
+
+    def get(self, request):
+        qs = ZoneTarget.objects.select_related("zone").all()
+
+        zone_id = request.query_params.get("zone")
+        if zone_id:
+            qs = qs.filter(zone_id=zone_id)
+
+        month = request.query_params.get("month")
+        if month:
+            try:
+                from datetime import datetime as dt
+
+                parsed = dt.strptime(month, "%Y-%m-%d").date().replace(day=1)
+                qs = qs.filter(month=parsed)
+            except ValueError:
+                pass
+
+        data = [
+            {
+                "id": str(t.id),
+                "zone": str(t.zone_id),
+                "zone_name": t.zone.name,
+                "month": t.month.isoformat(),
+                "target_orders": t.target_orders,
+                "target_revenue": str(t.target_revenue),
+            }
+            for t in qs
+        ]
+        return Response(data)
+
+    def post(self, request):
+        from .serializers import ZoneTargetSerializer
+
+        serializer = ZoneTargetSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class OCCZoneTargetDetailView(APIView):
+    """
+    GET    — Retrieve a single zone target.
+    PUT    — Full update of a zone target.
+    PATCH  — Partial update of a zone target.
+    DELETE — Delete a zone target.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [HasOCCReadScope()]
+        return [HasOCCWriteScope()]
+
+    def _get_object(self, pk):
+        try:
+            return ZoneTarget.objects.select_related("zone").get(pk=pk)
+        except ZoneTarget.DoesNotExist:
+            return None
+
+    def get(self, request, pk):
+        obj = self._get_object(pk)
+        if not obj:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        from .serializers import ZoneTargetSerializer
+
+        return Response(ZoneTargetSerializer(obj).data)
+
+    def put(self, request, pk):
+        obj = self._get_object(pk)
+        if not obj:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        from .serializers import ZoneTargetSerializer
+
+        serializer = ZoneTargetSerializer(obj, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def patch(self, request, pk):
+        obj = self._get_object(pk)
+        if not obj:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        from .serializers import ZoneTargetSerializer
+
+        serializer = ZoneTargetSerializer(obj, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def delete(self, request, pk):
+        obj = self._get_object(pk)
+        if not obj:
+            return Response(
+                {"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND
+            )
+        obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
