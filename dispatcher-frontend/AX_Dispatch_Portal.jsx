@@ -1475,6 +1475,11 @@ export default function AXDispatchPortal() {
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [orders, setOrders] = useState([]);
+  const [totalOrdersCount, setTotalOrdersCount] = useState(0);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const ordersPageRef = useRef(1);
+  
+  useEffect(() => { ordersPageRef.current = ordersPage; }, [ordersPage]);
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [vehicleAssets, setVehicleAssets] = useState([]);
@@ -1565,7 +1570,7 @@ export default function AXDispatchPortal() {
       try {
         const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
-          OrdersAPI.getAll().catch(() => []),
+          OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => ({ results: [], count: 0 })),
           MerchantsAPI.getAll().catch(() => []),
           DispatchersAPI.getAll().catch(() => []),
           VehicleAssetsAPI.getAll().catch(() => []),
@@ -1573,11 +1578,12 @@ export default function AXDispatchPortal() {
         ]);
         if (cancelled) return;
         setRiders(ridersData);
-        setOrders(ordersData);
+        setOrders(ordersData.results || ordersData);
+        if (ordersData.count !== undefined) setTotalOrdersCount(ordersData.count);
         setMerchants(merchantsData);
         setDispatchers(dispatchersData);
         setVehicleAssets(vehicleAssetsData);
-        setEventLogs(initEventLogs(ordersData));
+        setEventLogs(initEventLogs(ordersData.results || ordersData));
         if (settingsData?.commission_pct != null) {
           setCommissionPct(parseFloat(settingsData.commission_pct) || 20);
         }
@@ -1590,6 +1596,21 @@ export default function AXDispatchPortal() {
       }
     };
     fetchData();
+
+    // Re-fetch orders when page changes
+    const fetchPage = async () => {
+      if (ordersPage === 1 && !ordersPageRef.current_hasChanged) {
+          ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
+      }
+      try {
+        const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+        if (res) {
+           setOrders(res.results || res);
+           if (res.count !== undefined) setTotalOrdersCount(res.count);
+        }
+      } catch (e) { /* ignore */ }
+    };
+    fetchPage();
 
     // Load initial activity feed + subscribe to live updates
     const setupAbly = async () => {
@@ -1656,7 +1677,10 @@ export default function AXDispatchPortal() {
               playNewOrderChime();
               setOrders(prev => {
                 if (!prev.find(o => o.id === d.order_id)) {
-                  OrdersAPI.getAll().then(data => setOrders(cur => mergeOrders(data, cur))).catch(() => { });
+                  OrdersAPI.getAll({ page: ordersPageRef.current }).then(data => {
+                      setOrders(cur => mergeOrders(data.results || data, cur));
+                      if (data.count !== undefined) setTotalOrdersCount(data.count);
+                  }).catch(() => { });
                 }
                 return prev;
               });
@@ -1729,8 +1753,11 @@ export default function AXDispatchPortal() {
 
     const ordersInterval = setInterval(async () => {
       try {
-        const data = await OrdersAPI.getAll().catch(() => null);
-        if (data) setOrders(prev => mergeOrders(data, prev));
+        const data = await OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => null);
+        if (data) {
+           setOrders(prev => mergeOrders(data.results || data, prev));
+           if (data.count !== undefined) setTotalOrdersCount(data.count);
+        }
       } catch (_) { /* ignore */ }
     }, 60000);
 
@@ -2176,7 +2203,7 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [search, setSearch] = useState("");
@@ -2364,6 +2391,15 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
             </div>
+            
+            <div style={{ padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${S.borderLight}` }}>
+              <button disabled={ordersPage <= 1} onClick={() => setOrdersPage(p => p - 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage <= 1 ? "not-allowed" : "pointer", color: ordersPage <= 1 ? S.textMuted : S.navy, fontWeight: 600 }}>Previous Page</button>
+              <div style={{ fontSize: 13, color: S.textMuted, fontWeight: 500 }}>
+                Page <strong style={{ color: S.navy }}>{ordersPage}</strong> of {Math.max(1, Math.ceil(totalOrdersCount / 50))} <span style={{ opacity: 0.5, margin: "0 8px" }}>|</span> Total: {totalOrdersCount}
+              </div>
+              <button disabled={ordersPage * 50 >= totalOrdersCount} onClick={() => setOrdersPage(p => p + 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage * 50 >= totalOrdersCount ? "not-allowed" : "pointer", color: ordersPage * 50 >= totalOrdersCount ? S.textMuted : S.navy, fontWeight: 600 }}>Next Page</button>
+            </div>
+            
           </div>
         </div>
       </div>
