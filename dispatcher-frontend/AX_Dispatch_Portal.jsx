@@ -1596,22 +1596,6 @@ export default function AXDispatchPortal() {
       }
     };
     fetchData();
-
-    // Re-fetch orders when page changes
-    const fetchPage = async () => {
-      if (ordersPage === 1 && !ordersPageRef.current_hasChanged) {
-          ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
-      }
-      try {
-        const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
-        if (res) {
-           setOrders(res.results || res);
-           if (res.count !== undefined) setTotalOrdersCount(res.count);
-        }
-      } catch (e) { /* ignore */ }
-    };
-    fetchPage();
-
     // Load initial activity feed + subscribe to live updates
     const setupAbly = async () => {
       try {
@@ -1770,6 +1754,24 @@ export default function AXDispatchPortal() {
     };
   }, [isAuthenticated]); // re-run when user logs in
 
+  // Re-fetch orders when page changes
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (ordersPage === 1 && !ordersPageRef.current_hasChanged) {
+        ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
+    }
+    const fetchPage = async () => {
+      try {
+        const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+        if (res) {
+           setOrders(res.results || res);
+           if (res.count !== undefined) setTotalOrdersCount(res.count);
+        }
+      } catch (e) { /* ignore */ }
+    };
+    fetchPage();
+  }, [ordersPage, isAuthenticated]);
+
   // Show auth screens if not authenticated
   if (!isAuthenticated) {
     if (authScreen === "login") {
@@ -1910,7 +1912,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -2395,9 +2397,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
             <div style={{ padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${S.borderLight}` }}>
               <button disabled={ordersPage <= 1} onClick={() => setOrdersPage(p => p - 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage <= 1 ? "not-allowed" : "pointer", color: ordersPage <= 1 ? S.textMuted : S.navy, fontWeight: 600 }}>Previous Page</button>
               <div style={{ fontSize: 13, color: S.textMuted, fontWeight: 500 }}>
-                Page <strong style={{ color: S.navy }}>{ordersPage}</strong> of {Math.max(1, Math.ceil(totalOrdersCount / 50))} <span style={{ opacity: 0.5, margin: "0 8px" }}>|</span> Total: {totalOrdersCount}
+                Page <strong style={{ color: S.navy }}>{ordersPage}</strong> of {Math.max(1, Math.ceil(totalOrdersCount / 100))} <span style={{ opacity: 0.5, margin: "0 8px" }}>|</span> Total: {totalOrdersCount}
               </div>
-              <button disabled={ordersPage * 50 >= totalOrdersCount} onClick={() => setOrdersPage(p => p + 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage * 50 >= totalOrdersCount ? "not-allowed" : "pointer", color: ordersPage * 50 >= totalOrdersCount ? S.textMuted : S.navy, fontWeight: 600 }}>Next Page</button>
+              <button disabled={ordersPage * 100 >= totalOrdersCount} onClick={() => setOrdersPage(p => p + 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage * 100 >= totalOrdersCount ? "not-allowed" : "pointer", color: ordersPage * 100 >= totalOrdersCount ? S.textMuted : S.navy, fontWeight: 600 }}>Next Page</button>
             </div>
             
           </div>
