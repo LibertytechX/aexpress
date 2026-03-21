@@ -8,6 +8,7 @@ from rest_framework.settings import api_settings
 
 from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.pagination import PageNumberPagination
 from .models import (
     Rider,
     ActivityFeed,
@@ -162,6 +163,12 @@ class RiderViewSet(viewsets.ModelViewSet):
         )
 
 
+class OrderPagination(PageNumberPagination):
+    page_size = 100
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class OrderViewSet(viewsets.ModelViewSet):
     from orders.models import Order
 
@@ -177,6 +184,7 @@ class OrderViewSet(viewsets.ModelViewSet):
     )
 
     serializer_class = OrderSerializer
+    pagination_class = OrderPagination
     permission_classes = [permissions.IsAuthenticated]
 
     def get_serializer_class(self):
