@@ -325,7 +325,7 @@ class OCCVerticalListView(APIView):
         result = []
 
         for v in verticals:
-            zone_ids = list(v.zones.values_list("id", flat=True))
+            zone_ids = list(v.zones.filter(is_active=True).values_list("id", flat=True))
             rider_ids = list(
                 Rider.objects.filter(home_zone_id__in=zone_ids).values_list(
                     "id", flat=True
@@ -1173,7 +1173,7 @@ class OCCVerticalLeaderboardView(APIView):
         entries = []
 
         for v in verticals:
-            zone_ids = list(v.zones.values_list("id", flat=True))
+            zone_ids = list(v.zones.filter(is_active=True).values_list("id", flat=True))
             rider_ids = list(
                 Rider.objects.filter(home_zone_id__in=zone_ids).values_list(
                     "id", flat=True
