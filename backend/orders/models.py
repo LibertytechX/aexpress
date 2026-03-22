@@ -291,6 +291,22 @@ class Order(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     scheduled_pickup_time = models.DateTimeField(null=True, blank=True)
 
+    # For relay sub-orders: points back to the parent relay order that spawned this one.
+    # Null for top-level (non-relay-sub) orders.
+    parent_order = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sub_orders",
+        help_text="Parent relay order that this sub-order belongs to (null for regular orders)",
+    )
+    # Which relay leg number this sub-order represents (0 = not a relay sub-order).
+    relay_leg_number = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Leg number (1-based) within the parent relay route (0 for regular orders)",
+    )
+
     # Relay delivery
     is_relay_order = models.BooleanField(
         default=False,

@@ -213,6 +213,18 @@ class ZoneAdmin(admin.ModelAdmin):
     search_fields = ("name", "description")
     readonly_fields = ("id", "created_at", "updated_at")
     autocomplete_fields = ("vertical",)
+    actions = ["set_active"]
+
+    @admin.action(description="Set selected zones as active")
+    def set_active(self, request, queryset):
+        from django.contrib import messages
+
+        updated_count = queryset.update(is_active=True)
+        self.message_user(
+            request,
+            f"Successfully marked {updated_count} zones as active.",
+            level=messages.SUCCESS,
+        )
 
 
 class RelayNodeInline(admin.TabularInline):
