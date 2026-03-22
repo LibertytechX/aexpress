@@ -18,7 +18,8 @@ build/
 out/
 .nuxt/
 .cache/
-migrations/
+**/migrations/*
+!**/migrations/__init__.py
 
 # Environment variables
 .env
