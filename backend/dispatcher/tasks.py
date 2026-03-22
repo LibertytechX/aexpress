@@ -56,18 +56,12 @@ def aggregate_daily_rider_snapshots(target_date=None):
             status__in=["CustomerCanceled", "RiderCanceled"]
         ).count()
         failed = rider_orders.filter(status="Failed").count()
-        revenue = (
-            rider_orders.filter(status="Done").aggregate(total=Sum("total_amount"))[
-                "total"
-            ]
-            or Decimal("0")
-        )
-        distance = (
-            rider_orders.filter(status="Done").aggregate(total=Sum("distance_km"))[
-                "total"
-            ]
-            or Decimal("0")
-        )
+        revenue = rider_orders.filter(status="Done").aggregate(
+            total=Sum("total_amount")
+        )["total"] or Decimal("0")
+        distance = rider_orders.filter(status="Done").aggregate(
+            total=Sum("distance_km")
+        )["total"] or Decimal("0")
 
         # Online minutes from RiderDutyLog
         duty_logs = RiderDutyLog.objects.filter(
@@ -90,9 +84,7 @@ def aggregate_daily_rider_snapshots(target_date=None):
                 overlap_start = max(start, peak_s)
                 overlap_end = min(end, peak_e)
                 if overlap_end > overlap_start:
-                    peak_mins += int(
-                        (overlap_end - overlap_start).total_seconds() / 60
-                    )
+                    peak_mins += int((overlap_end - overlap_start).total_seconds() / 60)
 
         RiderDailySnapshot.objects.update_or_create(
             rider=rider,
@@ -147,12 +139,9 @@ def aggregate_daily_merchant_snapshots(target_date=None):
         placed = merchant_orders.count()
         completed = merchant_orders.filter(status="Done").count()
         failed = merchant_orders.filter(status="Failed").count()
-        revenue = (
-            merchant_orders.filter(status="Done").aggregate(
-                total=Sum("total_amount")
-            )["total"]
-            or Decimal("0")
-        )
+        revenue = merchant_orders.filter(status="Done").aggregate(
+            total=Sum("total_amount")
+        )["total"] or Decimal("0")
 
         MerchantDailySnapshot.objects.update_or_create(
             merchant=merchant.user,
@@ -187,20 +176,30 @@ def update_merchant_activity_status():
     thirty_days_ago = now - timedelta(days=30)
 
     # Active: last_order_date within 7 days
-    active_count = Merchant.objects.filter(
-        last_order_date__gte=seven_days_ago
-    ).exclude(activity_status="active").update(activity_status="active")
+    active_count = (
+        Merchant.objects.filter(last_order_date__gte=seven_days_ago)
+        .exclude(activity_status="active")
+        .update(activity_status="active")
+    )
 
     # Watch: last_order_date between 7-30 days
-    watch_count = Merchant.objects.filter(
-        last_order_date__lt=seven_days_ago,
-        last_order_date__gte=thirty_days_ago,
-    ).exclude(activity_status="watch").update(activity_status="watch")
+    watch_count = (
+        Merchant.objects.filter(
+            last_order_date__lt=seven_days_ago,
+            last_order_date__gte=thirty_days_ago,
+        )
+        .exclude(activity_status="watch")
+        .update(activity_status="watch")
+    )
 
     # Inactive: last_order_date > 30 days or null
-    inactive_count = Merchant.objects.filter(
-        Q(last_order_date__lt=thirty_days_ago) | Q(last_order_date__isnull=True)
-    ).exclude(activity_status="inactive").update(activity_status="inactive")
+    inactive_count = (
+        Merchant.objects.filter(
+            Q(last_order_date__lt=thirty_days_ago) | Q(last_order_date__isnull=True)
+        )
+        .exclude(activity_status="inactive")
+        .update(activity_status="inactive")
+    )
 
     logger.info(
         f"update_merchant_activity_status: active={active_count}, "
@@ -317,7 +316,8 @@ def _directions_legs(origin, points):
         from django.core.cache import cache
 
         cache_key = "relay_route_legs:" + "->".join(
-            [f"{origin['lat']},{origin['lng']}"] + [f"{p['lat']},{p['lng']}" for p in points]
+            [f"{origin['lat']},{origin['lng']}"]
+            + [f"{p['lat']},{p['lng']}" for p in points]
         )
         cached = cache.get(cache_key)
         if cached:
@@ -383,7 +383,9 @@ def _nearest_rider_to(lat, lng):
     )
     best, best_d = None, None
     for r in riders[:200]:
-        d = _haversine_km(lat, lng, float(r.current_latitude), float(r.current_longitude))
+        d = _haversine_km(
+            lat, lng, float(r.current_latitude), float(r.current_longitude)
+        )
         if best is None or d < best_d:
             best, best_d = r, d
     return best
@@ -399,8 +401,12 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
     for n in nodes:
         if n.latitude is None or n.longitude is None:
             continue
-        d1 = _haversine_km(pickup["lat"], pickup["lng"], float(n.latitude), float(n.longitude))
-        d2 = _haversine_km(float(n.latitude), float(n.longitude), dropoff["lat"], dropoff["lng"])
+        d1 = _haversine_km(
+            pickup["lat"], pickup["lng"], float(n.latitude), float(n.longitude)
+        )
+        d2 = _haversine_km(
+            float(n.latitude), float(n.longitude), dropoff["lat"], dropoff["lng"]
+        )
         if (d1 + d2) <= (direct * 1.6):
             filtered.append(n)
 
@@ -435,9 +441,133 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
             break
 
     # If still far and we couldn't hop, signal failure by returning None
-    if _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"]) > max_leg_km_est:
+    if (
+        _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"])
+        > max_leg_km_est
+    ):
         return None
     return hops
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    name="dispatcher.tasks.notify_relay_vertical_leads",
+)
+def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
+    """
+    Send an SMS to each vertical lead whose riders were assigned relay legs.
+
+    Groups assigned riders by their home-zone vertical lead so each lead
+    receives a single, consolidated SMS rather than one per rider.
+
+    Args:
+        parent_order_number: Human-readable ID of the parent relay order.
+        sub_order_ids:       List of UUID strings for the created sub-orders.
+    """
+    from authentication.services import send_sms
+    from orders.models import Order
+    from .models import VerticalLead
+
+    if not sub_order_ids:
+        logger.info("notify_relay_vertical_leads: no sub-orders provided, skipping.")
+        return
+
+    # Fetch sub-orders with their assigned riders and home zones in one query.
+    sub_orders = (
+        Order.objects.filter(id__in=sub_order_ids)
+        .select_related(
+            "rider",
+            "rider__user",
+            "rider__home_zone",
+            "rider__home_zone__vertical",
+            "rider__home_zone__vertical__lead",
+            "rider__home_zone__vertical__lead__user",
+        )
+        .order_by("relay_leg_number")
+    )
+
+    # Build a mapping: VerticalLead → list of leg summaries
+    # Key: (lead_user_phone, lead_name)  — avoids loading the full object into a dict key
+    lead_legs: dict[tuple, list[str]] = {}
+
+    for sub in sub_orders:
+        rider = sub.rider
+        if not rider:
+            continue
+
+        home_zone = rider.home_zone
+        if not home_zone or not home_zone.vertical:
+            logger.warning(
+                f"notify_relay_vertical_leads: rider {rider.rider_id} has no home zone "
+                f"or vertical — skipping SMS for leg {sub.relay_leg_number}."
+            )
+            continue
+
+        vertical = home_zone.vertical
+        try:
+            vl = vertical.lead  # VerticalLead instance (OneToOne reverse)
+        except VerticalLead.DoesNotExist:
+            logger.warning(
+                f"notify_relay_vertical_leads: vertical '{vertical.name}' has no lead — "
+                f"skipping SMS for rider {rider.rider_id}."
+            )
+            continue
+
+        if not vl.is_active:
+            logger.info(
+                f"notify_relay_vertical_leads: lead for vertical '{vertical.name}' is inactive, skipping."
+            )
+            continue
+
+        lead_phone = vl.user.phone
+        lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
+        rider_name = rider.user.contact_name if rider.user else rider.rider_id
+
+        leg_summary = (
+            f"Leg {sub.relay_leg_number}: {rider_name} ({rider.rider_id}) — "
+            f"pickup: {sub.pickup_address}"
+        )
+
+        key = (lead_phone, lead_name)
+        lead_legs.setdefault(key, []).append(leg_summary)
+
+    if not lead_legs:
+        logger.info(
+            "notify_relay_vertical_leads: no eligible vertical leads found, no SMS sent."
+        )
+        return
+
+    sent = 0
+    failed = 0
+    for (phone, name), legs in lead_legs.items():
+        legs_text = "\n".join(f"  • {lg}" for lg in legs)
+        message = (
+            f"AX Relay Alert — Order #{parent_order_number}\n"
+            f"Hi {name}, {len(legs)} rider(s) from your vertical have been assigned:\n"
+            f"{legs_text}\n"
+            f"Please ensure your riders are ready for pickup."
+        )
+
+        ok = send_sms(phone, message)
+        if ok:
+            sent += 1
+            logger.info(
+                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone}) "
+                f"for {len(legs)} leg(s)."
+            )
+        else:
+            failed += 1
+            logger.error(
+                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})."
+            )
+
+    logger.info(
+        f"notify_relay_vertical_leads: done for order #{parent_order_number} — "
+        f"{sent} sent, {failed} failed."
+    )
 
 
 @shared_task
@@ -572,7 +702,9 @@ def generate_relay_legs_sync(order_id):
                     g = None
                 if not g:
                     order.routing_status = Order.RoutingStatus.FAILED
-                    order.routing_error = "Pickup coordinates missing and geocoding failed."
+                    order.routing_error = (
+                        "Pickup coordinates missing and geocoding failed."
+                    )
                     order.save(update_fields=["routing_status", "routing_error"])
                     return False
                 pickup = g
@@ -590,7 +722,9 @@ def generate_relay_legs_sync(order_id):
                     g = None
                 if not g:
                     order.routing_status = Order.RoutingStatus.FAILED
-                    order.routing_error = "Dropoff coordinates missing and geocoding failed."
+                    order.routing_error = (
+                        "Dropoff coordinates missing and geocoding failed."
+                    )
                     order.save(update_fields=["routing_status", "routing_error"])
                     return False
                 dropoff = g
@@ -606,8 +740,10 @@ def generate_relay_legs_sync(order_id):
             # valid direct single-leg delivery and must not trigger the
             # fallback path.
             direct_km = _haversine_km(
-                float(pickup["lat"]), float(pickup["lng"]),
-                float(dropoff["lat"]), float(dropoff["lng"]),
+                float(pickup["lat"]),
+                float(pickup["lng"]),
+                float(dropoff["lat"]),
+                float(dropoff["lng"]),
             )
             if direct_km <= RELAY_THRESHOLD_KM:
                 hop_nodes = []  # short enough — direct delivery, no hubs needed
@@ -650,7 +786,9 @@ def generate_relay_legs_sync(order_id):
             # Enforce 100km cap (best-effort; haversine fallback may exceed in real roads)
             if any(d > 100.0 for d, _ in legs_metrics):
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "One or more legs exceed 100km after routing validation."
+                order.routing_error = (
+                    "One or more legs exceed 100km after routing validation."
+                )
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",
@@ -713,7 +851,9 @@ def generate_relay_legs_sync(order_id):
 
             # Keep order.suggested_rider pointing to the leg-1 suggestion
             # (used by the banner; consistent with previous behaviour)
-            order.suggested_rider = created_legs[0].suggested_rider if created_legs else None
+            order.suggested_rider = (
+                created_legs[0].suggested_rider if created_legs else None
+            )
 
             # Persist computed totals + status
             order.relay_legs_count = len(created_legs)
@@ -742,9 +882,9 @@ def generate_relay_legs_sync(order_id):
             color="green",
             metadata={
                 "legs": order.relay_legs_count,
-                "suggested_rider_id": str(order.suggested_rider.id)
-                if order.suggested_rider
-                else None,
+                "suggested_rider_id": (
+                    str(order.suggested_rider.id) if order.suggested_rider else None
+                ),
             },
         )
         return True

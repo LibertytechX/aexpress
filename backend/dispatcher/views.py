@@ -720,6 +720,18 @@ class OrderViewSet(viewsets.ModelViewSet):
             },
         )
 
+        # Notify vertical leads of their assigned riders via SMS (background task).
+        from .tasks import notify_relay_vertical_leads
+
+        assigned_sub_ids = [
+            str(sub.id) for _, sub in created_sub_orders if sub.rider_id
+        ]
+        if assigned_sub_ids:
+            notify_relay_vertical_leads.delay(
+                parent_order_number=order.order_number,
+                sub_order_ids=assigned_sub_ids,
+            )
+
         # Re-fetch with all relations so the serializer returns the full picture.
         from orders.models import Order as OrderModel
 
