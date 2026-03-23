@@ -309,10 +309,19 @@ const normalizeOrder = (o) => ({
 });
 
 export const OrdersAPI = {
-    async getAll() {
-        const res = await fetchWithAuth(`/dispatch/orders/`);
+    async getAll(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ''}`);
         if (!res.ok) throw new Error('Failed to fetch orders');
         const data = await res.json();
+        if (data && data.results) {
+            return {
+                results: data.results.map(normalizeOrder),
+                count: data.count,
+                next: data.next,
+                previous: data.previous
+            };
+        }
         return data.map(normalizeOrder);
     },
 

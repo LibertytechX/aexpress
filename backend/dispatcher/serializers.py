@@ -4,6 +4,7 @@ from .models import (
     DispatcherProfile,
     ActivityFeed,
     Zone,
+    ZoneTarget,
     RelayNode,
     VehicleAsset,
     Vertical,
@@ -268,6 +269,18 @@ class OrderSerializer(serializers.ModelSerializer):
 
     relay_legs = serializers.SerializerMethodField()
     charge = serializers.SerializerMethodField()
+    parent_order_number = serializers.CharField(
+        source="parent_order.order_number", read_only=True, allow_null=True
+    )
+    sub_order_numbers = serializers.SerializerMethodField()
+
+    def get_sub_order_numbers(self, obj):
+        """Return list of sub-order order_numbers if this is a relay parent order."""
+        return list(
+            obj.sub_orders.values_list("order_number", flat=True).order_by(
+                "relay_leg_number"
+            )
+        )
 
     class Meta:
         from orders.models import Order
@@ -315,6 +328,10 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_time",
             "total_order_time",
             "charge",
+            # Sub-order linkage
+            "parent_order_number",
+            "relay_leg_number",
+            "sub_order_numbers",
         ]
 
     def get_pickup_lat(self, obj):
@@ -843,12 +860,33 @@ class OrderLegSerializer(serializers.ModelSerializer):
     start_relay_node = RelayNodeMiniSerializer(read_only=True)
     end_relay_node = RelayNodeMiniSerializer(read_only=True)
     rider_id = serializers.CharField(source="rider.id", read_only=True, allow_null=True)
+    rider_name = serializers.CharField(
+        source="rider.user.contact_name", read_only=True, allow_null=True
+    )
     suggested_rider_id = serializers.CharField(
         source="suggested_rider.id", read_only=True, allow_null=True
     )
     suggested_rider_name = serializers.CharField(
         source="suggested_rider.user.contact_name", read_only=True, allow_null=True
     )
+    sub_order_number = serializers.SerializerMethodField()
+
+    def get_sub_order_number(self, obj):
+        """Return the order_number of the sub-order created for this leg, if any."""
+        from orders.models import Order
+
+        try:
+            sub = (
+                Order.objects.filter(
+                    parent_order=obj.order,
+                    relay_leg_number=obj.leg_number,
+                )
+                .values_list("order_number", flat=True)
+                .first()
+            )
+            return sub
+        except Exception:
+            return None
 
     class Meta:
         from orders.models import OrderLeg
@@ -864,8 +902,10 @@ class OrderLegSerializer(serializers.ModelSerializer):
             "rider_payout",
             "zone_compliance_bonus",
             "rider_id",
+            "rider_name",
             "suggested_rider_id",
             "suggested_rider_name",
+            "sub_order_number",
             "start_relay_node",
             "end_relay_node",
         ]
@@ -1134,12 +1174,15 @@ class ActivityFeedSerializer(serializers.ModelSerializer):
 
 class ZoneSerializer(serializers.ModelSerializer):
     relay_nodes_count = serializers.SerializerMethodField()
+    vertical_name = serializers.CharField(source="vertical.name", read_only=True)
 
     class Meta:
         model = Zone
         fields = [
             "id",
             "name",
+            "vertical",
+            "vertical_name",
             "center_lat",
             "center_lng",
             "radius_km",
@@ -1151,6 +1194,26 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_relay_nodes_count(self, obj):
         return obj.relay_nodes.count()
+
+
+class ZoneTargetSerializer(serializers.ModelSerializer):
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = ZoneTarget
+        fields = [
+            "id",
+            "zone",
+            "zone_name",
+            "month",
+            "target_orders",
+            "target_revenue",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_month(self, value):
+        """Ensure month is always the first day of the month."""
+        return value.replace(day=1)
 
 
 class RelayNodeSerializer(serializers.ModelSerializer):

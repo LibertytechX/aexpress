@@ -18,7 +18,8 @@ build/
 out/
 .nuxt/
 .cache/
-migrations/
+**/migrations/*
+!**/migrations/__init__.py
 
 # Environment variables
 .env
@@ -30,6 +31,8 @@ migrations/
 .env.server
 .env.production
 backend/deploy/.env*
+__pycache__/
+*.zip
 
 # IDE
 .vscode/

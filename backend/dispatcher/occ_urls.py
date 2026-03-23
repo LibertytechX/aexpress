@@ -13,6 +13,8 @@ from .occ_views import (
     OCCZoneLeaderboardView,
     OCCZoneMerchantsView,
     OCCZoneRidersView,
+    OCCZoneTargetDetailView,
+    OCCZoneTargetListCreateView,
 )
 
 urlpatterns = [
@@ -34,4 +36,7 @@ urlpatterns = [
     path("leaderboard/verticals/", OCCVerticalLeaderboardView.as_view(), name="occ-leaderboard-verticals"),
     # Orders
     path("orders/analytics/", OCCOrderAnalyticsView.as_view(), name="occ-order-analytics"),
+    # Zone Targets
+    path("zone-targets/", OCCZoneTargetListCreateView.as_view(), name="occ-zone-target-list"),
+    path("zone-targets/<uuid:pk>/", OCCZoneTargetDetailView.as_view(), name="occ-zone-target-detail"),
 ]

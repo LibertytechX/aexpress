@@ -63,3 +63,50 @@ class OTPService:
     def send_email_otp(user, otp):
         """Send verification email containing OTP."""
         return send_verification_email(user, otp=otp)
+
+
+def send_sms(phone, message):
+    """
+    Send a plain SMS via WhisperSMS.
+
+    This is a lower-level helper that sends any arbitrary message body (not
+    just OTPs).  Use this for operational notifications such as relay alerts.
+
+    Args:
+        phone:   Recipient phone number (any format — passed straight through).
+        message: The text body to deliver.
+
+    Returns:
+        True on success, False on any failure.
+    """
+    api_key = os.getenv("WHISPERSMS_API_KEY")
+
+    if not api_key:
+        logger.warning("send_sms: WHISPERSMS_API_KEY not configured. SMS not sent.")
+        logger.info(f"send_sms (dev log) → {phone}: {message}")
+        return False
+
+    url = "https://whispersms.xyz/transactional/send"
+    template_id = os.getenv("WHISPERSMS_DEFAULT_TEMPLATE_ID")
+
+    payload = {
+        "receiver": phone,
+        "place_holders": {"message": message},
+    }
+    if template_id:
+        payload["template"] = template_id
+
+    headers = {
+        "Authorization": f"Api_key {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response.raise_for_status()
+        logger.info(f"send_sms: message delivered to {phone}")
+        return True
+    except Exception as exc:
+        logger.error(f"send_sms: failed to deliver to {phone}: {exc}")
+        return False
