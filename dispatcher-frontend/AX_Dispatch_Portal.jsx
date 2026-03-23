@@ -2423,6 +2423,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [acceptRelayLoading, setAcceptRelayLoading] = useState(false);
+  const [acceptRelayError, setAcceptRelayError] = useState("");
+  const [assigningLeg, setAssigningLeg] = useState(null);
+  const [assigningLegLoading, setAssigningLegLoading] = useState(false);
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
   
@@ -2495,6 +2499,34 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       setRelayError(e?.error || e?.message || "Failed to generate relay route");
     } finally {
       setRelayLoading(false);
+    }
+  };
+
+  const handleAcceptRelayRoute = async () => {
+    setAcceptRelayLoading(true);
+    setAcceptRelayError("");
+    try {
+      const updated = await OrdersAPI.acceptRelayRoute(order.id);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Relay route accepted and sub-orders created`, "Dispatch", "create");
+    } catch (e) {
+      setAcceptRelayError(e?.error || e?.message || "Failed to create assignment");
+    } finally {
+      setAcceptRelayLoading(false);
+    }
+  };
+
+  const handleAssignLegRider = async (legNumber, riderId) => {
+    setAssigningLegLoading(true);
+    try {
+      const updated = await OrdersAPI.assignRelayLeg(order.id, legNumber, riderId);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Rider ${riderId ? 'assigned' : 'unassigned'} for Leg ${legNumber}`, "Dispatch", "assign");
+      setAssigningLeg(null);
+    } catch (e) {
+      alert(e?.error || e?.message || "Failed to assign leg rider");
+    } finally {
+      setAssigningLegLoading(false);
     }
   };
 
@@ -2858,9 +2890,14 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     </button>
                   )}
                   {order.isRelayOrder && order.routingStatus === "ready" && (
-                    <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                      🔄 Re-generate
-                    </button>
+                    <>
+                      <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                        🔄 Re-generate
+                      </button>
+                      <button disabled={acceptRelayLoading} onClick={handleAcceptRelayRoute} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: acceptRelayLoading ? "not-allowed" : "pointer", background: `linear-gradient(135deg,${S.green},#22c55e)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit", marginLeft: 8, opacity: acceptRelayLoading ? 0.7 : 1 }}>
+                        {acceptRelayLoading ? "Creating..." : "✅ Create Assignment"}
+                      </button>
+                    </>
                   )}
                 </>
               )}
@@ -2868,9 +2905,9 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
 
             {/* Error message */}
-            {(relayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
+            {(relayError || acceptRelayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
               <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: S.redBg, border: `1px solid ${S.red}30`, fontSize: 11, color: S.red, fontWeight: 500 }}>
-                ⚠ {relayError || order.routingError}
+                ⚠ {relayError || acceptRelayError || order.routingError}
               </div>
             )}
 
@@ -2939,12 +2976,45 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                       <span>⏱ {leg.duration_minutes || 0} min</span>
                       {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
                     </div>
-                    {suggestedName && (
-                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, color: S.blue, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span></span>
-                        {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                    {/* Assignment / Suggested Rider Inline Block */}
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {leg.riderName ? (
+                            <span style={{ color: S.green }}>✅ <span style={{ fontWeight: 700 }}>{leg.riderName}</span></span>
+                          ) : suggestedName ? (
+                            <span style={{ color: S.blue }}>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span> (Suggested)</span>
+                          ) : (
+                            <span style={{ color: S.textMuted }}>No rider selected</span>
+                          )}
+                          {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                        </div>
+                        <button
+                          onClick={() => setAssigningLeg(assigningLeg === leg.leg_number ? null : leg.leg_number)}
+                          style={{ padding: "3px 8px", fontSize: 9, borderRadius: 5, border: `1px solid ${S.border}`, background: assigningLeg === leg.leg_number ? S.borderLight : "#fff", color: S.navy, cursor: "pointer", fontWeight: 600 }}
+                        >
+                          {assigningLeg === leg.leg_number ? "Cancel" : leg.riderName || suggestedName ? "Change" : "Assign"}
+                        </button>
                       </div>
-                    )}
+
+                      {assigningLeg === leg.leg_number && (
+                        <div style={{ marginTop: 4, padding: 8, borderRadius: 6, background: "#fff", border: `1px solid ${S.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <span style={{ fontWeight: 600, color: S.navy }}>Select Rider for Leg {leg.leg_number}</span>
+                          <div style={{ maxHeight: 120, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 6, background: S.bgHover }}>
+                            {riders.map(r => (
+                              <div
+                                key={r.id}
+                                onClick={() => !assigningLegLoading && handleAssignLegRider(leg.leg_number, r.id)}
+                                style={{ padding: "6px 8px", borderBottom: `1px solid ${S.border}`, fontSize: 10, display: "flex", justifyContent: "space-between", cursor: assigningLegLoading ? "not-allowed" : "pointer", opacity: assigningLegLoading ? 0.6 : 1, background: "#fff" }}
+                              >
+                                <span style={{ fontWeight: 600, color: S.navy }}>{r.name}</span>
+                                <span style={{ color: S.textMuted }}>{r.capacityLoad || 'Bike'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   );
                 })}
@@ -2968,31 +3038,6 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 })()}
               </div>
             )}
-
-            {/* Suggested rider for leg 1 */}
-            {order.routingStatus === "ready" && order.suggestedRiderId && (() => {
-              const suggestedRider = riders.find(r => r._uuid === order.suggestedRiderId);
-              const leg1 = order.relayLegs?.[0];
-              const endAddr = leg1?.end_relay_node?.name || order.dropoff;
-              const rLat = suggestedRider?.lat ? parseFloat(suggestedRider.lat) : null;
-              const rLng = suggestedRider?.lng ? parseFloat(suggestedRider.lng) : null;
-              const pLat = order.pickupLat ? parseFloat(order.pickupLat) : null;
-              const pLng = order.pickupLng ? parseFloat(order.pickupLng) : null;
-              const distKm = (rLat && rLng && pLat && pLng) ? haversineKm(rLat, rLng, pLat, pLng) : null;
-              return (
-                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ color: S.blue, fontWeight: 700 }}>💡 Suggested for Leg 1: {suggestedRider?.name || `Rider #${order.suggestedRiderId}`}</span>
-                    <button onClick={() => suggestedRider && onAssign(order.id, suggestedRider.id)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: suggestedRider ? S.blue : S.textMuted, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3, color: S.textDim, fontSize: 10 }}>
-                    <span><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {order.pickup}</span>
-                    <span><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {endAddr}</span>
-                    {distKm !== null && <span style={{ color: S.textMuted }}>🏍️ {distKm.toFixed(1)} km from pickup</span>}
-                  </div>
-                </div>
-              );
-            })()}
 
             {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (

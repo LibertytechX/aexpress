@@ -518,6 +518,121 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data)
 
+    @action(detail=True, methods=["post"], url_path="assign-relay-leg")
+    def assign_relay_leg(self, request, order_number=None):
+        """Assign or change the rider for a specific relay leg.
+        If the sub-order has already been created, updates the sub-order too.
+        """
+        from orders.models import Order
+
+        order = self.get_object()
+        leg_number = request.data.get("leg_number")
+        rider_id = request.data.get("rider_id")
+
+        if not order.is_relay_order:
+            return Response(
+                {"error": "This order is not a relay order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        leg = order.legs.filter(leg_number=leg_number).first()
+        if not leg:
+            return Response(
+                {"error": f"Leg {leg_number} not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Retrieve the updated rider or None
+        if not rider_id:
+            rider = None
+        else:
+            try:
+                rider = Rider.objects.get(rider_id=rider_id)
+            except Rider.DoesNotExist:
+                return Response(
+                    {"error": "Rider not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+
+        # Check if the sub-order already exists for this leg
+        sub_order = Order.objects.filter(
+            parent_order=order, relay_leg_number=leg_number
+        ).first()
+
+        if sub_order:
+            # Sub-order exists! This means accept_relay_route was already called.
+            # We must update the sub-order's rider and notify them.
+            if not rider:
+                sub_order.rider = None
+                sub_order.status = "Pending"
+                sub_order.save(update_fields=["rider", "status"])
+                emit_activity(
+                    event_type="unassigned",
+                    order_id=sub_order.order_number,
+                    text=f"Leg {leg_number} unassigned from {sub_order.order_number}",
+                    color="yellow",
+                    metadata={},
+                )
+                leg.rider = None
+                leg.status = "Pending"
+                leg.save(update_fields=["rider", "status"])
+            else:
+                sub_order.rider = rider
+                sub_order.status = "Assigned"
+                sub_order.assigned_at = timezone.now()
+                sub_order.save(update_fields=["rider", "status", "assigned_at"])
+                rider_name = getattr(rider.user, "contact_name", None) or getattr(
+                    rider.user, "phone", "Unknown"
+                )
+                emit_activity(
+                    event_type="assigned",
+                    order_id=sub_order.order_number,
+                    text=f"Leg {leg_number} assigned to {rider_name}",
+                    color="blue",
+                    metadata={"rider": rider_name, "rider_id": rider.rider_id},
+                )
+                leg.rider = rider
+                leg.status = "Assigned"
+                leg.assigned_at = sub_order.assigned_at
+                leg.save(update_fields=["rider", "status", "assigned_at"])
+
+                # Notify the newly assigned rider
+                try:
+                    from riders.notifications import notify_rider
+                    notify_rider(
+                        rider=rider,
+                        title="Relay Leg Assigned 🔁",
+                        body=f"You have been assigned Leg {leg_number} of relay order #{order.order_number}. Pick up from: {sub_order.pickup_address}.",
+                        data={"order_number": sub_order.order_number, "status": "Assigned"},
+                    )
+                    publish_order_assigned_event(sub_order, rider)
+                except Exception as exc:
+                    logger.warning(f"Relay leg assignment notification failed: {exc}")
+        else:
+            # Sub-order not yet created. Just update the suggested rider on the leg.
+            leg.suggested_rider = rider
+            leg.save(update_fields=["suggested_rider"])
+
+        # Re-fetch parent order with all relations so the serializer runs cleanly
+        order = (
+            Order.objects.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "legs__rider",
+                "legs__rider__user",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
+                "sub_orders",
+                "deliveries",
+                "events",
+                "events__created_by",
+            )
+            .select_related("user", "rider", "rider__user", "suggested_rider")
+            .get(pk=order.pk)
+        )
+
+        return Response(self.get_serializer(order).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="accept-relay-route")
     def accept_relay_route(self, request, order_number=None):
         """Accept a generated relay route: create one sub-order per leg, assign the
