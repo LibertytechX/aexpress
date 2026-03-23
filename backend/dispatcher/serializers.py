@@ -117,8 +117,9 @@ class RiderSerializer(serializers.ModelSerializer):
     vehicle_asset_detail = serializers.SerializerMethodField()
 
     # Mock/Computed fields to match frontend interface
-    todayOrders = serializers.IntegerField(default=0, read_only=True)
-    todayEarnings = serializers.IntegerField(default=0, read_only=True)
+    current_order = serializers.SerializerMethodField()
+    todayOrders = serializers.SerializerMethodField()
+    todayEarnings = serializers.SerializerMethodField()
     completionRate = serializers.IntegerField(default=98, read_only=True)
     avgTime = serializers.CharField(default="25 mins", read_only=True)
     joined = serializers.DateTimeField(
@@ -149,6 +150,31 @@ class RiderSerializer(serializers.ModelSerializer):
             "last_location_update",
             "total_yesterday_order_distance",
         ]
+
+    def get_todayOrders(self, obj):
+        today = datetime.now().date()
+        return obj.rider_orders.filter(status="Done", created_at__date=today).count()
+
+    def get_todayEarnings(self, obj):
+        from django.db.models import Sum
+
+        today = datetime.now().date()
+        total = obj.rider_orders.filter(
+            status="Done", created_at__date=today
+        ).aggregate(total=Sum("total_amount"))["total"]
+        return float(total) if total else 0
+
+    def get_current_order(self, obj):
+        active_order = (
+            obj.rider_orders.filter(
+                status__in=["Assigned", "PickedUp", "Started", "Arrived", "Done"]
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if active_order:
+            return active_order.order_number
+        return None
 
     def get_total_yesterday_order_distance(self, obj):
         yesterday = datetime.now() - timedelta(days=1)
