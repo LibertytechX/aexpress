@@ -2304,6 +2304,90 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     { value: "month", label: "This Month" },
   ];
 
+  const renderOrderRow = (rowOrder, isChild = false, isLastChild = false) => {
+    const dt = formatOrderDateTime(rowOrder.created);
+    const psLower = (rowOrder.payment_status || "").toLowerCase();
+    const isPaid = psLower === "paid" || psLower === "success";
+    
+    return (
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+        <div
+          onClick={(e) => {
+            if (!isChild && rowOrder.isRelayOrder) toggleExpand(e, rowOrder.id);
+          }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            cursor: (!isChild && rowOrder.isRelayOrder) ? "pointer" : "default",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isChild && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, background: S.borderLight, padding: "2px 4px", borderRadius: 4 }}>
+                LEG {rowOrder.relayLegNumber || "-"}
+              </span>
+            )}
+            <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
+              {rowOrder.id}
+            </span>
+          </div>
+          {!isChild && rowOrder.isRelayOrder && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 4px",
+              borderRadius: 4,
+              background: S.purpleBg,
+              color: S.purple,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+            }}>
+              Relay
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                ›
+              </span>
+            </div>
+          )}
+        </div>
+        <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
+        <div><div style={{ fontSize: 12, fontWeight: 600 }}>{rowOrder.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{rowOrder.customerPhone}</div></div>
+        <span style={{ fontSize: 12, color: S.textDim }}>{rowOrder.merchant}</span>
+        <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowOrder.pickup.split(",")[0]} → {rowOrder.dropoff.split(",")[0]}</div>
+        <div>{rowOrder.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{rowOrder.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.waitingTime || "—"}</span>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.deliveryTime || "—"}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{rowOrder.totalOrderTime || "—"}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.amount.toLocaleString()}</div>
+          {rowOrder.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.pricePerKm.toFixed(0)}/km</div>}
+        </div>
+        <span style={{ fontSize: 11, color: rowOrder.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{rowOrder.cod > 0 ? `₦${(rowOrder.cod / 1000).toFixed(0)}K` : "—"}</span>
+        <div>
+          <button onClick={(e) => { e.stopPropagation(); onSelect(rowOrder.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+            <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
+          </button>
+        </div>
+        <div>
+          {isPaid ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+            </div>
+          )}
+        </div>
+        <Badge status={rowOrder.status} />
+      </div>
+    );
+  };
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
@@ -2350,122 +2434,59 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
               {filtered.map(o => {
-                const dt = formatOrderDateTime(o.created);
-                const psLower = (o.payment_status || "").toLowerCase();
-                const psStyle = psLower === "paid" || psLower === "success" ? { bg: S.greenBg, text: S.green } : psLower === "pending" ? { bg: S.goldPale, text: S.gold } : psLower === "failed" || psLower === "cancelled" ? { bg: S.redBg, text: S.red } : { bg: S.borderLight, text: S.textMuted };
-                const isPaid = psLower === "paid" || psLower === "success";
+                // Do not render sub-orders as top-level rows
+                if (o.parentOrderNumber) return null;
+
+                // Find all sub-orders of this parent
+                const childOrders = orders.filter(child => child.parentOrderNumber === String(o.id));
+                childOrders.sort((a, b) => (a.relayLegNumber || 0) - (b.relayLegNumber || 0));
 
                 return (
                   <React.Fragment key={o.id}>
-                    <div onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[o.id] ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
-                      <div
-                        onClick={(e) => {
-                          if (o.isRelayOrder) toggleExpand(e, o.id);
-                        }}
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 2,
-                          cursor: o.isRelayOrder ? "pointer" : "default",
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
-                            {o.id}
-                          </span>
-                        </div>
-                        {o.isRelayOrder && (
-                          <div style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 4,
-                            padding: "2px 4px",
-                            borderRadius: 4,
-                            background: S.purpleBg,
-                            color: S.purple,
-                            fontSize: 9,
-                            fontWeight: 800,
-                            textTransform: "uppercase",
-                            letterSpacing: "0.5px",
-                            alignSelf: "flex-start",
-                          }}>
-                            Relay
-                            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[o.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
-                              ›
-                            </span>
+                    {renderOrderRow(o, false, false)}
+                    {expandedRows[o.id] && o.isRelayOrder && (
+                      <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
+                        {childOrders.length > 0 ? (
+                          <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${S.border}`, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                            {childOrders.map((child, idx) => renderOrderRow(child, true, idx === childOrders.length - 1))}
                           </div>
+                        ) : o.sub_orders && o.sub_orders.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+                              <span>Leg No.</span>
+                              <span>Order ID</span>
+                              <span>Created Date</span>
+                              <span>Assigned Rider</span>
+                              <span>Amount</span>
+                              <span style={{ textAlign: "center" }}>Status</span>
+                            </div>
+                            {o.sub_orders.map((sub) => (
+                              <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
+                                <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
+                                <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
+                                <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
+                                <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                                  {sub.rider ? (
+                                    <>
+                                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
+                                      <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
+                                    </>
+                                  ) : "—"}
+                                </span>
+                                <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
+                                <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
                         )}
                       </div>
-                  <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
-                  <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
-                  <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
-                  <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-                  <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-                  <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
-                  <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
-                    {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
-                  </div>
-                  <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                  <div>
-                    <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
-                      <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
-                    </button>
-                  </div>
-                  <div>
-                    {isPaid ? (
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                        <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
-                      </div>
-                    ) : (
-                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                        <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
-                      </div>
                     )}
-                  </div>
-                  <Badge status={o.status} />
-                </div>
-                {expandedRows[o.id] && o.isRelayOrder && (
-                  <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
-                    <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
-                    {o.sub_orders && o.sub_orders.length > 0 ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
-                          <span>Leg No.</span>
-                          <span>Order ID</span>
-                          <span>Created Date</span>
-                          <span>Assigned Rider</span>
-                          <span>Amount</span>
-                          <span style={{ textAlign: "center" }}>Status</span>
-                        </div>
-                        {o.sub_orders.map((sub) => (
-                          <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
-                            <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
-                            <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
-                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
-                            <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
-                              {sub.rider ? (
-                                <>
-                                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
-                                  <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
-                                </>
-                              ) : "—"}
-                            </span>
-                            <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
-                            <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
-                    )}
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
+                  </React.Fragment>
+                );
+              })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
             </div>
             
