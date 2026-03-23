@@ -110,6 +110,14 @@ class RiderSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="user.contact_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
 
+    # Zone field (maps to home_zone on the model)
+    zone = serializers.PrimaryKeyRelatedField(
+        source="home_zone",
+        queryset=Zone.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
+
     # Vehicle fields from Rider model
     vehicle = serializers.SerializerMethodField()
 
@@ -134,6 +142,7 @@ class RiderSerializer(serializers.ModelSerializer):
             "rider_id",
             "name",
             "phone",
+            "zone",
             "vehicle",
             "vehicle_asset_detail",
             "status",
