@@ -945,3 +945,182 @@ def generate_relay_legs_sync(order_id):
         except Exception:
             pass
         return False
+
+
+@shared_task
+def process_accepted_relay_route_task(order_id):
+    """
+    Background task to process an accepted relay route: create sub-orders,
+    assign riders, and send notifications.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+    from orders.models import Order, OrderLeg, Delivery
+    from riders.notifications import notify_rider
+    from riders.views import publish_order_assigned_event
+    from .utils import emit_activity
+    
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        logger.error(f"process_accepted_relay_route_task: Order {order_id} not found.")
+        return False
+
+    legs = list(
+        order.legs.select_related(
+            "start_relay_node",
+            "end_relay_node",
+            "suggested_rider",
+            "suggested_rider__user",
+        ).order_by("leg_number")
+    )
+
+    first_delivery = order.deliveries.first()
+    if not first_delivery:
+        logger.error(f"process_accepted_relay_route_task: Parent order {order_id} has no delivery record.")
+        return False
+
+    with transaction.atomic():
+        created_sub_orders = []
+
+        for leg in legs:
+            is_first_leg = leg.leg_number == 1
+            is_last_leg = leg.leg_number == len(legs)
+
+            # ── Pickup for this leg ───────────────────────────────────────
+            if is_first_leg:
+                # First leg always picks up from the original order origin.
+                pickup_address = order.pickup_address
+                pickup_lat = order.pickup_latitude
+                pickup_lng = order.pickup_longitude
+                pickup_sender_name = order.sender_name
+                pickup_sender_phone = order.sender_phone
+            else:
+                # Subsequent legs pick up from the previous leg's end relay node.
+                node = leg.start_relay_node
+                pickup_address = node.address
+                pickup_lat = node.latitude
+                pickup_lng = node.longitude
+                pickup_sender_name = node.name
+                pickup_sender_phone = ""
+
+            # ── Dropoff for this leg ──────────────────────────────────────
+            if is_last_leg:
+                # Last leg delivers to the original order destination.
+                dropoff_address = first_delivery.dropoff_address
+                dropoff_lat = first_delivery.dropoff_latitude
+                dropoff_lng = first_delivery.dropoff_longitude
+                receiver_name = first_delivery.receiver_name
+                receiver_phone = first_delivery.receiver_phone
+            else:
+                # Intermediate legs deliver to the leg's end relay node (hub).
+                node = leg.end_relay_node
+                dropoff_address = node.address
+                dropoff_lat = node.latitude
+                dropoff_lng = node.longitude
+                receiver_name = node.name
+                receiver_phone = ""
+
+            assigned_rider = leg.suggested_rider
+            sub_status = "Assigned" if assigned_rider else "Pending"
+
+            # ── Create the sub-order ──────────────────────────────────────
+            sub_order = Order.objects.create(
+                user=order.user,
+                rider=assigned_rider,
+                parent_order=order,
+                relay_leg_number=leg.leg_number,
+                mode=order.mode,
+                vehicle=order.vehicle,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                payment_method=order.payment_method,
+                payment_status="Pending",
+                total_amount=leg.rider_payout,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+                status=sub_status,
+                assigned_at=timezone.now() if assigned_rider else None,
+                notes=(
+                    f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
+                    f"for parent order {order.order_number}"
+                ),
+                is_relay_order=True,
+            )
+
+            # ── Create the delivery record for this sub-order ─────────────
+            Delivery.objects.create(
+                order=sub_order,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                dropoff_address=dropoff_address,
+                dropoff_latitude=dropoff_lat,
+                dropoff_longitude=dropoff_lng,
+                receiver_name=receiver_name,
+                receiver_phone=receiver_phone,
+                package_type=first_delivery.package_type,
+                notes=first_delivery.notes,
+                sequence=leg.leg_number,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+            )
+
+            # ── Assign suggested rider onto the leg itself ────────────────
+            leg.rider = assigned_rider
+            if assigned_rider:
+                leg.status = OrderLeg.Status.ASSIGNED
+                leg.assigned_at = timezone.now()
+            leg.save(update_fields=["rider", "status", "assigned_at"])
+
+            created_sub_orders.append((leg, sub_order))
+
+            # ── Notify the assigned rider ─────────────────────────────────
+            if assigned_rider:
+                try:
+                    notify_rider(
+                        rider=assigned_rider,
+                        title="Relay Leg Assigned 🔁",
+                        body=(
+                            f"You have been assigned Leg {leg.leg_number} of relay order "
+                            f"#{order.order_number}. Pick up from: {pickup_address}."
+                        ),
+                        data={
+                            "order_number": sub_order.order_number,
+                            "parent_order_number": order.order_number,
+                            "leg_number": str(leg.leg_number),
+                            "status": "Assigned",
+                        },
+                    )
+                    publish_order_assigned_event(sub_order, assigned_rider)
+                except Exception as exc:
+                    logger.warning(
+                        f"Relay leg assignment notification failed: {exc}"
+                    )
+
+    emit_activity(
+        event_type="relay_route_accepted",
+        order_id=order.order_number,
+        text=f"Relay route accepted for {order.order_number} — {len(legs)} sub-orders created",
+        color="green",
+        metadata={
+            "legs": len(legs),
+            "sub_orders": [sub.order_number for _, sub in created_sub_orders],
+        },
+    )
+
+    assigned_sub_ids = [
+        str(sub.id) for _, sub in created_sub_orders if sub.rider_id
+    ]
+    if assigned_sub_ids:
+        # call other celery task
+        notify_relay_vertical_leads.delay(
+            parent_order_number=order.order_number,
+            sub_order_ids=assigned_sub_ids,
+        )
+    return True
