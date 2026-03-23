@@ -220,6 +220,9 @@ class OrderViewSet(viewsets.ModelViewSet):
             "legs__suggested_rider__user",
             "events",
             "events__created_by",
+            "sub_orders",
+            "sub_orders__rider",
+            "sub_orders__rider__user",
         )
 
     def create(self, request, *args, **kwargs):
@@ -786,7 +789,7 @@ class OrderViewSet(viewsets.ModelViewSet):
                         f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
                         f"for parent order {order.order_number}"
                     ),
-                    is_relay_order=False,
+                    is_relay_order=True,
                 )
 
                 # ── Create the delivery record for this sub-order ─────────────
