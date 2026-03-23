@@ -851,6 +851,46 @@ class GenerateRelayLegsSyncTests(TestCase):
     @patch("dispatcher.utils.emit_activity")
     @patch("dispatcher.tasks._directions_legs", return_value=None)
     @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
+    def test_generate_relay_legs_falls_back_to_closest_hub_when_no_15km_hub_exists(
+        self, _nearest_rider_mock, _directions_mock, _emit_activity_mock
+    ):
+        from dispatcher.models import RelayNode
+        from dispatcher.tasks import generate_relay_legs_sync
+
+        first_hub = RelayNode.objects.create(
+            name="Fallback Hub",
+            address="18km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(18),
+            is_active=True,
+        )
+        second_hub = RelayNode.objects.create(
+            name="Forward Hub",
+            address="30km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(30),
+            is_active=True,
+        )
+        order = self._create_order(total_km=45)
+
+        success = generate_relay_legs_sync(order.id)
+
+        self.assertTrue(success)
+        order.refresh_from_db()
+        legs = list(order.legs.order_by("leg_number"))
+
+        self.assertEqual(order.routing_status, order.RoutingStatus.READY)
+        self.assertEqual(len(legs), 3)
+        self.assertEqual(legs[0].end_relay_node_id, first_hub.id)
+        self.assertEqual(legs[1].start_relay_node_id, first_hub.id)
+        self.assertEqual(legs[1].end_relay_node_id, second_hub.id)
+        self.assertGreater(legs[0].distance_km, 15.0)
+        self.assertLessEqual(legs[1].distance_km, 15.0)
+        self.assertLessEqual(legs[2].distance_km, 15.0)
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks._directions_legs", return_value=None)
+    @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
     def test_generate_relay_legs_fails_without_full_15km_hub_chain(
         self, _nearest_rider_mock, _directions_mock, _emit_activity_mock
     ):
@@ -872,4 +912,4 @@ class GenerateRelayLegsSyncTests(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.routing_status, order.RoutingStatus.FAILED)
         self.assertEqual(order.legs.count(), 0)
-        self.assertIn("15km", order.routing_error)
+        self.assertIn("relay-hub chain", order.routing_error.lower())
