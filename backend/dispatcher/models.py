@@ -109,6 +109,8 @@ class RelayNode(models.Model):
         default=0.5,
         help_text="Radius (km) within which riders are eligible to pick up at this node",
     )
+    hub_captain_name = models.CharField(max_length=255, null=True, blank=True)
+    hub_captain_phone = models.CharField(max_length=50, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
