@@ -296,6 +296,8 @@ const normalizeOrder = (o) => ({
     dropoffLng: o.dropoff_lng || null,
     relayLegs: (o.relay_legs || []).map(leg => ({
         ...leg,
+        riderId: leg.rider_id || null,
+        riderName: leg.rider_name || null,
         suggestedRiderId: leg.suggested_rider_id || null,
         suggestedRiderName: leg.suggested_rider_name || null,
     })),
@@ -396,6 +398,17 @@ export const OrdersAPI = {
         let data;
         try { data = await res.json(); } catch (e) { throw new Error('Failed to accept relay route'); }
         if (!res.ok) throw data || new Error('Failed to accept relay route');
+        return normalizeOrder(data);
+    },
+
+    async assignRelayLeg(orderNumber, legNumber, riderId) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/assign-relay-leg/`, {
+            method: 'POST',
+            body: JSON.stringify({ leg_number: legNumber, rider_id: riderId || null })
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to assign relay leg'); }
+        if (!res.ok) throw data || new Error('Failed to assign relay leg');
         return normalizeOrder(data);
     },
 
