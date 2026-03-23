@@ -308,6 +308,7 @@ class OrderSerializer(serializers.ModelSerializer):
         source="parent_order.order_number", read_only=True, allow_null=True
     )
     sub_order_numbers = serializers.SerializerMethodField()
+    sub_orders = serializers.SerializerMethodField()
 
     def get_sub_order_numbers(self, obj):
         """Return list of sub-order order_numbers if this is a relay parent order."""
@@ -316,6 +317,24 @@ class OrderSerializer(serializers.ModelSerializer):
                 "relay_leg_number"
             )
         )
+
+    def get_sub_orders(self, obj):
+        """Return simplified sub-order details if this is a relay parent order."""
+        if obj.is_relay_order and not obj.parent_order_id:
+            sub_orders = obj.sub_orders.all().order_by("relay_leg_number")
+            return [
+                {
+                    "id": so.order_number,
+                    "status": so.status,
+                    "rider": so.rider.user.contact_name if so.rider and getattr(so.rider, "user", None) else None,
+                    "riderId": so.rider.rider_id if so.rider else None,
+                    "created": so.created_at.strftime("%Y-%m-%d %H:%M") if getattr(so, "created_at", None) else None,
+                    "amount": float(so.total_amount) if getattr(so, "total_amount", None) else 0.0,
+                    "relay_leg_number": so.relay_leg_number,
+                }
+                for so in sub_orders
+            ]
+        return []
 
     class Meta:
         from orders.models import Order
@@ -367,6 +386,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "parent_order_number",
             "relay_leg_number",
             "sub_order_numbers",
+            "sub_orders",
         ]
 
     def get_pickup_lat(self, obj):
