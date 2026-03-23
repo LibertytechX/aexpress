@@ -300,6 +300,7 @@ const normalizeOrder = (o) => ({
         riderName: leg.rider_name || null,
         suggestedRiderId: leg.suggested_rider_id || null,
         suggestedRiderName: leg.suggested_rider_name || null,
+        subOrderNumber: leg.sub_order_number || null,
     })),
     events: (o.events || []).map(ev => ({
         eventType: ev.event_type || ev.event || '',

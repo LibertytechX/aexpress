@@ -1,5 +1,7 @@
 import logging
 import datetime
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
 
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
@@ -517,6 +519,23 @@ class OrderViewSet(viewsets.ModelViewSet):
                         leg.save(update_fields=["rider_payout"])
 
         return Response(self.get_serializer(order).data)
+
+    @exception_advice()
+    @action(detail=True, methods=["get"])
+    def events(self, request, order_number=None):
+        """List all events for a particular order."""
+        order = self.get_object()
+        events_queryset = order.events.all().order_by("-created_at")
+        
+        from .serializers import OrderEventSerializer
+        serializer = OrderEventSerializer(events_queryset, many=True)
+        
+        return service_response(
+            status="success",
+            message="Order events retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
 
     @action(detail=True, methods=["post"], url_path="assign-relay-leg")
     def assign_relay_leg(self, request, order_number=None):
