@@ -1913,7 +1913,7 @@ export default function AXDispatchPortal() {
         <button 
           onClick={() => setShowStaleModal(true)}
           style={{
-            position: "fixed", bottom: 32, right: 32, zIndex: 900,
+            position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 900,
             display: "flex", alignItems: "center", gap: 12, padding: "12px 20px",
             background: S.gold, color: S.navy, border: "none", borderRadius: 32,
             boxShadow: `0 8px 32px ${S.gold}60`, cursor: "pointer", animation: "stalePulseGlobal 2.5s infinite"
@@ -3539,6 +3539,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showReassignVehicle, setShowReassignVehicle] = useState(false);
   const [isTogglingDuty, setIsTogglingDuty] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
@@ -3687,10 +3688,10 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         <StatCard label="Deliveries Today" value={riders.reduce((s, r) => s + r.todayOrders, 0)} color={S.gold} />
       </div>
 
-      {/* 50/50 split: table (left) + map (right) */}
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+      {/* Full width table with floating Map button */}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
 
-        {/* Left – filters + table (50%) */}
+        {/* Top – filters + table */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -3704,7 +3705,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               {I.plus} Add Rider
             </button>
           </div>
-	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
 	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
 	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
 	            </div>
@@ -3730,12 +3731,45 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           </div>
         </div>
 
-        {/* Right – riders location map (50%) */}
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <RidersLocationMap riders={riders} />
-        </div>
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
 
       </div>
+
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Rider Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <RidersLocationMap riders={riders} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateRider && (
         <CreateRiderModal
@@ -4130,13 +4164,14 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const [search, setSearch] = useState("");
   const [showCreateVehicle, setShowCreateVehicle] = useState(false);
   const [detailVehicleId, setDetailVehicleId] = useState(null);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   const detailVehicle = detailVehicleId ? vehicles.find(v => v.id === detailVehicleId) : null;
 
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-		  const gridCols = "70px 90px 60px 60px 60px 80px 110px 110px 120px 80px 90px 80px";
+		  const gridCols = "70px 1.2fr 60px 1fr 1fr 80px 110px 110px 120px 80px 1.5fr 80px";
 	  const fmtDistance = (raw, unit) => {
 	    if (raw === null || raw === undefined || raw === "") return "—";
 	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -4154,7 +4189,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
         <StatCard label="With GPS" value={vehicles.filter(v => v.latitude && v.longitude).length} color={S.gold} />
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -4193,10 +4228,44 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <VehiclesLocationMap vehicles={vehicles} />
-        </div>
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
       </div>
+
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Vehicle Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <VehiclesLocationMap vehicles={vehicles} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateVehicle && (
         <CreateVehicleModal
