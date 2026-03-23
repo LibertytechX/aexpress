@@ -41,6 +41,86 @@ class VehicleAssetAdmin(admin.ModelAdmin):
     readonly_fields = ("id", "asset_id", "created_at", "updated_at")
 
 
+class RiderResource(resources.ModelResource):
+    rider_name = fields.Field(column_name="Rider Name")
+    yesterday_completed_order_count = fields.Field(column_name="Yesterday Completed Orders")
+    total_amount_for_previous_day = fields.Field(column_name="Previous Day Total Amount")
+
+    class Meta:
+        model = Rider
+        fields = (
+            "rider_id", 
+            "status", 
+            "rating", 
+            "total_deliveries", 
+            "is_active", 
+            "rider_name", 
+            "yesterday_completed_order_count", 
+            "total_amount_for_previous_day",
+        )
+        export_order = fields
+
+    def dehydrate_rider_name(self, rider):
+        return rider.user.get_full_name()
+
+    def dehydrate_yesterday_completed_order_count(self, rider):
+        if hasattr(rider, "yesterday_completed_order_count_annotated"):
+            return rider.yesterday_completed_order_count_annotated
+        else:
+            from django.utils import timezone
+            from datetime import timedelta
+            from orders.models import Order
+            yesterday = timezone.now().date() - timedelta(days=1)
+            return Order.objects.filter(
+                rider=rider,
+                status="Done",
+                completed_at__date=yesterday
+            ).count()
+
+    def dehydrate_total_amount_for_previous_day(self, rider):
+        if hasattr(rider, "total_amount_for_previous_day_annotated"):
+            val = rider.total_amount_for_previous_day_annotated
+        else:
+            from django.utils import timezone
+            from datetime import timedelta
+            from orders.models import Order
+            from django.db.models import Sum
+            yesterday = timezone.now().date() - timedelta(days=1)
+            val = Order.objects.filter(
+                rider=rider,
+                status="Done",
+                completed_at__date=yesterday
+            ).aggregate(total=Sum('total_amount'))['total']
+        return round(val, 2) if val else 0.00
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Count, Sum, Q
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        
+        qs = qs.annotate(
+            yesterday_completed_order_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done", 
+                    rider_orders__completed_at__date=yesterday
+                ),
+                distinct=True
+            ),
+            total_amount_for_previous_day_annotated=Sum(
+                "rider_orders__total_amount",
+                filter=Q(
+                    rider_orders__status="Done", 
+                    rider_orders__completed_at__date=yesterday
+                )
+            )
+        )
+        return qs
+
+
 @admin.register(VehicleTracking)
 class VehicleTrackingAdmin(admin.ModelAdmin):
     list_display = (
@@ -63,9 +143,10 @@ class VehicleTrackingAdmin(admin.ModelAdmin):
 
 
 @admin.register(Rider)
-class RiderAdmin(admin.ModelAdmin):
+class RiderAdmin(ImportExportModelAdmin):
+    resource_class = RiderResource
     list_display = (
-        "user",
+        "rider_name",
         "rider_id",
         "status",
         "home_zone",
@@ -74,6 +155,8 @@ class RiderAdmin(admin.ModelAdmin):
         "rating",
         "total_deliveries",
         "is_active",
+        "yesterday_completed_order_count",
+        "total_amount_for_previous_day",
     )
     list_filter = (
         "status",
@@ -150,6 +233,46 @@ class RiderAdmin(admin.ModelAdmin):
             }
         )
         return render(request, "admin/assign_zone_intermediate.html", context)
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Count, Sum, Q
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        
+        qs = qs.annotate(
+            yesterday_completed_order_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done", 
+                    rider_orders__completed_at__date=yesterday
+                ),
+                distinct=True
+            ),
+            total_amount_for_previous_day_annotated=Sum(
+                "rider_orders__total_amount",
+                filter=Q(
+                    rider_orders__status="Done", 
+                    rider_orders__completed_at__date=yesterday
+                )
+            )
+        )
+        return qs
+
+    @admin.display(description="Rider Name", ordering="user__first_name")
+    def rider_name(self, obj):
+        return obj.user.get_full_name()
+
+    @admin.display(description="Yesterday Completed Orders", ordering="yesterday_completed_order_count_annotated")
+    def yesterday_completed_order_count(self, obj):
+        return getattr(obj, "yesterday_completed_order_count_annotated", 0)
+
+    @admin.display(description="Prev Day Total Amount", ordering="total_amount_for_previous_day_annotated")
+    def total_amount_for_previous_day(self, obj):
+        val = getattr(obj, "total_amount_for_previous_day_annotated", 0)
+        return round(val, 2) if val else 0.00
 
 
 @admin.register(DispatcherProfile)
