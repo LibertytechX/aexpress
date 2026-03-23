@@ -39,14 +39,14 @@ User = get_user_model()
 
 class RiderViewSet(viewsets.ModelViewSet):
     queryset = Rider.objects.all().select_related(
-        "user", "vehicle_type", "vehicle_asset"
+        "user", "vehicle_type", "vehicle_asset", "home_zone"
     )
     serializer_class = RiderSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         return Rider.objects.all().select_related(
-            "user", "vehicle_type", "vehicle_asset"
+            "user", "vehicle_type", "vehicle_asset", "home_zone"
         )
 
     @action(detail=True, methods=["post"], url_path="reset_password")
