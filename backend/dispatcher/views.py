@@ -1061,7 +1061,7 @@ class S3PresignedUrlView(views.APIView):
 class ZoneViewSet(viewsets.ModelViewSet):
     """CRUD for delivery zones."""
 
-    queryset = Zone.objects.all().order_by("name")
+    queryset = Zone.objects.filter(is_active=True).order_by("name")
     serializer_class = ZoneSerializer
     authentication_classes = [
         ServiceAPIKeyAuthentication,
