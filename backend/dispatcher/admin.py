@@ -1,4 +1,7 @@
 from django.contrib import admin
+from import_export.admin import ImportExportModelAdmin
+from import_export import resources, fields
+
 from .models import (
     Rider,
     DispatcherProfile,
@@ -160,16 +163,59 @@ class DispatcherProfileAdmin(admin.ModelAdmin):
     )
 
 
+class MerchantResource(resources.ModelResource):
+    name = fields.Field(column_name="Name")
+    email = fields.Field(attribute="user__email", column_name="Email")
+    phone = fields.Field(attribute="user__phone", column_name="Phone")
+    last_login = fields.Field(attribute="user__last_login", column_name="Last Login")
+
+    class Meta:
+        model = Merchant
+        fields = ("name", "email", "phone", "last_login", "merchant_id", "activity_status", "acquisition_source", "created_at")
+        export_order = ("name", "email", "phone", "merchant_id", "activity_status", "acquisition_source", "created_at", "last_login")
+
+    def dehydrate_name(self, merchant):
+        return merchant.user.get_full_name()
+
+
 @admin.register(Merchant)
-class MerchantAdmin(admin.ModelAdmin):
-    list_display = ("user", "merchant_id", "zone", "activity_status", "created_at")
-    list_filter = ("activity_status", "zone")
+class MerchantAdmin(ImportExportModelAdmin):
+    resource_class = MerchantResource
+    list_display = (
+        "get_name",
+        "get_email",
+        "get_phone",
+        "merchant_id",
+        "activity_status",
+        "acquisition_source",
+        "created_at",
+        "get_last_login",
+    )
+    list_filter = ("activity_status", "zone", "acquisition_source")
     search_fields = (
-        "user__username",
+        "user__first_name",
+        "user__last_name",
         "user__email",
+        "user__phone",
         "merchant_id",
         "user__business_name",
     )
+
+    @admin.display(description="Name", ordering="user__first_name")
+    def get_name(self, obj):
+        return obj.user.get_full_name()
+
+    @admin.display(description="Email", ordering="user__email")
+    def get_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="Phone Number", ordering="user__phone")
+    def get_phone(self, obj):
+        return obj.user.phone
+
+    @admin.display(description="Last Login", ordering="user__last_login")
+    def get_last_login(self, obj):
+        return obj.user.last_login
 
 
 @admin.register(SystemSettings)
@@ -236,7 +282,6 @@ class ZoneAdmin(admin.ModelAdmin):
             f"Successfully marked {updated_count} zones as inactive.",
             level=messages.SUCCESS,
         )
-
 
 
 class RelayNodeInline(admin.TabularInline):

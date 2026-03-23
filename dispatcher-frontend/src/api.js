@@ -389,6 +389,16 @@ export const OrdersAPI = {
         return normalizeOrder(data);
     },
 
+    async acceptRelayRoute(orderNumber) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/accept-relay-route/`, {
+            method: 'POST'
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to accept relay route'); }
+        if (!res.ok) throw data || new Error('Failed to accept relay route');
+        return normalizeOrder(data);
+    },
+
     async payNow(orderNumber) {
         const res = await fetchWithAuth(`/orders/${orderNumber}/pay-now/`, {
             method: 'POST'

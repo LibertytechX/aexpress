@@ -2423,6 +2423,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [acceptRelayLoading, setAcceptRelayLoading] = useState(false);
+  const [acceptRelayError, setAcceptRelayError] = useState("");
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
   
@@ -2495,6 +2497,20 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       setRelayError(e?.error || e?.message || "Failed to generate relay route");
     } finally {
       setRelayLoading(false);
+    }
+  };
+
+  const handleAcceptRelayRoute = async () => {
+    setAcceptRelayLoading(true);
+    setAcceptRelayError("");
+    try {
+      const updated = await OrdersAPI.acceptRelayRoute(order.id);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Relay route accepted and sub-orders created`, "Dispatch", "create");
+    } catch (e) {
+      setAcceptRelayError(e?.error || e?.message || "Failed to create assignment");
+    } finally {
+      setAcceptRelayLoading(false);
     }
   };
 
@@ -2858,9 +2874,14 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     </button>
                   )}
                   {order.isRelayOrder && order.routingStatus === "ready" && (
-                    <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                      🔄 Re-generate
-                    </button>
+                    <>
+                      <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                        🔄 Re-generate
+                      </button>
+                      <button disabled={acceptRelayLoading} onClick={handleAcceptRelayRoute} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: acceptRelayLoading ? "not-allowed" : "pointer", background: `linear-gradient(135deg,${S.green},#22c55e)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit", marginLeft: 8, opacity: acceptRelayLoading ? 0.7 : 1 }}>
+                        {acceptRelayLoading ? "Creating..." : "✅ Create Assignment"}
+                      </button>
+                    </>
                   )}
                 </>
               )}
@@ -2868,9 +2889,9 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
 
             {/* Error message */}
-            {(relayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
+            {(relayError || acceptRelayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
               <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: S.redBg, border: `1px solid ${S.red}30`, fontSize: 11, color: S.red, fontWeight: 500 }}>
-                ⚠ {relayError || order.routingError}
+                ⚠ {relayError || acceptRelayError || order.routingError}
               </div>
             )}
 
