@@ -2358,17 +2358,44 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 return (
                   <React.Fragment key={o.id}>
                     <div onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[o.id] ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace", display: "flex", alignItems: "center", gap: 6 }}>
-                        {o.isRelayOrder && (
-                          <button onClick={(e) => toggleExpand(e, o.id)} style={{ background: expandedRows[o.id] ? S.purple : S.borderLight, color: expandedRows[o.id] ? "#fff" : S.textMuted, border: "none", width: 20, height: 20, borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
-                            {expandedRows[o.id] ? "v" : ">"}
-                          </button>
-                        )}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          {o.id}
-                          {o.isRelayOrder && <span style={{ padding: "2px 4px", borderRadius: 4, background: S.purpleBg, color: S.purple, fontSize: 9, fontWeight: 800, textTransform: "uppercase", alignSelf: "flex-start" }}>Relay</span>}
+                      <div
+                        onClick={(e) => {
+                          if (o.isRelayOrder) toggleExpand(e, o.id);
+                        }}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 2,
+                          cursor: o.isRelayOrder ? "pointer" : "default",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
+                            {o.id}
+                          </span>
                         </div>
-                      </span>
+                        {o.isRelayOrder && (
+                          <div style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "2px 4px",
+                            borderRadius: 4,
+                            background: S.purpleBg,
+                            color: S.purple,
+                            fontSize: 9,
+                            fontWeight: 800,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.5px",
+                            alignSelf: "flex-start",
+                          }}>
+                            Relay
+                            <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[o.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                              ›
+                            </span>
+                          </div>
+                        )}
+                      </div>
                   <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
                   <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
                   <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
@@ -2403,17 +2430,31 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 {expandedRows[o.id] && o.isRelayOrder && (
                   <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
                     <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
-                    {o.relayLegs && o.relayLegs.length > 0 ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        {o.relayLegs.map((leg) => (
-                          <div key={leg.leg_number} style={{ display: "grid", gridTemplateColumns: "60px 100px 1fr 1fr 80px 140px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "8px 12px", alignItems: "center", fontSize: 11 }}>
-                            <span style={{ fontWeight: 800, color: S.purple }}>LEG {leg.leg_number}</span>
-                            <span style={{ color: leg.subOrderNumber ? S.navy : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: leg.subOrderNumber ? 700 : 400 }}>{leg.subOrderNumber || "Not Created"}</span>
-                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || "Pickup"}</div>
-                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || "Dropoff"}</div>
-                            <span style={{ color: S.textDim }}>{(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
-                            <span style={{ fontWeight: 600, color: leg.riderName ? S.green : S.blue, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{leg.riderName ? `✅ ${leg.riderName}` : leg.suggestedRiderName ? `💡 ${leg.suggestedRiderName}` : "—"}</span>
-                            <span style={{ padding: "2px 8px", borderRadius: 6, background: leg.status === "Completed" ? S.greenBg : S.blueBg, color: leg.status === "Completed" ? S.green : S.blue, fontWeight: 700, fontSize: 9, textAlign: "center" }}>{leg.status ? leg.status.toUpperCase() : "PENDING"}</span>
+                    {o.sub_orders && o.sub_orders.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+                          <span>Leg No.</span>
+                          <span>Order ID</span>
+                          <span>Created Date</span>
+                          <span>Assigned Rider</span>
+                          <span>Amount</span>
+                          <span style={{ textAlign: "center" }}>Status</span>
+                        </div>
+                        {o.sub_orders.map((sub) => (
+                          <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
+                            <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
+                            <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
+                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
+                            <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                              {sub.rider ? (
+                                <>
+                                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
+                                  <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
+                                </>
+                              ) : "—"}
+                            </span>
+                            <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
+                            <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
                           </div>
                         ))}
                       </div>

@@ -309,6 +309,8 @@ const normalizeOrder = (o) => ({
         createdBy: ev.created_by || null,
         createdAt: ev.created_at || null,
     })),
+    sub_orders: o.sub_orders || [],
+    sub_order_numbers: o.sub_order_numbers || [],
 });
 
 export const OrdersAPI = {
