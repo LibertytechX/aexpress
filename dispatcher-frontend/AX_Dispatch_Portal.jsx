@@ -1474,6 +1474,11 @@ export default function AXDispatchPortal() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [expandedRows, setExpandedRows] = useState({});
+  const toggleExpand = (e, id) => {
+    e.stopPropagation();
+    setExpandedRows(p => ({ ...p, [id]: !p[id] }));
+  };
   const [orders, setOrders] = useState([]);
   const [totalOrdersCount, setTotalOrdersCount] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -2356,39 +2361,73 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 const isPaid = psLower === "paid" || psLower === "success";
 
                 return (
-                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
-                <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
-                <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
-                <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-                <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
-                  {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
+                  <React.Fragment key={o.id}>
+                    <div onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[o.id] ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace", display: "flex", alignItems: "center", gap: 6 }}>
+                        {o.isRelayOrder && (
+                          <button onClick={(e) => toggleExpand(e, o.id)} style={{ background: expandedRows[o.id] ? S.purple : S.borderLight, color: expandedRows[o.id] ? "#fff" : S.textMuted, border: "none", width: 20, height: 20, borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s" }}>
+                            {expandedRows[o.id] ? "v" : ">"}
+                          </button>
+                        )}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {o.id}
+                          {o.isRelayOrder && <span style={{ padding: "2px 4px", borderRadius: 4, background: S.purpleBg, color: S.purple, fontSize: 9, fontWeight: 800, textTransform: "uppercase", alignSelf: "flex-start" }}>Relay</span>}
+                        </div>
+                      </span>
+                  <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
+                  <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
+                  <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
+                  <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
+                  <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+                  <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
+                  <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
+                    {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
+                  </div>
+                  <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
+                  <div>
+                    <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+                      <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
+                    </button>
+                  </div>
+                  <div>
+                    {isPaid ? (
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+                        <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+                      </div>
+                    ) : (
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+                        <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+                      </div>
+                    )}
+                  </div>
+                  <Badge status={o.status} />
                 </div>
-                <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                <div>
-                  <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
-                    <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
-                  </button>
-                </div>
-                <div>
-                  {isPaid ? (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
-                    </div>
-                  ) : (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
-                    </div>
-                  )}
-                </div>
-                <Badge status={o.status} />
-              </div>
+                {expandedRows[o.id] && o.isRelayOrder && (
+                  <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
+                    {o.relayLegs && o.relayLegs.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                        {o.relayLegs.map((leg) => (
+                          <div key={leg.leg_number} style={{ display: "grid", gridTemplateColumns: "60px 100px 1fr 1fr 80px 140px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "8px 12px", alignItems: "center", fontSize: 11 }}>
+                            <span style={{ fontWeight: 800, color: S.purple }}>LEG {leg.leg_number}</span>
+                            <span style={{ color: leg.subOrderNumber ? S.navy : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: leg.subOrderNumber ? 700 : 400 }}>{leg.subOrderNumber || "Not Created"}</span>
+                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || "Pickup"}</div>
+                            <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || "Dropoff"}</div>
+                            <span style={{ color: S.textDim }}>{(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
+                            <span style={{ fontWeight: 600, color: leg.riderName ? S.green : S.blue, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{leg.riderName ? `✅ ${leg.riderName}` : leg.suggestedRiderName ? `💡 ${leg.suggestedRiderName}` : "—"}</span>
+                            <span style={{ padding: "2px 8px", borderRadius: 6, background: leg.status === "Completed" ? S.greenBg : S.blueBg, color: leg.status === "Completed" ? S.green : S.blue, fontWeight: 700, fontSize: 9, textAlign: "center" }}>{leg.status ? leg.status.toUpperCase() : "PENDING"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
+                    )}
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
