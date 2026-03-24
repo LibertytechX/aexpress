@@ -96,7 +96,7 @@ class Command(BaseCommand):
             except Rider.DoesNotExist:
                 continue
 
-            zone_name = rider.home_zone.name if rider.home_zone else ""
+            zone_name = rider.hub.zone.name if rider.hub and rider.hub.zone else ""
             entries.append(
                 LeaderboardEntry(
                     rider=rider,
