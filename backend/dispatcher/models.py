@@ -39,11 +39,12 @@ class Vertical(models.Model):
 
 class Zone(models.Model):
     """
-    A delivery zone defined by a center point and radius.
+    A delivery zone aka (verticals) defined by a center point and radius.
     Zones are used to assign riders to home areas and segment relay paths.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # deprecated
     vertical = models.ForeignKey(
         Vertical,
         on_delete=models.SET_NULL,
@@ -57,6 +58,13 @@ class Zone(models.Model):
         default="",
         help_text="List of areas covered by this zone",
     )
+    zone_lead = models.ForeignKey(
+        "dispatcher.VerticalLead",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="area_zones",
+    )
     center_lat = models.FloatField(help_text="Zone center latitude")
     center_lng = models.FloatField(help_text="Zone center longitude")
     radius_km = models.FloatField(default=5.0, help_text="Zone radius in kilometers")
@@ -67,6 +75,8 @@ class Zone(models.Model):
     class Meta:
         db_table = "zones"
         ordering = ["name"]
+        verbose_name = "Zone/Vertical"
+        verbose_name_plural = "Zones/Verticals"
 
     def __str__(self):
         return f"{self.name} ({self.radius_km}km radius)"
@@ -586,6 +596,7 @@ class Merchant(models.Model):
     acquisition_source = models.CharField(
         max_length=100,
         blank=True,
+        null=True,
         default="",
         help_text='How the merchant was acquired: "experiential", "referral", "organic"',
     )

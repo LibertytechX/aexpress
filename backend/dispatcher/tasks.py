@@ -562,19 +562,19 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             )
             continue
 
-        vertical = home_zone.vertical
+        # vertical = home_zone.vertical
         try:
-            vl = vertical.lead  # VerticalLead instance (OneToOne reverse)
+            vl = home_zone.zone_lead  # VerticalLead instance (OneToOne reverse)
         except VerticalLead.DoesNotExist:
             logger.warning(
-                f"notify_relay_vertical_leads: vertical '{vertical.name}' has no lead — "
+                f"notify_relay_vertical_leads: vertical '{vl.user.first_name}' has no lead — "
                 f"skipping SMS for rider {rider.rider_id}."
             )
             continue
 
         if not vl.is_active:
             logger.info(
-                f"notify_relay_vertical_leads: lead for vertical '{vertical.name}' is inactive, skipping."
+                f"notify_relay_vertical_leads: lead for vertical '{vl.user.first_name}' is inactive, skipping."
             )
             continue
 
