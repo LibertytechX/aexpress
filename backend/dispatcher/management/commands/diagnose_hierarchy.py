@@ -18,7 +18,7 @@ class Command(BaseCommand):
                 f"total zones: {all_zones.count()}"
             )
             for z in all_zones:
-                rider_count = Rider.objects.filter(home_zone=z).count()
+                rider_count = Rider.objects.filter(hub__zone=z).count()
                 self.stdout.write(
                     f"        -> {z.name} (id={z.id}, active={z.is_active}, "
                     f"riders={rider_count})"
@@ -29,7 +29,7 @@ class Command(BaseCommand):
         if not orphan_zones.exists():
             self.stdout.write("  None — all zones are linked to a vertical.")
         for z in orphan_zones:
-            rider_count = Rider.objects.filter(home_zone=z).count()
+            rider_count = Rider.objects.filter(hub__zone=z).count()
             merchant_count = Merchant.objects.filter(zone=z).count()
             relay_count = RelayNode.objects.filter(zone=z).count()
             self.stdout.write(
@@ -38,8 +38,8 @@ class Command(BaseCommand):
                 f"relay_nodes={relay_count}"
             )
 
-        self.stdout.write(self.style.MIGRATE_HEADING("\n=== ORPHAN RIDERS (home_zone=NULL) ==="))
-        orphan_riders = Rider.objects.filter(home_zone__isnull=True)
+        self.stdout.write(self.style.MIGRATE_HEADING("\n=== ORPHAN RIDERS (hub=NULL) ==="))
+        orphan_riders = Rider.objects.filter(hub__isnull=True)
         self.stdout.write(f"  Count: {orphan_riders.count()}")
 
         self.stdout.write(self.style.MIGRATE_HEADING("\n=== ORPHAN MERCHANTS (zone=NULL) ==="))

@@ -110,10 +110,12 @@ class RiderSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="user.contact_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
 
-    # Zone field (maps to home_zone on the model)
-    zone = serializers.PrimaryKeyRelatedField(
-        source="home_zone",
-        queryset=Zone.objects.filter(is_active=True),
+    # Zone derived from hub (RelayNode) → zone FK
+    zone = serializers.SerializerMethodField()
+
+    # Hub field (maps to the rider's assigned relay node)
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.filter(is_active=True),
         required=False,
         allow_null=True,
     )
@@ -142,6 +144,7 @@ class RiderSerializer(serializers.ModelSerializer):
             "rider_id",
             "name",
             "phone",
+            "hub",
             "zone",
             "vehicle",
             "vehicle_asset_detail",
@@ -159,6 +162,11 @@ class RiderSerializer(serializers.ModelSerializer):
             "last_location_update",
             "total_yesterday_order_distance",
         ]
+
+    def get_zone(self, obj):
+        if obj.hub and obj.hub.zone_id:
+            return str(obj.hub.zone_id)
+        return None
 
     def get_todayOrders(self, obj):
         today = datetime.now().date()
@@ -1067,11 +1075,11 @@ class RiderOnboardingSerializer(serializers.Serializer):
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
-    home_zone = serializers.PrimaryKeyRelatedField(
-        queryset=Zone.objects.all(),
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.all(),
         required=False,
         allow_null=True,
-        help_text="Relay network zone to assign this rider to.",
+        help_text="Relay hub (node) to assign this rider to.",
     )
     driving_license_number = serializers.CharField(required=False, max_length=50)
     national_id = serializers.CharField(required=False, max_length=50)
