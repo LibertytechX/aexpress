@@ -462,6 +462,7 @@ class Rider(models.Model):
     onro_location_lat = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
     onro_location_lng = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
 
+    # deprecated
     # Home Zone (used for relay dispatch — rider is assigned legs within this zone)
     home_zone = models.ForeignKey(
         Zone,
@@ -469,6 +470,14 @@ class Rider(models.Model):
         null=True,
         blank=True,
         related_name="riders",
+    )
+
+    hub = models.ForeignKey(
+        "dispatcher.RelayNode",
+        verbose_name="Hub",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
 
     # GPS Tracking
@@ -555,12 +564,18 @@ class Rider(models.Model):
 
 
 class DispatcherProfile(models.Model):
+    class Role(models.TextChoices):
+        ZONE_LEAD = "zone_lead", "Zone Lead"
+        HUB_CAPTAIN = "hub_captain", "Hub Captain"
+        ADMIN = "admin", "Admin"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="dispatcher_profile",
     )
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
