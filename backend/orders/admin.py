@@ -222,15 +222,20 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
 
 
 class OrderResource(resources.ModelResource):
+    user_name_display = fields.Field(column_name="User Name")
+    rider_name_display = fields.Field(column_name="Rider Name")
     rider_id_display = fields.Field(column_name="Rider ID")
     vehicle_asset_id_display = fields.Field(column_name="Vehicle Asset ID")
+    collect_on_delivery_for_merchant = fields.Field(
+        column_name="Collect On Delivery For Merchant"
+    )
 
     class Meta:
         model = Order
         fields = (
             "order_number",
-            "user",
-            "rider",
+            "user_name_display",
+            "rider_name_display",
             "rider_id_display",
             "mode",
             "is_relay_order",
@@ -246,11 +251,20 @@ class OrderResource(resources.ModelResource):
             "picked_up_at",
             "arrived_at",
             "completed_at",
-            "collect_on_delivery",
+            "collect_on_delivery_for_merchant",
             "cod_amount",
             "created_at",
         )
         export_order = fields
+
+    def dehydrate_user_name_display(self, obj):
+        return obj.user.get_full_name() if obj.user else "-"
+
+    def dehydrate_collect_on_delivery_for_merchant(self, obj):
+        return obj.collect_on_delivery
+
+    def dehydrate_rider_name_display(self, obj):
+        return obj.rider.user.get_full_name() if obj.rider and obj.rider.user else "-"
 
     def dehydrate_rider_id_display(self, obj):
         return obj.rider.rider_id if obj.rider else "-"

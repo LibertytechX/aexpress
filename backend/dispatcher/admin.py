@@ -45,6 +45,8 @@ class RiderResource(resources.ModelResource):
     rider_name = fields.Field(column_name="Rider Name")
     yesterday_completed_order_count = fields.Field(column_name="Yesterday Completed Orders")
     total_amount_for_previous_day = fields.Field(column_name="Previous Day Total Amount")
+    yesterday_distance_covered = fields.Field(column_name="Previous Day Distance (km)")
+    yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
 
     class Meta:
         model = Rider
@@ -57,6 +59,8 @@ class RiderResource(resources.ModelResource):
             "rider_name", 
             "yesterday_completed_order_count", 
             "total_amount_for_previous_day",
+            "yesterday_distance_covered",
+            "yesterday_order_distance",
         )
         export_order = fields
 
@@ -93,6 +97,40 @@ class RiderResource(resources.ModelResource):
             ).aggregate(total=Sum('total_amount'))['total']
         return round(val, 2) if val else 0.00
 
+    def dehydrate_yesterday_order_distance(self, rider):
+        val = getattr(rider, "total_yesterday_order_distance_annotated", 0)
+        return round(val, 2) if val else 0.00
+
+    def dehydrate_yesterday_distance_covered(self, rider):
+        if not rider.vehicle_asset:
+            return 0.00
+            
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.core.cache import cache
+        from .models import VehicleTracking
+        
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{rider.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+            
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset=rider.vehicle_asset, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
     def get_queryset(self):
         qs = super().get_queryset()
         from django.utils import timezone
@@ -115,6 +153,12 @@ class RiderResource(resources.ModelResource):
                 filter=Q(
                     rider_orders__status="Done", 
                     rider_orders__completed_at__date=yesterday
+                )
+            ),
+            total_yesterday_order_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(
+                    rider_orders__created_at__date=yesterday
                 )
             )
         )
@@ -157,6 +201,8 @@ class RiderAdmin(ImportExportModelAdmin):
         "is_active",
         "yesterday_completed_order_count",
         "total_amount_for_previous_day",
+        "yesterday_distance_covered",
+        "yesterday_order_distance",
     )
     list_filter = (
         "status",
@@ -257,6 +303,12 @@ class RiderAdmin(ImportExportModelAdmin):
                     rider_orders__status="Done", 
                     rider_orders__completed_at__date=yesterday
                 )
+            ),
+            total_yesterday_order_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(
+                    rider_orders__created_at__date=yesterday
+                )
             )
         )
         return qs
@@ -272,6 +324,42 @@ class RiderAdmin(ImportExportModelAdmin):
     @admin.display(description="Prev Day Total Amount", ordering="total_amount_for_previous_day_annotated")
     def total_amount_for_previous_day(self, obj):
         val = getattr(obj, "total_amount_for_previous_day_annotated", 0)
+        return round(val, 2) if val else 0.00
+
+    @admin.display(description="Prev Day Distance (km)")
+    def yesterday_distance_covered(self, obj):
+        if not obj.vehicle_asset:
+            return 0.00
+            
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.core.cache import cache
+        from .models import VehicleTracking
+        
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{obj.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+            
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset=obj.vehicle_asset, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
+    @admin.display(description="Prev Day Orders (km)", ordering="total_yesterday_order_distance_annotated")
+    def yesterday_order_distance(self, obj):
+        val = getattr(obj, "total_yesterday_order_distance_annotated", 0)
         return round(val, 2) if val else 0.00
 
 
