@@ -42,6 +42,10 @@ class RiderViewSet(viewsets.ModelViewSet):
         "user", "vehicle_type", "vehicle_asset", "home_zone"
     )
     serializer_class = RiderSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
@@ -1059,6 +1063,10 @@ class MerchantViewSet(viewsets.ModelViewSet):
     from .serializers import MerchantSerializer
 
     serializer_class = MerchantSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
@@ -1190,6 +1198,10 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
 
     queryset = RelayNode.objects.all().select_related("zone").order_by("name")
     serializer_class = RelayNodeSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
