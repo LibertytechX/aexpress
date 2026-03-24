@@ -596,6 +596,7 @@ class Merchant(models.Model):
     acquisition_source = models.CharField(
         max_length=100,
         blank=True,
+        null=True,
         default="",
         help_text='How the merchant was acquired: "experiential", "referral", "organic"',
     )
