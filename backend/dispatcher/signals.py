@@ -15,7 +15,9 @@ def create_user_profile(sender, instance, created, **kwargs):
         elif instance.usertype == "Rider":
             Rider.objects.create(user=instance)
         elif instance.usertype == "Merchant":
-            Merchant.objects.create(user=instance)
+            Merchant.objects.create(
+                user=instance, acquisition_source=instance.registration_source
+            )
 
             # Trigger merchant-created webhook in background
             def _trigger_merchant_created():
