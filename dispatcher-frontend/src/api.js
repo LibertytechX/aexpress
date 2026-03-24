@@ -300,6 +300,7 @@ const normalizeOrder = (o) => ({
         riderName: leg.rider_name || null,
         suggestedRiderId: leg.suggested_rider_id || null,
         suggestedRiderName: leg.suggested_rider_name || null,
+        subOrderNumber: leg.sub_order_number || null,
     })),
     events: (o.events || []).map(ev => ({
         eventType: ev.event_type || ev.event || '',
@@ -308,6 +309,10 @@ const normalizeOrder = (o) => ({
         createdBy: ev.created_by || null,
         createdAt: ev.created_at || null,
     })),
+    sub_orders: o.sub_orders || [],
+    sub_order_numbers: o.sub_order_numbers || [],
+    parentOrderNumber: o.parent_order_number || null,
+    relayLegNumber: o.relay_leg_number || 0,
 });
 
 export const OrdersAPI = {

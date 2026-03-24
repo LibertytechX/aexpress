@@ -371,7 +371,9 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
-RELAY_THRESHOLD_KM = 18.0  # Orders longer than this are split via relay hubs
+MAX_RELAY_LEG_KM = 15.0
+RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
+RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
 
 
 def _nearest_rider_to(lat, lng):
@@ -391,10 +393,33 @@ def _nearest_rider_to(lat, lng):
     return best
 
 
-def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
-    """Greedy hop selection using haversine distance as a cheap proxy."""
+def _point_along_line(start, end, distance_km):
+    """Return an approximate point `distance_km` from start toward end."""
+    total = _haversine_km(start["lat"], start["lng"], end["lat"], end["lng"])
+    if total <= 0:
+        return {"lat": start["lat"], "lng": start["lng"]}
+
+    fraction = max(0.0, min(1.0, distance_km / total))
+    return {
+        "lat": start["lat"] + ((end["lat"] - start["lat"]) * fraction),
+        "lng": start["lng"] + ((end["lng"] - start["lng"]) * fraction),
+    }
+
+
+def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
+    """
+    Build a continuous relay-node chain from pickup to dropoff.
+
+    Preference order:
+    - prefer hubs reachable within `max_leg_km_est` from the current point;
+    - if none exist, fall back to the closest forward-moving hub;
+    - stop once the remaining distance to the dropoff is within the cap.
+    """
     nodes = _get_active_relay_nodes_cached()
     direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
+
+    if direct <= max_leg_km_est:
+        return []
 
     # Filter nodes roughly "near" the pickup→dropoff corridor (triangle inequality)
     filtered = []
@@ -407,45 +432,76 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
         d2 = _haversine_km(
             float(n.latitude), float(n.longitude), dropoff["lat"], dropoff["lng"]
         )
-        if (d1 + d2) <= (direct * 1.6):
+        if (d1 + d2) <= (direct * 1.5):
             filtered.append(n)
 
     hops = []
     cur = pickup
-    remaining = _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"])
+    remaining = direct
+    used_node_ids = set()
 
-    while remaining > max_leg_km_est:
-        best = None
-        best_remaining = None
+    while remaining > (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+        hop_index = len(hops)
+        target = _point_along_line(cur, dropoff, max_leg_km_est)
+        best_strict = None
+        best_strict_score = None
+        best_strict_remaining = None
+        best_fallback = None
+        best_fallback_score = None
+        best_fallback_remaining = None
+
         for n in filtered:
+            if n.id in used_node_ids:
+                continue
+
             n_lat, n_lng = float(n.latitude), float(n.longitude)
             leg = _haversine_km(cur["lat"], cur["lng"], n_lat, n_lng)
-            if leg > max_leg_km_est:
+            if leg <= 0:
                 continue
-            rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
-            # must make progress
-            if rem >= remaining - 1.0:
-                continue
-            if best is None or rem < best_remaining:
-                best = n
-                best_remaining = rem
 
-        if not best:
-            break
+            rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
+
+            # Must make forward progress and avoid obvious detours.
+            if rem >= remaining:
+                continue
+            if (leg + rem) > (remaining * 1.35):
+                continue
+
+            target_gap = _haversine_km(target["lat"], target["lng"], n_lat, n_lng)
+
+            if leg <= (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+                if hop_index == 0:
+                    score = (leg, target_gap, rem)
+                else:
+                    score = (target_gap, abs(max_leg_km_est - leg), rem)
+
+                if best_strict is None or score < best_strict_score:
+                    best_strict = n
+                    best_strict_score = score
+                    best_strict_remaining = rem
+                continue
+
+            fallback_score = (leg, target_gap, rem)
+            if best_fallback is None or fallback_score < best_fallback_score:
+                best_fallback = n
+                best_fallback_score = fallback_score
+                best_fallback_remaining = rem
+
+        best = best_strict or best_fallback
+        best_remaining = (
+            best_strict_remaining
+            if best_strict is not None
+            else best_fallback_remaining
+        )
+
+        if not best or best_remaining is None:
+            return None
 
         hops.append(best)
+        used_node_ids.add(best.id)
         cur = {"lat": float(best.latitude), "lng": float(best.longitude)}
         remaining = best_remaining
 
-        if len(hops) >= max_hops:
-            break
-
-    # If still far and we couldn't hop, signal failure by returning None
-    if (
-        _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"])
-        > max_leg_km_est
-    ):
-        return None
     return hops
 
 
@@ -731,14 +787,10 @@ def generate_relay_legs_sync(order_id):
                 first_delivery.dropoff_latitude = dropoff["lat"]
                 first_delivery.dropoff_longitude = dropoff["lng"]
 
-            # Build hop chain.
-            # Orders ≤ 18 km go direct (single leg, no hub handoffs).
-            # Orders > 18 km must pass through relay hubs — the algorithm
-            # tries progressively relaxed per-leg caps until a valid path
-            # is found or all caps are exhausted (→ fail).
-            # IMPORTANT: use explicit `is None` — an empty list [] means a
-            # valid direct single-leg delivery and must not trigger the
-            # fallback path.
+            # Build a continuous chain that prefers ~15km relay spacing.
+            # Orders within the cap go direct (single leg, no hub handoffs).
+            # Longer routes use relay hubs, falling back to the closest forward
+            # hub when no hub is available within the preferred cap.
             direct_km = _haversine_km(
                 float(pickup["lat"]),
                 float(pickup["lng"]),
@@ -746,19 +798,17 @@ def generate_relay_legs_sync(order_id):
                 float(dropoff["lng"]),
             )
             if direct_km <= RELAY_THRESHOLD_KM:
-                hop_nodes = []  # short enough — direct delivery, no hubs needed
+                hop_nodes = []
             else:
-                hop_nodes = None
-                for max_leg in [18.0, 25.0, 35.0, 50.0, 80.0]:
-                    hop_nodes = _build_greedy_relay_hops(
-                        pickup, dropoff, max_leg_km_est=max_leg
-                    )
-                    if hop_nodes is not None:
-                        break
+                hop_nodes = _build_greedy_relay_hops(
+                    pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM
+                )
 
             if hop_nodes is None:
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "Could not find relay hubs to split this route into manageable legs."
+                order.routing_error = (
+                    "Could not find a continuous relay-hub chain for this route."
+                )
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",
@@ -782,22 +832,6 @@ def generate_relay_legs_sync(order_id):
 
             if legs_metrics is None:
                 legs_metrics = _estimate_legs_haversine(pickup, points)
-
-            # Enforce 100km cap (best-effort; haversine fallback may exceed in real roads)
-            if any(d > 100.0 for d, _ in legs_metrics):
-                order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = (
-                    "One or more legs exceed 100km after routing validation."
-                )
-                order.save(update_fields=["routing_status", "routing_error"])
-                emit_activity(
-                    event_type="relay_route_failed",
-                    order_id=order.order_number,
-                    text=f"Relay route exceeds cap for {order.order_number}",
-                    color="red",
-                    metadata={"reason": order.routing_error},
-                )
-                return False
 
             # Clear and recreate legs (idempotent retries)
             order.legs.all().delete()
@@ -911,3 +945,182 @@ def generate_relay_legs_sync(order_id):
         except Exception:
             pass
         return False
+
+
+@shared_task
+def process_accepted_relay_route_task(order_id):
+    """
+    Background task to process an accepted relay route: create sub-orders,
+    assign riders, and send notifications.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+    from orders.models import Order, OrderLeg, Delivery
+    from riders.notifications import notify_rider
+    from riders.views import publish_order_assigned_event
+    from .utils import emit_activity
+    
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        logger.error(f"process_accepted_relay_route_task: Order {order_id} not found.")
+        return False
+
+    legs = list(
+        order.legs.select_related(
+            "start_relay_node",
+            "end_relay_node",
+            "suggested_rider",
+            "suggested_rider__user",
+        ).order_by("leg_number")
+    )
+
+    first_delivery = order.deliveries.first()
+    if not first_delivery:
+        logger.error(f"process_accepted_relay_route_task: Parent order {order_id} has no delivery record.")
+        return False
+
+    with transaction.atomic():
+        created_sub_orders = []
+
+        for leg in legs:
+            is_first_leg = leg.leg_number == 1
+            is_last_leg = leg.leg_number == len(legs)
+
+            # ── Pickup for this leg ───────────────────────────────────────
+            if is_first_leg:
+                # First leg always picks up from the original order origin.
+                pickup_address = order.pickup_address
+                pickup_lat = order.pickup_latitude
+                pickup_lng = order.pickup_longitude
+                pickup_sender_name = order.sender_name
+                pickup_sender_phone = order.sender_phone
+            else:
+                # Subsequent legs pick up from the previous leg's end relay node.
+                node = leg.start_relay_node
+                pickup_address = node.address
+                pickup_lat = node.latitude
+                pickup_lng = node.longitude
+                pickup_sender_name = node.name
+                pickup_sender_phone = ""
+
+            # ── Dropoff for this leg ──────────────────────────────────────
+            if is_last_leg:
+                # Last leg delivers to the original order destination.
+                dropoff_address = first_delivery.dropoff_address
+                dropoff_lat = first_delivery.dropoff_latitude
+                dropoff_lng = first_delivery.dropoff_longitude
+                receiver_name = first_delivery.receiver_name
+                receiver_phone = first_delivery.receiver_phone
+            else:
+                # Intermediate legs deliver to the leg's end relay node (hub).
+                node = leg.end_relay_node
+                dropoff_address = node.address
+                dropoff_lat = node.latitude
+                dropoff_lng = node.longitude
+                receiver_name = node.name
+                receiver_phone = ""
+
+            assigned_rider = leg.suggested_rider
+            sub_status = "Assigned" if assigned_rider else "Pending"
+
+            # ── Create the sub-order ──────────────────────────────────────
+            sub_order = Order.objects.create(
+                user=order.user,
+                rider=assigned_rider,
+                parent_order=order,
+                relay_leg_number=leg.leg_number,
+                mode=order.mode,
+                vehicle=order.vehicle,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                payment_method=order.payment_method,
+                payment_status="Pending",
+                total_amount=leg.rider_payout,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+                status=sub_status,
+                assigned_at=timezone.now() if assigned_rider else None,
+                notes=(
+                    f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
+                    f"for parent order {order.order_number}"
+                ),
+                is_relay_order=True,
+            )
+
+            # ── Create the delivery record for this sub-order ─────────────
+            Delivery.objects.create(
+                order=sub_order,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                dropoff_address=dropoff_address,
+                dropoff_latitude=dropoff_lat,
+                dropoff_longitude=dropoff_lng,
+                receiver_name=receiver_name,
+                receiver_phone=receiver_phone,
+                package_type=first_delivery.package_type,
+                notes=first_delivery.notes,
+                sequence=leg.leg_number,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+            )
+
+            # ── Assign suggested rider onto the leg itself ────────────────
+            leg.rider = assigned_rider
+            if assigned_rider:
+                leg.status = OrderLeg.Status.ASSIGNED
+                leg.assigned_at = timezone.now()
+            leg.save(update_fields=["rider", "status", "assigned_at"])
+
+            created_sub_orders.append((leg, sub_order))
+
+            # ── Notify the assigned rider ─────────────────────────────────
+            if assigned_rider:
+                try:
+                    notify_rider(
+                        rider=assigned_rider,
+                        title="Relay Leg Assigned 🔁",
+                        body=(
+                            f"You have been assigned Leg {leg.leg_number} of relay order "
+                            f"#{order.order_number}. Pick up from: {pickup_address}."
+                        ),
+                        data={
+                            "order_number": sub_order.order_number,
+                            "parent_order_number": order.order_number,
+                            "leg_number": str(leg.leg_number),
+                            "status": "Assigned",
+                        },
+                    )
+                    publish_order_assigned_event(sub_order, assigned_rider)
+                except Exception as exc:
+                    logger.warning(
+                        f"Relay leg assignment notification failed: {exc}"
+                    )
+
+    emit_activity(
+        event_type="relay_route_accepted",
+        order_id=order.order_number,
+        text=f"Relay route accepted for {order.order_number} — {len(legs)} sub-orders created",
+        color="green",
+        metadata={
+            "legs": len(legs),
+            "sub_orders": [sub.order_number for _, sub in created_sub_orders],
+        },
+    )
+
+    assigned_sub_ids = [
+        str(sub.id) for _, sub in created_sub_orders if sub.rider_id
+    ]
+    if assigned_sub_ids:
+        # call other celery task
+        notify_relay_vertical_leads.delay(
+            parent_order_number=order.order_number,
+            sub_order_ids=assigned_sub_ids,
+        )
+    return True

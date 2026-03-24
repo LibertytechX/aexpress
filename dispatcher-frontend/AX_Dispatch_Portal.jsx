@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
@@ -393,15 +393,12 @@ function DeliveryRouteMap({ order, rider }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+      directionsRendererRef.current = new window.google.maps.Polyline({
         map: map,
-        suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#E8A838',
-          strokeWeight: 4,
-          strokeOpacity: 0.7,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
-        }
+        strokeColor: '#E8A838',
+        strokeWeight: 4,
+        strokeOpacity: 0.7,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
       });
       setMapReady(true);
     };
@@ -439,7 +436,7 @@ function DeliveryRouteMap({ order, rider }) {
       // Clear previous markers and route
       markersRef.current.forEach(m => m.setMap(null));
       markersRef.current = [];
-      if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] });
+      if (directionsRendererRef.current) directionsRendererRef.current.setPath([]);
 
       const [pickupLoc, dropoffLoc] = await Promise.all([
         geocodeAddr(order.pickup),
@@ -473,24 +470,17 @@ function DeliveryRouteMap({ order, rider }) {
         }));
       }
 
-      // Draw route
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc,
-        destination: dropoffLoc,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        if (status === 'OK') {
-          directionsRendererRef.current.setDirections(result);
-        } else {
-          // Route failed — just fit bounds to markers
-          const bounds = new window.google.maps.LatLngBounds();
-          bounds.extend(pickupLoc);
-          bounds.extend(dropoffLoc);
-          if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
-          map.fitBounds(bounds, { padding: 40 });
-        }
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setPath([pickupLoc, dropoffLoc]);
+      }
+      
+      const bounds = new window.google.maps.LatLngBounds();
+      bounds.extend(pickupLoc);
+      bounds.extend(dropoffLoc);
+      if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
+      map.fitBounds(bounds, { padding: 40 });
+      setMapStatus('ready');
     })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
   }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
 
@@ -534,12 +524,10 @@ function RelayRouteMap({ order, riders }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      rendererRef.current = new window.google.maps.DirectionsRenderer({
-        map, suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
-        }
+      rendererRef.current = new window.google.maps.Polyline({
+        map,
+        strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
       });
       setMapReady(true);
     };
@@ -567,7 +555,7 @@ function RelayRouteMap({ order, riders }) {
     });
     (async () => {
       markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
-      if (rendererRef.current) rendererRef.current.setDirections({ routes: [] });
+      if (rendererRef.current) rendererRef.current.setPath([]);
 
       // Resolve pickup coordinates
       const pickupLoc = (order.pickupLat && order.pickupLng)
@@ -597,15 +585,12 @@ function RelayRouteMap({ order, riders }) {
       intermediateNodes.forEach(n => bounds.extend({ lat: n.lat, lng: n.lng }));
       map.fitBounds(bounds, { padding: 50 });
 
-      // Draw route through all waypoints
-      const waypoints = intermediateNodes.map(n => ({ location: new window.google.maps.LatLng(n.lat, n.lng), stopover: true }));
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc, destination: dropoffLoc, waypoints,
-        travelMode: window.google.maps.TravelMode.DRIVING, optimizeWaypoints: false,
-      }, (result, status) => {
-        if (status === 'OK' && rendererRef.current) rendererRef.current.setDirections(result);
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      const allPathNodes = [pickupLoc, ...intermediateNodes.map(n => new window.google.maps.LatLng(n.lat, n.lng)), dropoffLoc];
+      if (rendererRef.current) {
+        rendererRef.current.setPath(allPathNodes);
+      }
+      setMapStatus('ready');
 
       // Pickup marker (📦)
       markersRef.current.push(new window.google.maps.Marker({
@@ -1480,6 +1465,15 @@ export default function AXDispatchPortal() {
   const ordersPageRef = useRef(1);
   
   useEffect(() => { ordersPageRef.current = ordersPage; }, [ordersPage]);
+  const reloadOrders = async () => {
+    try {
+      const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+      if (res) {
+         setOrders(res.results || res);
+         if (res.count !== undefined) setTotalOrdersCount(res.count);
+      }
+    } catch (e) { /* ignore */ }
+  };
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [vehicleAssets, setVehicleAssets] = useState([]);
@@ -1912,7 +1906,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1928,7 +1922,7 @@ export default function AXDispatchPortal() {
         <button 
           onClick={() => setShowStaleModal(true)}
           style={{
-            position: "fixed", bottom: 32, right: 32, zIndex: 900,
+            position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 900,
             display: "flex", alignItems: "center", gap: 12, padding: "12px 20px",
             background: S.gold, color: S.navy, border: "none", borderRadius: 32,
             boxShadow: `0 8px 32px ${S.gold}60`, cursor: "pointer", animation: "stalePulseGlobal 2.5s infinite"
@@ -2205,9 +2199,14 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
+  const [expandedRows, setExpandedRows] = useState({});
+  const toggleExpand = (e, id) => {
+    e.stopPropagation();
+    setExpandedRows(p => ({ ...p, [id]: !p[id] }));
+  };
   const [search, setSearch] = useState("");
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
@@ -2305,6 +2304,90 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     { value: "month", label: "This Month" },
   ];
 
+  const renderOrderRow = (rowOrder, isChild = false, isLastChild = false) => {
+    const dt = formatOrderDateTime(rowOrder.created);
+    const psLower = (rowOrder.payment_status || "").toLowerCase();
+    const isPaid = psLower === "paid" || psLower === "success";
+    
+    return (
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+        <div
+          onClick={(e) => {
+            if (!isChild && rowOrder.isRelayOrder) toggleExpand(e, rowOrder.id);
+          }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            cursor: (!isChild && rowOrder.isRelayOrder) ? "pointer" : "default",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isChild && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, background: S.borderLight, padding: "2px 4px", borderRadius: 4 }}>
+                LEG {rowOrder.relayLegNumber || "-"}
+              </span>
+            )}
+            <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
+              {rowOrder.id}
+            </span>
+          </div>
+          {!isChild && rowOrder.isRelayOrder && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 4px",
+              borderRadius: 4,
+              background: S.purpleBg,
+              color: S.purple,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+            }}>
+              Relay
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                ›
+              </span>
+            </div>
+          )}
+        </div>
+        <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
+        <div><div style={{ fontSize: 12, fontWeight: 600 }}>{rowOrder.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{rowOrder.customerPhone}</div></div>
+        <span style={{ fontSize: 12, color: S.textDim }}>{rowOrder.merchant}</span>
+        <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowOrder.pickup.split(",")[0]} → {rowOrder.dropoff.split(",")[0]}</div>
+        <div>{rowOrder.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{rowOrder.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.waitingTime || "—"}</span>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.deliveryTime || "—"}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{rowOrder.totalOrderTime || "—"}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.amount.toLocaleString()}</div>
+          {rowOrder.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.pricePerKm.toFixed(0)}/km</div>}
+        </div>
+        <span style={{ fontSize: 11, color: rowOrder.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{rowOrder.cod > 0 ? `₦${(rowOrder.cod / 1000).toFixed(0)}K` : "—"}</span>
+        <div>
+          <button onClick={(e) => { e.stopPropagation(); onSelect(rowOrder.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+            <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
+          </button>
+        </div>
+        <div>
+          {isPaid ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+            </div>
+          )}
+        </div>
+        <Badge status={rowOrder.status} />
+      </div>
+    );
+  };
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
@@ -2339,6 +2422,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <span style={{ opacity: 0.4 }}>{I.search}</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
+        <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
         <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
       </div>
 
@@ -2350,47 +2434,59 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
               {filtered.map(o => {
-                const dt = formatOrderDateTime(o.created);
-                const psLower = (o.payment_status || "").toLowerCase();
-                const psStyle = psLower === "paid" || psLower === "success" ? { bg: S.greenBg, text: S.green } : psLower === "pending" ? { bg: S.goldPale, text: S.gold } : psLower === "failed" || psLower === "cancelled" ? { bg: S.redBg, text: S.red } : { bg: S.borderLight, text: S.textMuted };
-                const isPaid = psLower === "paid" || psLower === "success";
+                // Do not render sub-orders as top-level rows
+                if (o.parentOrderNumber) return null;
+
+                // Find all sub-orders of this parent
+                const childOrders = orders.filter(child => child.parentOrderNumber === String(o.id));
+                childOrders.sort((a, b) => (a.relayLegNumber || 0) - (b.relayLegNumber || 0));
 
                 return (
-                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
-                <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
-                <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
-                <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-                <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
-                  {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
-                </div>
-                <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                <div>
-                  <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
-                    <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
-                  </button>
-                </div>
-                <div>
-                  {isPaid ? (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
-                    </div>
-                  ) : (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
-                    </div>
-                  )}
-                </div>
-                <Badge status={o.status} />
-              </div>
-            );
-          })}
+                  <React.Fragment key={o.id}>
+                    {renderOrderRow(o, false, false)}
+                    {expandedRows[o.id] && o.isRelayOrder && (
+                      <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
+                        {childOrders.length > 0 ? (
+                          <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${S.border}`, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                            {childOrders.map((child, idx) => renderOrderRow(child, true, idx === childOrders.length - 1))}
+                          </div>
+                        ) : o.sub_orders && o.sub_orders.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+                              <span>Leg No.</span>
+                              <span>Order ID</span>
+                              <span>Created Date</span>
+                              <span>Assigned Rider</span>
+                              <span>Amount</span>
+                              <span style={{ textAlign: "center" }}>Status</span>
+                            </div>
+                            {o.sub_orders.map((sub) => (
+                              <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
+                                <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
+                                <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
+                                <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
+                                <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                                  {sub.rider ? (
+                                    <>
+                                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
+                                      <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
+                                    </>
+                                  ) : "—"}
+                                </span>
+                                <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
+                                <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
             </div>
             
@@ -3599,6 +3695,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [showReassignVehicle, setShowReassignVehicle] = useState(false);
   const [isTogglingDuty, setIsTogglingDuty] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
@@ -3747,10 +3844,10 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         <StatCard label="Deliveries Today" value={riders.reduce((s, r) => s + r.todayOrders, 0)} color={S.gold} />
       </div>
 
-      {/* 50/50 split: table (left) + map (right) */}
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+      {/* Full width table with floating Map button */}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
 
-        {/* Left – filters + table (50%) */}
+        {/* Top – filters + table */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -3764,7 +3861,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               {I.plus} Add Rider
             </button>
           </div>
-	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
 	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
 	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
 	            </div>
@@ -3790,12 +3887,45 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           </div>
         </div>
 
-        {/* Right – riders location map (50%) */}
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <RidersLocationMap riders={riders} />
-        </div>
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
 
       </div>
+
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Rider Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <RidersLocationMap riders={riders} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateRider && (
         <CreateRiderModal
@@ -4190,13 +4320,14 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const [search, setSearch] = useState("");
   const [showCreateVehicle, setShowCreateVehicle] = useState(false);
   const [detailVehicleId, setDetailVehicleId] = useState(null);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   const detailVehicle = detailVehicleId ? vehicles.find(v => v.id === detailVehicleId) : null;
 
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-		  const gridCols = "70px 90px 60px 60px 60px 80px 110px 110px 120px 80px 90px 80px";
+		  const gridCols = "70px 1.2fr 60px 1fr 1fr 80px 110px 110px 120px 80px 1.5fr 80px";
 	  const fmtDistance = (raw, unit) => {
 	    if (raw === null || raw === undefined || raw === "") return "—";
 	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -4214,7 +4345,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
         <StatCard label="With GPS" value={vehicles.filter(v => v.latitude && v.longitude).length} color={S.gold} />
       </div>
 
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -4253,10 +4384,44 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <VehiclesLocationMap vehicles={vehicles} />
-        </div>
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
       </div>
+
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Vehicle Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <VehiclesLocationMap vehicles={vehicles} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateVehicle && (
         <CreateVehicleModal
