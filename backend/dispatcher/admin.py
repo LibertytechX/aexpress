@@ -193,7 +193,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "rider_name",
         "rider_id",
         "status",
-        "home_zone",
+        "hub",
         "vehicle_type",
         "vehicle_asset",
         "rating",
@@ -206,7 +206,7 @@ class RiderAdmin(ImportExportModelAdmin):
     )
     list_filter = (
         "status",
-        "home_zone",
+        "hub__zone",
         "vehicle_type",
         "vehicle_asset__vehicle_type",
         "is_active",
@@ -218,7 +218,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "rider_id",
         "user__phone",
     )
-    autocomplete_fields = ("vehicle_asset", "home_zone")
+    autocomplete_fields = ("vehicle_asset", "hub")
     actions = ["assign_zone", "soft_delete_riders"]
 
     @admin.action(description="Soft delete selected riders")
@@ -232,37 +232,37 @@ class RiderAdmin(ImportExportModelAdmin):
             level=messages.SUCCESS,
         )
 
-    @admin.action(description="Assign selected riders to a zone")
+    @admin.action(description="Assign selected riders to a hub")
     def assign_zone(self, request, queryset):
         from django.shortcuts import render
         from django.http import HttpResponseRedirect
         from django import forms
         from django.contrib import messages
-        from .models import Zone
+        from .models import RelayNode
 
-        class AssignZoneForm(forms.Form):
+        class AssignHubForm(forms.Form):
             _selected_action = forms.CharField(widget=forms.MultipleHiddenInput)
-            zone = forms.ModelChoiceField(
-                queryset=Zone.objects.filter(is_active=True),
+            hub = forms.ModelChoiceField(
+                queryset=RelayNode.objects.filter(is_active=True),
                 required=True,
-                label="Target Zone",
+                label="Target Hub",
             )
 
         if "apply" in request.POST:
-            form = AssignZoneForm(request.POST)
+            form = AssignHubForm(request.POST)
             if form.is_valid():
-                zone = form.cleaned_data["zone"]
-                updated_count = queryset.update(home_zone=zone)
+                hub = form.cleaned_data["hub"]
+                updated_count = queryset.update(hub=hub)
                 self.message_user(
                     request,
-                    f"Successfully assigned {updated_count} riders to {zone.name}.",
+                    f"Successfully assigned {updated_count} riders to {hub.name}.",
                     level=messages.SUCCESS,
                 )
                 return HttpResponseRedirect(request.get_full_path())
         else:
             from django.contrib.admin import helpers
 
-            form = AssignZoneForm(
+            form = AssignHubForm(
                 initial={
                     "_selected_action": request.POST.getlist(
                         helpers.ACTION_CHECKBOX_NAME
@@ -274,7 +274,7 @@ class RiderAdmin(ImportExportModelAdmin):
         context.update(
             {
                 "form": form,
-                "title": "Assign Zone to Riders",
+                "title": "Assign Hub to Riders",
                 "queryset": queryset,
             }
         )

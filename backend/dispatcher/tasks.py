@@ -531,16 +531,17 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         logger.info("notify_relay_vertical_leads: no sub-orders provided, skipping.")
         return
 
-    # Fetch sub-orders with their assigned riders and home zones in one query.
+    # Fetch sub-orders with their assigned riders and hubs in one query.
     sub_orders = (
         Order.objects.filter(id__in=sub_order_ids)
         .select_related(
             "rider",
             "rider__user",
-            "rider__home_zone",
-            "rider__home_zone__vertical",
-            "rider__home_zone__vertical__lead",
-            "rider__home_zone__vertical__lead__user",
+            "rider__hub",
+            "rider__hub__zone",
+            "rider__hub__zone__vertical",
+            "rider__hub__zone__vertical__lead",
+            "rider__hub__zone__vertical__lead__user",
         )
         .order_by("relay_leg_number")
     )
@@ -554,20 +555,20 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         if not rider:
             continue
 
-        home_zone = rider.home_zone
-        if not home_zone or not home_zone.vertical:
+        hub = rider.hub
+        zone = hub.zone if hub else None
+        if not zone or not zone.vertical:
             logger.warning(
-                f"notify_relay_vertical_leads: rider {rider.rider_id} has no home zone "
+                f"notify_relay_vertical_leads: rider {rider.rider_id} has no hub/zone "
                 f"or vertical — skipping SMS for leg {sub.relay_leg_number}."
             )
             continue
 
-        # vertical = home_zone.vertical
         try:
-            vl = home_zone.zone_lead  # VerticalLead instance (OneToOne reverse)
+            vl = zone.zone_lead  # VerticalLead instance (OneToOne reverse)
         except VerticalLead.DoesNotExist:
             logger.warning(
-                f"notify_relay_vertical_leads: vertical '{vl.user.first_name}' has no lead — "
+                f"notify_relay_vertical_leads: zone '{zone.name}' has no lead — "
                 f"skipping SMS for rider {rider.rider_id}."
             )
             continue
