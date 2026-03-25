@@ -1009,3 +1009,95 @@ class RiderAssignmentTaskTests(TestCase):
         self.assertEqual(sub_order.status, "Assigned")
         self.assertEqual(leg.status, OrderLeg.Status.ASSIGNED)
 
+
+class OrderViewSetListTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from orders.models import Vehicle
+
+        self.user = User.objects.create_user(
+            phone="08011110000",
+            email="list_test@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.vehicle = Vehicle.objects.create(
+            name="Bike-List",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _create_orders(self, count):
+        from orders.models import Order, Delivery
+        for i in range(count):
+            order = Order.objects.create(
+                order_number=f"ORD{1000+i}",
+                user=self.user,
+                vehicle=self.vehicle,
+                pickup_address=f"Pickup {i}",
+                sender_name=f"Sender {i}",
+                sender_phone=f"080{i:08d}",
+                total_amount=Decimal("1000.00"),
+                payment_status="Pending",
+                status="Pending",
+            )
+            Delivery.objects.create(
+                order=order,
+                dropoff_address=f"Dropoff {i}",
+                receiver_name=f"Receiver {i}",
+                receiver_phone=f"090{i:08d}",
+            )
+
+    def test_list_paginated_by_default(self):
+        self._create_orders(110)
+        res = self.client.get("/api/dispatch/orders/")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("results", res.data)
+        self.assertEqual(len(res.data["results"]), 100)
+
+    def test_list_all_no_pagination(self):
+        self._create_orders(110)
+        res = self.client.get("/api/dispatch/orders/?all=true")
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn("results", res.data)
+        self.assertEqual(len(res.data), 110)
+
+    def test_list_filter_status(self):
+        from orders.models import Order
+        self._create_orders(10)
+        order = Order.objects.all().first()
+        order.status = "Done"
+        order.save()
+
+        res = self.client.get("/api/dispatch/orders/?status=Done")
+        self.assertEqual(res.status_code, 200)
+        # It's paginated since we didn't pass all=true
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["id"], order.order_number)
+
+    def test_list_filter_period_today(self):
+        from orders.models import Order
+        self._create_orders(5)
+        # Change one to yesterday
+        order = Order.objects.all().last()
+        order.created_at = timezone.now() - datetime.timedelta(days=1)
+        order.save()
+
+        res = self.client.get("/api/dispatch/orders/?period=today")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 4)
+
+    def test_list_filter_search(self):
+        self._create_orders(5)
+        res = self.client.get("/api/dispatch/orders/?search=ORD1002")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data["count"], 1)
+        self.assertEqual(res.data["results"][0]["id"], "ORD1002")

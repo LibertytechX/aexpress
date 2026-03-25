@@ -2223,6 +2223,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const [search, setSearch] = useState("");
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
+  const [loadingExport, setLoadingExport] = useState(false);
 
   const handlePayNow = async (order) => {
     if (order.paymentInfo) {
@@ -2289,25 +2290,42 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return true;
   });
 
-  const exportCSV = () => {
-    const esc = v => {
-      const s = v == null ? "" : String(v);
-      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
-    const rows = filtered.map(o => {
-      const dt = formatOrderDateTime(o.created);
-      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
-    });
-    const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
-    a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportCSV = async () => {
+    setLoadingExport(true);
+    try {
+      const res = await OrdersAPI.getAll({ 
+        all: "true", 
+        status: statusFilter, 
+        period: periodFilter, 
+        search: search 
+      }).catch(() => null);
+      
+      const dataToExport = res?.results || res || [];
+      
+      const esc = v => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
+      const rows = dataToExport.map(o => {
+        const dt = formatOrderDateTime(o.created);
+        return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
+      });
+      const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
+      a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Export failed:", e);
+      alert("Failed to export orders. Please try again.");
+    } finally {
+      setLoadingExport(false);
+    }
   };
 
   const PERIOD_OPTS = [
@@ -2341,6 +2359,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 LEG {rowOrder.relayLegNumber || "-"}
               </span>
             )}
+            {rowOrder.source === "merchant_web" ? (
+              <span title="Merchant Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.blue, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(59,130,246,0.3)" }}>M</span>
+            ) : rowOrder.source === "dispatcher_web" ? (
+              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>G</span>
+            ) : null}
             <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
               {rowOrder.id}
             </span>
