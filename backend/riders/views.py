@@ -12,6 +12,8 @@ from django.db import transaction
 
 from wallet.corebanking_service import generate_one_time_account
 from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
 
 from .serializers import (
     RiderLoginSerializer,
@@ -41,7 +43,7 @@ from .models import (
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
-from orders.models import Order
+from orders.models import Order, OrderEvent
 from orders.permissions import IsRider
 from dispatcher.utils import emit_activity
 from .notifications import notify_rider
@@ -162,9 +164,26 @@ class OrderOfferAcceptView(APIView):
 
             # 3. Order Assignment
             order.rider = rider
-            order.status = "Assigned"
+            order.status = "AssignmentAccepted"
             order.assigned_at = timezone.now()
-            order.save(update_fields=["rider", "status", "assigned_at", "updated_at"])
+            order.dispatcher_assigned = False
+            order.save(
+                update_fields=[
+                    "rider",
+                    "status",
+                    "assigned_at",
+                    "dispatcher_assigned",
+                    "updated_at",
+                ]
+            )
+
+            # 3.5 Log Event
+            OrderEvent.objects.create(
+                order=order,
+                event="assignment_accepted",
+                description=f"Rider {rider.rider_id} accepted the offer. Order status updated to AssignmentAccepted.",
+                created_by=request.user,
+            )
 
             # 4. COD Logic
             if order.collect_on_delivery:
@@ -1019,3 +1038,70 @@ class GenerateCODAccountView(APIView):
                 data={},
                 status_code=500,
             )
+
+
+class RiderAssignmentActionView(APIView):
+    """
+    API endpoint for riders to accept or reject an assignment.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @exception_advice()
+    def post(self, request, order_number):
+        action = request.data.get("action")
+        if action not in ["accept", "reject"]:
+            raise ServiceException(status_code=400, message="Invalid action. Use 'accept' or 'reject'.")
+
+        try:
+            order = Order.objects.get(order_number=order_number)
+        except Order.DoesNotExist:
+            raise ServiceException(status_code=404, message="Order not found.")
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(status_code=403, message="Authenticated user is not a driver.")
+
+        if order.rider != rider:
+            raise ServiceException(status_code=403, message="This order is not assigned to you.")
+
+        if action == "accept":
+            order.status = "AssignmentAccepted"
+            event_msg = f"Rider {rider.rider_id} accepted the assignment."
+            activity_text = f"Assignment accepted by rider {rider.rider_id}."
+            notif_title = "Assignment Accepted ✅"
+        else:
+            order.status = "AssignmentRejected"
+            order.rider = None  # Remove rider if rejected
+            event_msg = f"Rider {rider.rider_id} rejected the assignment."
+            activity_text = f"Assignment rejected by rider {rider.rider_id}."
+            notif_title = "Assignment Rejected ❌"
+
+        order.save(update_fields=["status", "rider", "updated_at"])
+
+        # Log Event
+        OrderEvent.objects.create(
+            order=order,
+            event=f"assignment_{action}ed",
+            description=event_msg,
+            created_by=request.user,
+        )
+
+        # Emit Activity
+        emit_activity(
+            event_type=f"assignment_{action}ed",
+            order_id=order.order_number,
+            text=activity_text,
+            color="blue" if action == "accept" else "red",
+            metadata={
+                "rider_id": str(rider.id),
+                "order_number": order.order_number,
+            },
+        )
+
+        return service_response(
+            status="success",
+            message=f"Assignment {action}ed successfully.",
+            data={"order_number": order.order_number, "status": order.status},
+            status_code=200,
+        )
