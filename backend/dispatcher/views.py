@@ -219,6 +219,28 @@ class OrderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset().order_by("-created_at")
 
+        user = self.request.user
+        role = getattr(user.dispatcher_profile, "role", None)
+        # if the dispatcher role is zone_lead
+        if role == "zone_lead":
+            try:
+                zone_lead = VerticalLead.objects.get(user=user)
+                zones = zone_lead.area_zones.all()
+                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+
+                # Filter orders:
+                # 1. Status is Pending
+                # 2. Assigned rider's hub is in my zones
+                # 3. Any relay leg starts/ends in my zones
+                qs = qs.filter(
+                    Q(status="Pending")
+                    | Q(rider__hub__in=relay_nodes)
+                    | Q(legs__start_relay_node__in=relay_nodes)
+                    | Q(legs__end_relay_node__in=relay_nodes)
+                ).distinct()
+            except VerticalLead.DoesNotExist:
+                pass
+
         paid_compete = self.request.query_params.get("paid_complete")
         unpaid_complete = self.request.query_params.get("unpaid_complete")
 
@@ -543,7 +565,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(order).data)
 
     @exception_advice()
-    @action(detail=True, methods=["get"])
+    @action(detail=True, methods=["get"], url_path="events")
     def events(self, request, order_number=None):
         """List all events for a particular order."""
         order = self.get_object()

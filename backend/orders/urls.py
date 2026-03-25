@@ -24,6 +24,7 @@ from .views import (
     OrderCompleteView,
     OrderStatusChangeView,
     OrderPayNowView,
+    OrderEventAPIView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -56,6 +57,7 @@ urlpatterns = [
         AssignedOrderDetailView.as_view(),
         name="assigned_order_detail",
     ),
+    path("<str:order_number>/events/", OrderEventAPIView.as_view(), name="order_events"),
     path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
     path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
     path("start/", OrderStartView.as_view(), name="order_start"),

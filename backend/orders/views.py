@@ -31,6 +31,8 @@ from wallet.corebanking_service import create_virtual_account
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
 from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from dispatcher.serializers import OrderEventSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -734,6 +736,28 @@ class OrderListView(APIView):
         return Response(
             {"success": True, "count": len(serializer.data), "orders": serializer.data},
             status=status.HTTP_200_OK,
+        )
+
+
+class OrderEventAPIView(APIView):
+    """
+    Order Event API View for listing the events for a particular order
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice()
+    def get(self, request, *args, **kwargs):
+        order_number = kwargs.get("order_number")
+        order = Order.objects.get(order_number=order_number)
+        events_queryset = order.events.all().order_by("-created_at")
+        serializer = OrderEventSerializer(events_queryset, many=True)
+
+        return service_response(
+            status="success",
+            message="Order events retrieved successfully",
+            data=serializer.data,
+            status_code=200,
         )
 
 
