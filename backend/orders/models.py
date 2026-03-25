@@ -358,6 +358,18 @@ class Order(models.Model):
         help_text="Amount the rider should collect from the customer (COD)",
     )
 
+    # Source detection
+    SOURCE_CHOICES = [
+        ("merchant_web", "Merchant Web"),
+        ("dispatcher_web", "Dispatcher Web"),
+    ]
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default="merchant_web",
+        help_text="Where the order was created from",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     payment_info = models.JSONField(null=True, blank=True)

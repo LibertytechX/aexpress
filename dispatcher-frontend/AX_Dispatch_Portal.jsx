@@ -2341,6 +2341,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 LEG {rowOrder.relayLegNumber || "-"}
               </span>
             )}
+            {rowOrder.source === "merchant_web" ? (
+              <span title="Merchant Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.blue, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(59,130,246,0.3)" }}>M</span>
+            ) : rowOrder.source === "dispatcher_web" ? (
+              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>G</span>
+            ) : null}
             <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
               {rowOrder.id}
             </span>

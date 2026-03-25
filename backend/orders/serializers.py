@@ -118,6 +118,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "delivery_count",
             "charge",
             "dispatcher_assigned",
+            "source",
         ]
         read_only_fields = ["id", "order_number", "created_at", "updated_at"]
 

@@ -396,6 +396,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "sub_order_numbers",
             "sub_orders",
             "dispatcher_assigned",
+            "source",
         ]
 
     def get_pickup_lat(self, obj):
@@ -836,6 +837,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             total_amount=total_amount,
             rider=rider_obj,
             dispatcher_assigned=True if rider_obj else False,
+            source="dispatcher_web",
             status="Assigned" if rider_obj else "Pending",
             distance_km=distance_km,
             duration_minutes=duration_minutes,
