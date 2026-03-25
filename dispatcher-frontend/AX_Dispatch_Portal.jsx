@@ -1978,6 +1978,7 @@ export default function AXDispatchPortal() {
           relayLegsCount: created.relayLegsCount || 0,
           relayLegs: created.relayLegs || [],
           suggestedRiderId: created.suggestedRiderId || null,
+          source: created.source || "dispatcher_web",
         };
         setOrders(p => [newOrder, ...p]);
       }} />}

@@ -313,6 +313,7 @@ const normalizeOrder = (o) => ({
     sub_order_numbers: o.sub_order_numbers || [],
     parentOrderNumber: o.parent_order_number || null,
     relayLegNumber: o.relay_leg_number || 0,
+    source: o.source || 'merchant_web',
 });
 
 export const OrdersAPI = {
