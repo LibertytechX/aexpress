@@ -200,6 +200,8 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
+        ("AssignmentAccepted", "Assignment Accepted"),
+        ("AssignmentRejected", "Assignment Rejected"),
         ("Started", "Started"),
         ("Pickup", "Pick Up"),
         ("Fulfilling", "Fulfilling"),
@@ -233,6 +235,10 @@ class Order(models.Model):
         null=True,
         blank=True,
         related_name="rider_orders",
+    )
+    dispatcher_assigned = models.BooleanField(
+        default=False,
+        help_text="True if the rider was manually assigned by a dispatcher",
     )
 
     # Order details

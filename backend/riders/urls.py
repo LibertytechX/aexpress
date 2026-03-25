@@ -20,6 +20,7 @@ from .views import (
     RiderNotificationDetailView,
     RiderNotificationMarkReadView,
     GenerateCODAccountView,
+    RiderAssignmentActionView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -58,6 +59,11 @@ urlpatterns = [
         "orders/<str:order_id>/",
         RiderOrderDetailView.as_view(),
         name="rider-order-detail",
+    ),
+    path(
+        "orders/<str:order_number>/assignment-action/",
+        RiderAssignmentActionView.as_view(),
+        name="rider-assignment-action",
     ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
     path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),

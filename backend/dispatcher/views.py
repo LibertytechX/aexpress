@@ -358,6 +358,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             rider = Rider.objects.get(rider_id=rider_id)
             order.rider = rider
             order.status = "Assigned"
+            order.dispatcher_assigned = True
             # if not getattr(order, "assigned_at", None):
             order.assigned_at = timezone.now()
             order.save()
@@ -435,7 +436,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         update_fields = ["status", "updated_at"]
         if new_status == "Assigned" and not getattr(order, "assigned_at", None):
             order.assigned_at = now
+            order.dispatcher_assigned = True
             update_fields.append("assigned_at")
+            update_fields.append("dispatcher_assigned")
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
@@ -643,7 +646,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                 sub_order.rider = rider
                 sub_order.status = "Assigned"
                 sub_order.assigned_at = timezone.now()
-                sub_order.save(update_fields=["rider", "status", "assigned_at"])
+                sub_order.dispatcher_assigned = True
+                sub_order.save(
+                    update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"]
+                )
                 rider_name = getattr(rider.user, "contact_name", None) or getattr(
                     rider.user, "phone", "Unknown"
                 )

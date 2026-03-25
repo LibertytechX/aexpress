@@ -368,7 +368,20 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" }, "Paid Complete": { bg: S.greenBg, text: S.green }, "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red } };
+const STS = {
+  Pending: { bg: S.yellowBg, text: S.yellow },
+  Assigned: { bg: S.blueBg, text: S.blue },
+  AssignmentAccepted: { bg: "rgba(59,130,246,0.15)", text: "#60A5FA" },
+  AssignmentRejected: { bg: "rgba(239,68,68,0.15)", text: "#F87171" },
+  "Picked Up": { bg: S.purpleBg, text: S.purple },
+  "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold },
+  "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" },
+  Delivered: { bg: S.greenBg, text: S.green },
+  Cancelled: { bg: S.redBg, text: S.red },
+  Failed: { bg: S.redBg, text: "#F87171" },
+  "Paid Complete": { bg: S.greenBg, text: S.green },
+  "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red }
+};
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -1882,7 +1895,7 @@ export default function AXDispatchPortal() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
-          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned", "AssignmentAccepted", "AssignmentRejected"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
@@ -2261,7 +2274,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 
   const periodOrders = orders.filter(inPeriod);
 
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
+  const tabs = ["All", "Pending", "Assigned", "AssignmentAccepted", "AssignmentRejected", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
   const filtered = periodOrders.filter(o => {
     if (statusFilter !== "All") {
       if (statusFilter === "Paid Complete") {
@@ -2536,7 +2549,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   // Status flow for progression
   const nextStatuses = () => {
-    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
+    const flow = ["Pending", "Assigned", "AssignmentAccepted", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
     const idx = flow.indexOf(order.status);
     const opts = [];
     if (idx >= 0 && idx < flow.length - 1) opts.push(flow[idx + 1]);
@@ -2642,6 +2655,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 12, color: S.textMuted }}>{order.created}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
+          {order.rider && (
+            order.dispatcher_assigned ? (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {I.check} DISPATCHER ASSIGNED
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.borderLight, color: S.textMuted, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                RIDER CLAIMED
+              </span>
+            )
+          )}
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -2681,7 +2705,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            {["Pending", "Assigned", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
+            {["Pending", "Assigned", "AssignmentAccepted", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
               // "Picked Up" is a transient state — treat it as "In Transit" on the bar
               const barStatus = order.status === "Picked Up" ? "In Transit" : order.status;
               const idx = arr.indexOf(barStatus);

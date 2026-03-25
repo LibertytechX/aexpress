@@ -1013,7 +1013,8 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     sub_order.rider = rider
     sub_order.status = "Assigned"
     sub_order.assigned_at = timezone.now()
-    sub_order.save(update_fields=["rider", "status", "assigned_at"])
+    sub_order.dispatcher_assigned = True
+    sub_order.save(update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"])
 
     leg.rider = rider
     leg.status = OrderLeg.Status.ASSIGNED
@@ -1137,6 +1138,7 @@ def process_accepted_relay_route_task(order_id):
                 rider=actual_rider,
                 parent_order=order,
                 relay_leg_number=leg.leg_number,
+                dispatcher_assigned=True,
                 mode=order.mode,
                 vehicle=order.vehicle,
                 pickup_address=pickup_address,
