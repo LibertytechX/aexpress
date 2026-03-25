@@ -550,9 +550,10 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         .order_by("relay_leg_number")
     )
 
-    # Build a mapping: VerticalLead → list of leg summaries
-    # Key: (lead_user_phone, lead_name)  — avoids loading the full object into a dict key
+    # Build mappings for Vertical Leads and Hub Captains
+    # Key: (phone, name)  — avoids loading the full object into a dict key
     lead_legs: dict[tuple, list[str]] = {}
+    captain_legs: dict[tuple, list[str]] = {}
 
     for sub in sub_orders:
         rider = sub.rider
@@ -560,49 +561,42 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             continue
 
         hub = rider.hub
-        zone = hub.zone if hub else None
-        if not zone or not zone.vertical:
-            logger.warning(
-                f"notify_relay_vertical_leads: rider {rider.rider_id} has no hub/zone "
-                f"or vertical — skipping SMS for leg {sub.relay_leg_number}."
-            )
-            continue
-
-        try:
-            vl = zone.zone_lead  # VerticalLead instance (OneToOne reverse)
-        except VerticalLead.DoesNotExist:
-            logger.warning(
-                f"notify_relay_vertical_leads: zone '{zone.name}' has no lead — "
-                f"skipping SMS for rider {rider.rider_id}."
-            )
-            continue
-
-        if not vl.is_active:
-            logger.info(
-                f"notify_relay_vertical_leads: lead for vertical '{vl.user.first_name}' is inactive, skipping."
-            )
-            continue
-
-        lead_phone = vl.user.phone
-        lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
-        rider_name = rider.user.contact_name if rider.user else rider.rider_id
-
+        rider_name = rider.user.contact_name if (rider.user and rider.user.contact_name) else rider.rider_id
         leg_summary = (
             f"Leg {sub.relay_leg_number}: {rider_name} ({rider.rider_id}) — "
             f"pickup: {sub.pickup_address}"
         )
 
-        key = (lead_phone, lead_name)
-        lead_legs.setdefault(key, []).append(leg_summary)
+        # 1. Collect data for Vertical Lead
+        zone = hub.zone if hub else None
+        if zone and zone.vertical:
+            try:
+                vl = zone.zone_lead
+                if vl and vl.is_active:
+                    lead_phone = vl.user.phone
+                    lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
+                    key = (lead_phone, lead_name)
+                    lead_legs.setdefault(key, []).append(leg_summary)
+            except VerticalLead.DoesNotExist:
+                pass
 
-    if not lead_legs:
+        # 2. Collect data for Hub Captain
+        if hub and hub.hub_captain_phone:
+            captain_phone = hub.hub_captain_phone
+            captain_name = hub.hub_captain_name or "Captain"
+            c_key = (captain_phone, captain_name)
+            captain_legs.setdefault(c_key, []).append(leg_summary)
+
+    if not lead_legs and not captain_legs:
         logger.info(
-            "notify_relay_vertical_leads: no eligible vertical leads found, no SMS sent."
+            "notify_relay_vertical_leads: no eligible leads or captains found, no SMS sent."
         )
         return
 
     sent = 0
     failed = 0
+
+    # Send consolidated SMS to Vertical Leads
     for (phone, name), legs in lead_legs.items():
         legs_text = "\n".join(f"  • {lg}" for lg in legs)
         message = (
@@ -611,19 +605,28 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             f"{legs_text}\n"
             f"Please ensure your riders are ready for pickup."
         )
-
-        ok = send_sms(phone, message)
-        if ok:
+        if send_sms(phone, message):
             sent += 1
-            logger.info(
-                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone}) "
-                f"for {len(legs)} leg(s)."
-            )
+            logger.info(f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone})")
         else:
             failed += 1
-            logger.error(
-                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})."
-            )
+            logger.error(f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})")
+
+    # Send consolidated SMS to Hub Captains
+    for (phone, name), legs in captain_legs.items():
+        legs_text = "\n".join(f"  • {lg}" for lg in legs)
+        message = (
+            f"AX Relay Alert — Order #{parent_order_number}\n"
+            f"Hi {name}, {len(legs)} rider(s) from your hub have been assigned relay leg(s):\n"
+            f"{legs_text}\n"
+            f"Please ensure your riders are ready."
+        )
+        if send_sms(phone, message):
+            sent += 1
+            logger.info(f"notify_relay_vertical_leads: SMS sent to hub captain {name} ({phone})")
+        else:
+            failed += 1
+            logger.error(f"notify_relay_vertical_leads: SMS FAILED for hub captain {name} ({phone})")
 
     logger.info(
         f"notify_relay_vertical_leads: done for order #{parent_order_number} — "
@@ -957,7 +960,7 @@ def generate_relay_legs_sync(order_id):
 
 
 @shared_task
-def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id):
+def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     """
     Background task to assign a rider to a sub-order and relay leg, 
     and send the corresponding notification.
@@ -974,9 +977,33 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id):
     try:
         sub_order = Order.objects.select_related("parent_order").get(id=sub_order_id)
         leg = OrderLeg.objects.get(id=leg_id)
-        rider = Rider.objects.get(id=rider_id)
+        
+        if rider_id:
+            rider = Rider.objects.get(id=rider_id)
+        else:
+            # Dynamically find the nearest rider at this moment
+            start_lat = float(sub_order.pickup_latitude)
+            start_lng = float(sub_order.pickup_longitude)
+            prev_node = leg.start_relay_node
+            
+            logger.info(f"assign_rider_to_sub_order_task: Searching for nearest rider for sub-order {sub_order_id} at ({start_lat}, {start_lng})")
+            
+            try:
+                rider = None
+                if prev_node:
+                    rider = _nearest_rider_to(start_lat, start_lng, hub=prev_node)
+                if not rider:
+                    rider = _nearest_rider_to(start_lat, start_lng)
+            except Exception as e:
+                logger.error(f"assign_rider_to_sub_order_task: Error searching for rider: {e}")
+                rider = None
+                
+            if not rider:
+                logger.warning(f"assign_rider_to_sub_order_task: No available rider found for sub-order {sub_order_id}")
+                return False
+                
     except Exception as exc:
-        logger.error(f"assign_rider_to_sub_order_task: missing relation {exc}")
+        logger.error(f"assign_rider_to_sub_order_task: missing relation or error: {exc}")
         return False
 
     if sub_order.rider or sub_order.status not in ["Pending", "assigning"]:
@@ -1188,7 +1215,7 @@ def process_accepted_relay_route_task(order_id):
                 else:
                     eta_time = timezone.now() + timezone.timedelta(minutes=cumulative_duration_minutes)
                     assign_rider_to_sub_order_task.apply_async(
-                        args=[str(sub_order.id), str(leg.id), str(assigned_rider.id)],
+                        args=[str(sub_order.id), str(leg.id), None],
                         eta=eta_time
                     )
             
