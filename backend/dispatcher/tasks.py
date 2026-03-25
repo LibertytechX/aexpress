@@ -376,13 +376,17 @@ RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
 RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
 
 
-def _nearest_rider_to(lat, lng):
+def _nearest_rider_to(lat, lng, hub=None):
     """Return the nearest authorized rider (with GPS) to (lat, lng)."""
-    riders = Rider.objects.filter(
-        is_authorized=True,
-        current_latitude__isnull=False,
-        current_longitude__isnull=False,
-    )
+    filters = {
+        "is_authorized": True,
+        "current_latitude__isnull": False,
+        "current_longitude__isnull": False,
+    }
+    if hub:
+        filters["hub"] = hub
+
+    riders = Rider.objects.filter(**filters)
     best, best_d = None, None
     for r in riders[:200]:
         d = _haversine_km(
@@ -853,7 +857,11 @@ def generate_relay_legs_sync(order_id):
                     start_lng = float(prev_node.longitude)
 
                 try:
-                    suggested = _nearest_rider_to(start_lat, start_lng)
+                    suggested = None
+                    if prev_node:
+                        suggested = _nearest_rider_to(start_lat, start_lng, hub=prev_node)
+                    if not suggested:
+                        suggested = _nearest_rider_to(start_lat, start_lng)
                 except Exception:
                     suggested = None
 
@@ -949,6 +957,70 @@ def generate_relay_legs_sync(order_id):
 
 
 @shared_task
+def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id):
+    """
+    Background task to assign a rider to a sub-order and relay leg, 
+    and send the corresponding notification.
+    """
+    from django.utils import timezone
+    from orders.models import Order, OrderLeg
+    from riders.notifications import notify_rider
+    from riders.views import publish_order_assigned_event
+    from dispatcher.models import Rider
+    import logging
+
+    logger = logging.getLogger(__name__)
+    
+    try:
+        sub_order = Order.objects.select_related("parent_order").get(id=sub_order_id)
+        leg = OrderLeg.objects.get(id=leg_id)
+        rider = Rider.objects.get(id=rider_id)
+    except Exception as exc:
+        logger.error(f"assign_rider_to_sub_order_task: missing relation {exc}")
+        return False
+
+    if sub_order.rider or sub_order.status not in ["Pending", "assigning"]:
+        logger.info(f"assign_rider_to_sub_order_task: Sub-order {sub_order_id} already has a rider or is not Pending.")
+        return False
+
+    sub_order.rider = rider
+    sub_order.status = "Assigned"
+    sub_order.assigned_at = timezone.now()
+    sub_order.save(update_fields=["rider", "status", "assigned_at"])
+
+    leg.rider = rider
+    leg.status = OrderLeg.Status.ASSIGNED
+    leg.assigned_at = timezone.now()
+    leg.save(update_fields=["rider", "status", "assigned_at"])
+
+    try:
+        notify_rider(
+            rider=rider,
+            title="Relay Leg Assigned 🔁",
+            body=(
+                f"You have been assigned Leg {leg.leg_number} of relay order "
+                f"#{sub_order.parent_order.order_number}. Pick up from: {sub_order.pickup_address}."
+            ),
+            data={
+                "order_number": sub_order.order_number,
+                "parent_order_number": sub_order.parent_order.order_number,
+                "leg_number": str(leg.leg_number),
+                "status": "Assigned",
+            },
+        )
+        publish_order_assigned_event(sub_order, rider)
+    except Exception as exc:
+        logger.warning(f"Relay leg assignment notification failed: {exc}")
+        
+    notify_relay_vertical_leads.delay(
+        parent_order_number=sub_order.parent_order.order_number,
+        sub_order_ids=[str(sub_order.id)],
+    )
+
+    return True
+
+
+@shared_task
 def process_accepted_relay_route_task(order_id):
     """
     Background task to process an accepted relay route: create sub-orders,
@@ -983,6 +1055,7 @@ def process_accepted_relay_route_task(order_id):
 
     with transaction.atomic():
         created_sub_orders = []
+        cumulative_duration_minutes = 0
 
         for leg in legs:
             is_first_leg = leg.leg_number == 1
@@ -1023,12 +1096,18 @@ def process_accepted_relay_route_task(order_id):
                 receiver_phone = ""
 
             assigned_rider = leg.suggested_rider
-            sub_status = "Assigned" if assigned_rider else "Pending"
+            
+            if is_first_leg:
+                sub_status = "Assigned" if assigned_rider else "Pending"
+                actual_rider = assigned_rider
+            else:
+                sub_status = "Pending"
+                actual_rider = None
 
             # ── Create the sub-order ──────────────────────────────────────
             sub_order = Order.objects.create(
                 user=order.user,
-                rider=assigned_rider,
+                rider=actual_rider,
                 parent_order=order,
                 relay_leg_number=leg.leg_number,
                 mode=order.mode,
@@ -1044,7 +1123,7 @@ def process_accepted_relay_route_task(order_id):
                 distance_km=leg.distance_km,
                 duration_minutes=leg.duration_minutes,
                 status=sub_status,
-                assigned_at=timezone.now() if assigned_rider else None,
+                assigned_at=timezone.now() if actual_rider else None,
                 notes=(
                     f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
                     f"for parent order {order.order_number}"
@@ -1073,36 +1152,47 @@ def process_accepted_relay_route_task(order_id):
             )
 
             # ── Assign suggested rider onto the leg itself ────────────────
-            leg.rider = assigned_rider
-            if assigned_rider:
+            leg.rider = actual_rider
+            if actual_rider:
                 leg.status = OrderLeg.Status.ASSIGNED
                 leg.assigned_at = timezone.now()
+            else:
+                leg.status = "Pending"
             leg.save(update_fields=["rider", "status", "assigned_at"])
 
             created_sub_orders.append((leg, sub_order))
 
-            # ── Notify the assigned rider ─────────────────────────────────
+            # ── Notify the assigned rider or schedule it ─────────────────
             if assigned_rider:
-                try:
-                    notify_rider(
-                        rider=assigned_rider,
-                        title="Relay Leg Assigned 🔁",
-                        body=(
-                            f"You have been assigned Leg {leg.leg_number} of relay order "
-                            f"#{order.order_number}. Pick up from: {pickup_address}."
-                        ),
-                        data={
-                            "order_number": sub_order.order_number,
-                            "parent_order_number": order.order_number,
-                            "leg_number": str(leg.leg_number),
-                            "status": "Assigned",
-                        },
+                if is_first_leg:
+                    try:
+                        notify_rider(
+                            rider=assigned_rider,
+                            title="Relay Leg Assigned 🔁",
+                            body=(
+                                f"You have been assigned Leg {leg.leg_number} of relay order "
+                                f"#{order.order_number}. Pick up from: {pickup_address}."
+                            ),
+                            data={
+                                "order_number": sub_order.order_number,
+                                "parent_order_number": order.order_number,
+                                "leg_number": str(leg.leg_number),
+                                "status": "Assigned",
+                            },
+                        )
+                        publish_order_assigned_event(sub_order, assigned_rider)
+                    except Exception as exc:
+                        logger.warning(
+                            f"Relay leg assignment notification failed: {exc}"
+                        )
+                else:
+                    eta_time = timezone.now() + timezone.timedelta(minutes=cumulative_duration_minutes)
+                    assign_rider_to_sub_order_task.apply_async(
+                        args=[str(sub_order.id), str(leg.id), str(assigned_rider.id)],
+                        eta=eta_time
                     )
-                    publish_order_assigned_event(sub_order, assigned_rider)
-                except Exception as exc:
-                    logger.warning(
-                        f"Relay leg assignment notification failed: {exc}"
-                    )
+            
+            cumulative_duration_minutes += leg.duration_minutes
 
     emit_activity(
         event_type="relay_route_accepted",
