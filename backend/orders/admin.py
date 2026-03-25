@@ -330,7 +330,16 @@ class OrderAdmin(ImportExportModelAdmin):
     fieldsets = (
         (
             "Order Information",
-            {"fields": ("order_number", "user", "mode", "status", "rider")},
+            {
+                "fields": (
+                    "order_number",
+                    "user",
+                    "mode",
+                    "status",
+                    "rider",
+                    "payment_status",
+                )
+            },
         ),
         (
             "Pickup Details",
