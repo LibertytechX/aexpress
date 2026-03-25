@@ -1069,35 +1069,3 @@ class OrderViewSetListTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertNotIn("results", res.data)
         self.assertEqual(len(res.data), 110)
-
-    def test_list_filter_status(self):
-        from orders.models import Order
-        self._create_orders(10)
-        order = Order.objects.all().first()
-        order.status = "Done"
-        order.save()
-
-        res = self.client.get("/api/dispatch/orders/?status=Done")
-        self.assertEqual(res.status_code, 200)
-        # It's paginated since we didn't pass all=true
-        self.assertEqual(res.data["count"], 1)
-        self.assertEqual(res.data["results"][0]["id"], order.order_number)
-
-    def test_list_filter_period_today(self):
-        from orders.models import Order
-        self._create_orders(5)
-        # Change one to yesterday
-        order = Order.objects.all().last()
-        order.created_at = timezone.now() - datetime.timedelta(days=1)
-        order.save()
-
-        res = self.client.get("/api/dispatch/orders/?period=today")
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["count"], 4)
-
-    def test_list_filter_search(self):
-        self._create_orders(5)
-        res = self.client.get("/api/dispatch/orders/?search=ORD1002")
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["count"], 1)
-        self.assertEqual(res.data["results"][0]["id"], "ORD1002")

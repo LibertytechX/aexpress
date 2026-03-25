@@ -1978,6 +1978,7 @@ export default function AXDispatchPortal() {
           relayLegsCount: created.relayLegsCount || 0,
           relayLegs: created.relayLegs || [],
           suggestedRiderId: created.suggestedRiderId || null,
+          source: created.source || "dispatcher_web",
         };
         setOrders(p => [newOrder, ...p]);
       }} />}
@@ -2293,13 +2294,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const exportCSV = async () => {
     setLoadingExport(true);
     try {
-      const res = await OrdersAPI.getAll({ 
-        all: "true", 
-        status: statusFilter, 
-        period: periodFilter, 
-        search: search 
-      }).catch(() => null);
-      
+      const res = await OrdersAPI.getAll({ all: "true" }).catch(() => null);
       const dataToExport = res?.results || res || [];
       
       const esc = v => {
@@ -2316,8 +2311,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
-      a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `all_orders_${new Date().toISOString().slice(0, 10)}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -2459,7 +2453,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
-        <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
+        <button onClick={exportCSV} disabled={loadingExport} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: loadingExport ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "inherit", opacity: loadingExport ? 0.7 : 1 }}>
+          {loadingExport ? "Preparing..." : <>{I.download} Export All ({totalOrdersCount})</>}
+        </button>
       </div>
 
       <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
