@@ -169,8 +169,12 @@ async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): 
 // --- API Modules ---
 
 export const AuthAPI = {
-  signup: async (userData: any): Promise<AuthResponse> => {
-    const response = await apiRequest<AuthResponse>('/auth/signup/', {
+  signup: async (userData: any, source?: string): Promise<AuthResponse> => {
+    let url = '/auth/signup/';
+    if (source) {
+      url += `?source=${encodeURIComponent(source)}`;
+    }
+    const response = await apiRequest<AuthResponse>(url, {
       method: 'POST',
       body: JSON.stringify(userData),
       skipAuth: true,

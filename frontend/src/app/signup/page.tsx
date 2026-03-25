@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Phone, Mail, Lock, Building, MapPin,
@@ -49,6 +49,8 @@ const slides = [
 
 export default function SignupPage() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const source = searchParams.get('source');
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -99,7 +101,7 @@ export default function SignupPage() {
                 password: pass,
                 confirm_password: confirmPass,
                 address: address
-            });
+            }, source || undefined);
 
             if (response.success) {
                 // If it auto-logged in (no OTP required by backend actually), we'd just go to Step 4.
