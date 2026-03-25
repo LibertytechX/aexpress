@@ -803,8 +803,9 @@ class GenerateRelayLegsSyncTests(TestCase):
 
         rider_calls = []
 
-        def record_rider_lookup(lat, lng):
-            rider_calls.append((float(lat), float(lng)))
+        def record_rider_lookup(lat, lng, hub=None):
+            if hub is None:
+                rider_calls.append((float(lat), float(lng)))
             return None
 
         nearest_rider_mock.side_effect = record_rider_lookup
