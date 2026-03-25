@@ -11,6 +11,7 @@ from django.utils import timezone
 from decimal import Decimal
 from .models import Order, Delivery, Vehicle, OrderEvent
 from .utils import calculate_route
+from .pricing import calculate_effective_fare
 from .serializers import (
     OrderSerializer,
     VehicleSerializer,
@@ -43,13 +44,33 @@ class VehicleListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Get all active vehicles with pricing."""
-        vehicles = Vehicle.objects.filter(is_active=True)
-        serializer = VehicleSerializer(vehicles, many=True)
+        """Get all active vehicles with pricing, applying merchant overrides if present."""
+        from .models import MerchantPricingOverride
 
-        return Response(
-            {"success": True, "vehicles": serializer.data}, status=status.HTTP_200_OK
-        )
+        vehicles = Vehicle.objects.filter(is_active=True)
+        results = []
+
+        for vehicle in vehicles:
+            # Check for merchant override
+            override = MerchantPricingOverride.objects.filter(
+                merchant=request.user, vehicle=vehicle, is_active=True
+            ).first()
+
+            v_data = VehicleSerializer(vehicle).data
+
+            if override:
+                # Apply override to serialized data
+                if override.flat_fee is not None:
+                    v_data["base_fare"] = float(override.flat_fee)
+                    v_data["rate_per_km"] = 0.0
+                    v_data["rate_per_minute"] = 0.0
+                    v_data["pricing_tiers"] = None
+                elif override.pricing_tiers:
+                    v_data["pricing_tiers"] = override.pricing_tiers
+
+            results.append(v_data)
+
+        return Response({"success": True, "vehicles": results}, status=status.HTTP_200_OK)
 
 
 class VehicleUpdateView(generics.UpdateAPIView):
@@ -118,10 +139,12 @@ class QuickSendView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
+        total_amount = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
 
         # Create order
         order = Order.objects.create(
@@ -315,11 +338,13 @@ class MultiDropView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
         total_amount = unit_fare * num_deliveries
 
         # Create order
@@ -492,11 +517,13 @@ class BulkImportView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
         total_amount = unit_fare * num_deliveries
 
         # Create order
@@ -869,8 +896,8 @@ class CalculateFareView(APIView):
             )
 
         try:
-            total_amount = vehicle.calculate_fare(
-                float(distance_km), int(duration_minutes)
+            total_amount = calculate_effective_fare(
+                request.user, vehicle, float(distance_km), int(duration_minutes)
             )
 
             return Response(
@@ -939,7 +966,9 @@ class BulkCalculateFareView(APIView):
                 dur_mins = route_data["duration_minutes"]
 
                 for vehicle in vehicles:
-                    fare = vehicle.calculate_fare(dist_km, dur_mins)
+                    fare = calculate_effective_fare(
+                        request.user, vehicle, dist_km, dur_mins
+                    )
                     results[vehicle.name] = {
                         "price": fare,
                         "distance_km": dist_km,
@@ -968,7 +997,9 @@ class BulkCalculateFareView(APIView):
                         "fares": {},
                     }
                     for vehicle in vehicles:
-                        fare = vehicle.calculate_fare(dist_km, dur_mins)
+                        fare = calculate_effective_fare(
+                            request.user, vehicle, dist_km, dur_mins
+                        )
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
