@@ -957,7 +957,7 @@ def generate_relay_legs_sync(order_id):
 
 
 @shared_task
-def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id):
+def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     """
     Background task to assign a rider to a sub-order and relay leg, 
     and send the corresponding notification.
@@ -974,9 +974,33 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id):
     try:
         sub_order = Order.objects.select_related("parent_order").get(id=sub_order_id)
         leg = OrderLeg.objects.get(id=leg_id)
-        rider = Rider.objects.get(id=rider_id)
+        
+        if rider_id:
+            rider = Rider.objects.get(id=rider_id)
+        else:
+            # Dynamically find the nearest rider at this moment
+            start_lat = float(sub_order.pickup_latitude)
+            start_lng = float(sub_order.pickup_longitude)
+            prev_node = leg.start_relay_node
+            
+            logger.info(f"assign_rider_to_sub_order_task: Searching for nearest rider for sub-order {sub_order_id} at ({start_lat}, {start_lng})")
+            
+            try:
+                rider = None
+                if prev_node:
+                    rider = _nearest_rider_to(start_lat, start_lng, hub=prev_node)
+                if not rider:
+                    rider = _nearest_rider_to(start_lat, start_lng)
+            except Exception as e:
+                logger.error(f"assign_rider_to_sub_order_task: Error searching for rider: {e}")
+                rider = None
+                
+            if not rider:
+                logger.warning(f"assign_rider_to_sub_order_task: No available rider found for sub-order {sub_order_id}")
+                return False
+                
     except Exception as exc:
-        logger.error(f"assign_rider_to_sub_order_task: missing relation {exc}")
+        logger.error(f"assign_rider_to_sub_order_task: missing relation or error: {exc}")
         return False
 
     if sub_order.rider or sub_order.status not in ["Pending", "assigning"]:
@@ -1188,7 +1212,7 @@ def process_accepted_relay_route_task(order_id):
                 else:
                     eta_time = timezone.now() + timezone.timedelta(minutes=cumulative_duration_minutes)
                     assign_rider_to_sub_order_task.apply_async(
-                        args=[str(sub_order.id), str(leg.id), str(assigned_rider.id)],
+                        args=[str(sub_order.id), str(leg.id), None],
                         eta=eta_time
                     )
             

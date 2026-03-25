@@ -914,3 +914,98 @@ class GenerateRelayLegsSyncTests(TestCase):
         self.assertEqual(order.routing_status, order.RoutingStatus.FAILED)
         self.assertEqual(order.legs.count(), 0)
         self.assertIn("relay-hub chain", order.routing_error.lower())
+
+
+class RiderAssignmentTaskTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from dispatcher.models import Rider, RelayNode
+        from orders.models import Vehicle
+
+        self.user = User.objects.create_user(
+            phone="08011110000",
+            email="testuser@example.com",
+            password="password",
+        )
+        self.vehicle = Vehicle.objects.create(
+            name="Bike-Test",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+        
+        # Create a hub
+        self.hub = RelayNode.objects.create(
+            name="Test Hub",
+            latitude=6.5,
+            longitude=3.3,
+            address="Test Hub Address",
+            is_active=True
+        )
+        
+        # Create a rider near the hub
+        self.rider_user = User.objects.create_user(
+            phone="08022220000",
+            email="rider@example.com",
+            password="password",
+            usertype="Rider"
+        )
+        self.rider = Rider.objects.create(
+            user=self.rider_user,
+            rider_id="R123",
+            current_latitude=6.501,
+            current_longitude=3.301,
+            is_authorized=True,
+            hub=self.hub
+        )
+
+    @patch("riders.notifications.notify_rider")
+    @patch("riders.views.publish_order_assigned_event")
+    @patch("dispatcher.tasks.notify_relay_vertical_leads.delay")
+    def test_assign_rider_dynamically(self, mock_notify_leads, mock_publish, mock_notify):
+        from orders.models import Order, OrderLeg
+        from dispatcher.tasks import assign_rider_to_sub_order_task
+        
+        # Create a parent order and a sub-order
+        parent = Order.objects.create(
+            order_number="P100",
+            user=self.user,
+            vehicle=self.vehicle,
+            is_relay_order=True,
+            pickup_address="Origin",
+            pickup_latitude=6.4,
+            pickup_longitude=3.2
+        )
+        sub_order = Order.objects.create(
+            order_number="S101",
+            user=self.user,
+            parent_order=parent,
+            vehicle=self.vehicle,
+            pickup_latitude=6.5,
+            pickup_longitude=3.3,
+            status="Pending",
+            pickup_address="Hub Address"
+        )
+        leg = OrderLeg.objects.create(
+            order=parent,
+            leg_number=2,
+            start_relay_node=self.hub,
+            status="Pending"
+        )
+        
+        # Run task with rider_id=None
+        success = assign_rider_to_sub_order_task(str(sub_order.id), str(leg.id), None)
+        
+        self.assertTrue(success)
+        sub_order.refresh_from_db()
+        leg.refresh_from_db()
+        
+        self.assertEqual(sub_order.rider, self.rider)
+        self.assertEqual(leg.rider, self.rider)
+        self.assertEqual(sub_order.status, "Assigned")
+        self.assertEqual(leg.status, OrderLeg.Status.ASSIGNED)
+
