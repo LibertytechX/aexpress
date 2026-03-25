@@ -248,44 +248,11 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         paid_complete = self.request.query_params.get("paid_complete")
         unpaid_complete = self.request.query_params.get("unpaid_complete")
-        status_filter = self.request.query_params.get("status")
-        period_filter = self.request.query_params.get("period")
-        search = self.request.query_params.get("search")
 
         if paid_complete:
             qs = qs.filter(payment_status="Paid", status="Done")
         if unpaid_complete:
             qs = qs.filter(payment_status="Pending", status="Done")
-
-        if status_filter and status_filter != "All":
-            if status_filter == "Paid Complete":
-                qs = qs.filter(payment_status="Paid", status="Done")
-            elif status_filter == "Unpaid Complete":
-                qs = qs.filter(payment_status="Pending", status="Done")
-            else:
-                qs = qs.filter(status=status_filter)
-
-        if period_filter and period_filter != "all":
-            now = timezone.now()
-            if period_filter == "today":
-                qs = qs.filter(created_at__date=now.date())
-            elif period_filter == "week":
-                week_start = now - datetime.timedelta(days=now.weekday())
-                qs = qs.filter(created_at__gte=week_start.replace(hour=0, minute=0, second=0))
-            elif period_filter == "month":
-                month_start = now.replace(day=1, hour=0, minute=0, second=0)
-                qs = qs.filter(created_at__gte=month_start)
-
-        if search:
-            qs = qs.filter(
-                Q(order_number__icontains=search)
-                | Q(sender_name__icontains=search)
-                | Q(sender_phone__icontains=search)
-                | Q(user__business_name__icontains=search)
-                | Q(user__phone__icontains=search)
-                | Q(deliveries__receiver_name__icontains=search)
-                | Q(deliveries__receiver_phone__icontains=search)
-            ).distinct()
 
         # Always prefetch relay legs so the list endpoint returns them too.
         # This keeps relayLegs alive through 60-second auto-refreshes.
