@@ -6,6 +6,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 *.docx
+
+# Local documentation (Claude instructions)
+CLAUDE.md
+GEMINI.md
+
 # Package manager lock files (optional - uncomment if needed)
 # package-lock.json
 # yarn.lock
