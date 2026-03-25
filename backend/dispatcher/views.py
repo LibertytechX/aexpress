@@ -543,7 +543,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(order).data)
 
     @exception_advice()
-    @action(detail=True, methods=["get"])
+    @action(detail=True, methods=["get"], url_path="events")
     def events(self, request, order_number=None):
         """List all events for a particular order."""
         order = self.get_object()
