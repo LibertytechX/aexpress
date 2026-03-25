@@ -43,21 +43,25 @@ class VehicleAssetAdmin(admin.ModelAdmin):
 
 class RiderResource(resources.ModelResource):
     rider_name = fields.Field(column_name="Rider Name")
-    yesterday_completed_order_count = fields.Field(column_name="Yesterday Completed Orders")
-    total_amount_for_previous_day = fields.Field(column_name="Previous Day Total Amount")
+    yesterday_completed_order_count = fields.Field(
+        column_name="Yesterday Completed Orders"
+    )
+    total_amount_for_previous_day = fields.Field(
+        column_name="Previous Day Total Amount"
+    )
     yesterday_distance_covered = fields.Field(column_name="Previous Day Distance (km)")
     yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
 
     class Meta:
         model = Rider
         fields = (
-            "rider_id", 
-            "status", 
-            "rating", 
-            "total_deliveries", 
-            "is_active", 
-            "rider_name", 
-            "yesterday_completed_order_count", 
+            "rider_id",
+            "status",
+            "rating",
+            "total_deliveries",
+            "is_active",
+            "rider_name",
+            "yesterday_completed_order_count",
             "total_amount_for_previous_day",
             "yesterday_distance_covered",
             "yesterday_order_distance",
@@ -74,11 +78,10 @@ class RiderResource(resources.ModelResource):
             from django.utils import timezone
             from datetime import timedelta
             from orders.models import Order
+
             yesterday = timezone.now().date() - timedelta(days=1)
             return Order.objects.filter(
-                rider=rider,
-                status="Done",
-                completed_at__date=yesterday
+                rider=rider, status="Done", completed_at__date=yesterday
             ).count()
 
     def dehydrate_total_amount_for_previous_day(self, rider):
@@ -89,12 +92,11 @@ class RiderResource(resources.ModelResource):
             from datetime import timedelta
             from orders.models import Order
             from django.db.models import Sum
+
             yesterday = timezone.now().date() - timedelta(days=1)
             val = Order.objects.filter(
-                rider=rider,
-                status="Done",
-                completed_at__date=yesterday
-            ).aggregate(total=Sum('total_amount'))['total']
+                rider=rider, status="Done", completed_at__date=yesterday
+            ).aggregate(total=Sum("total_amount"))["total"]
         return round(val, 2) if val else 0.00
 
     def dehydrate_yesterday_order_distance(self, rider):
@@ -104,19 +106,19 @@ class RiderResource(resources.ModelResource):
     def dehydrate_yesterday_distance_covered(self, rider):
         if not rider.vehicle_asset:
             return 0.00
-            
+
         from django.utils import timezone
         from datetime import timedelta
         from django.core.cache import cache
         from .models import VehicleTracking
-        
+
         yesterday = timezone.now().date() - timedelta(days=1)
         cache_key = f"yesterday_distance_{rider.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
 
         cached_distance = cache.get(cache_key)
         if cached_distance is not None:
             return round(cached_distance, 2) if cached_distance else 0.00
-            
+
         trackings = VehicleTracking.objects.filter(
             vehicle_asset=rider.vehicle_asset, created_at__date=yesterday
         ).order_by("created_at")
@@ -138,29 +140,27 @@ class RiderResource(resources.ModelResource):
         from django.db.models import Count, Sum, Q
 
         yesterday = timezone.now().date() - timedelta(days=1)
-        
+
         qs = qs.annotate(
             yesterday_completed_order_count_annotated=Count(
                 "rider_orders",
                 filter=Q(
-                    rider_orders__status="Done", 
-                    rider_orders__completed_at__date=yesterday
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
                 ),
-                distinct=True
+                distinct=True,
             ),
             total_amount_for_previous_day_annotated=Sum(
                 "rider_orders__total_amount",
                 filter=Q(
-                    rider_orders__status="Done", 
-                    rider_orders__completed_at__date=yesterday
-                )
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
             ),
             total_yesterday_order_distance_annotated=Sum(
                 "rider_orders__distance_km",
-                filter=Q(
-                    rider_orders__created_at__date=yesterday
-                )
-            )
+                filter=Q(rider_orders__created_at__date=yesterday),
+            ),
         )
         return qs
 
@@ -287,29 +287,27 @@ class RiderAdmin(ImportExportModelAdmin):
         from django.db.models import Count, Sum, Q
 
         yesterday = timezone.now().date() - timedelta(days=1)
-        
+
         qs = qs.annotate(
             yesterday_completed_order_count_annotated=Count(
                 "rider_orders",
                 filter=Q(
-                    rider_orders__status="Done", 
-                    rider_orders__completed_at__date=yesterday
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
                 ),
-                distinct=True
+                distinct=True,
             ),
             total_amount_for_previous_day_annotated=Sum(
                 "rider_orders__total_amount",
                 filter=Q(
-                    rider_orders__status="Done", 
-                    rider_orders__completed_at__date=yesterday
-                )
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
             ),
             total_yesterday_order_distance_annotated=Sum(
                 "rider_orders__distance_km",
-                filter=Q(
-                    rider_orders__created_at__date=yesterday
-                )
-            )
+                filter=Q(rider_orders__created_at__date=yesterday),
+            ),
         )
         return qs
 
@@ -317,11 +315,17 @@ class RiderAdmin(ImportExportModelAdmin):
     def rider_name(self, obj):
         return obj.user.get_full_name()
 
-    @admin.display(description="Yesterday Completed Orders", ordering="yesterday_completed_order_count_annotated")
+    @admin.display(
+        description="Yesterday Completed Orders",
+        ordering="yesterday_completed_order_count_annotated",
+    )
     def yesterday_completed_order_count(self, obj):
         return getattr(obj, "yesterday_completed_order_count_annotated", 0)
 
-    @admin.display(description="Prev Day Total Amount", ordering="total_amount_for_previous_day_annotated")
+    @admin.display(
+        description="Prev Day Total Amount",
+        ordering="total_amount_for_previous_day_annotated",
+    )
     def total_amount_for_previous_day(self, obj):
         val = getattr(obj, "total_amount_for_previous_day_annotated", 0)
         return round(val, 2) if val else 0.00
@@ -330,19 +334,19 @@ class RiderAdmin(ImportExportModelAdmin):
     def yesterday_distance_covered(self, obj):
         if not obj.vehicle_asset:
             return 0.00
-            
+
         from django.utils import timezone
         from datetime import timedelta
         from django.core.cache import cache
         from .models import VehicleTracking
-        
+
         yesterday = timezone.now().date() - timedelta(days=1)
         cache_key = f"yesterday_distance_{obj.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
 
         cached_distance = cache.get(cache_key)
         if cached_distance is not None:
             return round(cached_distance, 2) if cached_distance else 0.00
-            
+
         trackings = VehicleTracking.objects.filter(
             vehicle_asset=obj.vehicle_asset, created_at__date=yesterday
         ).order_by("created_at")
@@ -357,7 +361,10 @@ class RiderAdmin(ImportExportModelAdmin):
         cache.set(cache_key, distance, 60 * 60 * 24)
         return round(distance, 2)
 
-    @admin.display(description="Prev Day Orders (km)", ordering="total_yesterday_order_distance_annotated")
+    @admin.display(
+        description="Prev Day Orders (km)",
+        ordering="total_yesterday_order_distance_annotated",
+    )
     def yesterday_order_distance(self, obj):
         val = getattr(obj, "total_yesterday_order_distance_annotated", 0)
         return round(val, 2) if val else 0.00
@@ -365,7 +372,7 @@ class RiderAdmin(ImportExportModelAdmin):
 
 @admin.register(DispatcherProfile)
 class DispatcherProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "created_at")
+    list_display = ("user", "role", "created_at")
     search_fields = (
         "user__first_name",
         "user__last_name",
@@ -382,8 +389,26 @@ class MerchantResource(resources.ModelResource):
 
     class Meta:
         model = Merchant
-        fields = ("name", "email", "phone", "last_login", "merchant_id", "activity_status", "acquisition_source", "created_at")
-        export_order = ("name", "email", "phone", "merchant_id", "activity_status", "acquisition_source", "created_at", "last_login")
+        fields = (
+            "name",
+            "email",
+            "phone",
+            "last_login",
+            "merchant_id",
+            "activity_status",
+            "acquisition_source",
+            "created_at",
+        )
+        export_order = (
+            "name",
+            "email",
+            "phone",
+            "merchant_id",
+            "activity_status",
+            "acquisition_source",
+            "created_at",
+            "last_login",
+        )
 
     def dehydrate_name(self, merchant):
         return merchant.user.get_full_name()
