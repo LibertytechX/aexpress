@@ -17,6 +17,7 @@ from .models import (
     Zone,
     RelayNode,
     VehicleAsset,
+    VerticalLead,
     Vertical,
     RiderDutyLog,
 )
@@ -33,6 +34,7 @@ from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
+from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -48,9 +50,22 @@ class RiderViewSet(viewsets.ModelViewSet):
         ServiceAPIKeyAuthentication,
         *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
     ]
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcher]
 
     def get_queryset(self):
+        user = self.request.user
+        role = user.dispatcher_profile.role
+        # if the dispatcher role is zone_lead
+        if role == "zone_lead":
+            try:
+                zone_lead = VerticalLead.objects.get(user=user)
+                zones = zone_lead.area_zones.all()
+                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+                return Rider.objects.filter(hub__in=relay_nodes).select_related(
+                    "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
+                )
+            except VerticalLead.DoesNotExist:
+                pass
         return Rider.objects.all().select_related(
             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
@@ -191,14 +206,14 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     serializer_class = OrderSerializer
     pagination_class = OrderPagination
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcher]
 
     def get_serializer_class(self):
         if self.action == "create":
             return self.OrderCreateSerializer
         return self.OrderSerializer
 
-    permission_classes = [permissions.IsAuthenticated]
+    # permission_classes = [permissions.IsAuthenticated]
     lookup_field = "order_number"
 
     def get_queryset(self):
@@ -533,10 +548,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         """List all events for a particular order."""
         order = self.get_object()
         events_queryset = order.events.all().order_by("-created_at")
-        
+
         from .serializers import OrderEventSerializer
+
         serializer = OrderEventSerializer(events_queryset, many=True)
-        
+
         return service_response(
             status="success",
             message="Order events retrieved successfully",
@@ -624,11 +640,15 @@ class OrderViewSet(viewsets.ModelViewSet):
                 # Notify the newly assigned rider
                 try:
                     from riders.notifications import notify_rider
+
                     notify_rider(
                         rider=rider,
                         title="Relay Leg Assigned 🔁",
                         body=f"You have been assigned Leg {leg_number} of relay order #{order.order_number}. Pick up from: {sub_order.pickup_address}.",
-                        data={"order_number": sub_order.order_number, "status": "Assigned"},
+                        data={
+                            "order_number": sub_order.order_number,
+                            "status": "Assigned",
+                        },
                     )
                     publish_order_assigned_event(sub_order, rider)
                 except Exception as exc:
@@ -727,6 +747,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Trigger the celery task asynchronously to create sub-orders
         from .tasks import process_accepted_relay_route_task
+
         process_accepted_relay_route_task.delay(str(order.id))
 
         # Re-fetch with all relations so the serializer returns the full picture.

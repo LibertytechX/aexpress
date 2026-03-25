@@ -819,6 +819,7 @@ class VerticalLead(models.Model):
         on_delete=models.CASCADE,
         related_name="vertical_lead_profile",
     )
+    # deprecated
     vertical = models.OneToOneField(
         Vertical, on_delete=models.CASCADE, related_name="lead"
     )
