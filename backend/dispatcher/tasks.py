@@ -550,9 +550,10 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         .order_by("relay_leg_number")
     )
 
-    # Build a mapping: VerticalLead → list of leg summaries
-    # Key: (lead_user_phone, lead_name)  — avoids loading the full object into a dict key
+    # Build mappings for Vertical Leads and Hub Captains
+    # Key: (phone, name)  — avoids loading the full object into a dict key
     lead_legs: dict[tuple, list[str]] = {}
+    captain_legs: dict[tuple, list[str]] = {}
 
     for sub in sub_orders:
         rider = sub.rider
@@ -560,49 +561,42 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             continue
 
         hub = rider.hub
-        zone = hub.zone if hub else None
-        if not zone or not zone.vertical:
-            logger.warning(
-                f"notify_relay_vertical_leads: rider {rider.rider_id} has no hub/zone "
-                f"or vertical — skipping SMS for leg {sub.relay_leg_number}."
-            )
-            continue
-
-        try:
-            vl = zone.zone_lead  # VerticalLead instance (OneToOne reverse)
-        except VerticalLead.DoesNotExist:
-            logger.warning(
-                f"notify_relay_vertical_leads: zone '{zone.name}' has no lead — "
-                f"skipping SMS for rider {rider.rider_id}."
-            )
-            continue
-
-        if not vl.is_active:
-            logger.info(
-                f"notify_relay_vertical_leads: lead for vertical '{vl.user.first_name}' is inactive, skipping."
-            )
-            continue
-
-        lead_phone = vl.user.phone
-        lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
-        rider_name = rider.user.contact_name if rider.user else rider.rider_id
-
+        rider_name = rider.user.contact_name if (rider.user and rider.user.contact_name) else rider.rider_id
         leg_summary = (
             f"Leg {sub.relay_leg_number}: {rider_name} ({rider.rider_id}) — "
             f"pickup: {sub.pickup_address}"
         )
 
-        key = (lead_phone, lead_name)
-        lead_legs.setdefault(key, []).append(leg_summary)
+        # 1. Collect data for Vertical Lead
+        zone = hub.zone if hub else None
+        if zone and zone.vertical:
+            try:
+                vl = zone.zone_lead
+                if vl and vl.is_active:
+                    lead_phone = vl.user.phone
+                    lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
+                    key = (lead_phone, lead_name)
+                    lead_legs.setdefault(key, []).append(leg_summary)
+            except VerticalLead.DoesNotExist:
+                pass
 
-    if not lead_legs:
+        # 2. Collect data for Hub Captain
+        if hub and hub.hub_captain_phone:
+            captain_phone = hub.hub_captain_phone
+            captain_name = hub.hub_captain_name or "Captain"
+            c_key = (captain_phone, captain_name)
+            captain_legs.setdefault(c_key, []).append(leg_summary)
+
+    if not lead_legs and not captain_legs:
         logger.info(
-            "notify_relay_vertical_leads: no eligible vertical leads found, no SMS sent."
+            "notify_relay_vertical_leads: no eligible leads or captains found, no SMS sent."
         )
         return
 
     sent = 0
     failed = 0
+
+    # Send consolidated SMS to Vertical Leads
     for (phone, name), legs in lead_legs.items():
         legs_text = "\n".join(f"  • {lg}" for lg in legs)
         message = (
@@ -611,19 +605,28 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             f"{legs_text}\n"
             f"Please ensure your riders are ready for pickup."
         )
-
-        ok = send_sms(phone, message)
-        if ok:
+        if send_sms(phone, message):
             sent += 1
-            logger.info(
-                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone}) "
-                f"for {len(legs)} leg(s)."
-            )
+            logger.info(f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone})")
         else:
             failed += 1
-            logger.error(
-                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})."
-            )
+            logger.error(f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})")
+
+    # Send consolidated SMS to Hub Captains
+    for (phone, name), legs in captain_legs.items():
+        legs_text = "\n".join(f"  • {lg}" for lg in legs)
+        message = (
+            f"AX Relay Alert — Order #{parent_order_number}\n"
+            f"Hi {name}, {len(legs)} rider(s) from your hub have been assigned relay leg(s):\n"
+            f"{legs_text}\n"
+            f"Please ensure your riders are ready."
+        )
+        if send_sms(phone, message):
+            sent += 1
+            logger.info(f"notify_relay_vertical_leads: SMS sent to hub captain {name} ({phone})")
+        else:
+            failed += 1
+            logger.error(f"notify_relay_vertical_leads: SMS FAILED for hub captain {name} ({phone})")
 
     logger.info(
         f"notify_relay_vertical_leads: done for order #{parent_order_number} — "
