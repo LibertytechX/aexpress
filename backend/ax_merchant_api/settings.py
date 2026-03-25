@@ -42,9 +42,11 @@ ALLOWED_HOSTS = os.getenv(
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.auth",
+    # Local apps (must come before admin since we use custom User model)
+    "authentication",
+    "django.contrib.admin",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -56,7 +58,6 @@ INSTALLED_APPS = [
     "django_redis",
     "import_export",
     # Local apps
-    "authentication",
     "orders",
     "wallet",
     "bot",
@@ -65,6 +66,7 @@ INSTALLED_APPS = [
     "webhooks",
     "referrals",
     "chats",
+    "whatsapp_messaging",
 ]
 
 MIDDLEWARE = [
@@ -374,6 +376,9 @@ BOT_API_KEY = os.getenv("BOT_API_KEY", "")
 # respond.io Integration
 RESPOND_IO_API_KEY = os.getenv("RESPOND_IO_API_KEY", "")
 RESPOND_IO_BASE_URL = os.getenv("RESPOND_IO_BASE_URL", "https://api.respond.io/v2")
+
+# 360Messenger WhatsApp API
+MESSENGER360_API_KEY = os.getenv("MESSENGER360_API_KEY", "")
 
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
