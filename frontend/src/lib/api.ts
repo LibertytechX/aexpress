@@ -2,7 +2,7 @@
 const API_BASE_URL = 'https://www.orders.axpress.net/api';
 // const API_BASE_URL = 'http://147.182.251.211/api';
 
-// --- Interfaces ---
+// --- Interfaces ----
 
 export interface User {
   id: number;
