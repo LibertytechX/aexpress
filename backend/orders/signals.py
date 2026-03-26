@@ -74,6 +74,20 @@ def on_order_completed(sender, instance, created, **kwargs):
         from referrals.services import fire_referral_commission
 
         fire_referral_commission(instance)
+
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+
+    # 4. Fire buddy referral commission (LibertyPay)
+    try:
+        if instance.user.referral_code:
+            from referrals.tasks import send_buddy_referral_commission_task
+
+            send_buddy_referral_commission_task.delay(
+                instance.user.referral_code, instance.order_number
+            )
     except Exception:
         import traceback
 

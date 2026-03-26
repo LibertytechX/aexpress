@@ -3,6 +3,15 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+2: 
+3: ## [2026-03-26] — Buddy Referral Commission (LibertyPay)
+4: 
+5: ### Added
+6: - `send_buddy_referral_commission_task` Celery task to send commissions to LibertyPay users via external API.
+7: - `LIBERTYPAY_TRANSACTION_PIN` setting for authorizing buddy commission transfers.
+8: - Integration with `on_order_completed` signal to automatically trigger buddy commissions when a merchant with a referral code completes an order.
+9: 
+10: ---
 
 ## [2026-03-26] — Dispatcher Assignment Visibility Fix
 
