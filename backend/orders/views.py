@@ -1270,8 +1270,11 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     # Proximity check for pickup actions
     if new_status in ["PickedUp", "Fulfilling"]:
-        lat = ser.validated_data.get("latitude")
-        lng = ser.validated_data.get("longitude")
+        # let's just use the rider's known location instead
+        # lat = ser.validated_data.get("latitude")
+        # lng = ser.validated_data.get("longitude")
+        lat = request.user.rider_profile.current_latitude
+        lng = request.user.rider_profile.current_longitude
 
         if lat is None or lng is None:
             return service_response(
