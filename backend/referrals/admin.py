@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import RiderReferral, ReferralEarning
+from .models import RiderReferral, ReferralEarning, LibertyPayUser
 
 
 class ReferralEarningInline(admin.TabularInline):
@@ -40,3 +40,18 @@ class ReferralEarningAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return False  # Created only via the commission service
+
+
+@admin.register(LibertyPayUser)
+class LibertyPayUserAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "username",
+        "email",
+        "phone_number",
+        "referral_code",
+        "date_joined",
+    )
+    search_fields = ("username", "email", "phone_number", "referral_code")
+    list_filter = ("date_joined", "last_login")
+    readonly_fields = ("created_at", "updated_at")

@@ -40,6 +40,7 @@ db.sqlite3-journal
 media/
 staticfiles/
 static/
+libertypay_user.json
 
 # Migrations (optional - uncomment if you want to ignore migrations)
 # */migrations/*.py
