@@ -3,6 +3,19 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+
+## [2026-03-26] — Transaction Admin Balance Tracking & Charge Soft Delete
+
+### Added
+- `is_active` field to `Charge` model to support soft deletion.
+- `soft_delete_charges` action to `ChargeAdmin` for deactivating charges.
+
+### Changed
+- Added `balance_before` and `balance_after` to the `list_display` of `TransactionAdmin` for better visibility of wallet balance changes.
+- Updated `ChargeAdmin` to display `is_active` and include it in filters.
+
+---
+
 2: 
 3: ## [2026-03-26] — Order Status Fix Management Command
 4: 

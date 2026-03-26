@@ -65,7 +65,16 @@ class WalletAdmin(admin.ModelAdmin):
 
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
-    list_display = ["reference", "wallet", "type", "amount", "status", "created_at"]
+    list_display = [
+        "reference",
+        "wallet",
+        "type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "status",
+        "created_at",
+    ]
     search_fields = [
         "reference",
         "paystack_reference",
@@ -185,8 +194,8 @@ class WebhookLogAdmin(admin.ModelAdmin):
 
 @admin.register(Charge)
 class ChargeAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "order", "amount", "status", "created_at"]
-    list_filter = ["status", "created_at"]
+    list_display = ["id", "user", "order", "amount", "status", "is_active", "created_at"]
+    list_filter = ["status", "is_active", "created_at"]
     search_fields = [
         "user__email",
         "user__phone",
@@ -196,12 +205,24 @@ class ChargeAdmin(admin.ModelAdmin):
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["-created_at"]
-    actions = ["debit_and_complete_charge"]
+    actions = ["debit_and_complete_charge", "soft_delete_charges"]
 
     fieldsets = (
-        ("Charge Information", {"fields": ("id", "user", "order", "amount", "status")}),
+        (
+            "Charge Information",
+            {"fields": ("id", "user", "order", "amount", "status", "is_active")},
+        ),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+    @admin.action(description="Soft delete selected charges")
+    def soft_delete_charges(self, request, queryset):
+        """Deactivate selected charges."""
+        updated = queryset.update(is_active=False)
+        self.message_user(
+            request,
+            f"Successfully deactivated {updated} charges.",
+        )
 
     @admin.action(description="Debit wallet, complete charge, and set order to paid")
     def debit_and_complete_charge(self, request, queryset):
