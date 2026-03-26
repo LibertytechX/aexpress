@@ -314,6 +314,7 @@ const normalizeOrder = (o) => ({
     parentOrderNumber: o.parent_order_number || null,
     relayLegNumber: o.relay_leg_number || 0,
     source: o.source || 'merchant_web',
+    dispatcher_assigned: o.dispatcher_assigned || false,
 });
 
 export const OrdersAPI = {

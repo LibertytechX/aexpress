@@ -62,6 +62,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True, db_index=True)
     address = models.TextField(null=True, blank=True)
     registration_source = models.CharField(max_length=100, null=True, blank=True)
+    referral_code = models.CharField(max_length=100, null=True, blank=True)
 
     # Status fields
     is_active = models.BooleanField(default=True)

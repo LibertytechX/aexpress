@@ -1821,7 +1821,7 @@ export default function AXDispatchPortal() {
     const r = riders.find(x => x.id === rid); if (!r) return;
     try {
       await OrdersAPI.assignRider(oid, rid);
-      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned" });
+      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned", dispatcher_assigned: true });
 	      // Allow assigning even if rider is already fulfilling another ride.
 	      // Don't overwrite an existing currentOrder (it represents the *active* ride).
 	      setRiders(p => p.map(x => {
@@ -1850,7 +1850,7 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns });
+        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
         addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
 	        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
@@ -2675,7 +2675,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
           {order.rider && (
-            order.dispatcher_assigned ? (
+            order.dispatcher_assigned === true ? (
               <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
                 {I.check} DISPATCHER ASSIGNED
               </span>

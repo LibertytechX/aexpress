@@ -15,8 +15,21 @@ def create_user_profile(sender, instance, created, **kwargs):
         elif instance.usertype == "Rider":
             Rider.objects.create(user=instance)
         elif instance.usertype == "Merchant":
+            referral_code = getattr(instance, "referral_code", None)
+            acquisition_source = instance.registration_source
+
+            if referral_code:
+                from referrals.models import LibertyPayUser
+
+                if LibertyPayUser.objects.filter(referral_code=referral_code).exists():
+                    acquisition_source = "referral"
+                else:
+                    referral_code = None
+
             Merchant.objects.create(
-                user=instance, acquisition_source=instance.registration_source
+                user=instance,
+                acquisition_source=acquisition_source,
+                referral_code=referral_code,
             )
 
             # Trigger merchant-created webhook in background

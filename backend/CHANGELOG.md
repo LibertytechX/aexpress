@@ -4,6 +4,25 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-26] — Dispatcher Assignment Visibility Fix
+
+### Fixed
+- UI bug where dispatcher-assigned orders were incorrectly labeled as "RIDER CLAIMED".
+- Missing `dispatcher_assigned` field in frontend `normalizeOrder` function.
+- Local state update in `assignRider` and `changeStatus` now correctly reflects dispatcher assignment status.
+
+---
+
+## [2026-03-26] — Merchant Referral Registration
+
+### Added
+- Optional `referral_code` field to merchant signup endpoint.
+- `referral_code` field to `User` and `Merchant` models.
+- Database index on `LibertyPayUser.referral_code` for faster lookups.
+- Logic to automatically link merchants to `LibertyPayUser` referrals during registration.
+
+---
+
 ## [2026-03-26] — LibertyPay User Synchronization
 
 ### Added
