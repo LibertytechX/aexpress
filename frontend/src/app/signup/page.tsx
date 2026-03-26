@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Phone, Mail, Lock, Building, MapPin,
     ArrowRight, Loader2, Eye, EyeOff, Check,
-    Package, Zap, Shield, ChevronLeft, Gift
+    Package, Shield, ChevronLeft, Gift
 } from 'lucide-react';
 import Image from 'next/image';
 import Logo from '@/components/ui/logo';
@@ -169,7 +169,7 @@ function SignupForm() {
                     <div className="absolute bottom-[-10%] left-[-20%] w-[800px] h-[800px] bg-[#00B67A]/5 blur-[120px] rounded-full" />
                 </div>
 
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3">
+                  <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3 w-[50px]">
                     <Logo />
                 </motion.div>
 
