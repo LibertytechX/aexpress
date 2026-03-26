@@ -4,7 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 2: 
-3: ## [2026-03-26] — Buddy Referral Commission (LibertyPay)
+3: ## [2026-03-26] — Order Status Fix Management Command
+4: 
+5: ### Added
+6: - `fix_assignment_accepted_status` management command to update orders from "AssignmentAccepted" to "Assigned".
+7: - Automatic `OrderEvent` logging for order status fixes.
+8: 
+9: ---
+10: 11: 3: ## [2026-03-26] — Buddy Referral Commission (LibertyPay)
 4: 
 5: ### Added
 6: - `send_buddy_referral_commission_task` Celery task to send commissions to LibertyPay users via external API.
