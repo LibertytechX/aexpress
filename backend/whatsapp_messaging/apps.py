@@ -6,5 +6,5 @@ class WhatsappMessagingConfig(AppConfig):
     name = "whatsapp_messaging"
     verbose_name = "WhatsApp Messaging"
 
-    def ready(self):
-        import whatsapp_messaging.signals  # noqa: F401
+    # def ready(self):
+    #     import whatsapp_messaging.signals  # noqa: F401
