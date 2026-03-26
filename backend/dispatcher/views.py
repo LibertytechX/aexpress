@@ -53,19 +53,19 @@ class RiderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        user = self.request.user
-        role = user.dispatcher_profile.role
+        # user = self.request.user
+        # role = user.dispatcher_profile.role
         # if the dispatcher role is zone_lead
-        if role == "zone_lead":
-            try:
-                zone_lead = VerticalLead.objects.get(user=user)
-                zones = zone_lead.area_zones.all()
-                relay_nodes = RelayNode.objects.filter(zone__in=zones)
-                return Rider.objects.filter(hub__in=relay_nodes).select_related(
-                    "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
-                )
-            except VerticalLead.DoesNotExist:
-                pass
+        # if role == "zone_lead":
+        #     try:
+        #         zone_lead = VerticalLead.objects.get(user=user)
+        #         zones = zone_lead.area_zones.all()
+        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
+        #         return Rider.objects.filter(hub__in=relay_nodes).select_related(
+        #             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
+        #         )
+        #     except VerticalLead.DoesNotExist:
+        #         pass
         return Rider.objects.all().select_related(
             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
