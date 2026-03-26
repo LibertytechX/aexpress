@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Phone, Mail, Lock, Building, MapPin,
     ArrowRight, Loader2, Eye, EyeOff, Check,
-    Package, Zap, Shield, ChevronLeft
+    Package, Zap, Shield, ChevronLeft, Gift
 } from 'lucide-react';
 import Image from 'next/image';
 import Logo from '@/components/ui/logo';
@@ -71,6 +71,7 @@ function SignupForm() {
     const [confirmPass, setConfirmPass] = useState("");
     const [showPass, setShowPass] = useState(false);
     const [showConfirmPass, setShowConfirmPass] = useState(false);
+    const [referralCode, setReferralCode] = useState("");
 
     // Step 2 fields
     const [businessName, setBusinessName] = useState("");
@@ -100,7 +101,8 @@ function SignupForm() {
                 email: email,
                 password: pass,
                 confirm_password: confirmPass,
-                address: address
+                address: address,
+                referral_code: referralCode
             }, source || undefined);
 
             if (response.success) {
@@ -361,6 +363,19 @@ function SignupForm() {
                                                 <input type={showConfirmPass ? "text" : "password"} value={confirmPass} onChange={e => setConfirmPass(e.target.value)} placeholder="Repeat password" className={`w-full pl-10 pr-10 py-3.5 bg-slate-50 border rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:ring-4 transition-all font-medium ${passwordsDontMatch ? 'border-red-300 focus:border-red-500 focus:ring-red-100' : 'border-slate-200 focus:border-[#FBB12F] focus:ring-[#FBB12F]/10'}`} />
                                                 <button type="button" onClick={() => setShowConfirmPass(!showConfirmPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#2F3758]"><div className="p-1">{showConfirmPass ? <EyeOff size={16} /> : <Eye size={16} />}</div></button>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-[#2F3758]">Do you have a referral code? (Optional)</label>
+                                        <div className="relative group">
+                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#FBB12F] transition-colors"><Gift size={18} /></div>
+                                            <input
+                                                value={referralCode}
+                                                onChange={e => setReferralCode(e.target.value)}
+                                                placeholder="Enter code if any"
+                                                className="w-full pl-10 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium"
+                                            />
                                         </div>
                                     </div>
 
