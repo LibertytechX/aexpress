@@ -343,7 +343,15 @@ class OrderAdmin(ImportExportModelAdmin):
         ),
         (
             "Pickup Details",
-            {"fields": ("pickup_address", "sender_name", "sender_phone")},
+            {
+                "fields": (
+                    "pickup_address",
+                    "sender_name",
+                    "sender_phone",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                )
+            },
         ),
         ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount")}),
         ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
