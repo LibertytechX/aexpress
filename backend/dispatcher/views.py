@@ -50,7 +50,7 @@ class RiderViewSet(viewsets.ModelViewSet):
         ServiceAPIKeyAuthentication,
         *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
     ]
-    permission_classes = [IsDispatcher]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         user = self.request.user

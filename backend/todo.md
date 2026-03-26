@@ -5,3 +5,4 @@
 - [] add an order source i.e where an order is being created from either from the merchant web or the dispatcher web
 - [x] rider accepts/reject assignment if a dispatcher assigned the rider and order
 - [] order export all
+- [] complete the merchant referral implementation with agency banking

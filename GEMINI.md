@@ -63,6 +63,9 @@ class CryptoPaymentSerializer(serializers.Serializer):
 - Prefer `ModelSerializer` unless the logic is highly custom.
 - Use `APIView` or `ViewSet` for API views, but always prefer `APIView`
 
+### 3. Documentation and changelog
+- For every new updates (features, bugs, chores) let's update the `CHANGELOG.md` file in the root of the project to keep track of what has been done and when, and also update the `ENDPOINTS_DOCUMENTATION.md` file to reflect the changes in the API endpoints. 
+
 
 ### 3. Running Commands
 - Active venv in the backend directory `/Users/ayo/Liberty/aexpress/backend` using `source venv/bin/activate`

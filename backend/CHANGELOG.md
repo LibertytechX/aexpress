@@ -4,6 +4,16 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-26] — LibertyPay User Synchronization
+
+### Added
+- `LibertyPayUser` model in `referrals` app to store synced user data from external API.
+- `sync_libertypay_users_task` Celery task to fetch and update user data from LibertyPay API.
+- `sync_libertypay_users` management command to manually trigger the synchronization.
+- `LIBERTYPAY_API_KEY` setting for authenticating with the LibertyPay API.
+
+---
+
 ## [2026-03-24] — Hierarchy Restructuring: Rider Assignment via Hub
 
 ### Breaking Changes

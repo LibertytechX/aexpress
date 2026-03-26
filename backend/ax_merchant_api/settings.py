@@ -309,6 +309,9 @@ AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 
+# LibertyPay API Configuration
+LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")
+
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
