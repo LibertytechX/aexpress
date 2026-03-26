@@ -21,7 +21,8 @@ http://127.0.0.1:8000/api/auth
   "email": "test@testlogistics.com",
   "address": "123 Test Street, Lagos",
   "password": "securepass123",
-  "confirm_password": "securepass123"
+  "confirm_password": "securepass123",
+  "referral_code": "LP-12345"
 }
 ```
 

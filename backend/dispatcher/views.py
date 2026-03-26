@@ -425,6 +425,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             "CustomerCanceled": ("cancelled", "red"),
             "RiderCanceled": ("cancelled", "red"),
             "Failed": ("failed", "red"),
+            "AssignmentAccepted": ("assignment_accepted", "green"),
+            "AssignmentRejected": ("assignment_rejected", "red"),
         }
 
         if new_status not in STATUS_MAP:
@@ -653,7 +655,12 @@ class OrderViewSet(viewsets.ModelViewSet):
                 sub_order.assigned_at = timezone.now()
                 sub_order.dispatcher_assigned = True
                 sub_order.save(
-                    update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"]
+                    update_fields=[
+                        "rider",
+                        "status",
+                        "assigned_at",
+                        "dispatcher_assigned",
+                    ]
                 )
                 rider_name = getattr(rider.user, "contact_name", None) or getattr(
                     rider.user, "phone", "Unknown"

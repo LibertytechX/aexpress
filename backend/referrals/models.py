@@ -99,7 +99,7 @@ class LibertyPayUser(models.Model):
 
     id = models.BigAutoField(primary_key=True)
     email = models.EmailField(unique=True, null=True, blank=True)
-    referral_code = models.CharField(max_length=100, null=True, blank=True)
+    referral_code = models.CharField(max_length=100, null=True, blank=True, db_index=True)
     phone_number = models.CharField(max_length=30, null=True, blank=True)
     first_name = models.CharField(max_length=255, null=True, blank=True)
     last_name = models.CharField(max_length=255, null=True, blank=True)

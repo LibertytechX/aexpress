@@ -626,6 +626,12 @@ class Merchant(models.Model):
         blank=True,
         help_text="Timestamp of most recent order",
     )
+    referral_code = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Referral code used during signup",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

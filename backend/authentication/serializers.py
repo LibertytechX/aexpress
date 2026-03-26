@@ -47,6 +47,7 @@ class SignupSerializer(serializers.ModelSerializer):
             "confirm_password",
             "usertype",
             "registration_source",
+            "referral_code",
         ]
         extra_kwargs = {
             "usertype": {
@@ -101,6 +102,7 @@ class SignupSerializer(serializers.ModelSerializer):
             address=validated_data.get("address", ""),
             usertype=validated_data.get("usertype", "Merchant"),
             registration_source=validated_data.get("registration_source"),
+            referral_code=validated_data.get("referral_code"),
         )
 
         return user
