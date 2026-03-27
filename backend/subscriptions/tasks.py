@@ -1,11 +1,39 @@
 import logging
 from celery import shared_task
 from django.utils import timezone
-from .models import MerchantSubscription, SubscriptionInvoice
-from .services import generate_end_of_period_invoice
+from .models import (
+    MerchantSubscription,
+    SubscriptionInvoice,
+    MerchantPostpaidSubscription,
+    PostpaidInvoice,
+)
+from .services import generate_end_of_period_invoice, generate_postpaid_invoice
 from wallet.models import Wallet
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(name="subscriptions.tasks.process_postpaid_billing_cycles")
+def process_postpaid_billing_cycles():
+    """
+    Daily task to check for postpaid subscriptions that have reached their period end.
+    Generates an invoice and rotates the period.
+    """
+    now = timezone.now()
+    subscriptions = MerchantPostpaidSubscription.objects.filter(
+        status__in=["active", "blocked"], current_period_end__lte=now
+    )
+
+    count = 0
+    for sub in subscriptions:
+        try:
+            generate_postpaid_invoice(sub)
+            count += 1
+        except Exception as e:
+            logger.error(f"Failed to process postpaid billing for sub {sub.id}: {e}")
+
+    logger.info(f"Processed {count} postpaid billing cycles.")
+    return count
 
 
 @shared_task(name="subscriptions.tasks.process_subscription_invoicing")
@@ -26,9 +54,9 @@ def process_subscription_invoicing():
         if not SubscriptionInvoice.objects.filter(
             subscription=sub, created_at__gte=sub.start_date
         ).exists():
-            invoice = generate_end_of_period_invoice(sub)
-            process_invoice_payment.delay(str(invoice.id))
-            count += 1
+            _ = generate_end_of_period_invoice(sub)
+            # process_invoice_payment.delay(str(invoice.id))
+            # count += 1
 
             # Here we might also want to rotate the cycle if auto-renew is enabled
             # For now, we just mark it as ended/expired or keep it active if we want to auto-renew
@@ -49,7 +77,7 @@ def process_invoice_payment(invoice_id):
         if invoice.status == "paid":
             return True
 
-        merchant_user = invoice.subscriptiokn.merchant.user
+        merchant_user = invoice.subscription.merchant.user
         wallet = getattr(merchant_user, "wallet", None)
 
         if not wallet:
@@ -75,7 +103,9 @@ def process_invoice_payment(invoice_id):
             sub.is_paid = True
             sub.save(update_fields=["is_paid"])
 
-            logger.info(f"Paid invoice {invoice_id} from wallet for merchant {merchant_user.id}")
+            logger.info(
+                f"Paid invoice {invoice_id} from wallet for merchant {merchant_user.id}"
+            )
             return True
         else:
             logger.warning(

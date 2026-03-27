@@ -360,6 +360,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "orders.marketing_tasks.process_weekly_monday_reports",
         "schedule": crontab(day_of_week=1, hour=9, minute=0),  # Monday 9 AM
     },
+    "process-subscription-invoicing-daily": {
+        "task": "subscriptions.tasks.process_subscription_invoicing",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    "process-postpaid-billing-cycles": {
+        "task": "subscriptions.tasks.process_postpaid_billing_cycles",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
 }
 
 # Production Security Settings

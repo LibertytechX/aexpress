@@ -139,6 +139,7 @@ class SubscriptionInvoice(models.Model):
         ordering = ["-created_at"]
 
 
+
 class MerchantDedicatedRider(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
@@ -150,3 +151,75 @@ class MerchantDedicatedRider(models.Model):
     class Meta:
         db_table = "merchant_dedicated_riders"
         unique_together = ("merchant", "rider")
+
+
+class PostpaidPlan(models.Model):
+    PLAN_TYPE_CHOICES = [
+        ("weekly", "Weekly"),
+        ("monthly", "Monthly"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    plan_type = models.CharField(max_length=20, choices=PLAN_TYPE_CHOICES)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "postpaid_plans"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.get_plan_type_display()})"
+
+
+class MerchantPostpaidSubscription(models.Model):
+    STATUS_CHOICES = [
+        ("active", "Active"),
+        ("blocked", "Blocked"),
+        ("inactive", "Inactive"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.OneToOneField(
+        "dispatcher.Merchant",
+        on_delete=models.CASCADE,
+        related_name="postpaid_subscription",
+    )
+    plan = models.ForeignKey(PostpaidPlan, on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    accumulated_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0.00
+    )
+    current_period_start = models.DateTimeField()
+    current_period_end = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_postpaid_subscriptions"
+
+    def __str__(self):
+        return f"{self.merchant.user.business_name} - {self.plan.name}"
+
+
+class PostpaidInvoice(models.Model):
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("paid", "Paid"),
+        ("failed", "Failed"),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    subscription = models.ForeignKey(
+        MerchantPostpaidSubscription, on_delete=models.PROTECT, related_name="invoices"
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
+    payment_ref = models.CharField(max_length=100, null=True, blank=True, unique=True)
+    payment_info = models.JSONField(null=True, blank=True)
+    due_date = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "postpaid_invoices"
+        ordering = ["-created_at"]

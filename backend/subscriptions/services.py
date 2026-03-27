@@ -1,6 +1,6 @@
 import logging
 from django.utils import timezone
-from django.db import models
+from django.db import models, transaction
 from decimal import Decimal
 import datetime
 from .models import (
@@ -8,6 +8,9 @@ from .models import (
     SubscriptionUsage,
     SubscriptionOverage,
     SubscriptionInvoice,
+    PostpaidPlan,
+    MerchantPostpaidSubscription,
+    PostpaidInvoice,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,7 +77,8 @@ def process_order_subscription(order):
         order=order,
         amount=order_amount,
     )
-
+    order.payment_status = "Paid"
+    order.save()
     logger.info(
         f"Order {order.order_number} recorded as subscription overage ({plan.overage_fee}% fee)."
     )
@@ -94,12 +98,14 @@ def generate_end_of_period_invoice(subscription):
     plan_amount = subscription.plan.price
     total_amount = plan_amount + total_overage_amount
 
-    invoice = SubscriptionInvoice.objects.create(
+    invoice, created = SubscriptionInvoice.objects.update_or_create(
         subscription=subscription,
-        plan_amount=plan_amount,
-        total_overage_amount=total_overage_amount,
-        total_amount=total_amount,
-        status="pending",
+        status="pending",  # Only update if it hasn't been paid yet
+        defaults={
+            "plan_amount": plan_amount,
+            "total_overage_amount": total_overage_amount,
+            "total_amount": total_amount,
+        },
     )
 
     # Initial virtual account generation
@@ -189,8 +195,143 @@ def activate_merchant_subscription(merchant, plan):
     # Update Merchant flag
     merchant.has_active_subscription = True
     merchant.save(update_fields=["has_active_subscription", "updated_at"])
+    # generate_end_of_period_invoice(subscription)
 
     logger.info(
         f"Activated {plan.name} subscription for merchant {merchant.merchant_id}"
     )
     return subscription
+
+
+def get_active_postpaid_subscription(merchant):
+    """Retrieve the current active postpaid subscription for a merchant."""
+    return (
+        MerchantPostpaidSubscription.objects.filter(
+            merchant=merchant, status__in=["active", "blocked"]
+        )
+        .select_related("plan")
+        .first()
+    )
+
+
+def accumulate_postpaid_order(order):
+    """
+    Add order total to merchant's postpaid accumulated amount.
+    """
+    merchant_profile = getattr(order.user, "merchant_profile", None)
+    if not merchant_profile:
+        return False
+
+    subscription = get_active_postpaid_subscription(merchant_profile)
+    if not subscription:
+        return False
+
+    if subscription.status == "blocked":
+        # Blocked merchants cannot accumulate more until payment
+        return False
+
+    with transaction.atomic():
+        # Lock the row for update to prevent race conditions
+        subscription = MerchantPostpaidSubscription.objects.select_for_update().get(
+            id=subscription.id
+        )
+        subscription.accumulated_amount += order.total_amount
+        subscription.save(update_fields=["accumulated_amount", "updated_at"])
+
+    order.payment_status = "Postpaid"
+    order.save(update_fields=["payment_status"])
+    return True
+
+
+def generate_postpaid_invoice(subscription):
+    """
+    Generate an invoice for the current postpaid period.
+    """
+    amount = subscription.accumulated_amount
+    if amount <= 0:
+        # Just rotate the period if no accumulation
+        _rotate_postpaid_period(subscription)
+        return None
+
+    due_date = timezone.now() + datetime.timedelta(days=1)  # 24h grace period
+
+    invoice = PostpaidInvoice.objects.create(
+        subscription=subscription, amount=amount, status="pending", due_date=due_date
+    )
+
+    # Reset accumulation and rotate period
+    _rotate_postpaid_period(subscription)
+
+    # Generate virtual account for payment
+    refresh_postpaid_invoice_virtual_account(invoice)
+
+    # Block merchant until payment is completed
+    subscription.status = "blocked"
+    subscription.save(update_fields=["status"])
+
+    logger.info(
+        f"Generated postpaid invoice {invoice.id} for merchant {subscription.merchant.merchant_id}"
+    )
+    return invoice
+
+
+def _rotate_postpaid_period(subscription):
+    """Update period start and end dates based on plan type and reset accumulation."""
+    now = timezone.now()
+    subscription.current_period_start = now
+    if subscription.plan.plan_type == "weekly":
+        subscription.current_period_end = now + datetime.timedelta(days=7)
+    else:
+        subscription.current_period_end = now + datetime.timedelta(days=30)
+
+    subscription.accumulated_amount = Decimal("0.00")
+    subscription.save(
+        update_fields=[
+            "current_period_start",
+            "current_period_end",
+            "accumulated_amount",
+            "updated_at",
+        ]
+    )
+
+
+def refresh_postpaid_invoice_virtual_account(invoice):
+    """
+    Generate or refresh a dynamic virtual account for a postpaid invoice.
+    """
+    from wallet.corebanking_service import generate_one_time_account
+
+    # Generate reference
+    payment_ref = (
+        f"POST-INV-{invoice.id.hex[:10].upper()}-{int(timezone.now().timestamp())}"
+    )
+
+    success, account_data = generate_one_time_account(payment_ref)
+    if success:
+        invoice.payment_ref = payment_ref
+        invoice.payment_info = account_data
+        invoice.save(update_fields=["payment_ref", "payment_info", "updated_at"])
+        return True
+
+    logger.error(f"Failed to refresh virtual account for postpaid invoice {invoice.id}")
+    return False
+
+
+def handle_postpaid_invoice_paid(invoice):
+    """
+    Mark invoice as paid and unblock subscription if no other pending invoices exist.
+    """
+    subscription = invoice.subscription
+    invoice.status = "paid"
+    invoice.save(update_fields=["status", "updated_at"])
+
+    # Check for other pending invoices
+    has_pending = PostpaidInvoice.objects.filter(
+        subscription=subscription, status="pending"
+    ).exists()
+    if not has_pending:
+        subscription.status = "active"
+        subscription.save(update_fields=["status", "updated_at"])
+        logger.info(
+            f"Merchant {subscription.merchant.merchant_id} unblocked after paying invoice."
+        )
