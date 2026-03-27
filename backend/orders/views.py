@@ -1557,6 +1557,7 @@ class OrderCompleteView(APIView):
     # Default commission percentage if SystemSettings row doesn't exist yet
     DEFAULT_COMMISSION_PCT = Decimal("20.00")
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         try:
             if not order_number:
@@ -1621,46 +1622,7 @@ class OrderCompleteView(APIView):
                     )
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
-            # is_cod = order.payment_method in self.COD_METHODS
-            logger.info("Let's see the payment method %s", order.payment_method)
-            logger.info("Let's see the payment methods %s", self.COD_METHODS)
             cod_total = Decimal("0.00")
-
-            # if is_cod:
-            #     # Sum COD across all deliveries for this order
-            #     from django.db.models import Sum
-
-            #     cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
-            #         "cod_amount__sum"
-            #     ] or Decimal("0.00")
-
-            #     if cod_total > 0:
-            #         try:
-            #             rider_wallet = Wallet.objects.get(user=rider.user)
-            #         except Wallet.DoesNotExist:
-            #             return service_response(
-            #                 status="error",
-            #                 message="Rider wallet not found. Cannot process COD payment.",
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #             )
-
-            #         if not rider_wallet.can_debit(cod_total):
-            #             return service_response(
-            #                 status="error",
-            #                 message=f"Insufficient wallet balance for COD settlement. Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}",
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #             )
-
-            #         # Debit COD amount from rider wallet
-            #         rider_wallet.debit(
-            #             amount=cod_total,
-            #             description=f"COD remittance for order #{order_number}",
-            #             reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
-            #             metadata={
-            #                 "order_number": order_number,
-            #                 "order_id": str(order.id),
-            #             },
-            #         )
 
             # ── Step 2: Calculate and record rider earnings ───────────────────────
             settings_obj = SystemSettings.objects.first()

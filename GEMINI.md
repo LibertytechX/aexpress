@@ -33,7 +33,7 @@ class CryptoPaymentSerializer(serializers.Serializer):
         return attrs
 
 <!-- exception_advice and service response -->
-@exception_advice()
+@exception_advice(model_object=ErrorLog)
     def post(self, request, *args, **kwargs):
         data = request.data
         chat_id = data.get("chat_id")

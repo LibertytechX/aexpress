@@ -1,3 +1,4 @@
+from email.policy import default
 import hashlib
 import math
 
@@ -634,6 +635,7 @@ class Merchant(models.Model):
         blank=True,
         help_text="Referral code used during signup",
     )
+    has_active_subscription = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
