@@ -4,6 +4,18 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-27] — Postpaid Payment Plan Feature
+
+### Added
+- **Postpaid Billing System**: Launched a new postpaid payment method for merchants with weekly and monthly options.
+- **Models**: Added `PostpaidPlan`, `MerchantPostpaidSubscription`, and `PostpaidInvoice` to the `subscriptions` app.
+- **Order Integration**: Added `postpaid` payment method to `Order` model and integrated accumulation logic in `QuickSend`, `MultiDrop`, and `BulkImport` views.
+- **Automated Billing**: Implemented `process_postpaid_billing_cycles` Celery task for automated period rotation and invoice generation.
+- **Payment Blocking**: Automated blocking of order creation for merchants with unpaid postpaid invoices.
+- **API Endpoints**: New suite of endpoints for listing/activating postpaid plans and managing invoices.
+
+---
+
 ## [2026-03-27] — Subscription Payment Model & Deferred Overage Billing
 
 ### Added

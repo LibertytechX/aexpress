@@ -35,6 +35,11 @@ from riders.models import RiderEarning, RiderCodRecord
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
 from dispatcher.serializers import OrderEventSerializer
+from subscriptions.services import (
+    process_order_subscription,
+    get_active_postpaid_subscription,
+    accumulate_postpaid_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +172,7 @@ class QuickSendView(APIView):
             cod_amount=data.get("cod_amount"),
         )
 
-        if data.get("payment_method") == "pay_with_subscription":
+        if data.get("payment_method") == "subscription":
 
             # [NEW] Subscription processing
             from subscriptions.services import process_order_subscription
@@ -180,6 +185,60 @@ class QuickSendView(APIView):
                         "errors": {
                             "payment_method": [
                                 "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
                             ]
                         },
                     },
@@ -405,6 +464,60 @@ class MultiDropView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -597,6 +710,60 @@ class BulkImportView(APIView):
                         "errors": {
                             "payment_method": [
                                 "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
                             ]
                         },
                     },

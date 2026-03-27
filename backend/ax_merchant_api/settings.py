@@ -364,6 +364,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "subscriptions.tasks.process_subscription_invoicing",
         "schedule": crontab(hour=0, minute=0),  # Daily at midnight
     },
+    "process-postpaid-billing-cycles": {
+        "task": "subscriptions.tasks.process_postpaid_billing_cycles",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
 }
 
 # Production Security Settings

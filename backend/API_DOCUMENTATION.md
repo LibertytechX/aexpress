@@ -243,3 +243,106 @@ Authorization: Bearer <access_token>
 - `404` - Not Found
 - `500` - Internal Server Error
 
+
+---
+
+## Postpaid Payment Plan Endpoints
+
+### 1. List Postpaid Plans
+**Endpoint:** `GET /api/subscriptions/postpaid/plans/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** List all available postpaid plans (Weekly/Monthly)
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid plans retrieved successfully.",
+  "data": [
+    {
+      "id": "uuid-here",
+      "name": "Weekly Postpaid",
+      "plan_type": "weekly",
+      "is_active": true
+    }
+  ]
+}
+```
+
+---
+
+### 2. Activate Postpaid Plan
+**Endpoint:** `POST /api/subscriptions/postpaid/plans/<plan_id>/activate/`  
+**Authentication:** Required (Merchant only)  
+**Description:** Activate a postpaid plan for the merchant
+
+**Success Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "Successfully activated Weekly Postpaid plan.",
+  "data": {
+    "id": "uuid-here",
+    "status": "active",
+    "accumulated_amount": "0.00",
+    "current_period_start": "2026-03-27T15:18:51Z",
+    "current_period_end": "2026-04-03T15:18:51Z",
+    "plan": { ... }
+  }
+}
+```
+
+---
+
+### 3. Get Active Postpaid Subscription
+**Endpoint:** `GET /api/subscriptions/postpaid/active/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Get the merchant's current active or blocked postpaid subscription and accumulation status
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid subscription retrieved successfully.",
+  "data": {
+    "id": "uuid-here",
+    "status": "active", // active, blocked, inactive
+    "accumulated_amount": "1500.00",
+    "current_period_end": "2026-04-03T15:18:51Z",
+    "invoices": [ ... ]
+  }
+}
+```
+
+---
+
+### 4. Get Postpaid Invoice Detail
+**Endpoint:** `GET /api/subscriptions/postpaid/invoices/<invoice_id>/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Get details and payment info (virtual account) for a postpaid invoice
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid invoice retrieved successfully.",
+  "data": {
+    "id": "uuid-here",
+    "amount": "5000.00",
+    "status": "pending", // pending, paid, failed
+    "payment_ref": "POST-INV-...",
+    "payment_info": {
+      "account_number": "1234567890",
+      "bank_name": "Test Bank",
+      "account_name": "Liberty AXpress"
+    },
+    "due_date": "2026-03-28T15:18:51Z"
+  }
+}
+```
+
+---
+
+## Order Integration
+Merchants with an active, non-blocked postpaid plan can now select `"postpaid"` as a `payment_method` when creating orders via `QuickSend`, `MultiDrop`, or `BulkImport`. The order amount will be added to their `accumulated_amount`, and the order `payment_status` will be set to `"Postpaid"`.
+
