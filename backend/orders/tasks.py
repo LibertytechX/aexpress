@@ -121,3 +121,71 @@ def create_order_charge(order_id):
         logger.error(
             f"create_order_charge: Failed to create charge for Order {order_id}: {e}"
         )
+
+
+@shared_task
+def handle_order_completion_tasks(order_id):
+    """
+    Orchestrates post-order completion activities in the background:
+    1. Update rider streak
+    2. Update challenge progress
+    3. Fire referral commission
+    4. Fire buddy referral commission (LibertyPay)
+    """
+    try:
+        order = Order.objects.select_related("rider", "user").get(id=order_id)
+    except Order.DoesNotExist:
+        logger.error(f"handle_order_completion_tasks: Order {order_id} not found.")
+        return False
+
+    rider = order.rider
+    if not rider:
+        logger.warning(
+            f"handle_order_completion_tasks: Order {order.order_number} has no rider."
+        )
+        return False
+
+    # 1. Update streak
+    try:
+        from riders.gamification import update_rider_streak
+
+        update_rider_streak(rider)
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to update streak for rider {rider.id}"
+        )
+
+    # 2. Update challenge progress
+    try:
+        from riders.gamification import update_challenge_progress
+
+        update_challenge_progress(rider, order)
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to update challenge progress for rider {rider.id}"
+        )
+
+    # 3. Fire referral commission
+    try:
+        from referrals.services import fire_referral_commission
+
+        fire_referral_commission(order)
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to fire referral commission for order {order.order_number}"
+        )
+
+    # 4. Fire buddy referral commission (LibertyPay)
+    try:
+        if order.user.referral_code:
+            from referrals.tasks import send_buddy_referral_commission_task
+
+            send_buddy_referral_commission_task.delay(
+                order.user.referral_code, order.order_number
+            )
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to fire buddy referral commission for order {order.order_number}"
+        )
+
+    return True

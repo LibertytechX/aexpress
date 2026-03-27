@@ -15,6 +15,11 @@ All notable changes to the AXpress backend are documented in this file.
 - **Dynamic Virtual Accounts**: Implemented 30-minute one-time virtual accounts for subscription invoices with automated webhook reconciliation (`SUB-INV-` prefix).
 - **Invoice Management API**: New endpoints for listing subscriptions and refreshing invoice virtual accounts.
 
+- **Order Completion Offloading**: Moved heavy post-order completion logic (streaks, challenges, and commissions) from the synchronous signal handler to a background Celery task (`handle_order_completion_tasks`) to reduce endpoint latency.
+
+### Fixed
+- `TypeError` in `Zone.haversine_distance` caused by mixed `float` and `Decimal` coordinate types during distance calculations (e.g., during order pickup/completion).
+
 ---
 
 ## [2026-03-26] — Transaction Admin Balance Tracking & Charge Soft Delete
