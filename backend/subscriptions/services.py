@@ -94,12 +94,14 @@ def generate_end_of_period_invoice(subscription):
     plan_amount = subscription.plan.price
     total_amount = plan_amount + total_overage_amount
 
-    invoice = SubscriptionInvoice.objects.create(
+    invoice, created = SubscriptionInvoice.objects.update_or_create(
         subscription=subscription,
-        plan_amount=plan_amount,
-        total_overage_amount=total_overage_amount,
-        total_amount=total_amount,
-        status="pending",
+        status="pending",  # Only update if it hasn't been paid yet
+        defaults={
+            "plan_amount": plan_amount,
+            "total_overage_amount": total_overage_amount,
+            "total_amount": total_amount,
+        },
     )
 
     # Initial virtual account generation
@@ -189,6 +191,7 @@ def activate_merchant_subscription(merchant, plan):
     # Update Merchant flag
     merchant.has_active_subscription = True
     merchant.save(update_fields=["has_active_subscription", "updated_at"])
+    # generate_end_of_period_invoice(subscription)
 
     logger.info(
         f"Activated {plan.name} subscription for merchant {merchant.merchant_id}"

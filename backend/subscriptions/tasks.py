@@ -26,9 +26,9 @@ def process_subscription_invoicing():
         if not SubscriptionInvoice.objects.filter(
             subscription=sub, created_at__gte=sub.start_date
         ).exists():
-            invoice = generate_end_of_period_invoice(sub)
-            process_invoice_payment.delay(str(invoice.id))
-            count += 1
+            _ = generate_end_of_period_invoice(sub)
+            # process_invoice_payment.delay(str(invoice.id))
+            # count += 1
 
             # Here we might also want to rotate the cycle if auto-renew is enabled
             # For now, we just mark it as ended/expired or keep it active if we want to auto-renew
@@ -49,7 +49,7 @@ def process_invoice_payment(invoice_id):
         if invoice.status == "paid":
             return True
 
-        merchant_user = invoice.subscriptiokn.merchant.user
+        merchant_user = invoice.subscription.merchant.user
         wallet = getattr(merchant_user, "wallet", None)
 
         if not wallet:
@@ -75,7 +75,9 @@ def process_invoice_payment(invoice_id):
             sub.is_paid = True
             sub.save(update_fields=["is_paid"])
 
-            logger.info(f"Paid invoice {invoice_id} from wallet for merchant {merchant_user.id}")
+            logger.info(
+                f"Paid invoice {invoice_id} from wallet for merchant {merchant_user.id}"
+            )
             return True
         else:
             logger.warning(

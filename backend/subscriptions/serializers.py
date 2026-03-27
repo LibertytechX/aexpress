@@ -8,15 +8,16 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
 
-class MerchantSubscriptionSerializer(serializers.ModelSerializer):
-    plan = SubscriptionPlanSerializer(read_only=True)
-
-    class Meta:
-        model = MerchantSubscription
-        fields = "__all__"
-
-
 class SubscriptionInvoiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubscriptionInvoice
+        fields = "__all__"
+
+
+class MerchantSubscriptionSerializer(serializers.ModelSerializer):
+    plan = SubscriptionPlanSerializer(read_only=True)
+    invoices = SubscriptionInvoiceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = MerchantSubscription
         fields = "__all__"
