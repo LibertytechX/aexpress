@@ -167,12 +167,24 @@ class QuickSendView(APIView):
             cod_amount=data.get("cod_amount"),
         )
 
-        # [NEW] Subscription processing
-        from subscriptions.services import process_order_subscription
+        if data.get("payment_method") == "pay_with_subscription":
 
-        subscription = process_order_subscription(order)
-        if subscription:
-            total_amount = order.total_amount  # Will be 0 if covered
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
+
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Create single delivery
         Delivery.objects.create(
@@ -375,12 +387,24 @@ class MultiDropView(APIView):
         )
 
         # [NEW] Subscription processing
-        from subscriptions.services import process_order_subscription
+        if data.get("payment_method") == "pay_with_subscription":
 
-        subscription = process_order_subscription(order)
-        if subscription:
-            total_amount = order.total_amount  # Will be 0 if covered
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
 
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -560,12 +584,24 @@ class BulkImportView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
-        # [NEW] Subscription processing
-        from subscriptions.services import process_order_subscription
+        if data.get("payment_method") == "pay_with_subscription":
 
-        subscription = process_order_subscription(order)
-        if subscription:
-            total_amount = order.total_amount  # Will be 0 if covered
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
+
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):

@@ -30,8 +30,8 @@ def get_active_subscription(merchant):
 def process_order_subscription(order):
     """
     Apply subscription benefits to an order.
-    - If within free limit, set total_amount to 0 and increment usage.
-    - If over limit, record an overage and set total_amount to 0 (deferred billing).
+    - If merchant has credits, deduct from plan_credit.
+    - If credits exhausted, record an overage and apply overage fee percentage.
     """
     merchant_profile = getattr(order.user, "merchant_profile", None)
     if not merchant_profile:
@@ -42,30 +42,42 @@ def process_order_subscription(order):
         return None
 
     plan = subscription.plan
+    order_amount = order.total_amount
+    order_amount_in_credit = round(order.total_amount / 100, 2)
 
-    # Get or create usage for the current cycle
-    usage, created = SubscriptionUsage.objects.get_or_create(
+    if subscription.has_sufficient_credit(amount=order_amount_in_credit):
+        # Deduct credits
+        if subscription.deduct_credit(amount=order_amount_in_credit):
+            # usage tracking
+            usage, created = SubscriptionUsage.objects.get_or_create(
+                subscription=subscription,
+                cycle_start_date=subscription.start_date.date(),
+                cycle_end_date=subscription.end_date.date(),
+            )
+            usage.used_free_orders += 1
+            usage.save(update_fields=["used_free_orders"])
+
+            logger.info(f"Order {order.order_number} covered by subscription credits.")
+            return subscription
+
+    # If we are here, credits are insufficient - record as overage
+    # For overage, we might want to apply a fee based on the order amount and plan's overage_fee percentage
+    # (Assuming overage_fee is a percentage based on user's help_text)
+    # overage_amount = order.total_amount * (plan.overage_fee / Decimal("100.00"))
+    # check if the credit is still left
+    if subscription.plan_credit > 0:
+        order_amount = order_amount - (subscription.plan_credit * 100)
+        subscription.deduct_credit(amount=subscription.plan_credit)
+
+    SubscriptionOverage.objects.create(
         subscription=subscription,
-        cycle_start_date=subscription.start_date.date(),
-        cycle_end_date=subscription.end_date.date(),
+        order=order,
+        amount=order_amount,
     )
 
-    if usage.used_free_orders < plan.free_orders_limit:
-        # Covered by free orders
-        usage.used_free_orders += 1
-        usage.save(update_fields=["used_free_orders"])
-        order.total_amount = Decimal("0.00")
-        logger.info(f"Order {order.order_number} covered by subscription free limit.")
-    else:
-        # Overage - record for deferred billing
-        SubscriptionOverage.objects.create(
-            subscription=subscription,
-            order=order,
-            amount=plan.overage_fee,
-        )
-        order.total_amount = Decimal("0.00")
-        logger.info(f"Order {order.order_number} recorded as subscription overage.")
-
+    logger.info(
+        f"Order {order.order_number} recorded as subscription overage ({plan.overage_fee}% fee)."
+    )
     return subscription
 
 
