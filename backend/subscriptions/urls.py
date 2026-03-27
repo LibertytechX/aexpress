@@ -12,6 +12,11 @@ urlpatterns = [
         "active/", views.MerchantSubscriptionListView.as_view(), name="subscription-list"
     ),
     path(
+        "invoices/",
+        views.MerchantSubscriptionInvoiceListView.as_view(),
+        name="invoice-list",
+    ),
+    path(
         "invoices/<uuid:invoice_id>/",
         views.SubscriptionInvoiceDetailView.as_view(),
         name="invoice-detail",
@@ -29,6 +34,11 @@ urlpatterns = [
         "postpaid/plans/<uuid:plan_id>/activate/",
         views.MerchantActivatePostpaidPlanView.as_view(),
         name="postpaid-activate",
+    ),
+    path(
+        "postpaid/invoices/",
+        views.MerchantPostpaidInvoiceListView.as_view(),
+        name="postpaid-invoice-list",
     ),
     path(
         "postpaid/invoices/<uuid:invoice_id>/",

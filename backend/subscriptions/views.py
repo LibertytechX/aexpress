@@ -279,3 +279,49 @@ class PostpaidInvoiceDetailView(APIView):
             data=serializer.data,
             status_code=200,
         )
+
+
+class MerchantSubscriptionInvoiceListView(APIView):
+    """
+    API endpoint to list all subscription invoices for the merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        invoices = SubscriptionInvoice.objects.filter(subscription__merchant=merchant)
+        serializer = SubscriptionInvoiceSerializer(invoices, many=True)
+        return service_response(
+            status="success",
+            message="Subscription invoices retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class MerchantPostpaidInvoiceListView(APIView):
+    """
+    API endpoint to list all postpaid invoices for the merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        invoices = PostpaidInvoice.objects.filter(subscription__merchant=merchant)
+        serializer = PostpaidInvoiceSerializer(invoices, many=True)
+        return service_response(
+            status="success",
+            message="Postpaid invoices retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )

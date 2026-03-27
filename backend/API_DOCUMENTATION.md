@@ -181,7 +181,14 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 5. Refresh Access Token
+### 5. List Subscription Invoices
+**Endpoint:** `GET /api/subscriptions/invoices/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** List all subscription invoices for the merchant.
+
+---
+
+### 6. Refresh Access Token
 **Endpoint:** `POST /api/auth/refresh/`  
 **Authentication:** Not required  
 **Description:** Get a new access token using refresh token
