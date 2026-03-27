@@ -21,6 +21,16 @@ http://127.0.0.1:8000/api/orders/
 
 ## Endpoints
 
+### Subscription Benefits & Pricing
+
+Merchants with an active subscription plan enjoy special pricing and billing:
+- **Free Orders**: Each plan includes a monthly quota of free orders.
+- **Zero Upfront Cost**: For subscribed merchants, order `total_amount` is set to `0.00` during creation—this applies to both free orders and overages.
+- **Deferred Billing**: The base plan fee and all accumulated overage fees are aggregated into a single invoice at the end of the billing cycle.
+- **Dedicated Rider**: Subscriptions can include a "Dedicated Rider" benefit, which prioritizes a specific rider for all the merchant's orders if that rider is online.
+
+---
+
 ### 1. Get Available Vehicles
 
 **GET** `/api/orders/vehicles/`

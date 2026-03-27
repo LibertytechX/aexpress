@@ -163,6 +163,12 @@ class QuickSendView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
             cod_amount=data.get("cod_amount"),
         )
+        
+        # [NEW] Subscription processing
+        from subscriptions.services import process_order_subscription
+        subscription = process_order_subscription(order)
+        if subscription:
+            total_amount = order.total_amount # Will be 0 if covered
 
         # Create single delivery
         Delivery.objects.create(
@@ -363,6 +369,12 @@ class MultiDropView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
+        
+        # [NEW] Subscription processing
+        from subscriptions.services import process_order_subscription
+        subscription = process_order_subscription(order)
+        if subscription:
+            total_amount = order.total_amount # Will be 0 if covered
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -542,6 +554,12 @@ class BulkImportView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
+        
+        # [NEW] Subscription processing
+        from subscriptions.services import process_order_subscription
+        subscription = process_order_subscription(order)
+        if subscription:
+            total_amount = order.total_amount # Will be 0 if covered
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):

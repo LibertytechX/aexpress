@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     "referrals",
     "chats",
     "whatsapp_messaging",
+    "subscriptions",
 ]
 
 MIDDLEWARE = [
