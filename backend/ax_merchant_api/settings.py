@@ -68,6 +68,7 @@ INSTALLED_APPS = [
     "chats",
     "whatsapp_messaging",
     "subscriptions",
+    "devs",
 ]
 
 MIDDLEWARE = [

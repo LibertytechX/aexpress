@@ -1,3 +1,4 @@
+from devs.models import ErrorLog
 import traceback
 from dispatcher.models import SystemSettings
 import logging
@@ -70,7 +71,9 @@ class VehicleListView(APIView):
 
             results.append(v_data)
 
-        return Response({"success": True, "vehicles": results}, status=status.HTTP_200_OK)
+        return Response(
+            {"success": True, "vehicles": results}, status=status.HTTP_200_OK
+        )
 
 
 class VehicleUpdateView(generics.UpdateAPIView):
@@ -163,12 +166,13 @@ class QuickSendView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
             cod_amount=data.get("cod_amount"),
         )
-        
+
         # [NEW] Subscription processing
         from subscriptions.services import process_order_subscription
+
         subscription = process_order_subscription(order)
         if subscription:
-            total_amount = order.total_amount # Will be 0 if covered
+            total_amount = order.total_amount  # Will be 0 if covered
 
         # Create single delivery
         Delivery.objects.create(
@@ -369,12 +373,13 @@ class MultiDropView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
-        
+
         # [NEW] Subscription processing
         from subscriptions.services import process_order_subscription
+
         subscription = process_order_subscription(order)
         if subscription:
-            total_amount = order.total_amount # Will be 0 if covered
+            total_amount = order.total_amount  # Will be 0 if covered
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -554,12 +559,13 @@ class BulkImportView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
-        
+
         # [NEW] Subscription processing
         from subscriptions.services import process_order_subscription
+
         subscription = process_order_subscription(order)
         if subscription:
-            total_amount = order.total_amount # Will be 0 if covered
+            total_amount = order.total_amount  # Will be 0 if covered
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -1402,6 +1408,7 @@ class OrderPickupView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:

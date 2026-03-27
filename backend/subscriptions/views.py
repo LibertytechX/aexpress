@@ -5,7 +5,8 @@ from .models import SubscriptionInvoice, MerchantSubscription
 from .serializers import SubscriptionInvoiceSerializer, MerchantSubscriptionSerializer
 from .services import refresh_invoice_virtual_account
 from sparky_utils.response import service_response
-from sparky_utils.exceptions import ServiceException, exception_advice
+from sparky_utils.exceptions import ServiceException
+from sparky_utils.advice import exception_advice
 
 
 class MerchantSubscriptionListView(APIView):
