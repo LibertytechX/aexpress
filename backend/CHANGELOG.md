@@ -4,6 +4,19 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-27] — Subscription Payment Model & Deferred Overage Billing
+
+### Added
+- New `subscriptions` app for merchant plans and automated invoicing.
+- Models: `SubscriptionPlan`, `MerchantSubscription`, `SubscriptionUsage`, `SubscriptionOverage`, `SubscriptionInvoice`, `MerchantDedicatedRider`.
+- Celery tasks `process_subscription_invoicing` and `process_invoice_payment` for hands-free billing cycles.
+- Integrated subscription checks into `QuickSend`, `MultiDrop`, and `BulkImport` views for zero-upfront order creation.
+- Dedicated rider prioritization in `process_order_proximity` dispatch logic.
+- **Dynamic Virtual Accounts**: Implemented 30-minute one-time virtual accounts for subscription invoices with automated webhook reconciliation (`SUB-INV-` prefix).
+- **Invoice Management API**: New endpoints for listing subscriptions and refreshing invoice virtual accounts.
+
+---
+
 ## [2026-03-26] — Transaction Admin Balance Tracking & Charge Soft Delete
 
 ### Added

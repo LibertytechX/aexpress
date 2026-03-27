@@ -65,18 +65,30 @@ def process_order_proximity(self, order_id):
     estimated_earnings = (total_amount * commission_factor).quantize(Decimal("0.01"))
 
     # 4. Create OrderOffer
+    dedicated_rider = None
+    merchant_profile = getattr(order.user, "merchant_profile", None)
+    if merchant_profile:
+        from subscriptions.services import get_dedicated_rider
+        from dispatcher.models import Rider
+
+        dedicated_rider = get_dedicated_rider(merchant_profile)
+        # Check if rider is online (or on delivery but still dedicated)
+        if dedicated_rider and dedicated_rider.status == Rider.Status.OFFLINE:
+            dedicated_rider = None
+
     try:
         with transaction.atomic():
             # Check if an offer already exists for this order to avoid duplicates on retries
             offer, created = OrderOffer.objects.get_or_create(
                 order=order,
                 defaults={
-                    "rider": None,
+                    "rider": dedicated_rider,
                     "status": OrderOffer.Status.PENDING,
                     "estimated_earnings": estimated_earnings,
                     "zone": zone,
                 },
             )
+            # TODO: update the order rider
             if not created:
                 # Update existing offer if it was created without a zone
                 if zone and not offer.zone:
