@@ -75,9 +75,9 @@ def generate_end_of_period_invoice(subscription):
     Sums the base plan amount and all overages.
     """
     overages = SubscriptionOverage.objects.filter(subscription=subscription)
-    total_overage_amount = (
-        overages.aggregate(total=models.Sum("amount"))["total"] or Decimal("0.00")
-    )
+    total_overage_amount = overages.aggregate(total=models.Sum("amount"))[
+        "total"
+    ] or Decimal("0.00")
 
     plan_amount = subscription.plan.price
     total_amount = plan_amount + total_overage_amount
@@ -112,7 +112,9 @@ def refresh_invoice_virtual_account(invoice):
             return True
 
     # Generate new reference (includes timestamp to ensure uniqueness and new account)
-    payment_ref = f"SUB-INV-{invoice.id.hex[:10].upper()}-{int(timezone.now().timestamp())}"
+    payment_ref = (
+        f"SUB-INV-{invoice.id.hex[:10].upper()}-{int(timezone.now().timestamp())}"
+    )
 
     success, account_data = generate_one_time_account(payment_ref)
     if success:
@@ -120,11 +122,18 @@ def refresh_invoice_virtual_account(invoice):
         invoice.payment_info = account_data
         invoice.virtual_account_expiry = timezone.now() + datetime.timedelta(minutes=30)
         invoice.save(
-            update_fields=["payment_ref", "payment_info", "virtual_account_expiry", "updated_at"]
+            update_fields=[
+                "payment_ref",
+                "payment_info",
+                "virtual_account_expiry",
+                "updated_at",
+            ]
         )
         return True
 
-    logger.error(f"Failed to refresh virtual account for invoice {invoice.id}: {account_data}")
+    logger.error(
+        f"Failed to refresh virtual account for invoice {invoice.id}: {account_data}"
+    )
     return False
 
 
@@ -143,3 +152,33 @@ def get_dedicated_rider(merchant):
     if dedicated_rider_rel:
         return dedicated_rider_rel.rider
     return None
+
+
+def activate_merchant_subscription(merchant, plan):
+    """
+    Activate a subscription for a merchant.
+    - If they have an existing active one, generate final invoice and mark as expired.
+    - Create a new active MerchantSubscription.
+    - Update the Merchant model flag.
+    """
+    # Create new subscription
+    start_date = timezone.now()
+    end_date = start_date + datetime.timedelta(days=30)
+
+    subscription = MerchantSubscription.objects.create(
+        merchant=merchant,
+        plan=plan,
+        start_date=start_date,
+        end_date=end_date,
+        status="active",
+        is_paid=False,  # Base fee is included in the end-of-period invoice
+    )
+
+    # Update Merchant flag
+    merchant.has_active_subscription = True
+    merchant.save(update_fields=["has_active_subscription", "updated_at"])
+
+    logger.info(
+        f"Activated {plan.name} subscription for merchant {merchant.merchant_id}"
+    )
+    return subscription
