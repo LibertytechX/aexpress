@@ -1307,6 +1307,9 @@ def _advance_order(request, order_number, new_status, event_desc):
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Ensure types are float for distance calculation
+        lat, lng = float(lat), float(lng)
+
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
             from dispatcher.models import Zone
 

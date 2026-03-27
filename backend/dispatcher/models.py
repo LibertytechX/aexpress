@@ -84,6 +84,8 @@ class Zone(models.Model):
     @staticmethod
     def haversine_distance(lat1, lng1, lat2, lng2):
         """Return great-circle distance in km between two (lat, lng) points."""
+        # Ensure all coordinates are floats to avoid TypeError with math functions or mixed Decimal/float
+        lat1, lng1, lat2, lng2 = float(lat1), float(lng1), float(lat2), float(lng2)
         R = 6371.0
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
