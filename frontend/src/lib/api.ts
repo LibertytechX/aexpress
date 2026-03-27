@@ -283,6 +283,11 @@ export const WalletAPI = {
   },
   initializePayment: async (amount: number) => apiRequest('/wallet/fund/initialize/', { method: 'POST', body: JSON.stringify({ amount: amount.toString() }) }),
   verifyPayment: async (reference: string) => apiRequest('/wallet/fund/verify/', { method: 'POST', body: JSON.stringify({ reference }) }),
+  getVirtualAccount: async () => {
+    return await apiRequest('/wallet/virtual-account/', {
+      method: 'GET',
+    });
+  },
 };
 
 // Chat interfaces

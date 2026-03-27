@@ -13,6 +13,45 @@
 4. [Dashboard Endpoints](#dashboard-endpoints)
 5. [Dashboard Analytics Endpoints](#dashboard-analytics-endpoints)
 6. [Key Configuration Files](#key-configuration-files)
+7. [Wallet Endpoints](#wallet-endpoints)
+8. [Auth & Signup Endpoints](#auth--signup-endpoints)
+
+---
+
+## WALLET ENDPOINTS
+
+### 1. Get Virtual Account
+```
+GET /wallet/virtual-account/
+Description: Retrieves or creates a dedicated virtual account for the merchant to fund their wallet via bank transfer.
+Authentication: Required (Merchant)
+Response:
+  {
+    "success": true,
+    "data": {
+      "account_number": "7924567890",
+      "account_name": "AXPRESS/JOHN DOE",
+      "bank_name": "Wema Bank"
+    }
+  }
+```
+
+---
+
+## AUTH & SIGNUP ENDPOINTS
+
+### 1. Merchant Signup
+```
+POST /api/auth/signup/
+Description: Register a new merchant account.
+Request Body:
+  {
+    "email": "user@example.com",
+    "password": "password123",
+    "business_name": "My Business",
+    "referral_code": "OPTIONAL_CODE"
+  }
+```
 
 ---
 
