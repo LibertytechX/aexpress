@@ -16,6 +16,7 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
         "price",
         "free_orders_limit",
         "overage_fee",
+        "order_credits",
         "has_dedicated_rider",
         "created_at",
     )
@@ -24,7 +25,15 @@ class SubscriptionPlanAdmin(admin.ModelAdmin):
 
 @admin.register(MerchantSubscription)
 class MerchantSubscriptionAdmin(admin.ModelAdmin):
-    list_display = ("merchant", "plan", "start_date", "end_date", "status", "is_paid")
+    list_display = (
+        "merchant",
+        "plan",
+        "start_date",
+        "end_date",
+        "status",
+        "is_paid",
+        "plan_credit",
+    )
     list_filter = ("status", "is_paid", "plan")
     search_fields = ("merchant__user__business_name", "merchant__merchant_id")
 

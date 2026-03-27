@@ -49,7 +49,7 @@ def process_invoice_payment(invoice_id):
         if invoice.status == "paid":
             return True
 
-        merchant_user = invoice.subscription.merchant.user
+        merchant_user = invoice.subscriptiokn.merchant.user
         wallet = getattr(merchant_user, "wallet", None)
 
         if not wallet:

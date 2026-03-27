@@ -54,3 +54,13 @@ class IsDispatcherAdmin(BasePermission):
         if hasattr(user, "dispatcher_profile"):
             return user.dispatcher_profile.role == "admin"
         return False
+
+
+class IsMerchant(BasePermission):
+    """
+    Permission class for merchant only resources
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+        return hasattr(user, "merchant_profile")

@@ -7,7 +7,7 @@
 
 ### 2. API Standards (DRF)
 - Use Serializers for validation, not just for output.
-- Use the `ServiceException` class for consistent serializer validation error handling, and use the `exception_advice` decorator to handle exceptions, and return consistent service responses `service_response`, this is the `service_response` function from `sparky_utils.response`.
+- Use the `ServiceException` class for consistent serializer validation error handling, and use the `exception_advice` decorator to handle exceptions and always pass the arg model_object=ErrorLog, and return consistent service responses `service_response`, this is the `service_response` function from `sparky_utils.response`.
 ```
 ## Example usage
 <!-- ServiceException -->

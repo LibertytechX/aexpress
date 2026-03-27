@@ -30,8 +30,8 @@ def get_active_subscription(merchant):
 def process_order_subscription(order):
     """
     Apply subscription benefits to an order.
-    - If within free limit, set total_amount to 0 and increment usage.
-    - If over limit, record an overage and set total_amount to 0 (deferred billing).
+    - If merchant has credits, deduct from plan_credit.
+    - If credits exhausted, record an overage and apply overage fee percentage.
     """
     merchant_profile = getattr(order.user, "merchant_profile", None)
     if not merchant_profile:
@@ -42,30 +42,42 @@ def process_order_subscription(order):
         return None
 
     plan = subscription.plan
+    order_amount = order.total_amount
+    order_amount_in_credit = round(order.total_amount / 100, 2)
 
-    # Get or create usage for the current cycle
-    usage, created = SubscriptionUsage.objects.get_or_create(
+    if subscription.has_sufficient_credit(amount=order_amount_in_credit):
+        # Deduct credits
+        if subscription.deduct_credit(amount=order_amount_in_credit):
+            # usage tracking
+            usage, created = SubscriptionUsage.objects.get_or_create(
+                subscription=subscription,
+                cycle_start_date=subscription.start_date.date(),
+                cycle_end_date=subscription.end_date.date(),
+            )
+            usage.used_free_orders += 1
+            usage.save(update_fields=["used_free_orders"])
+
+            logger.info(f"Order {order.order_number} covered by subscription credits.")
+            return subscription
+
+    # If we are here, credits are insufficient - record as overage
+    # For overage, we might want to apply a fee based on the order amount and plan's overage_fee percentage
+    # (Assuming overage_fee is a percentage based on user's help_text)
+    # overage_amount = order.total_amount * (plan.overage_fee / Decimal("100.00"))
+    # check if the credit is still left
+    if subscription.plan_credit > 0:
+        order_amount = order_amount - (subscription.plan_credit * 100)
+        subscription.deduct_credit(amount=subscription.plan_credit)
+
+    SubscriptionOverage.objects.create(
         subscription=subscription,
-        cycle_start_date=subscription.start_date.date(),
-        cycle_end_date=subscription.end_date.date(),
+        order=order,
+        amount=order_amount,
     )
 
-    if usage.used_free_orders < plan.free_orders_limit:
-        # Covered by free orders
-        usage.used_free_orders += 1
-        usage.save(update_fields=["used_free_orders"])
-        order.total_amount = Decimal("0.00")
-        logger.info(f"Order {order.order_number} covered by subscription free limit.")
-    else:
-        # Overage - record for deferred billing
-        SubscriptionOverage.objects.create(
-            subscription=subscription,
-            order=order,
-            amount=plan.overage_fee,
-        )
-        order.total_amount = Decimal("0.00")
-        logger.info(f"Order {order.order_number} recorded as subscription overage.")
-
+    logger.info(
+        f"Order {order.order_number} recorded as subscription overage ({plan.overage_fee}% fee)."
+    )
     return subscription
 
 
@@ -75,9 +87,9 @@ def generate_end_of_period_invoice(subscription):
     Sums the base plan amount and all overages.
     """
     overages = SubscriptionOverage.objects.filter(subscription=subscription)
-    total_overage_amount = (
-        overages.aggregate(total=models.Sum("amount"))["total"] or Decimal("0.00")
-    )
+    total_overage_amount = overages.aggregate(total=models.Sum("amount"))[
+        "total"
+    ] or Decimal("0.00")
 
     plan_amount = subscription.plan.price
     total_amount = plan_amount + total_overage_amount
@@ -112,7 +124,9 @@ def refresh_invoice_virtual_account(invoice):
             return True
 
     # Generate new reference (includes timestamp to ensure uniqueness and new account)
-    payment_ref = f"SUB-INV-{invoice.id.hex[:10].upper()}-{int(timezone.now().timestamp())}"
+    payment_ref = (
+        f"SUB-INV-{invoice.id.hex[:10].upper()}-{int(timezone.now().timestamp())}"
+    )
 
     success, account_data = generate_one_time_account(payment_ref)
     if success:
@@ -120,11 +134,18 @@ def refresh_invoice_virtual_account(invoice):
         invoice.payment_info = account_data
         invoice.virtual_account_expiry = timezone.now() + datetime.timedelta(minutes=30)
         invoice.save(
-            update_fields=["payment_ref", "payment_info", "virtual_account_expiry", "updated_at"]
+            update_fields=[
+                "payment_ref",
+                "payment_info",
+                "virtual_account_expiry",
+                "updated_at",
+            ]
         )
         return True
 
-    logger.error(f"Failed to refresh virtual account for invoice {invoice.id}: {account_data}")
+    logger.error(
+        f"Failed to refresh virtual account for invoice {invoice.id}: {account_data}"
+    )
     return False
 
 
@@ -143,3 +164,33 @@ def get_dedicated_rider(merchant):
     if dedicated_rider_rel:
         return dedicated_rider_rel.rider
     return None
+
+
+def activate_merchant_subscription(merchant, plan):
+    """
+    Activate a subscription for a merchant.
+    - If they have an existing active one, generate final invoice and mark as expired.
+    - Create a new active MerchantSubscription.
+    - Update the Merchant model flag.
+    """
+    # Create new subscription
+    start_date = timezone.now()
+    end_date = start_date + datetime.timedelta(days=30)
+
+    subscription = MerchantSubscription.objects.create(
+        merchant=merchant,
+        plan=plan,
+        start_date=start_date,
+        end_date=end_date,
+        status="active",
+        is_paid=False,  # Base fee is included in the end-of-period invoice
+    )
+
+    # Update Merchant flag
+    merchant.has_active_subscription = True
+    merchant.save(update_fields=["has_active_subscription", "updated_at"])
+
+    logger.info(
+        f"Activated {plan.name} subscription for merchant {merchant.merchant_id}"
+    )
+    return subscription
