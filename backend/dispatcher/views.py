@@ -1006,7 +1006,7 @@ class MerchantViewSet(viewsets.ModelViewSet):
         ServiceAPIKeyAuthentication,
         *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
     ]
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
@@ -1022,7 +1022,7 @@ class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
         "merchant", "vehicle"
     ).all()
     serializer_class = MerchantPricingOverrideSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-updated_at")
@@ -1042,7 +1042,7 @@ class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
 
 
 class SystemSettingsView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
 
     def get(self, request):
         from .models import SystemSettings
@@ -1065,7 +1065,7 @@ class SystemSettingsView(views.APIView):
 
 
 class RiderOnboardingView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
 
     def post(self, request):
