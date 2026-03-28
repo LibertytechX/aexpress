@@ -1,11 +1,23 @@
+import datetime
+from django.utils import timezone
 from rest_framework import status, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import SubscriptionInvoice, MerchantSubscription, SubscriptionPlan
+from .models import (
+    SubscriptionInvoice,
+    MerchantSubscription,
+    SubscriptionPlan,
+    PostpaidPlan,
+    MerchantPostpaidSubscription,
+    PostpaidInvoice,
+)
 from .serializers import (
     SubscriptionInvoiceSerializer,
     MerchantSubscriptionSerializer,
     SubscriptionPlanSerializer,
+    PostpaidPlanSerializer,
+    MerchantPostpaidSubscriptionSerializer,
+    PostpaidInvoiceSerializer,
 )
 from .services import refresh_invoice_virtual_account
 from sparky_utils.response import service_response
@@ -143,4 +155,173 @@ class MerchantActivateSubscriptionView(APIView):
             message=f"Successfully subscribed to {plan.name} plan.",
             data=serializer.data,
             status_code=201,
+        )
+
+
+class PostpaidPlanListView(APIView):
+    """
+    API endpoint to list all available postpaid plans.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        plans = PostpaidPlan.objects.filter(is_active=True)
+        serializer = PostpaidPlanSerializer(plans, many=True)
+        return service_response(
+            status="success",
+            message="Postpaid plans retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class MerchantPostpaidSubscriptionView(APIView):
+    """
+    API endpoint to retrieve the current postpaid subscription for the merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        subscription = MerchantPostpaidSubscription.objects.filter(
+            merchant=merchant
+        ).first()
+        serializer = MerchantPostpaidSubscriptionSerializer(subscription)
+        return service_response(
+            status="success",
+            message="Postpaid subscription retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class MerchantActivatePostpaidPlanView(APIView):
+    """
+    API endpoint to activate a postpaid plan.
+    """
+
+    permission_classes = [IsMerchant]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, plan_id):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        # Check if they already have an active postpaid plan
+        if MerchantPostpaidSubscription.objects.filter(merchant=merchant).exists():
+            raise ServiceException(
+                status_code=400, message="You already have an active postpaid plan."
+            )
+
+        try:
+            plan = PostpaidPlan.objects.get(id=plan_id, is_active=True)
+        except (PostpaidPlan.DoesNotExist, ValueError):
+            raise ServiceException(status_code=404, message="Postpaid plan not found.")
+
+        # Activate plan
+        now = timezone.now()
+        if plan.plan_type == "weekly":
+            end_date = now + datetime.timedelta(days=7)
+        else:
+            end_date = now + datetime.timedelta(days=30)
+
+        subscription = MerchantPostpaidSubscription.objects.create(
+            merchant=merchant,
+            plan=plan,
+            status="active",
+            current_period_start=now,
+            current_period_end=end_date,
+        )
+
+        serializer = MerchantPostpaidSubscriptionSerializer(subscription)
+        return service_response(
+            status="success",
+            message=f"Successfully activated {plan.name} postpaid plan.",
+            data=serializer.data,
+            status_code=201,
+        )
+
+
+class PostpaidInvoiceDetailView(APIView):
+    """
+    API endpoint to retrieve details for a specific postpaid invoice.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, invoice_id):
+        try:
+            invoice = PostpaidInvoice.objects.get(
+                id=invoice_id, subscription__merchant__user=request.user
+            )
+        except (PostpaidInvoice.DoesNotExist, ValueError):
+            raise ServiceException(status_code=404, message="Postpaid invoice not found.")
+
+        # Refresh virtual account if needed
+        from .services import refresh_postpaid_invoice_virtual_account
+
+        if invoice.status == "pending" and not invoice.payment_info:
+            refresh_postpaid_invoice_virtual_account(invoice)
+
+        serializer = PostpaidInvoiceSerializer(invoice)
+        return service_response(
+            status="success",
+            message="Postpaid invoice retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class MerchantSubscriptionInvoiceListView(APIView):
+    """
+    API endpoint to list all subscription invoices for the merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        invoices = SubscriptionInvoice.objects.filter(subscription__merchant=merchant)
+        serializer = SubscriptionInvoiceSerializer(invoices, many=True)
+        return service_response(
+            status="success",
+            message="Subscription invoices retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class MerchantPostpaidInvoiceListView(APIView):
+    """
+    API endpoint to list all postpaid invoices for the merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            raise ServiceException(status_code=400, message="User is not a merchant.")
+
+        invoices = PostpaidInvoice.objects.filter(subscription__merchant=merchant)
+        serializer = PostpaidInvoiceSerializer(invoices, many=True)
+        return service_response(
+            status="success",
+            message="Postpaid invoices retrieved successfully.",
+            data=serializer.data,
+            status_code=200,
         )

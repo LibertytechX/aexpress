@@ -217,6 +217,8 @@ class Order(models.Model):
         ("cash", "Cash"),
         ("cash_on_pickup", "Cash on Pickup"),
         ("receiver_pays", "Receiver Pays"),
+        ("postpaid", "Postpaid"),
+        ("subscription", "Subscription"),
     ]
 
     PAYMENT_STATUS_CHOICES = [
@@ -224,6 +226,7 @@ class Order(models.Model):
         ("Paid", "Paid"),
         ("Failed", "Failed"),
         ("Refunded", "Refunded"),
+        ("Postpaid", "Postpaid"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

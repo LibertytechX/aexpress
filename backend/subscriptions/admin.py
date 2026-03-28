@@ -6,6 +6,9 @@ from .models import (
     SubscriptionOverage,
     SubscriptionInvoice,
     MerchantDedicatedRider,
+    PostpaidPlan,
+    MerchantPostpaidSubscription,
+    PostpaidInvoice,
 )
 
 
@@ -64,3 +67,30 @@ class SubscriptionInvoiceAdmin(admin.ModelAdmin):
 @admin.register(MerchantDedicatedRider)
 class MerchantDedicatedRiderAdmin(admin.ModelAdmin):
     list_display = ("merchant", "rider", "created_at")
+
+
+@admin.register(PostpaidPlan)
+class PostpaidPlanAdmin(admin.ModelAdmin):
+    list_display = ("name", "plan_type", "is_active", "created_at")
+    list_filter = ("plan_type", "is_active")
+    search_fields = ("name",)
+
+
+@admin.register(MerchantPostpaidSubscription)
+class MerchantPostpaidSubscriptionAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "plan",
+        "status",
+        "accumulated_amount",
+        "current_period_end",
+    )
+    list_filter = ("status", "plan")
+    search_fields = ("merchant__user__business_name", "merchant__merchant_id")
+
+
+@admin.register(PostpaidInvoice)
+class PostpaidInvoiceAdmin(admin.ModelAdmin):
+    list_display = ("subscription", "amount", "status", "due_date", "created_at")
+    list_filter = ("status",)
+    search_fields = ("subscription__merchant__user__business_name", "payment_ref")
