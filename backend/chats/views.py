@@ -84,6 +84,8 @@ class ConversationCreateOrGetView(APIView):
             )
 
         # Return existing active conversation or create a new one
+        if user_type == "merchant":
+            user_type = "customer"
         conversation, created = Conversation.objects.get_or_create(
             user_id=user,
             type=f"{user_type}s",
