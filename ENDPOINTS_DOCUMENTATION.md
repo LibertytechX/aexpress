@@ -582,8 +582,9 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** March 4, 2026
-**Version:** 1.0
+**Last Updated:** March 28, 2026
+**Version:** 1.1
+**Recent Changes:** Fixed tiered pricing calculation logic in the merchant frontend to support 4+ tiers.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.

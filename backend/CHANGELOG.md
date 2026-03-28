@@ -3,6 +3,13 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+ 
+ ## [2026-03-28] — Frontend Tiered Pricing Fix
+ 
+ ### Fixed
+ - **Tiered Pricing Calculation**: Fixed a bug in `NewOrderScreen.tsx` where the tiered pricing logic was hardcoded to stop after 3 tiers, causing incorrect (higher) rates to be applied to long-distance deliveries. Replaced with a generic loop matching the backend behavior.
+ 
+ ---
 
 ## [2026-03-27] — Postpaid Payment Plan Feature
 
