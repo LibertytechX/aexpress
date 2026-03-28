@@ -8,6 +8,11 @@ All notable changes to the AXpress backend are documented in this file.
  
  ### Fixed
  - **Tiered Pricing Calculation**: Fixed a bug in `NewOrderScreen.tsx` where the tiered pricing logic was hardcoded to stop after 3 tiers, causing incorrect (higher) rates to be applied to long-distance deliveries. Replaced with a generic loop matching the backend behavior.
+
+### Added
+- **Order Admin Enhancement**: Added "Rider Earning" column and detail field to the `Order` model in Django Admin, showing the net earning for the assigned rider (or 0.00 if not available).
+- **Delivery Inline Enhancement**: Added `dropoff_latitude` and `dropoff_longitude` to the `Order` admin's `DeliveryInline` for better visibility of dropoff coordinates.
+
  
  ---
 
