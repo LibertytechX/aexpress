@@ -337,6 +337,25 @@ export const AblyTokenAPI = {
     apiRequest('/dispatch/ably-token/'),
 };
 
+export const SubscriptionAPI = {
+  getPlans: async () => apiRequest('/subscriptions/plans/', { method: 'GET' }),
+  subscribe: async (planId: string) => 
+    apiRequest(`/subscriptions/plans/${planId}/subscribe/`, { 
+      method: 'POST',
+      body: JSON.stringify({}) // Some backends require a body for POST
+    }),
+  getActiveSubscription: async () => apiRequest('/subscriptions/active/', { method: 'GET' }),
+  
+  // Postpaid plans
+  getPostpaidPlans: async () => apiRequest('/subscriptions/postpaid/plans/', { method: 'GET' }),
+  activatePostpaidPlan: async (planId: string) => 
+    apiRequest(`/subscriptions/postpaid/plans/${planId}/activate/`, { 
+      method: 'POST',
+      body: JSON.stringify({}) 
+    }),
+  getActivePostpaidSubscription: async () => apiRequest('/subscriptions/postpaid/active/', { method: 'GET' }),
+};
+
 // Default export matching original usage
 const API = {
   Auth: AuthAPI,
@@ -344,6 +363,7 @@ const API = {
   Wallet: WalletAPI,
   Token: TokenManager,
   Chats: ChatsAPI,
+  Subscription: SubscriptionAPI,
 };
 
 export default API;

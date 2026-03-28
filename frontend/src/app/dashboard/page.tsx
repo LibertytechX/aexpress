@@ -167,6 +167,26 @@ const Icons = {
       <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />
     </svg>
   ),
+  subscription: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3h12l4 6-10 12L2 9z" />
+    </svg>
+  ),
+  chevronDown: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  ),
+  plan: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M9 22V10" />
+    </svg>
+  ),
+  invoice: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><path d="M8 13h8" /><path d="M8 17h8" /><path d="M8 9h2" />
+    </svg>
+  ),
 };
 
 // ─── MOCK DATA ──────────────────────────────────────────────────
@@ -225,6 +245,7 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState(["subscription"]); // Subscription open by default
   const [walletBalance, setWalletBalance] = useState(0);
   const [orders, setOrders] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -420,6 +441,12 @@ export default function DashboardPage() {
     return `${month} ${day}, ${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
   };
 
+  const toggleMenu = (id) => {
+    setExpandedMenus(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
   const handleLogin = (user) => {
     setCurrentUser(user);
     setScreen("dashboard");
@@ -513,6 +540,16 @@ export default function DashboardPage() {
     { id: "newOrder", label: "New Order", icon: Icons.newOrder },
     { id: "orders", label: "Orders", icon: Icons.orders },
     { id: "wallet", label: "Wallet", icon: Icons.wallet },
+    { 
+      id: "subscription", 
+      label: "Subscription", 
+      icon: Icons.subscription, 
+      badge: "NEW",
+      subItems: [
+        { id: "subscription", label: "Plan", icon: Icons.plan },
+        { id: "subscription-invoices", label: "Invoice", icon: Icons.invoice },
+      ]
+    },
     { id: "website", label: "My Website", icon: Icons.website },
     { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "SOON" },
     { id: "loans", label: "Business Loans", icon: Icons.loans, badge: "SOON" },
@@ -694,44 +731,96 @@ export default function DashboardPage() {
         {/* Nav */}
         <nav style={{ flex: 1, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
           {navItems.map(item => {
-            const active = screen === item.id;
+            const hasSubItems = item.subItems && item.subItems.length > 0;
+            const isExpanded = expandedMenus.includes(item.id);
+            const isParentActive = screen === item.id || (hasSubItems && item.subItems.some(sub => screen === sub.id));
+            
             return (
-              <button key={item.id} onClick={() => { setScreen(item.id); setSidebarOpen(false); setOrderDetailId(null); }}
-                title={collapsed ? item.label : ""}
-                className={`relative group flex items-center gap-3 rounded-xl transition-all duration-200 ${collapsed ? "justify-center py-3" : "px-4 py-3"}`}
-                style={{
-                  background: active ? S.gold : "transparent",
-                  color: active ? S.navy : "rgba(255,255,255,0.7)",
-                  fontWeight: active ? 600 : 500,
-                  boxShadow: active ? "0 4px 12px rgba(251, 177, 47, 0.25)" : "none"
-                }}
-              >
-                <span style={{
-                  color: active ? S.navy : "rgba(255,255,255,0.7)",
-                  transition: "color 0.2s",
-                  transform: active ? "scale(1.05)" : "scale(1)"
-                }} className="group-hover:text-white">
-                  {React.cloneElement(item.icon, {
-                    strokeWidth: active ? 2.5 : 2,
-                    stroke: "currentColor"
-                  })}
-                </span>
+              <div key={item.id} className="flex flex-col gap-1">
+                <button 
+                  onClick={() => {
+                    if (hasSubItems && !collapsed) {
+                      toggleMenu(item.id);
+                    } else {
+                      setScreen(item.id);
+                      setSidebarOpen(false);
+                      setOrderDetailId(null);
+                    }
+                  }}
+                  title={collapsed ? item.label : ""}
+                  className={`relative group flex items-center gap-3 rounded-xl transition-all duration-300 ${collapsed ? "justify-center py-3" : "px-4 py-3"}`}
+                  style={{
+                    background: (!hasSubItems && screen === item.id) ? S.gold : "transparent",
+                    color: (screen === item.id || (hasSubItems && isParentActive)) ? "#fff" : "rgba(255,255,255,0.7)",
+                    fontWeight: isParentActive ? 600 : 500,
+                  }}
+                >
+                  <span style={{
+                    color: isParentActive ? S.gold : "rgba(255,255,255,0.7)",
+                    transition: "color 0.2s",
+                  }} className="group-hover:text-white">
+                    {React.cloneElement(item.icon, {
+                      strokeWidth: isParentActive ? 2.5 : 2,
+                      stroke: "currentColor"
+                    })}
+                  </span>
 
-                {!collapsed && (
-                  <>
-                    <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]! group-hover:text-white transition-colors'>{item.label}</span>
-                    {item.badge && (
-                      <span style={{
-                        marginLeft: "auto",
-                        background: item.badge === "FREE" ? S.green : "rgba(255,255,255,0.1)",
-                        color: "#fff",
-                        fontSize: 10, fontWeight: 700,
-                        padding: "2px 8px", borderRadius: 20
-                      }}>{item.badge}</span>
-                    )}
-                  </>
+                  {!collapsed && (
+                    <>
+                      <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]! group-hover:text-white transition-colors'>{item.label}</span>
+                      {item.badge && (
+                        <span style={{
+                          marginLeft: "auto",
+                          background: item.badge === "NEW" ? S.gold : item.badge === "FREE" ? S.green : "rgba(255,255,255,0.1)",
+                          color: item.badge === "NEW" ? S.navy : "#fff",
+                          fontSize: 8, fontWeight: 800,
+                          padding: "2px 7px", borderRadius: 6,
+                          boxShadow: item.badge === "NEW" ? "0 0 12px rgba(251, 177, 47, 0.3)" : "none",
+                          letterSpacing: "0.5px"
+                        }}>{item.badge}</span>
+                      )}
+                      {hasSubItems && (
+                        <span style={{ 
+                          marginLeft: item.badge ? 8 : "auto", 
+                          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                          transition: "transform 0.3s ease",
+                          opacity: 0.7
+                        }}>
+                          {Icons.chevronDown}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+
+                {/* Sub Items */}
+                {hasSubItems && isExpanded && !collapsed && (
+                  <div className="flex flex-col gap-1 ml-9 mt-1 mb-2 border-l border-white/10 pl-2">
+                    {item.subItems.map(sub => {
+                      const isSubActive = screen === sub.id;
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => {
+                            setScreen(sub.id);
+                            setSidebarOpen(false);
+                            setOrderDetailId(null);
+                          }}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200"
+                          style={{
+                            color: isSubActive ? S.gold : "rgba(255,255,255,0.5)",
+                            fontWeight: isSubActive ? 600 : 500,
+                            background: isSubActive ? "rgba(255,255,255,0.05)" : "transparent"
+                          }}
+                        >
+                          <span style={{ transform: "scale(0.85)" }}>{sub.icon}</span>
+                          <span style={{ fontSize: 12, fontFamily: "'Outfit', sans-serif" }}>{sub.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </nav>
@@ -807,7 +896,7 @@ export default function DashboardPage() {
 
           <div className="flex-1 min-w-0">
             <h1 className="text-lg md:text-xl font-bold text-[#2F3758] truncate">
-              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : "Page"}
+              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "subscription" ? "Subscription" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : "Page"}
             </h1>
           </div>
 
@@ -1006,6 +1095,17 @@ export default function DashboardPage() {
               transactions={transactions}
               onFund={() => setFundModal(true)}
             />
+          )}
+          {screen === "subscription" && (
+            <SubscriptionScreen 
+              currentUser={currentUser} 
+              onShowNotif={showNotif} 
+              balance={walletBalance}
+              onRefreshBalance={loadWalletBalance}
+            />
+          )}
+          {screen === "subscription-invoices" && (
+            <InvoicesScreen onShowNotif={showNotif} />
           )}
           {screen === "settings" && (
             <SettingsScreen
@@ -5502,6 +5602,454 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         @keyframes scaleIn { 0% { transform: scale(0); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
       `}</style>
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION DETAILS MODAL ────────────────────────────────
+function SubscriptionDetailsModal({ subscription, onClose, onShowNotif }) {
+  const plan = subscription.plan;
+  const invoices = subscription.invoices || [];
+
+  const handleDownloadInvoice = (invoice) => {
+    if (invoice.url) {
+      window.open(invoice.url, "_blank");
+    } else {
+      onShowNotif("Invoice download URL not available", "info");
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s ease" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} />
+      <div style={{ 
+        position: "relative", background: "#fff", borderRadius: 24, width: 500, maxHeight: "85vh", 
+        overflow: "hidden", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column"
+      }}>
+        {/* Header */}
+        <div style={{ padding: "24px 30px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h3 style={{ fontSize: 20, fontWeight: 800, color: S.navy, margin: 0 }}>Subscription Details</h3>
+            <p style={{ fontSize: 13, color: S.grayLight, margin: "4px 0 0" }}>Manage your current {plan.name} plan</p>
+          </div>
+          <button onClick={onClose} style={{ background: "#f8fafc", border: "none", cursor: "pointer", color: S.gray, padding: 8, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {Icons.close}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: 30, overflowY: "auto", flex: 1 }} className="no-scrollbar text-left!">
+          {/* Plan Summary Card */}
+          <div style={{ background: `linear-gradient(135deg, ${S.navy}, #1a2a47)`, borderRadius: 20, padding: 24, color: "#fff", marginBottom: 30 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>PLAN NAME</div>
+                <div style={{ fontSize: 24, fontWeight: 800 }}>{plan.name}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>PRICE</div>
+                <div style={{ fontSize: 24, fontWeight: 800 }}>₦{parseFloat(plan.price).toLocaleString()}</div>
+              </div>
+            </div>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: 4 }}>START DATE</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{new Date(subscription.start_date).toLocaleDateString()}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: 4 }}>EXPIRY DATE</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{new Date(subscription.end_date).toLocaleDateString()}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Plan Features */}
+          <div style={{ marginBottom: 30 }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, color: S.navy, marginBottom: 16 }}>Plan Features & Limits</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>FREE ORDERS</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>{plan.free_orders_limit} / mo</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>OVERAGE FEE</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>₦{parseFloat(plan.overage_fee).toLocaleString()}</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>ORDER CREDITS</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>₦{parseFloat(plan.order_credits || 0).toLocaleString()}</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>DEDICATED RIDER</div>
+                <div style={{ color: plan.has_dedicated_rider ? S.green : S.red, fontSize: 14, fontWeight: 700 }}>{plan.has_dedicated_rider ? "YES" : "NO"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Invoices */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h4 style={{ fontSize: 15, fontWeight: 700, color: S.navy, margin: 0 }}>Invoices</h4>
+              <span style={{ fontSize: 12, color: S.grayLight }}>{invoices.length} Found</span>
+            </div>
+
+            {invoices.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {invoices.map((inv, idx) => (
+                  <div key={idx} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 16px", borderRadius: 12, border: "1px solid #f1f5f9",
+                    background: "#fff", transition: "all 0.2s"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
+                        {Icons.orders}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Invoice #{inv.number || idx + 1001}</div>
+                        <div style={{ fontSize: 11, color: S.grayLight }}>{new Date(inv.date || subscription.created_at).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDownloadInvoice(inv)}
+                      style={{
+                        background: S.navy, color: "#fff", border: "none", borderRadius: 8,
+                        padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer"
+                      }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "30px 0", background: "#f8fafc", borderRadius: 16, border: "1.5px dashed #e2e8f0" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>📄</div>
+                <p style={{ fontSize: 13, color: S.grayLight, margin: 0 }}>No invoices found for this subscription yet.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: 24, borderTop: "1px solid #f1f5f9", background: "#f8fafc" }}>
+          <button onClick={onClose} style={{
+            width: "100%", height: 48, background: "#fff", color: S.navy, border: "1px solid #e2e8f0",
+            borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer"
+          }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION SCREEN ────────────────────────────────────────
+function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalance }) {
+  const [plans, setPlans] = useState([]);
+  const [activeSub, setActiveSub] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [subscribing, setSubscribing] = useState(null); 
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [activeTab, setActiveTab] = useState("manual"); 
+  const [postpaidPlans, setPostpaidPlans] = useState([]);
+  const [activePostpaidSub, setActivePostpaidSub] = useState(null);
+  const [activatingPostpaid, setActivatingPostpaid] = useState(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [plansRes, activeRes, postpaidPlansRes, activePostpaidRes] = await Promise.all([
+        API.Subscription.getPlans(),
+        API.Subscription.getActiveSubscription(),
+        API.Subscription.getPostpaidPlans(),
+        API.Subscription.getActivePostpaidSubscription()
+      ]);
+
+      if (plansRes.status === "success" || plansRes.success) setPlans(plansRes.data || []);
+      if (activeRes.status === "success" || activeRes.success) setActiveSub(activeRes.data?.current_active || null);
+      if (postpaidPlansRes.status === "success" || postpaidPlansRes.success) setPostpaidPlans(postpaidPlansRes.data || []);
+      
+      if (activePostpaidRes.status === "success" || activePostpaidRes.success) {
+        const data = activePostpaidRes.data;
+        if (data?.current_active) {
+          setActivePostpaidSub(data.current_active);
+        } else if (data?.status && data.status !== null) {
+          setActivePostpaidSub(data);
+        } else {
+          setActivePostpaidSub(null);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load subscription data:", error);
+      onShowNotif("Failed to load subscription data", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubscribe = async (plan) => {
+    try {
+      setSubscribing(plan.id);
+      const response = await API.Subscription.subscribe(plan.id);
+      if (response.status === "success" || response.success) {
+        onShowNotif(`Successfully subscribed to ${plan.name} plan!`, "success");
+        onRefreshBalance();
+        loadData();
+      } else {
+        onShowNotif(response.message || "Subscription failed", "error");
+      }
+    } catch (error) {
+      console.error("Subscription error:", error);
+      onShowNotif("Network error. Please try again.", "error");
+    } finally {
+      setSubscribing(null);
+    }
+  };
+
+  const handleActivatePostpaid = async (plan) => {
+    try {
+      setActivatingPostpaid(plan.id);
+      const response = await API.Subscription.activatePostpaidPlan(plan.id);
+      if (response.status === "success" || response.success) {
+        onShowNotif(`Successfully activated ${plan.name}!`, "success");
+        loadData();
+      } else {
+        onShowNotif(response.message || "Activation failed", "error");
+      }
+    } catch (error) {
+      console.error("Postpaid activation error:", error);
+      onShowNotif("Network error. Please try again.", "error");
+    } finally {
+      setActivatingPostpaid(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "100px 0" }}>
+        <div style={{ width: 40, height: 40, border: `3px solid ${S.goldPale}`, borderTop: `3px solid ${S.gold}`, borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+        <p style={{ marginTop: 16, color: S.grayLight, fontSize: 14 }}>Loading subscription details...</p>
+      </div>
+    );
+  }
+
+  const currentPlans = activeTab === "manual" ? plans : postpaidPlans;
+  const currentActive = activeTab === "manual" ? activeSub : activePostpaidSub;
+
+  return (
+    <div style={{ animation: "fadeIn 0.3s ease" }}>
+      {/* Active Subscription Banner */}
+      {currentActive && (
+        <div style={{
+          background: `linear-gradient(135deg, ${S.navy}, #1a2a47)`,
+          borderRadius: 20, padding: "24px 30px", marginBottom: 32,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          color: "#fff", boxShadow: "0 10px 25px rgba(27,42,74,0.15)",
+          border: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>
+              {activeTab === "manual" ? "CURRENT ACTIVE PLAN" : "ACTIVE POSTPAID PLAN"}
+            </div>
+            <h3 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{currentActive.plan?.name || currentActive.name}</h3>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
+              {currentActive.end_date ? `Ends on ${new Date(currentActive.end_date).toLocaleDateString()}` : "Active and ongoing"}
+            </div>
+          </div>
+          <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ background: "rgba(255,255,255,0.1)", padding: "8px 16px", borderRadius: 12, fontSize: 13, fontWeight: 600 }}>
+              Status: <span style={{ color: S.green }}>{(currentActive.status || "active").toUpperCase()}</span>
+            </div>
+            {activeTab === "manual" && (
+              <button 
+                onClick={() => setShowDetailsModal(true)}
+                style={{
+                  background: "rgba(255,255,255,0.15)", color: "#fff", border: "none",
+                  padding: "8px 20px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", transition: "all 0.2s"
+                }}
+              >
+                View Details
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showDetailsModal && activeSub && activeTab === "manual" && (
+        <SubscriptionDetailsModal 
+          subscription={activeSub} 
+          onClose={() => setShowDetailsModal(false)}
+          onShowNotif={onShowNotif}
+        />
+      )}
+
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, color: S.navy, margin: "0 0 12px", fontFamily: "'Outfit', sans-serif" }}>
+          Subscription Plans
+        </h2>
+        <p style={{ fontSize: 16, color: S.gray, maxWidth: 500, margin: "0 auto 30px" }}>
+          Select a subscription level that fits your business needs and start saving on every delivery.
+        </p>
+
+        {/* Tab Switcher */}
+        <div style={{ display: "inline-flex", background: "#f1f5f9", padding: 6, borderRadius: 16 }}>
+          {["manual", "postpaid"].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding: "10px 24px", borderRadius: 12, border: "none",
+              background: activeTab === tab ? "#fff" : "transparent",
+              color: activeTab === tab ? S.navy : S.gray,
+              fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.2s"
+            }}>
+              {tab === "manual" ? "Manual Plan" : "Postpaid Plan"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24, padding: "0 10px 40px" }}>
+        {currentPlans.map((plan) => {
+          const isActive = (activeTab === "manual" ? activeSub?.plan?.id : activePostpaidSub?.plan?.id) === plan.id;
+          const isEnterprise = plan.name === "Enterprise" || plan.name.includes("Monthly");
+          
+          return (
+            <div key={plan.id} style={{
+              background: "#fff", borderRadius: 24, padding: "40px 30px",
+              border: isActive ? `2px solid ${S.green}` : (isEnterprise ? `2px solid ${S.gold}` : "1.5px solid #e2e8f0"),
+              position: "relative", overflow: "hidden", display: "flex", flexDirection: "column",
+              transition: "all 0.3s ease",
+              boxShadow: isEnterprise ? "0 20px 40px rgba(251, 177, 47, 0.15)" : "0 4px 12px rgba(0,0,0,0.03)"
+            }}>
+              <div style={{ marginBottom: 30 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: S.grayLight, textTransform: "uppercase", marginBottom: 8 }}>{plan.name}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                  <span style={{ fontSize: 32, fontWeight: 800, color: S.navy }}>
+                    {plan.price ? `₦${parseFloat(plan.price).toLocaleString()}` : plan.plan_type?.toUpperCase()}
+                  </span>
+                  {plan.price && <span style={{ fontSize: 14, color: S.grayLight }}>/ month</span>}
+                </div>
+              </div>
+
+              <div style={{ flex: 1, marginBottom: 40 }}>
+                {activeTab === "manual" ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                      <span style={{ fontSize: 14, color: S.navyLight }}><strong>{plan.free_orders_limit}</strong> Free Orders / Month</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                      <span style={{ fontSize: 14, color: S.navyLight }}>₦{parseFloat(plan.overage_fee).toLocaleString()} Overage Fee</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                    <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                    <span style={{ fontSize: 14, color: S.navyLight }}>Automatic Billing: <strong>{plan.plan_type}</strong></span>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                  <span style={{ fontSize: 14, color: S.navyLight }}>24/7 Priority Support</span>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => activeTab === "manual" ? handleSubscribe(plan) : handleActivatePostpaid(plan)}
+                disabled={(activeTab === "manual" ? (subscribing === plan.id || isActive) : (activatingPostpaid === plan.id || isActive))}
+                style={{
+                  width: "100%", height: 52, borderRadius: 14, border: "none",
+                  background: isActive ? S.greenBg : (isEnterprise ? S.navy : "#f1f5f9"),
+                  color: isActive ? S.green : (isEnterprise ? "#fff" : S.navy),
+                  fontSize: 15, fontWeight: 700, cursor: isActive ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center"
+                }}
+              >
+                {(subscribing === plan.id || activatingPostpaid === plan.id) ? (
+                   <div style={{ width: 20, height: 20, border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid currentColor", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
+                ) : isActive ? "Active" : "Activate Plan"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── INVOICES SCREEN ───────────────────────────────────────────
+function InvoicesScreen({ onShowNotif }) {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
+  const fetchInvoices = async () => {
+    try {
+      setLoading(true);
+      const response = await API.Subscription.getActiveSubscription();
+      if (response.status === "success" || response.success) {
+        setInvoices(response.data?.subscriptions?.[0]?.invoices || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch invoices:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: 60 }}><div style={{ width: 40, height: 40, border: "3px solid #f3f3f3", borderTop: "3px solid #fb923c", borderRadius: "50%", animation: "spin 1s linear infinite" }} /></div>;
+
+  return (
+    <div style={{ animation: "fadeIn 0.3s ease" }}>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: S.navy, marginBottom: 8 }}>My Invoices</h2>
+        <p style={{ color: S.gray, fontSize: 15 }}>View and download your subscription payment history.</p>
+      </div>
+
+      <div style={{ background: "#fff", borderRadius: 24, padding: "20px", border: `1px solid ${S.border}`, boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+        {invoices.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${S.border}`, textAlign: "left" }}>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>INVOICE #</th>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>DATE</th>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>AMOUNT</th>
+                <th style={{ padding: "16px", textAlign: "right" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv, idx) => (
+                <tr key={idx} style={{ borderBottom: `1px solid ${S.border}`, transition: "background 0.2s" }} onMouseOver={e => e.currentTarget.style.background = "#f8fafc"} onMouseOut={e => e.currentTarget.style.background = "transparent"}>
+                  <td style={{ padding: "16px", fontWeight: 700, color: S.navy }}>INV-{inv.number || (1000 + idx)}</td>
+                  <td style={{ padding: "16px", color: S.navyLight }}>{new Date(inv.date || Date.now()).toLocaleDateString()}</td>
+                  <td style={{ padding: "16px", color: S.navy, fontWeight: 600 }}>₦{(inv.amount || 0).toLocaleString()}</td>
+                  <td style={{ padding: "16px", textAlign: "right" }}>
+                    <button style={{ background: S.goldPale, color: S.gold, border: "none", padding: "8px 16px", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+                      Download
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: "60px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: S.navy, marginBottom: 8 }}>No Invoices Yet</h3>
+            <p style={{ color: S.gray, fontSize: 14 }}>Once you make a subscription payment, your invoices will appear here.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

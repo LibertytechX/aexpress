@@ -15,6 +15,7 @@
 6. [Key Configuration Files](#key-configuration-files)
 7. [Wallet Endpoints](#wallet-endpoints)
 8. [Auth & Signup Endpoints](#auth--signup-endpoints)
+9. [Subscription Endpoints](#subscription-endpoints)
 
 ---
 
@@ -50,6 +51,118 @@ Request Body:
     "password": "password123",
     "business_name": "My Business",
     "referral_code": "OPTIONAL_CODE"
+  }
+```
+
+---
+
+## SUBSCRIPTION ENDPOINTS
+
+### 1. Get Subscription Plans
+```
+GET /subscriptions/plans/
+Description: Retrieves all available subscription plans (Starter, Growth, Enterprise).
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Enterprise",
+        "price": "75000.00",
+        "free_orders_limit": 400,
+        "overage_fee": "300.00",
+        "has_dedicated_rider": true
+      },
+      ...
+    ]
+  }
+```
+
+### 2. Subscribe to a Plan
+```
+POST /subscriptions/plans/{plan_id}/subscribe/
+Description: Subscribes the merchant to a specific plan.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "id": "uuid",
+      "plan": { ... },
+      "start_date": "...",
+      "end_date": "...",
+      "status": "active"
+    }
+  }
+```
+
+### 3. Get Postpaid Plans
+```
+GET /subscriptions/postpaid/plans/
+Description: Retrieves all available postpaid subscription plans.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Monthly Postpaid",
+        "plan_type": "monthly",
+        "is_active": true
+      },
+      ...
+    ]
+  }
+```
+
+### 4. Activate Postpaid Plan
+```
+POST /subscriptions/postpaid/plans/{plan_id}/activate/
+Description: Activates a postpaid plan for the merchant.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "message": "Plan activated successfully"
+  }
+```
+
+### 5. Get Active Postpaid Subscription
+```
+GET /subscriptions/postpaid/active/
+Description: Retrieves the current active postpaid subscription details.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+       "id": "uuid",
+       "name": "Monthly Postpaid",
+       "status": "active"
+    }
+  }
+```
+
+### 3. Get Active Subscription
+```
+GET /subscriptions/active/
+Description: Retrieves the merchant's current active subscription.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "subscriptions": [ ... ],
+      "current_active": {
+        "id": "uuid",
+        "plan": { ... },
+        "status": "active",
+        "end_date": "..."
+      }
+    }
   }
 ```
 
