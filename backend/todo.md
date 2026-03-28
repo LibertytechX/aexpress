@@ -7,3 +7,5 @@
 - [x] order export all
 - [x] complete the merchant referral implementation with agency banking
 - [] move all marketing tasks to tasks.py and update their references in the codebase
+- [] add check for rider acceptance of order offer to make sure the order within their zone.
+

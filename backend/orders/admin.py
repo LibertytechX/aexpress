@@ -170,6 +170,8 @@ class DeliveryInline(admin.TabularInline):
         "sender_name",
         "sender_phone",
         "dropoff_address",
+        "dropoff_latitude",
+        "dropoff_longitude",
         "receiver_name",
         "receiver_phone",
         "package_type",
@@ -229,6 +231,7 @@ class OrderResource(resources.ModelResource):
     collect_on_delivery_for_merchant = fields.Field(
         column_name="Collect On Delivery For Merchant"
     )
+    rider_earning = fields.Field(column_name="Rider Earning")
 
     class Meta:
         model = Order
@@ -253,6 +256,7 @@ class OrderResource(resources.ModelResource):
             "completed_at",
             "collect_on_delivery_for_merchant",
             "cod_amount",
+            "rider_earning",
             "created_at",
         )
         export_order = fields
@@ -274,6 +278,11 @@ class OrderResource(resources.ModelResource):
             return obj.rider.vehicle_asset.asset_id
         return "-"
 
+    def dehydrate_rider_earning(self, obj):
+        if hasattr(obj, "rider_earning"):
+            return obj.rider_earning.net_earning
+        return 0.00
+
 
 @admin.register(Order)
 class OrderAdmin(ImportExportModelAdmin):
@@ -288,6 +297,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "user",
         "rider",
         "get_rider_id",
+        "get_rider_earning",
         "mode",
         "is_relay_order",
         "vehicle",
@@ -324,7 +334,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "rider__user__phone",
         "pickup_address",
     ]
-    readonly_fields = ["order_number", "created_at", "updated_at"]
+    readonly_fields = ["order_number", "get_rider_earning", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
     fieldsets = (
@@ -353,7 +363,7 @@ class OrderAdmin(ImportExportModelAdmin):
                 )
             },
         ),
-        ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount")}),
+        ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount", "get_rider_earning")}),
         ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
         (
             "Timestamps",
@@ -372,6 +382,12 @@ class OrderAdmin(ImportExportModelAdmin):
         if obj.rider and obj.rider.vehicle_asset:
             return obj.rider.vehicle_asset.asset_id
         return "-"
+
+    @admin.display(description="Rider Earning")
+    def get_rider_earning(self, obj):
+        if hasattr(obj, "rider_earning"):
+            return f"₦{obj.rider_earning.net_earning}"
+        return "₦0.00"
 
 
 @admin.register(Delivery)
