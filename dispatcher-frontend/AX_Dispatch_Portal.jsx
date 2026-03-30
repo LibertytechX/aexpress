@@ -6788,7 +6788,7 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
 
 // ─── ADD DISPATCHER MODAL ────────────────────────────────────────
 function AddDispatcherModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "" });
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", role: "admin" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -6797,7 +6797,7 @@ function AddDispatcherModal({ onClose, onCreated }) {
   const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
 
   const handleSubmit = async () => {
-    if (!form.first_name || !form.last_name || !form.phone || !form.email || !form.password) {
+    if (!form.first_name || !form.last_name || !form.phone || !form.email || !form.password || !form.role) {
       setError("All fields are required."); return;
     }
     setSubmitting(true); setError("");
@@ -6853,10 +6853,20 @@ function AddDispatcherModal({ onClose, onCreated }) {
             <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="dispatcher@company.com" style={iSt} />
           </div>
 
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 14 }}>
             <label style={lSt}>Password</label>
             <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters" style={iSt} />
             <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>The dispatcher will use this to log in to the portal.</div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={lSt}>Role</label>
+            <select value={form.role} onChange={e => set("role", e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
+              <option value="admin">Admin</option>
+              <option value="zone_lead">Zone Lead</option>
+              <option value="hub_captain">Hub Captain</option>
+            </select>
+            <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>Access level granted to this dispatcher.</div>
           </div>
 
           {error && (
