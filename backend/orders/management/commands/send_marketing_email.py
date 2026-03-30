@@ -1,7 +1,7 @@
 import os
 from django.core.management.base import BaseCommand, CommandError
 from authentication.models import User
-from orders.marketing_tasks import _send_marketing_email
+from orders.tasks import _send_marketing_email
 
 
 class Command(BaseCommand):

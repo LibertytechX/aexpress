@@ -11,4 +11,5 @@
 - [] Bonus: integrate AI chatbot to the merchant support chats
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires
 - [] Move all map services to a separate secure service and use it across the platform 
+- [] update the onboard dispatcher in teams to support role assignment.
 
