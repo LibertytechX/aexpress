@@ -223,6 +223,7 @@ class Order(models.Model):
 
     PAYMENT_STATUS_CHOICES = [
         ("Pending", "Pending"),
+        ("Cancelled", "Cancelled"),
         ("Paid", "Paid"),
         ("Failed", "Failed"),
         ("Refunded", "Refunded"),

@@ -20,6 +20,8 @@ from .models import (
     VerticalLead,
     Vertical,
     RiderDutyLog,
+    Merchant,
+    MerchantAPIKey,
 )
 from .serializers import (
     RiderSerializer,
@@ -32,6 +34,14 @@ from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
+
+# Merchant API Key imports
+from authentication.services import OTPService
+from devs.models import ErrorLog
+from sparky_utils.exceptions import ServiceException
+import secrets
+import hashlib
+
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
@@ -406,9 +416,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         """
         order = self.get_object()
         new_status = request.data.get("status")
+        user = request.user
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
+            "Assignment Accepted": "AssignmentAccepted",
             "In Transit": "Started",
             "At Dropoff": "Arrived",  # rider is at the dropoff location
             "Delivered": "Done",
@@ -442,12 +454,28 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.status = new_status
 
         # Keep timestamps consistent with rider-app completion flows.
-        update_fields = ["status", "updated_at"]
-        if new_status == "Assigned" and not getattr(order, "assigned_at", None):
-            order.assigned_at = now
-            order.dispatcher_assigned = True
-            update_fields.append("assigned_at")
-            update_fields.append("dispatcher_assigned")
+        update_fields = ["status", "updated_at", "payment_status"]
+        if new_status == "Cancelled":
+            order.payment_status = "Cancelled"
+            # cancel the order charge as well
+            charge = order.charges.all().first()
+            if charge.status == "completed":
+                # refund the user wallet
+                wallet = user.wallet
+                wallet.credit(
+                    charge.amount,
+                    f"Refund for order #{order.order_number}",
+                    f"REFUND-{order.order_number}",
+                )
+            charge.status = "canceled"
+            charge.save()
+
+        if new_status == "Assigned":
+            return Response(
+                {"error": f"Please go assign a rider first biko! 😡"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
@@ -455,6 +483,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             order.arrived_at = now
             update_fields.append("arrived_at")
         if new_status == "Done" and not getattr(order, "completed_at", None):
+            if not order.rider:
+                return Response(
+                    {
+                        "error": f"You can't complete an order that has rider assigned! 😡"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             order.completed_at = now
             update_fields.append("completed_at")
 
@@ -746,6 +781,153 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(order).data, status=status.HTTP_200_OK)
+
+
+class MerchantAPIKeyRequestOTPView(views.APIView):
+    """
+    Step 1: Request an OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. OTP is sent to the merchant's registered email.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can request an API key.",
+            )
+        if merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403, message="Merchant must have api access! 🙈"
+            )
+
+        # Generate OTP
+        otp = OTPService.generate_otp()
+        user.otp = otp
+        user.otp_created_at = timezone.now()
+        user.save(update_fields=["otp", "otp_created_at"])
+
+        # Send OTP via Email
+        try:
+            OTPService.send_email_otp(user, otp)
+            logger.info(f"Merchant API Key OTP sent to {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to send Merchant API Key OTP email: {str(e)}")
+            raise ServiceException(
+                status_code=500,
+                message="Failed to send OTP email. Please try again later.",
+            )
+
+        return service_response(
+            status="success",
+            message="OTP sent to your registered email.",
+            data={},
+            status_code=200,
+        )
+
+
+class MerchantAPIKeyRetrieveView(views.APIView):
+    """
+    Step 2: Provide OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. Returns the raw API key ONLY ONCE.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        otp = request.data.get("otp")
+
+        if not otp:
+            raise ServiceException(status_code=400, message="OTP is required.")
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can retrieve an API key.",
+            )
+
+        # Basic OTP validation (expiry - 10 minutes)
+        if user.otp != otp:
+            raise ServiceException(status_code=400, message="Invalid OTP.")
+
+        expiry_time = timezone.now() - datetime.timedelta(minutes=10)
+        if not user.otp_created_at or user.otp_created_at < expiry_time:
+            raise ServiceException(status_code=400, message="OTP has expired.")
+
+        # OTP is valid, clear it
+        user.otp = None
+        user.save(update_fields=["otp"])
+
+        # Generate new API Key
+        raw_key = f"ak_live_{secrets.token_urlsafe(32)}"
+        prefix = raw_key[:11]
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+        # Update or create the API key
+        MerchantAPIKey.objects.update_or_create(
+            merchant=user,
+            defaults={
+                "key_hash": key_hash,
+                "prefix": prefix,
+                "is_active": True,
+                "created_at": timezone.now(),
+            },
+        )
+
+        return service_response(
+            status="success",
+            message="API Key generated successfully. Please store it securely.",
+            data={"api_key": raw_key},
+            status_code=200,
+        )
+
+
+class MerchantRequestAPIAccessView(views.APIView):
+    """
+    Allow a regular merchant to switch their account type to 'api'.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        merchant_profile = getattr(user, "merchant_profile", None)
+
+        if not merchant_profile:
+            raise ServiceException(
+                status_code=403, message="Only merchant users can request API access."
+            )
+
+        if merchant_profile.merchant_type == "api":
+            return service_response(
+                status="success",
+                message="Account is already set to API type.",
+                data={},
+                status_code=200,
+            )
+
+        merchant_profile.merchant_type = "api"
+        merchant_profile.save(update_fields=["merchant_type"])
+
+        logger.info(f"Merchant {user.email} switched to API type.")
+
+        return service_response(
+            status="success",
+            message="Your account has been switched to API type successfully.",
+            data={},
+            status_code=200,
+        )
 
     @action(detail=True, methods=["post"], url_path="accept-relay-route")
     def accept_relay_route(self, request, order_number=None):
