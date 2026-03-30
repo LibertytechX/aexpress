@@ -6,7 +6,7 @@
 - [x] rider accepts/reject assignment if a dispatcher assigned the rider and order
 - [x] order export all
 - [x] complete the merchant referral implementation with agency banking
-- [] move all marketing tasks to tasks.py and update their references in the codebase
+- [x] move all marketing tasks to tasks.py and update their references in the codebase
 - [] add check for rider acceptance of order offer to make sure the order within their zone.
 - [] Bonus: integrate AI chatbot to the merchant support chats
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires

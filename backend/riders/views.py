@@ -131,6 +131,8 @@ class OrderOfferAcceptView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
+            #
+
             # Get the offer and lock it for update
             try:
                 offer = OrderOffer.objects.select_for_update().get(id=offer_id)
@@ -138,6 +140,13 @@ class OrderOfferAcceptView(APIView):
                 return Response(
                     {"success": False, "message": "Offer not found."},
                     status=status.HTTP_404_NOT_FOUND,
+                )
+            rider_hub = rider.hub
+            zone_hubs = offer.zone.relay_nodes.all().value_list("id", flat=True)
+            if rider_hub not in zone_hubs:
+                return Response(
+                    {"success": False, "message": "Rider is not in the zone."},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
             # 1. Validation
