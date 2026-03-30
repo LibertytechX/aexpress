@@ -340,6 +340,15 @@ export const OrdersAPI = {
         return rawList.map(normalizeOrder);
     },
 
+    async exportHistory(params = {}) {
+        const res = await fetchWithAuth(`/dispatch/orders/export-history/`, {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error("Failed to trigger export");
+        return await res.json();
+    },
+
     async getOne(orderNumber) {
         const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/`);
         if (!res.ok) throw new Error('Failed to fetch order');

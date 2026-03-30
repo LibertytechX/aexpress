@@ -654,6 +654,141 @@ def send_onboarding_email_task(email, first_name, password, rider_id=None):
         return False
 
 
+@shared_task
+def export_orders_history_task(user_id, start_date_str, end_date_str):
+    """
+    Asynchronous task to export order history for a specific date range and email it to the dispatcher.
+    """
+    import csv
+    import io
+    from .models import VerticalLead, RelayNode
+    from authentication.models import User
+    from orders.models import Order
+
+    try:
+        user = User.objects.get(id=user_id)
+        role = getattr(user.dispatcher_profile, "role", None)
+
+        qs = (
+            Order.objects.filter(
+                created_at__date__gte=start_date_str, created_at__date__lte=end_date_str
+            )
+            .select_related("user", "rider")
+            .order_by("-created_at")
+        )
+
+        # Role-based filtering (logic from OrderViewSet)
+        if role == "zone_lead":
+            try:
+                zone_lead = VerticalLead.objects.get(user=user)
+                zones = zone_lead.area_zones.all()
+                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+                qs = qs.filter(
+                    Q(status="Pending")
+                    | Q(rider__hub__in=relay_nodes)
+                    | Q(legs__start_relay_node__in=relay_nodes)
+                    | Q(legs__end_relay_node__in=relay_nodes)
+                ).distinct()
+            except VerticalLead.DoesNotExist:
+                pass
+
+        # Helper for time formatting
+        def _format_td(td):
+            if not td:
+                return ""
+            minutes = int(td.total_seconds() / 60)
+            if minutes < 60:
+                return f"{minutes} mins"
+            else:
+                hours = minutes // 60
+                mins = minutes % 60
+                return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+
+        # Generate CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "Order ID",
+                "Date",
+                "Customer",
+                "Phone",
+                "Merchant",
+                "Pickup",
+                "Dropoff",
+                "Rider",
+                "Vehicle",
+                "Amount",
+                "Status",
+                "Payment Status",
+                "COD Amount",
+                "Wait Time",
+                "Delivery Time",
+                "Total Time",
+            ]
+        )
+
+        for o in qs:
+            wait_time = (
+                _format_td(o.assigned_at - o.created_at)
+                if (getattr(o, "assigned_at", None) and o.created_at)
+                else ""
+            )
+            delivery_time = (
+                _format_td(o.completed_at - o.assigned_at)
+                if (
+                    getattr(o, "completed_at", None)
+                    and getattr(o, "assigned_at", None)
+                )
+                else ""
+            )
+            total_time = (
+                _format_td(o.completed_at - o.created_at)
+                if (getattr(o, "completed_at", None) and o.created_at)
+                else ""
+            )
+
+            writer.writerow(
+                [
+                    o.order_number,
+                    o.created_at.strftime("%Y-%m-%d %H:%M"),
+                    o.customer_name,
+                    o.customer_phone,
+                    o.user.contact_name if (o.user and o.user.contact_name) else "N/A",
+                    o.pickup_address,
+                    o.dropoff_address,
+                    o.rider.rider_id if o.rider else "Unassigned",
+                    o.vehicle.name if o.vehicle else "N/A",
+                    o.total_amount,
+                    o.status,
+                    o.payment_status or "Pending",
+                    o.cod_amount if o.collect_on_delivery else 0,
+                    wait_time,
+                    delivery_time,
+                    total_time,
+                ]
+            )
+
+        csv_content = output.getvalue()
+        filename = f"orders_export_{start_date_str}_to_{end_date_str}.csv"
+        subject = f"Your Requested Order Export ({start_date_str} to {end_date_str})"
+        body = f"Hello {user.contact_name or user.first_name or 'Dispatcher'},\n\nPlease find attached the order history export you requested from the AX Dispatcher Portal."
+
+        from .utils import MailgunEmailService
+
+        success = MailgunEmailService.send_csv_attachment_email(
+            user.email, csv_content, filename, subject, body
+        )
+
+        if success:
+            logger.info(f"Export task successful for user {user.id}")
+        else:
+            logger.error(f"Export task failed to send email for user {user.id}")
+
+    except Exception as e:
+        logger.error(f"Error in export_orders_history_task: {str(e)}")
+
+
 @shared_task(
     bind=True,
     autoretry_for=(Exception,),

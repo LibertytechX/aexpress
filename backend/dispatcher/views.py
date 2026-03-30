@@ -594,6 +594,32 @@ class OrderViewSet(viewsets.ModelViewSet):
             status_code=200,
         )
 
+    @action(detail=False, methods=["post"], url_path="export-history")
+    def export_history(self, request):
+        """Trigger an async task to export order history within a date range and email it."""
+        from .tasks import export_orders_history_task
+
+        start_date = request.data.get("start_date")
+        end_date = request.data.get("end_date")
+
+        if not start_date or not end_date:
+            return service_response(
+                status="error",
+                message="Start date and end date are required",
+                data={},
+                status_code=400,
+            )
+
+        # Trigger Celery task
+        export_orders_history_task.delay(request.user.id, start_date, end_date)
+
+        return service_response(
+            status="success",
+            message="Export is being processed and will be sent to your email shortly.",
+            data={},
+            status_code=200,
+        )
+
     @action(detail=True, methods=["post"], url_path="assign-relay-leg")
     def assign_relay_leg(self, request, order_number=None):
         """Assign or change the rider for a specific relay leg.
