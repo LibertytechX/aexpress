@@ -64,7 +64,7 @@ class DispatcherListSerializer(serializers.ModelSerializer):
         )
 
     def get_role(self, obj):
-        return "Dispatcher"
+        return obj.get_role_display()
 
 
 class DispatcherCreateSerializer(serializers.Serializer):
@@ -76,6 +76,10 @@ class DispatcherCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(
         min_length=6, write_only=True, style={"input_type": "password"}
+    )
+    role = serializers.ChoiceField(
+        choices=DispatcherProfile.Role.choices,
+        default=DispatcherProfile.Role.ADMIN,
     )
 
     def validate_phone(self, value):
@@ -93,6 +97,7 @@ class DispatcherCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         first_name = validated_data["first_name"]
         last_name = validated_data["last_name"]
+        role = validated_data.get("role", DispatcherProfile.Role.ADMIN)
         user = User.objects.create_user(
             phone=validated_data["phone"],
             email=validated_data["email"],
@@ -102,7 +107,7 @@ class DispatcherCreateSerializer(serializers.Serializer):
             contact_name=f"{first_name} {last_name}".strip(),
             usertype="Dispatcher",
         )
-        profile = DispatcherProfile.objects.create(user=user)
+        profile = DispatcherProfile.objects.create(user=user, role=role)
         return profile
 
 
