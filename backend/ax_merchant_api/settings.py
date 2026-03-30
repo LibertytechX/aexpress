@@ -353,11 +353,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/15"),
     },
     "marketing-daily-drip": {
-        "task": "orders.marketing_tasks.process_daily_drip_campaigns",
+        "task": "orders.tasks.process_daily_drip_campaigns",
         "schedule": crontab(hour=8, minute=0),
     },
     "marketing-weekly-reports": {
-        "task": "orders.marketing_tasks.process_weekly_monday_reports",
+        "task": "orders.tasks.process_weekly_monday_reports",
         "schedule": crontab(day_of_week=1, hour=9, minute=0),  # Monday 9 AM
     },
     "process-subscription-invoicing-daily": {
