@@ -994,3 +994,40 @@ class ZoneTarget(models.Model):
 
     def __str__(self):
         return f"Target: {self.zone.name} — {self.month.strftime('%b %Y')}"
+
+
+class MerchantAPIKey(models.Model):
+    """
+    API keys for merchants of type 'api'.
+    Used for authenticating programmatic requests.
+    Keys are hashed (SHA-256); the raw key is shown once at creation time.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_api_key_profile",
+    )
+    key_hash = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="SHA-256 hash of the raw API key",
+    )
+    prefix = models.CharField(
+        max_length=16,
+        unique=True,
+        help_text="First characters of the key (ak_live_) for DB lookup",
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "merchant_api_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
+        )

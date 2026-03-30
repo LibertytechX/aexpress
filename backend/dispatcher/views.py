@@ -20,6 +20,8 @@ from .models import (
     VerticalLead,
     Vertical,
     RiderDutyLog,
+    Merchant,
+    MerchantAPIKey,
 )
 from .serializers import (
     RiderSerializer,
@@ -32,6 +34,14 @@ from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
+
+# Merchant API Key imports
+from authentication.services import OTPService
+from devs.models import ErrorLog
+from sparky_utils.exceptions import ServiceException
+import secrets
+import hashlib
+
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
@@ -746,6 +756,111 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(order).data, status=status.HTTP_200_OK)
+
+
+class MerchantAPIKeyRequestOTPView(views.APIView):
+    """
+    Step 1: Request an OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. OTP is sent to the merchant's registered email.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can request an API key.",
+            )
+
+        # Generate OTP
+        otp = OTPService.generate_otp()
+        user.otp = otp
+        user.otp_created_at = timezone.now()
+        user.save(update_fields=["otp", "otp_created_at"])
+
+        # Send OTP via Email
+        try:
+            OTPService.send_email_otp(user, otp)
+            logger.info(f"Merchant API Key OTP sent to {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to send Merchant API Key OTP email: {str(e)}")
+            raise ServiceException(
+                status_code=500,
+                message="Failed to send OTP email. Please try again later.",
+            )
+
+        return service_response(
+            status="success",
+            message="OTP sent to your registered email.",
+            data={},
+            status_code=200,
+        )
+
+
+class MerchantAPIKeyRetrieveView(views.APIView):
+    """
+    Step 2: Provide OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. Returns the raw API key ONLY ONCE.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        otp = request.data.get("otp")
+
+        if not otp:
+            raise ServiceException(status_code=400, message="OTP is required.")
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can retrieve an API key.",
+            )
+
+        # Basic OTP validation (expiry - 10 minutes)
+        if user.otp != otp:
+            raise ServiceException(status_code=400, message="Invalid OTP.")
+
+        expiry_time = timezone.now() - datetime.timedelta(minutes=10)
+        if not user.otp_created_at or user.otp_created_at < expiry_time:
+            raise ServiceException(status_code=400, message="OTP has expired.")
+
+        # OTP is valid, clear it
+        user.otp = None
+        user.save(update_fields=["otp"])
+
+        # Generate new API Key
+        raw_key = f"ak_live_{secrets.token_urlsafe(32)}"
+        prefix = raw_key[:11]
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+        # Update or create the API key
+        MerchantAPIKey.objects.update_or_create(
+            merchant=user,
+            defaults={
+                "key_hash": key_hash,
+                "prefix": prefix,
+                "is_active": True,
+                "created_at": timezone.now(),
+            },
+        )
+
+        return service_response(
+            status="success",
+            message="API Key generated successfully. Please store it securely.",
+            data={"api_key": raw_key},
+            status_code=200,
+        )
 
     @action(detail=True, methods=["post"], url_path="accept-relay-route")
     def accept_relay_route(self, request, order_number=None):

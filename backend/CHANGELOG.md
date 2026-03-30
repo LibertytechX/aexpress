@@ -3,7 +3,22 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
- 
+
+- Registered `Webhook` and `WebhookOutbox` models in the Django Admin for the `webhooks` app, enabling internal management of webhook configurations and inspection of delivery attempts.
+
+---
+
+## [2026-03-30] — Merchant API Key Authentication
+
+### Added
+- **Merchant API Key System**: Implemented a secure, two-step OTP-based retrieval and rotation flow for merchants of type `api`.
+- **Models**: Added `MerchantAPIKey` model in `dispatcher` app to store hashed API keys (`ak_live_` prefix).
+- **API Endpoints**: 
+    - `POST /api/merchant/apikey/request-otp/`: Requests a 6-digit OTP for API key management (JWT authenticated).
+    - `POST /api/merchant/apikey/retrieve/`: Verifies the OTP and returns a newly generated raw API key (JWT authenticated).
+- **Security**: API keys are stored as SHA-256 hashes; raw keys are only displayed once during generation. Rotation is supported and overwrites the previous key.
+
+
  ## [2026-03-28] — Frontend Tiered Pricing Fix
  
  ### Fixed
