@@ -371,16 +371,22 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
-RELAY_THRESHOLD_KM = 18.0  # Orders longer than this are split via relay hubs
+MAX_RELAY_LEG_KM = 15.0
+RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
+RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
 
 
-def _nearest_rider_to(lat, lng):
+def _nearest_rider_to(lat, lng, hub=None):
     """Return the nearest authorized rider (with GPS) to (lat, lng)."""
-    riders = Rider.objects.filter(
-        is_authorized=True,
-        current_latitude__isnull=False,
-        current_longitude__isnull=False,
-    )
+    filters = {
+        "is_authorized": True,
+        "current_latitude__isnull": False,
+        "current_longitude__isnull": False,
+    }
+    if hub:
+        filters["hub"] = hub
+
+    riders = Rider.objects.filter(**filters)
     best, best_d = None, None
     for r in riders[:200]:
         d = _haversine_km(
@@ -391,10 +397,33 @@ def _nearest_rider_to(lat, lng):
     return best
 
 
-def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
-    """Greedy hop selection using haversine distance as a cheap proxy."""
+def _point_along_line(start, end, distance_km):
+    """Return an approximate point `distance_km` from start toward end."""
+    total = _haversine_km(start["lat"], start["lng"], end["lat"], end["lng"])
+    if total <= 0:
+        return {"lat": start["lat"], "lng": start["lng"]}
+
+    fraction = max(0.0, min(1.0, distance_km / total))
+    return {
+        "lat": start["lat"] + ((end["lat"] - start["lat"]) * fraction),
+        "lng": start["lng"] + ((end["lng"] - start["lng"]) * fraction),
+    }
+
+
+def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
+    """
+    Build a continuous relay-node chain from pickup to dropoff.
+
+    Preference order:
+    - prefer hubs reachable within `max_leg_km_est` from the current point;
+    - if none exist, fall back to the closest forward-moving hub;
+    - stop once the remaining distance to the dropoff is within the cap.
+    """
     nodes = _get_active_relay_nodes_cached()
     direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
+
+    if direct <= max_leg_km_est:
+        return []
 
     # Filter nodes roughly "near" the pickup→dropoff corridor (triangle inequality)
     filtered = []
@@ -407,45 +436,76 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=90.0, max_hops=12):
         d2 = _haversine_km(
             float(n.latitude), float(n.longitude), dropoff["lat"], dropoff["lng"]
         )
-        if (d1 + d2) <= (direct * 1.6):
+        if (d1 + d2) <= (direct * 1.5):
             filtered.append(n)
 
     hops = []
     cur = pickup
-    remaining = _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"])
+    remaining = direct
+    used_node_ids = set()
 
-    while remaining > max_leg_km_est:
-        best = None
-        best_remaining = None
+    while remaining > (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+        hop_index = len(hops)
+        target = _point_along_line(cur, dropoff, max_leg_km_est)
+        best_strict = None
+        best_strict_score = None
+        best_strict_remaining = None
+        best_fallback = None
+        best_fallback_score = None
+        best_fallback_remaining = None
+
         for n in filtered:
+            if n.id in used_node_ids:
+                continue
+
             n_lat, n_lng = float(n.latitude), float(n.longitude)
             leg = _haversine_km(cur["lat"], cur["lng"], n_lat, n_lng)
-            if leg > max_leg_km_est:
+            if leg <= 0:
                 continue
-            rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
-            # must make progress
-            if rem >= remaining - 1.0:
-                continue
-            if best is None or rem < best_remaining:
-                best = n
-                best_remaining = rem
 
-        if not best:
-            break
+            rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
+
+            # Must make forward progress and avoid obvious detours.
+            if rem >= remaining:
+                continue
+            if (leg + rem) > (remaining * 1.35):
+                continue
+
+            target_gap = _haversine_km(target["lat"], target["lng"], n_lat, n_lng)
+
+            if leg <= (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+                if hop_index == 0:
+                    score = (leg, target_gap, rem)
+                else:
+                    score = (target_gap, abs(max_leg_km_est - leg), rem)
+
+                if best_strict is None or score < best_strict_score:
+                    best_strict = n
+                    best_strict_score = score
+                    best_strict_remaining = rem
+                continue
+
+            fallback_score = (leg, target_gap, rem)
+            if best_fallback is None or fallback_score < best_fallback_score:
+                best_fallback = n
+                best_fallback_score = fallback_score
+                best_fallback_remaining = rem
+
+        best = best_strict or best_fallback
+        best_remaining = (
+            best_strict_remaining
+            if best_strict is not None
+            else best_fallback_remaining
+        )
+
+        if not best or best_remaining is None:
+            return None
 
         hops.append(best)
+        used_node_ids.add(best.id)
         cur = {"lat": float(best.latitude), "lng": float(best.longitude)}
         remaining = best_remaining
 
-        if len(hops) >= max_hops:
-            break
-
-    # If still far and we couldn't hop, signal failure by returning None
-    if (
-        _haversine_km(cur["lat"], cur["lng"], dropoff["lat"], dropoff["lng"])
-        > max_leg_km_est
-    ):
-        return None
     return hops
 
 
@@ -475,73 +535,74 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         logger.info("notify_relay_vertical_leads: no sub-orders provided, skipping.")
         return
 
-    # Fetch sub-orders with their assigned riders and home zones in one query.
+    # Fetch sub-orders with their assigned riders and hubs in one query.
     sub_orders = (
         Order.objects.filter(id__in=sub_order_ids)
         .select_related(
             "rider",
             "rider__user",
-            "rider__home_zone",
-            "rider__home_zone__vertical",
-            "rider__home_zone__vertical__lead",
-            "rider__home_zone__vertical__lead__user",
+            "rider__hub",
+            "rider__hub__zone",
+            "rider__hub__zone__vertical",
+            "rider__hub__zone__vertical__lead",
+            "rider__hub__zone__vertical__lead__user",
         )
         .order_by("relay_leg_number")
     )
 
-    # Build a mapping: VerticalLead → list of leg summaries
-    # Key: (lead_user_phone, lead_name)  — avoids loading the full object into a dict key
+    # Build mappings for Vertical Leads and Hub Captains
+    # Key: (phone, name)  — avoids loading the full object into a dict key
     lead_legs: dict[tuple, list[str]] = {}
+    captain_legs: dict[tuple, list[str]] = {}
 
     for sub in sub_orders:
         rider = sub.rider
         if not rider:
             continue
 
-        home_zone = rider.home_zone
-        if not home_zone or not home_zone.vertical:
-            logger.warning(
-                f"notify_relay_vertical_leads: rider {rider.rider_id} has no home zone "
-                f"or vertical — skipping SMS for leg {sub.relay_leg_number}."
-            )
-            continue
-
-        vertical = home_zone.vertical
-        try:
-            vl = vertical.lead  # VerticalLead instance (OneToOne reverse)
-        except VerticalLead.DoesNotExist:
-            logger.warning(
-                f"notify_relay_vertical_leads: vertical '{vertical.name}' has no lead — "
-                f"skipping SMS for rider {rider.rider_id}."
-            )
-            continue
-
-        if not vl.is_active:
-            logger.info(
-                f"notify_relay_vertical_leads: lead for vertical '{vertical.name}' is inactive, skipping."
-            )
-            continue
-
-        lead_phone = vl.user.phone
-        lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
-        rider_name = rider.user.contact_name if rider.user else rider.rider_id
-
+        hub = rider.hub
+        rider_name = (
+            rider.user.contact_name
+            if (rider.user and rider.user.contact_name)
+            else rider.rider_id
+        )
         leg_summary = (
             f"Leg {sub.relay_leg_number}: {rider_name} ({rider.rider_id}) — "
             f"pickup: {sub.pickup_address}"
         )
 
-        key = (lead_phone, lead_name)
-        lead_legs.setdefault(key, []).append(leg_summary)
+        # 1. Collect data for Vertical Lead
+        zone = hub.zone if hub else None
+        if zone and zone.vertical:
+            try:
+                vl = zone.zone_lead
+                if vl and vl.is_active:
+                    lead_phone = vl.user.phone
+                    lead_name = (
+                        vl.user.contact_name or vl.user.get_full_name() or "Lead"
+                    )
+                    key = (lead_phone, lead_name)
+                    lead_legs.setdefault(key, []).append(leg_summary)
+            except VerticalLead.DoesNotExist:
+                pass
 
-    if not lead_legs:
+        # 2. Collect data for Hub Captain
+        if hub and hub.hub_captain_phone:
+            captain_phone = hub.hub_captain_phone
+            captain_name = hub.hub_captain_name or "Captain"
+            c_key = (captain_phone, captain_name)
+            captain_legs.setdefault(c_key, []).append(leg_summary)
+
+    if not lead_legs and not captain_legs:
         logger.info(
-            "notify_relay_vertical_leads: no eligible vertical leads found, no SMS sent."
+            "notify_relay_vertical_leads: no eligible leads or captains found, no SMS sent."
         )
         return
 
     sent = 0
     failed = 0
+
+    # Send consolidated SMS to Vertical Leads
     for (phone, name), legs in lead_legs.items():
         legs_text = "\n".join(f"  • {lg}" for lg in legs)
         message = (
@@ -550,18 +611,35 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             f"{legs_text}\n"
             f"Please ensure your riders are ready for pickup."
         )
-
-        ok = send_sms(phone, message)
-        if ok:
+        if send_sms(phone, message):
             sent += 1
             logger.info(
-                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone}) "
-                f"for {len(legs)} leg(s)."
+                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone})"
             )
         else:
             failed += 1
             logger.error(
-                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})."
+                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})"
+            )
+
+    # Send consolidated SMS to Hub Captains
+    for (phone, name), legs in captain_legs.items():
+        legs_text = "\n".join(f"  • {lg}" for lg in legs)
+        message = (
+            f"AX Relay Alert — Order #{parent_order_number}\n"
+            f"Hi {name}, {len(legs)} rider(s) from your hub have been assigned relay leg(s):\n"
+            f"{legs_text}\n"
+            f"Please ensure your riders are ready."
+        )
+        if send_sms(phone, message):
+            sent += 1
+            logger.info(
+                f"notify_relay_vertical_leads: SMS sent to hub captain {name} ({phone})"
+            )
+        else:
+            failed += 1
+            logger.error(
+                f"notify_relay_vertical_leads: SMS FAILED for hub captain {name} ({phone})"
             )
 
     logger.info(
@@ -588,6 +666,156 @@ def send_onboarding_email_task(email, first_name, password, rider_id=None):
     except Exception as e:
         logger.error(f"Error in send_onboarding_email_task: {str(e)}")
         return False
+
+
+@shared_task
+def export_orders_history_task(user_id, start_date_str, end_date_str):
+    """
+    Asynchronous task to export order history for a specific date range and email it to the dispatcher.
+    """
+    import csv
+    import io
+    from .models import VerticalLead, RelayNode
+    from authentication.models import User
+    from orders.models import Order
+
+    try:
+        user = User.objects.get(id=user_id)
+        role = getattr(user.dispatcher_profile, "role", None)
+
+        qs = (
+            Order.objects.filter(
+                created_at__date__gte=start_date_str, created_at__date__lte=end_date_str
+            )
+            .select_related("user", "rider", "vehicle")
+            .prefetch_related("deliveries")
+            .order_by("-created_at")
+        )
+
+        # Role-based filtering (logic from OrderViewSet)
+        if role == "zone_lead":
+            try:
+                zone_lead = VerticalLead.objects.get(user=user)
+                zones = zone_lead.area_zones.all()
+                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+                qs = qs.filter(
+                    Q(status="Pending")
+                    | Q(rider__hub__in=relay_nodes)
+                    | Q(legs__start_relay_node__in=relay_nodes)
+                    | Q(legs__end_relay_node__in=relay_nodes)
+                ).distinct()
+            except VerticalLead.DoesNotExist:
+                pass
+
+        # Helper for time formatting
+        def _format_td(td):
+            if not td:
+                return ""
+            minutes = int(td.total_seconds() / 60)
+            if minutes < 60:
+                return f"{minutes} mins"
+            else:
+                hours = minutes // 60
+                mins = minutes % 60
+                return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+
+        # Generate CSV
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(
+            [
+                "Order ID",
+                "Date",
+                "Customer",
+                "Phone",
+                "Merchant",
+                "Pickup",
+                "Dropoff",
+                "Rider ID",
+                "Rider Name",
+                "Vehicle",
+                "Amount",
+                "Status",
+                "Payment Status",
+                "COD Amount",
+                "Wait Time",
+                "Delivery Time",
+                "Total Time",
+            ]
+        )
+
+        for o in qs:
+            first_del = o.deliveries.first()
+            customer_name = first_del.receiver_name if first_del else "Unknown"
+            customer_phone = first_del.receiver_phone if first_del else ""
+            dropoff_address = (
+                first_del.dropoff_address if first_del else o.pickup_address
+            )  # Fallback
+
+            rider_name = (
+                o.rider.user.full_name
+                if (o.rider and getattr(o.rider, "user", None))
+                else "Unassigned"
+            )
+
+            wait_time = (
+                _format_td(o.assigned_at - o.created_at)
+                if (getattr(o, "assigned_at", None) and o.created_at)
+                else ""
+            )
+            delivery_time = (
+                _format_td(o.completed_at - o.assigned_at)
+                if (
+                    getattr(o, "completed_at", None) and getattr(o, "assigned_at", None)
+                )
+                else ""
+            )
+            total_time = (
+                _format_td(o.completed_at - o.created_at)
+                if (getattr(o, "completed_at", None) and o.created_at)
+                else ""
+            )
+
+            writer.writerow(
+                [
+                    o.order_number,
+                    o.created_at.strftime("%Y-%m-%d %H:%M"),
+                    customer_name,
+                    customer_phone,
+                    o.user.contact_name if (o.user and o.user.contact_name) else "N/A",
+                    o.pickup_address,
+                    dropoff_address,
+                    o.rider.rider_id if o.rider else "Unassigned",
+                    rider_name,
+                    o.vehicle.name if o.vehicle else "Bike",
+                    o.total_amount,
+                    o.status,
+                    o.payment_status or "Pending",
+                    o.cod_amount if o.collect_on_delivery else 0,
+                    wait_time,
+                    delivery_time,
+                    total_time,
+                ]
+            )
+
+        csv_content = output.getvalue()
+        filename = f"orders_export_{start_date_str}_to_{end_date_str}.csv"
+        subject = f"Your Requested Order Export ({start_date_str} to {end_date_str})"
+        body = f"Hello {user.contact_name or user.first_name or 'Dispatcher'},\n\nPlease find attached the order history export you requested from the AX Dispatcher Portal."
+
+        from .utils import MailgunEmailService
+
+        success = MailgunEmailService.send_csv_attachment_email(
+            user.email, csv_content, filename, subject, body
+        )
+
+        if success:
+            logger.info(f"Export task successful for user {user.id}")
+        else:
+            logger.error(f"Export task failed to send email for user {user.id}")
+
+    except Exception as e:
+        logger.error(f"Error in export_orders_history_task: {str(e)}")
 
 
 @shared_task(
@@ -731,14 +959,10 @@ def generate_relay_legs_sync(order_id):
                 first_delivery.dropoff_latitude = dropoff["lat"]
                 first_delivery.dropoff_longitude = dropoff["lng"]
 
-            # Build hop chain.
-            # Orders ≤ 18 km go direct (single leg, no hub handoffs).
-            # Orders > 18 km must pass through relay hubs — the algorithm
-            # tries progressively relaxed per-leg caps until a valid path
-            # is found or all caps are exhausted (→ fail).
-            # IMPORTANT: use explicit `is None` — an empty list [] means a
-            # valid direct single-leg delivery and must not trigger the
-            # fallback path.
+            # Build a continuous chain that prefers ~15km relay spacing.
+            # Orders within the cap go direct (single leg, no hub handoffs).
+            # Longer routes use relay hubs, falling back to the closest forward
+            # hub when no hub is available within the preferred cap.
             direct_km = _haversine_km(
                 float(pickup["lat"]),
                 float(pickup["lng"]),
@@ -746,19 +970,17 @@ def generate_relay_legs_sync(order_id):
                 float(dropoff["lng"]),
             )
             if direct_km <= RELAY_THRESHOLD_KM:
-                hop_nodes = []  # short enough — direct delivery, no hubs needed
+                hop_nodes = []
             else:
-                hop_nodes = None
-                for max_leg in [18.0, 25.0, 35.0, 50.0, 80.0]:
-                    hop_nodes = _build_greedy_relay_hops(
-                        pickup, dropoff, max_leg_km_est=max_leg
-                    )
-                    if hop_nodes is not None:
-                        break
+                hop_nodes = _build_greedy_relay_hops(
+                    pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM
+                )
 
             if hop_nodes is None:
                 order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = "Could not find relay hubs to split this route into manageable legs."
+                order.routing_error = (
+                    "Could not find a continuous relay-hub chain for this route."
+                )
                 order.save(update_fields=["routing_status", "routing_error"])
                 emit_activity(
                     event_type="relay_route_failed",
@@ -783,22 +1005,6 @@ def generate_relay_legs_sync(order_id):
             if legs_metrics is None:
                 legs_metrics = _estimate_legs_haversine(pickup, points)
 
-            # Enforce 100km cap (best-effort; haversine fallback may exceed in real roads)
-            if any(d > 100.0 for d, _ in legs_metrics):
-                order.routing_status = Order.RoutingStatus.FAILED
-                order.routing_error = (
-                    "One or more legs exceed 100km after routing validation."
-                )
-                order.save(update_fields=["routing_status", "routing_error"])
-                emit_activity(
-                    event_type="relay_route_failed",
-                    order_id=order.order_number,
-                    text=f"Relay route exceeds cap for {order.order_number}",
-                    color="red",
-                    metadata={"reason": order.routing_error},
-                )
-                return False
-
             # Clear and recreate legs (idempotent retries)
             order.legs.all().delete()
 
@@ -818,7 +1024,13 @@ def generate_relay_legs_sync(order_id):
                     start_lng = float(prev_node.longitude)
 
                 try:
-                    suggested = _nearest_rider_to(start_lat, start_lng)
+                    suggested = None
+                    if prev_node:
+                        suggested = _nearest_rider_to(
+                            start_lat, start_lng, hub=prev_node
+                        )
+                    if not suggested:
+                        suggested = _nearest_rider_to(start_lat, start_lng)
                 except Exception:
                     suggested = None
 
@@ -911,3 +1123,303 @@ def generate_relay_legs_sync(order_id):
         except Exception:
             pass
         return False
+
+
+@shared_task
+def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
+    """
+    Background task to assign a rider to a sub-order and relay leg,
+    and send the corresponding notification.
+    """
+    from django.utils import timezone
+    from orders.models import Order, OrderLeg
+    from riders.notifications import notify_rider
+    from riders.views import publish_order_assigned_event
+    from dispatcher.models import Rider
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        sub_order = Order.objects.select_related("parent_order").get(id=sub_order_id)
+        leg = OrderLeg.objects.get(id=leg_id)
+
+        if rider_id:
+            rider = Rider.objects.get(id=rider_id)
+        else:
+            # Dynamically find the nearest rider at this moment
+            start_lat = float(sub_order.pickup_latitude)
+            start_lng = float(sub_order.pickup_longitude)
+            prev_node = leg.start_relay_node
+
+            logger.info(
+                f"assign_rider_to_sub_order_task: Searching for nearest rider for sub-order {sub_order_id} at ({start_lat}, {start_lng})"
+            )
+
+            try:
+                rider = None
+                if prev_node:
+                    rider = _nearest_rider_to(start_lat, start_lng, hub=prev_node)
+                if not rider:
+                    rider = _nearest_rider_to(start_lat, start_lng)
+            except Exception as e:
+                logger.error(
+                    f"assign_rider_to_sub_order_task: Error searching for rider: {e}"
+                )
+                rider = None
+
+            if not rider:
+                logger.warning(
+                    f"assign_rider_to_sub_order_task: No available rider found for sub-order {sub_order_id}"
+                )
+                return False
+
+    except Exception as exc:
+        logger.error(
+            f"assign_rider_to_sub_order_task: missing relation or error: {exc}"
+        )
+        return False
+
+    if sub_order.rider or sub_order.status not in ["Pending", "assigning"]:
+        logger.info(
+            f"assign_rider_to_sub_order_task: Sub-order {sub_order_id} already has a rider or is not Pending."
+        )
+        return False
+
+    sub_order.rider = rider
+    sub_order.status = "Assigned"
+    sub_order.assigned_at = timezone.now()
+    sub_order.dispatcher_assigned = True
+    sub_order.save(
+        update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"]
+    )
+
+    leg.rider = rider
+    leg.status = OrderLeg.Status.ASSIGNED
+    leg.assigned_at = timezone.now()
+    leg.save(update_fields=["rider", "status", "assigned_at"])
+
+    try:
+        notify_rider(
+            rider=rider,
+            title="Relay Leg Assigned 🔁",
+            body=(
+                f"You have been assigned Leg {leg.leg_number} of relay order "
+                f"#{sub_order.parent_order.order_number}. Pick up from: {sub_order.pickup_address}."
+            ),
+            data={
+                "order_number": sub_order.order_number,
+                "parent_order_number": sub_order.parent_order.order_number,
+                "leg_number": str(leg.leg_number),
+                "status": "Assigned",
+            },
+        )
+        publish_order_assigned_event(sub_order, rider)
+    except Exception as exc:
+        logger.warning(f"Relay leg assignment notification failed: {exc}")
+
+    notify_relay_vertical_leads.delay(
+        parent_order_number=sub_order.parent_order.order_number,
+        sub_order_ids=[str(sub_order.id)],
+    )
+
+    return True
+
+
+@shared_task
+def process_accepted_relay_route_task(order_id):
+    """
+    Background task to process an accepted relay route: create sub-orders,
+    assign riders, and send notifications.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+    from orders.models import Order, OrderLeg, Delivery
+    from riders.notifications import notify_rider
+    from riders.views import publish_order_assigned_event
+    from .utils import emit_activity
+
+    try:
+        order = Order.objects.get(id=order_id)
+    except Order.DoesNotExist:
+        logger.error(f"process_accepted_relay_route_task: Order {order_id} not found.")
+        return False
+
+    legs = list(
+        order.legs.select_related(
+            "start_relay_node",
+            "end_relay_node",
+            "suggested_rider",
+            "suggested_rider__user",
+        ).order_by("leg_number")
+    )
+
+    first_delivery = order.deliveries.first()
+    if not first_delivery:
+        logger.error(
+            f"process_accepted_relay_route_task: Parent order {order_id} has no delivery record."
+        )
+        return False
+
+    with transaction.atomic():
+        created_sub_orders = []
+        cumulative_duration_minutes = 0
+
+        for leg in legs:
+            is_first_leg = leg.leg_number == 1
+            is_last_leg = leg.leg_number == len(legs)
+
+            # ── Pickup for this leg ───────────────────────────────────────
+            if is_first_leg:
+                # First leg always picks up from the original order origin.
+                pickup_address = order.pickup_address
+                pickup_lat = order.pickup_latitude
+                pickup_lng = order.pickup_longitude
+                pickup_sender_name = order.sender_name
+                pickup_sender_phone = order.sender_phone
+            else:
+                # Subsequent legs pick up from the previous leg's end relay node.
+                node = leg.start_relay_node
+                pickup_address = node.address
+                pickup_lat = node.latitude
+                pickup_lng = node.longitude
+                pickup_sender_name = node.name
+                pickup_sender_phone = ""
+
+            # ── Dropoff for this leg ──────────────────────────────────────
+            if is_last_leg:
+                # Last leg delivers to the original order destination.
+                dropoff_address = first_delivery.dropoff_address
+                dropoff_lat = first_delivery.dropoff_latitude
+                dropoff_lng = first_delivery.dropoff_longitude
+                receiver_name = first_delivery.receiver_name
+                receiver_phone = first_delivery.receiver_phone
+            else:
+                # Intermediate legs deliver to the leg's end relay node (hub).
+                node = leg.end_relay_node
+                dropoff_address = node.address
+                dropoff_lat = node.latitude
+                dropoff_lng = node.longitude
+                receiver_name = node.name
+                receiver_phone = ""
+
+            assigned_rider = leg.suggested_rider
+
+            if is_first_leg:
+                sub_status = "Assigned" if assigned_rider else "Pending"
+                actual_rider = assigned_rider
+            else:
+                sub_status = "Pending"
+                actual_rider = None
+
+            # ── Create the sub-order ──────────────────────────────────────
+            sub_order = Order.objects.create(
+                user=order.user,
+                rider=actual_rider,
+                parent_order=order,
+                relay_leg_number=leg.leg_number,
+                dispatcher_assigned=True,
+                mode=order.mode,
+                vehicle=order.vehicle,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                payment_method=order.payment_method,
+                payment_status="Pending",
+                total_amount=leg.rider_payout,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+                status=sub_status,
+                assigned_at=timezone.now() if actual_rider else None,
+                notes=(
+                    f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
+                    f"for parent order {order.order_number}"
+                ),
+                is_relay_order=True,
+            )
+
+            # ── Create the delivery record for this sub-order ─────────────
+            Delivery.objects.create(
+                order=sub_order,
+                pickup_address=pickup_address,
+                pickup_latitude=pickup_lat,
+                pickup_longitude=pickup_lng,
+                sender_name=pickup_sender_name,
+                sender_phone=pickup_sender_phone,
+                dropoff_address=dropoff_address,
+                dropoff_latitude=dropoff_lat,
+                dropoff_longitude=dropoff_lng,
+                receiver_name=receiver_name,
+                receiver_phone=receiver_phone,
+                package_type=first_delivery.package_type,
+                notes=first_delivery.notes,
+                sequence=leg.leg_number,
+                distance_km=leg.distance_km,
+                duration_minutes=leg.duration_minutes,
+            )
+
+            # ── Assign suggested rider onto the leg itself ────────────────
+            leg.rider = actual_rider
+            if actual_rider:
+                leg.status = OrderLeg.Status.ASSIGNED
+                leg.assigned_at = timezone.now()
+            else:
+                leg.status = "Pending"
+            leg.save(update_fields=["rider", "status", "assigned_at"])
+
+            created_sub_orders.append((leg, sub_order))
+
+            # ── Notify the assigned rider or schedule it ─────────────────
+            if assigned_rider:
+                if is_first_leg:
+                    try:
+                        notify_rider(
+                            rider=assigned_rider,
+                            title="Relay Leg Assigned 🔁",
+                            body=(
+                                f"You have been assigned Leg {leg.leg_number} of relay order "
+                                f"#{order.order_number}. Pick up from: {pickup_address}."
+                            ),
+                            data={
+                                "order_number": sub_order.order_number,
+                                "parent_order_number": order.order_number,
+                                "leg_number": str(leg.leg_number),
+                                "status": "Assigned",
+                            },
+                        )
+                        publish_order_assigned_event(sub_order, assigned_rider)
+                    except Exception as exc:
+                        logger.warning(
+                            f"Relay leg assignment notification failed: {exc}"
+                        )
+                else:
+                    eta_time = timezone.now() + timezone.timedelta(
+                        minutes=cumulative_duration_minutes
+                    )
+                    assign_rider_to_sub_order_task.apply_async(
+                        args=[str(sub_order.id), str(leg.id), None], eta=eta_time
+                    )
+
+            cumulative_duration_minutes += leg.duration_minutes
+
+    emit_activity(
+        event_type="relay_route_accepted",
+        order_id=order.order_number,
+        text=f"Relay route accepted for {order.order_number} — {len(legs)} sub-orders created",
+        color="green",
+        metadata={
+            "legs": len(legs),
+            "sub_orders": [sub.order_number for _, sub in created_sub_orders],
+        },
+    )
+
+    assigned_sub_ids = [str(sub.id) for _, sub in created_sub_orders if sub.rider_id]
+    if assigned_sub_ids:
+        # call other celery task
+        notify_relay_vertical_leads.delay(
+            parent_order_number=order.order_number,
+            sub_order_ids=assigned_sub_ids,
+        )
+    return True

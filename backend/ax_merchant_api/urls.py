@@ -36,4 +36,6 @@ urlpatterns = [
     path("api/occ/", include("dispatcher.occ_urls")),
     path("api/riders/referrals/", include("referrals.urls")),
     path("api/chats/", include("chats.urls")),
+    path("api/whatsapp/", include("whatsapp_messaging.urls")),
+    path("api/subscriptions/", include("subscriptions.urls")),
 ]

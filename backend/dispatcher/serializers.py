@@ -64,7 +64,7 @@ class DispatcherListSerializer(serializers.ModelSerializer):
         )
 
     def get_role(self, obj):
-        return "Dispatcher"
+        return obj.get_role_display()
 
 
 class DispatcherCreateSerializer(serializers.Serializer):
@@ -76,6 +76,10 @@ class DispatcherCreateSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(
         min_length=6, write_only=True, style={"input_type": "password"}
+    )
+    role = serializers.ChoiceField(
+        choices=DispatcherProfile.Role.choices,
+        default=DispatcherProfile.Role.ADMIN,
     )
 
     def validate_phone(self, value):
@@ -93,6 +97,7 @@ class DispatcherCreateSerializer(serializers.Serializer):
     def create(self, validated_data):
         first_name = validated_data["first_name"]
         last_name = validated_data["last_name"]
+        role = validated_data.get("role", DispatcherProfile.Role.ADMIN)
         user = User.objects.create_user(
             phone=validated_data["phone"],
             email=validated_data["email"],
@@ -102,13 +107,23 @@ class DispatcherCreateSerializer(serializers.Serializer):
             contact_name=f"{first_name} {last_name}".strip(),
             usertype="Dispatcher",
         )
-        profile = DispatcherProfile.objects.create(user=user)
+        profile = DispatcherProfile.objects.create(user=user, role=role)
         return profile
 
 
 class RiderSerializer(serializers.ModelSerializer):
     name = serializers.CharField(source="user.contact_name", read_only=True)
     phone = serializers.CharField(source="user.phone", read_only=True)
+
+    # Zone derived from hub (RelayNode) → zone FK
+    zone = serializers.SerializerMethodField()
+
+    # Hub field (maps to the rider's assigned relay node)
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
 
     # Vehicle fields from Rider model
     vehicle = serializers.SerializerMethodField()
@@ -117,8 +132,9 @@ class RiderSerializer(serializers.ModelSerializer):
     vehicle_asset_detail = serializers.SerializerMethodField()
 
     # Mock/Computed fields to match frontend interface
-    todayOrders = serializers.IntegerField(default=0, read_only=True)
-    todayEarnings = serializers.IntegerField(default=0, read_only=True)
+    current_order = serializers.SerializerMethodField()
+    todayOrders = serializers.SerializerMethodField()
+    todayEarnings = serializers.SerializerMethodField()
     completionRate = serializers.IntegerField(default=98, read_only=True)
     avgTime = serializers.CharField(default="25 mins", read_only=True)
     joined = serializers.DateTimeField(
@@ -133,6 +149,8 @@ class RiderSerializer(serializers.ModelSerializer):
             "rider_id",
             "name",
             "phone",
+            "hub",
+            "zone",
             "vehicle",
             "vehicle_asset_detail",
             "status",
@@ -149,6 +167,36 @@ class RiderSerializer(serializers.ModelSerializer):
             "last_location_update",
             "total_yesterday_order_distance",
         ]
+
+    def get_zone(self, obj):
+        if obj.hub and obj.hub.zone_id:
+            return str(obj.hub.zone_id)
+        return None
+
+    def get_todayOrders(self, obj):
+        today = datetime.now().date()
+        return obj.rider_orders.filter(status="Done", created_at__date=today).count()
+
+    def get_todayEarnings(self, obj):
+        from django.db.models import Sum
+
+        today = datetime.now().date()
+        total = obj.rider_orders.filter(
+            status="Done", created_at__date=today
+        ).aggregate(total=Sum("total_amount"))["total"]
+        return float(total) if total else 0
+
+    def get_current_order(self, obj):
+        active_order = (
+            obj.rider_orders.filter(
+                status__in=["Assigned", "PickedUp", "Started", "Arrived", "Done"]
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if active_order:
+            return active_order.order_number
+        return None
 
     def get_total_yesterday_order_distance(self, obj):
         yesterday = datetime.now() - timedelta(days=1)
@@ -273,6 +321,7 @@ class OrderSerializer(serializers.ModelSerializer):
         source="parent_order.order_number", read_only=True, allow_null=True
     )
     sub_order_numbers = serializers.SerializerMethodField()
+    sub_orders = serializers.SerializerMethodField()
 
     def get_sub_order_numbers(self, obj):
         """Return list of sub-order order_numbers if this is a relay parent order."""
@@ -281,6 +330,24 @@ class OrderSerializer(serializers.ModelSerializer):
                 "relay_leg_number"
             )
         )
+
+    def get_sub_orders(self, obj):
+        """Return simplified sub-order details if this is a relay parent order."""
+        if obj.is_relay_order and not obj.parent_order_id:
+            sub_orders = obj.sub_orders.all().order_by("relay_leg_number")
+            return [
+                {
+                    "id": so.order_number,
+                    "status": so.status,
+                    "rider": so.rider.user.contact_name if so.rider and getattr(so.rider, "user", None) else None,
+                    "riderId": so.rider.rider_id if so.rider else None,
+                    "created": so.created_at.strftime("%Y-%m-%d %H:%M") if getattr(so, "created_at", None) else None,
+                    "amount": float(so.total_amount) if getattr(so, "total_amount", None) else 0.0,
+                    "relay_leg_number": so.relay_leg_number,
+                }
+                for so in sub_orders
+            ]
+        return []
 
     class Meta:
         from orders.models import Order
@@ -332,6 +399,9 @@ class OrderSerializer(serializers.ModelSerializer):
             "parent_order_number",
             "relay_leg_number",
             "sub_order_numbers",
+            "sub_orders",
+            "dispatcher_assigned",
+            "source",
         ]
 
     def get_pickup_lat(self, obj):
@@ -771,6 +841,8 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             vehicle=vehicle_obj,
             total_amount=total_amount,
             rider=rider_obj,
+            dispatcher_assigned=True if rider_obj else False,
+            source="dispatcher_web",
             status="Assigned" if rider_obj else "Pending",
             distance_km=distance_km,
             duration_minutes=duration_minutes,
@@ -1012,11 +1084,11 @@ class RiderOnboardingSerializer(serializers.Serializer):
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
-    home_zone = serializers.PrimaryKeyRelatedField(
-        queryset=Zone.objects.all(),
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.all(),
         required=False,
         allow_null=True,
-        help_text="Relay network zone to assign this rider to.",
+        help_text="Relay hub (node) to assign this rider to.",
     )
     driving_license_number = serializers.CharField(required=False, max_length=50)
     national_id = serializers.CharField(required=False, max_length=50)

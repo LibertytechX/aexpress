@@ -1,3 +1,4 @@
+from email.policy import default
 import hashlib
 import math
 
@@ -39,11 +40,12 @@ class Vertical(models.Model):
 
 class Zone(models.Model):
     """
-    A delivery zone defined by a center point and radius.
+    A delivery zone aka (verticals) defined by a center point and radius.
     Zones are used to assign riders to home areas and segment relay paths.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # deprecated
     vertical = models.ForeignKey(
         Vertical,
         on_delete=models.SET_NULL,
@@ -57,6 +59,13 @@ class Zone(models.Model):
         default="",
         help_text="List of areas covered by this zone",
     )
+    zone_lead = models.ForeignKey(
+        "dispatcher.VerticalLead",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="area_zones",
+    )
     center_lat = models.FloatField(help_text="Zone center latitude")
     center_lng = models.FloatField(help_text="Zone center longitude")
     radius_km = models.FloatField(default=5.0, help_text="Zone radius in kilometers")
@@ -67,6 +76,8 @@ class Zone(models.Model):
     class Meta:
         db_table = "zones"
         ordering = ["name"]
+        verbose_name = "Zone/Vertical"
+        verbose_name_plural = "Zones/Verticals"
 
     def __str__(self):
         return f"{self.name} ({self.radius_km}km radius)"
@@ -74,6 +85,8 @@ class Zone(models.Model):
     @staticmethod
     def haversine_distance(lat1, lng1, lat2, lng2):
         """Return great-circle distance in km between two (lat, lng) points."""
+        # Ensure all coordinates are floats to avoid TypeError with math functions or mixed Decimal/float
+        lat1, lng1, lat2, lng2 = float(lat1), float(lng1), float(lat2), float(lng2)
         R = 6371.0
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
@@ -452,6 +465,7 @@ class Rider(models.Model):
     onro_location_lat = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
     onro_location_lng = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
 
+    # deprecated
     # Home Zone (used for relay dispatch — rider is assigned legs within this zone)
     home_zone = models.ForeignKey(
         Zone,
@@ -459,6 +473,14 @@ class Rider(models.Model):
         null=True,
         blank=True,
         related_name="riders",
+    )
+
+    hub = models.ForeignKey(
+        "dispatcher.RelayNode",
+        verbose_name="Hub",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
     )
 
     # GPS Tracking
@@ -545,12 +567,18 @@ class Rider(models.Model):
 
 
 class DispatcherProfile(models.Model):
+    class Role(models.TextChoices):
+        ZONE_LEAD = "zone_lead", "Zone Lead"
+        HUB_CAPTAIN = "hub_captain", "Hub Captain"
+        ADMIN = "admin", "Admin"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="dispatcher_profile",
     )
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -586,6 +614,7 @@ class Merchant(models.Model):
     acquisition_source = models.CharField(
         max_length=100,
         blank=True,
+        null=True,
         default="",
         help_text='How the merchant was acquired: "experiential", "referral", "organic"',
     )
@@ -600,6 +629,13 @@ class Merchant(models.Model):
         blank=True,
         help_text="Timestamp of most recent order",
     )
+    referral_code = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Referral code used during signup",
+    )
+    has_active_subscription = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -793,6 +829,7 @@ class VerticalLead(models.Model):
         on_delete=models.CASCADE,
         related_name="vertical_lead_profile",
     )
+    # deprecated
     vertical = models.OneToOneField(
         Vertical, on_delete=models.CASCADE, related_name="lead"
     )

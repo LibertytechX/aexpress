@@ -89,3 +89,31 @@ class ReferralEarning(models.Model):
 
     def __str__(self):
         return f"Commission ₦{self.commission_amount} — Order {self.order.order_number}"
+
+
+class LibertyPayUser(models.Model):
+    """
+    Stores user data synced from LibertyPay's external API.
+    Used for referral tracking and user identification across platforms.
+    """
+
+    id = models.BigAutoField(primary_key=True)
+    email = models.EmailField(unique=True, null=True, blank=True)
+    referral_code = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    phone_number = models.CharField(max_length=30, null=True, blank=True)
+    first_name = models.CharField(max_length=255, null=True, blank=True)
+    last_name = models.CharField(max_length=255, null=True, blank=True)
+    username = models.CharField(max_length=255, null=True, blank=True)
+    date_joined = models.DateTimeField(null=True, blank=True)
+    last_login = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "liberty_pay_users"
+        verbose_name = "LibertyPay User"
+        verbose_name_plural = "LibertyPay Users"
+        ordering = ["-date_joined"]
+
+    def __str__(self):
+        return f"{self.username or self.email or self.id}"

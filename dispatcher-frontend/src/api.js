@@ -296,8 +296,11 @@ const normalizeOrder = (o) => ({
     dropoffLng: o.dropoff_lng || null,
     relayLegs: (o.relay_legs || []).map(leg => ({
         ...leg,
+        riderId: leg.rider_id || null,
+        riderName: leg.rider_name || null,
         suggestedRiderId: leg.suggested_rider_id || null,
         suggestedRiderName: leg.suggested_rider_name || null,
+        subOrderNumber: leg.sub_order_number || null,
     })),
     events: (o.events || []).map(ev => ({
         eventType: ev.event_type || ev.event || '',
@@ -306,23 +309,44 @@ const normalizeOrder = (o) => ({
         createdBy: ev.created_by || null,
         createdAt: ev.created_at || null,
     })),
+    sub_orders: o.sub_orders || [],
+    sub_order_numbers: o.sub_order_numbers || [],
+    parentOrderNumber: o.parent_order_number || null,
+    relayLegNumber: o.relay_leg_number || 0,
+    source: o.source || 'merchant_web',
+    dispatcher_assigned: o.dispatcher_assigned || false,
 });
 
 export const OrdersAPI = {
     async getAll(params = {}) {
         const query = new URLSearchParams(params).toString();
-        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ''}`);
-        if (!res.ok) throw new Error('Failed to fetch orders');
+        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ""}`);
+        if (!res.ok) throw new Error("Failed to fetch orders");
         const data = await res.json();
+
+        // Support both paginated (data.results) and non-paginated (data is array) responses.
+        // Also support wrapped service_response (data.data) if backend uses it.
+        const rawList = data.results || (Array.isArray(data) ? data : data.data) || [];
+
         if (data && data.results) {
             return {
-                results: data.results.map(normalizeOrder),
+                results: rawList.map(normalizeOrder),
                 count: data.count,
                 next: data.next,
-                previous: data.previous
+                previous: data.previous,
             };
         }
-        return data.map(normalizeOrder);
+        // If it's a plain list (or wrapped in .data), return it normalized
+        return rawList.map(normalizeOrder);
+    },
+
+    async exportHistory(params = {}) {
+        const res = await fetchWithAuth(`/dispatch/orders/export-history/`, {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error("Failed to trigger export");
+        return await res.json();
     },
 
     async getOne(orderNumber) {
@@ -386,6 +410,27 @@ export const OrdersAPI = {
         let data;
         try { data = await res.json(); } catch (e) { throw new Error('Failed to generate relay route'); }
         if (!res.ok) throw data || new Error('Failed to generate relay route');
+        return normalizeOrder(data);
+    },
+
+    async acceptRelayRoute(orderNumber) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/accept-relay-route/`, {
+            method: 'POST'
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to accept relay route'); }
+        if (!res.ok) throw data || new Error('Failed to accept relay route');
+        return normalizeOrder(data);
+    },
+
+    async assignRelayLeg(orderNumber, legNumber, riderId) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/assign-relay-leg/`, {
+            method: 'POST',
+            body: JSON.stringify({ leg_number: legNumber, rider_id: riderId || null })
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to assign relay leg'); }
+        if (!res.ok) throw data || new Error('Failed to assign relay leg');
         return normalizeOrder(data);
     },
 

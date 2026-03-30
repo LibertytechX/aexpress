@@ -102,3 +102,16 @@ class MerchantEmailLogAdmin(admin.ModelAdmin):
     search_fields = ["merchant__business_name", "merchant__phone", "merchant__email", "template_code"]
     ordering = ["-sent_at"]
     readonly_fields = ["sent_at"]
+    actions = ["trigger_weekly_reports", "trigger_daily_drip_campaigns"]
+
+    @admin.action(description="Trigger process_weekly_monday_reports task")
+    def trigger_weekly_reports(self, request, queryset):
+        from orders.tasks import process_weekly_monday_reports
+        process_weekly_monday_reports.delay()
+        self.message_user(request, "Triggered process_weekly_monday_reports task successfully.")
+
+    @admin.action(description="Trigger process_daily_drip_campaigns task")
+    def trigger_daily_drip_campaigns(self, request, queryset):
+        from orders.tasks import process_daily_drip_campaigns
+        process_daily_drip_campaigns.delay()
+        self.message_user(request, "Triggered process_daily_drip_campaigns task successfully.")

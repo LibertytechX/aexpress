@@ -120,6 +120,40 @@ class MailgunEmailService:
                 logger.error(f"Mailgun response: {e.response.text}")
             return False
 
+    @staticmethod
+    def send_csv_attachment_email(email, csv_content, filename, subject, body):
+        """
+        Sends an email with a CSV attachment using Mailgun.
+        """
+        if not all([settings.MAILGUN_DOMAIN, settings.MAILGUN_API_KEY]):
+            logger.error("Mailgun settings are not fully configured.")
+            return False
+
+        api_url = f"https://api.mailgun.net/v3/{settings.MAILGUN_DOMAIN}/messages"
+
+        try:
+            response = requests.post(
+                api_url,
+                auth=("api", settings.MAILGUN_API_KEY),
+                files=[("attachment", (filename, csv_content))],
+                data={
+                    "from": f"Assured Express <mailgun@{settings.MAILGUN_DOMAIN}>",
+                    "to": [email],
+                    "subject": subject,
+                    "text": body,
+                    "html": f"<html><body><p>{body}</p></body></html>",
+                },
+                timeout=30,
+            )
+            response.raise_for_status()
+            logger.info(f"CSV export email sent successfully to {email}")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send CSV export email to {email}: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"Mailgun response: {e.response.text}")
+            return False
+
 
 def find_closest_zone(lat, lng):
     """

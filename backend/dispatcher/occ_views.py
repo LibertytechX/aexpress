@@ -227,7 +227,7 @@ def _build_rider_data(rider, start_dt, end_dt, period, zone_target=None):
     target_revenue = 0
     pct = 0
     if zone_target:
-        rider_count = Rider.objects.filter(home_zone=rider.home_zone).count()
+        rider_count = Rider.objects.filter(hub__zone=rider.hub.zone if rider.hub else None).count()
         if rider_count:
             target_orders = round(
                 float(_scale_target(zone_target.target_orders, period)) / rider_count
@@ -327,7 +327,7 @@ class OCCVerticalListView(APIView):
         for v in verticals:
             zone_ids = list(v.zones.filter(is_active=True).values_list("id", flat=True))
             rider_ids = list(
-                Rider.objects.filter(home_zone_id__in=zone_ids).values_list(
+                Rider.objects.filter(hub__zone_id__in=zone_ids).values_list(
                     "id", flat=True
                 )
             )
@@ -413,7 +413,7 @@ class OCCVerticalDetailView(APIView):
 
         for z in v.zones.filter(is_active=True):
             zone_riders = list(
-                Rider.objects.filter(home_zone=z).select_related("user", "vehicle_asset")
+                Rider.objects.filter(hub__zone=z).select_related("user", "vehicle_asset", "hub")
             )
             rider_ids = [r.id for r in zone_riders]
 
@@ -512,7 +512,7 @@ class OCCVerticalDetailView(APIView):
                     "orders": total_orders,
                     "revenue": str(total_revenue),
                     "active_riders": Rider.objects.filter(
-                        home_zone__vertical=v, status="online"
+                        hub__zone__vertical=v, status="online"
                     ).count(),
                     "active_merchants": Merchant.objects.filter(
                         zone__vertical=v, activity_status="active"
@@ -557,7 +557,7 @@ class OCCZoneDashboardView(APIView):
             )
 
         rider_ids = list(
-            Rider.objects.filter(home_zone=zone).values_list("id", flat=True)
+            Rider.objects.filter(hub__zone=zone).values_list("id", flat=True)
         )
 
         # TODO: switch to snapshot table once populated
@@ -617,7 +617,7 @@ class OCCZoneDashboardView(APIView):
                 "avg_distance_km": str(agg["avg_distance"]),
                 "rider_count": len(rider_ids),
                 "active_riders": Rider.objects.filter(
-                    home_zone=zone, status="online"
+                    hub__zone=zone, status="online"
                 ).count(),
                 "merchant_count": Merchant.objects.filter(zone=zone).count(),
                 "active_merchants": Merchant.objects.filter(
@@ -636,7 +636,7 @@ class OCCZoneRidersView(APIView):
         period = request.query_params.get("period", "this_month")
         start_dt, end_dt, _ = _parse_period(period)
 
-        riders = Rider.objects.filter(home_zone_id=pk).select_related("user")
+        riders = Rider.objects.filter(hub__zone_id=pk).select_related("user", "hub")
 
         result = []
         for r in riders:
@@ -973,7 +973,7 @@ class OCCRiderLocationsView(APIView):
         riders = Rider.objects.filter(
             current_latitude__isnull=False,
             current_longitude__isnull=False,
-        ).select_related("user", "home_zone")
+        ).select_related("user", "hub", "hub__zone")
 
         result = []
         for r in riders:
@@ -991,7 +991,7 @@ class OCCRiderLocationsView(APIView):
                         if r.last_location_update
                         else None
                     ),
-                    "zone": r.home_zone.name if r.home_zone else None,
+                    "zone": r.hub.zone.name if r.hub and r.hub.zone else None,
                 }
             )
 
@@ -1083,7 +1083,7 @@ class OCCZoneLeaderboardView(APIView):
 
         for z in zones:
             rider_ids = list(
-                Rider.objects.filter(home_zone=z).values_list("id", flat=True)
+                Rider.objects.filter(hub__zone=z).values_list("id", flat=True)
             )
 
             # TODO: switch to snapshot table once populated
@@ -1175,7 +1175,7 @@ class OCCVerticalLeaderboardView(APIView):
         for v in verticals:
             zone_ids = list(v.zones.filter(is_active=True).values_list("id", flat=True))
             rider_ids = list(
-                Rider.objects.filter(home_zone_id__in=zone_ids).values_list(
+                Rider.objects.filter(hub__zone_id__in=zone_ids).values_list(
                     "id", flat=True
                 )
             )
@@ -1258,7 +1258,7 @@ class OCCOrderAnalyticsView(APIView):
 
         # Scope to zone or vertical
         if zone_id:
-            rider_ids = Rider.objects.filter(home_zone_id=zone_id).values_list(
+            rider_ids = Rider.objects.filter(hub__zone_id=zone_id).values_list(
                 "id", flat=True
             )
             orders_qs = orders_qs.filter(rider_id__in=rider_ids)
@@ -1266,7 +1266,7 @@ class OCCOrderAnalyticsView(APIView):
             zone_ids = Zone.objects.filter(vertical_id=vertical_id).values_list(
                 "id", flat=True
             )
-            rider_ids = Rider.objects.filter(home_zone_id__in=zone_ids).values_list(
+            rider_ids = Rider.objects.filter(hub__zone_id__in=zone_ids).values_list(
                 "id", flat=True
             )
             orders_qs = orders_qs.filter(rider_id__in=rider_ids)
@@ -1302,8 +1302,8 @@ class OCCOrderAnalyticsView(APIView):
         # By zone
         by_zone = []
         zone_aggs = (
-            orders_qs.filter(rider__home_zone__isnull=False)
-            .values("rider__home_zone__id", "rider__home_zone__name")
+            orders_qs.filter(rider__hub__zone__isnull=False)
+            .values("rider__hub__zone__id", "rider__hub__zone__name")
             .annotate(
                 orders=Count("id", filter=Q(status="Done")),
                 revenue=Coalesce(
@@ -1315,8 +1315,8 @@ class OCCOrderAnalyticsView(APIView):
         for za in zone_aggs:
             by_zone.append(
                 {
-                    "zone_id": str(za["rider__home_zone__id"]),
-                    "zone_name": za["rider__home_zone__name"],
+                    "zone_id": str(za["rider__hub__zone__id"]),
+                    "zone_name": za["rider__hub__zone__name"],
                     "orders": za["orders"],
                     "revenue": str(za["revenue"]),
                 }

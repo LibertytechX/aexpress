@@ -2,6 +2,8 @@ import logging
 from decimal import Decimal
 
 from django.contrib import admin
+from import_export.admin import ImportExportModelAdmin
+from import_export import resources, fields
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.db.models import Sum
@@ -168,6 +170,8 @@ class DeliveryInline(admin.TabularInline):
         "sender_name",
         "sender_phone",
         "dropoff_address",
+        "dropoff_latitude",
+        "dropoff_longitude",
         "receiver_name",
         "receiver_phone",
         "package_type",
@@ -219,9 +223,72 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
     ordering = ["-created_at"]
 
 
+class OrderResource(resources.ModelResource):
+    user_name_display = fields.Field(column_name="User Name")
+    rider_name_display = fields.Field(column_name="Rider Name")
+    rider_id_display = fields.Field(column_name="Rider ID")
+    vehicle_asset_id_display = fields.Field(column_name="Vehicle Asset ID")
+    collect_on_delivery_for_merchant = fields.Field(
+        column_name="Collect On Delivery For Merchant"
+    )
+    rider_earning = fields.Field(column_name="Rider Earning")
+
+    class Meta:
+        model = Order
+        fields = (
+            "order_number",
+            "user_name_display",
+            "rider_name_display",
+            "rider_id_display",
+            "mode",
+            "is_relay_order",
+            "vehicle",
+            "vehicle_asset_id_display",
+            "status",
+            "payment_status",
+            "payment_method",
+            "total_amount",
+            "distance_km",
+            "duration_minutes",
+            "assigned_at",
+            "picked_up_at",
+            "arrived_at",
+            "completed_at",
+            "collect_on_delivery_for_merchant",
+            "cod_amount",
+            "rider_earning",
+            "created_at",
+        )
+        export_order = fields
+
+    def dehydrate_user_name_display(self, obj):
+        return obj.user.get_full_name() if obj.user else "-"
+
+    def dehydrate_collect_on_delivery_for_merchant(self, obj):
+        return obj.collect_on_delivery
+
+    def dehydrate_rider_name_display(self, obj):
+        return obj.rider.user.get_full_name() if obj.rider and obj.rider.user else "-"
+
+    def dehydrate_rider_id_display(self, obj):
+        return obj.rider.rider_id if obj.rider else "-"
+
+    def dehydrate_vehicle_asset_id_display(self, obj):
+        if obj.rider and obj.rider.vehicle_asset:
+            return obj.rider.vehicle_asset.asset_id
+        return "-"
+
+    def dehydrate_rider_earning(self, obj):
+        if hasattr(obj, "rider_earning"):
+            return obj.rider_earning.net_earning
+        return 0.00
+
+
 @admin.register(Order)
-class OrderAdmin(admin.ModelAdmin):
+class OrderAdmin(ImportExportModelAdmin):
     """Admin configuration for Order model."""
+
+    resource_classes = [OrderResource]
 
     actions = [complete_order_for_rider]
 
@@ -229,20 +296,36 @@ class OrderAdmin(admin.ModelAdmin):
         "order_number",
         "user",
         "rider",
+        "get_rider_id",
+        "get_rider_earning",
         "mode",
+        "is_relay_order",
         "vehicle",
+        "get_vehicle_asset_id",
         "status",
+        "payment_status",
+        "payment_method",
         "total_amount",
+        "distance_km",
+        "duration_minutes",
+        "assigned_at",
+        "picked_up_at",
+        "arrived_at",
+        "completed_at",
+        "collect_on_delivery",
+        "cod_amount",
         "created_at",
     ]
     list_filter = [
         "status",
         "mode",
+        "is_relay_order",
         "payment_method",
         AssignedRiderFilter,
         "rider",
         "created_at",
     ]
+    date_hierarchy = "created_at"
     search_fields = [
         "order_number",
         "id",
@@ -251,19 +334,36 @@ class OrderAdmin(admin.ModelAdmin):
         "rider__user__phone",
         "pickup_address",
     ]
-    readonly_fields = ["order_number", "created_at", "updated_at"]
+    readonly_fields = ["order_number", "get_rider_earning", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
     fieldsets = (
         (
             "Order Information",
-            {"fields": ("order_number", "user", "mode", "status", "rider")},
+            {
+                "fields": (
+                    "order_number",
+                    "user",
+                    "mode",
+                    "status",
+                    "rider",
+                    "payment_status",
+                )
+            },
         ),
         (
             "Pickup Details",
-            {"fields": ("pickup_address", "sender_name", "sender_phone")},
+            {
+                "fields": (
+                    "pickup_address",
+                    "sender_name",
+                    "sender_phone",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                )
+            },
         ),
-        ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount")}),
+        ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount", "get_rider_earning")}),
         ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
         (
             "Timestamps",
@@ -272,6 +372,22 @@ class OrderAdmin(admin.ModelAdmin):
     )
 
     inlines = [DeliveryInline, OrderLegInline]
+
+    @admin.display(description="Rider ID")
+    def get_rider_id(self, obj):
+        return obj.rider.rider_id if obj.rider else "-"
+
+    @admin.display(description="Vehicle ID")
+    def get_vehicle_asset_id(self, obj):
+        if obj.rider and obj.rider.vehicle_asset:
+            return obj.rider.vehicle_asset.asset_id
+        return "-"
+
+    @admin.display(description="Rider Earning")
+    def get_rider_earning(self, obj):
+        if hasattr(obj, "rider_earning"):
+            return f"₦{obj.rider_earning.net_earning}"
+        return "₦0.00"
 
 
 @admin.register(Delivery)

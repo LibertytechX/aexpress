@@ -61,6 +61,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     email = models.EmailField(unique=True, db_index=True)
     address = models.TextField(null=True, blank=True)
+    registration_source = models.CharField(max_length=100, null=True, blank=True)
+    referral_code = models.CharField(max_length=100, null=True, blank=True)
 
     # Status fields
     is_active = models.BooleanField(default=True)
@@ -107,6 +109,11 @@ class User(AbstractBaseUser, PermissionsMixin):
         if self.first_name and self.last_name:
             return f"{self.first_name} {self.last_name}"
         return self.contact_name or self.phone
+
+    # fullname getter
+    @property
+    def full_name(self):
+        return self.get_full_name()
 
     def get_short_name(self):
         return self.business_name

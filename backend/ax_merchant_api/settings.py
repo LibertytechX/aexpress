@@ -42,9 +42,11 @@ ALLOWED_HOSTS = os.getenv(
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.auth",
+    # Local apps (must come before admin since we use custom User model)
+    "authentication",
+    "django.contrib.admin",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -54,8 +56,8 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_redis",
+    "import_export",
     # Local apps
-    "authentication",
     "orders",
     "wallet",
     "bot",
@@ -64,6 +66,9 @@ INSTALLED_APPS = [
     "webhooks",
     "referrals",
     "chats",
+    "whatsapp_messaging",
+    "subscriptions",
+    "devs",
 ]
 
 MIDDLEWARE = [
@@ -306,6 +311,10 @@ AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 
+# LibertyPay API Configuration
+LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")
+LIBERTYPAY_TRANSACTION_PIN = os.getenv("LIBERTYPAY_TRANSACTION_PIN", "1234")
+
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
 CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/0")
@@ -344,12 +353,20 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute="*/15"),
     },
     "marketing-daily-drip": {
-        "task": "orders.marketing_tasks.process_daily_drip_campaigns",
+        "task": "orders.tasks.process_daily_drip_campaigns",
         "schedule": crontab(hour=8, minute=0),
     },
     "marketing-weekly-reports": {
-        "task": "orders.marketing_tasks.process_weekly_monday_reports",
+        "task": "orders.tasks.process_weekly_monday_reports",
         "schedule": crontab(day_of_week=1, hour=9, minute=0),  # Monday 9 AM
+    },
+    "process-subscription-invoicing-daily": {
+        "task": "subscriptions.tasks.process_subscription_invoicing",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    "process-postpaid-billing-cycles": {
+        "task": "subscriptions.tasks.process_postpaid_billing_cycles",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
     },
 }
 
@@ -373,6 +390,9 @@ BOT_API_KEY = os.getenv("BOT_API_KEY", "")
 # respond.io Integration
 RESPOND_IO_API_KEY = os.getenv("RESPOND_IO_API_KEY", "")
 RESPOND_IO_BASE_URL = os.getenv("RESPOND_IO_BASE_URL", "https://api.respond.io/v2")
+
+# 360Messenger WhatsApp API
+MESSENGER360_API_KEY = os.getenv("MESSENGER360_API_KEY", "")
 
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")

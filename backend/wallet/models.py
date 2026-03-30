@@ -64,10 +64,9 @@ class Wallet(models.Model):
         """Check for and process any pending charges for this user"""
         from .models import Charge  # Local import to be safe
 
-        charges = Charge.objects.filter(user=self.user, status="pending").order_by(
-            "created_at"
-        )
-        print("let's see the charges: ", charges)
+        charges = Charge.objects.filter(
+            user=self.user, status="pending", is_active=True
+        ).order_by("created_at")
 
         for charge in charges:
             if self.balance >= charge.amount:
@@ -418,6 +417,7 @@ class Charge(models.Model):
         max_length=20, choices=STATUS_CHOICES, default="pending", db_index=True
     )
 
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

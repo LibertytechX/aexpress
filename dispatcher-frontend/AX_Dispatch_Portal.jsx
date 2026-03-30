@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
@@ -368,7 +368,20 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" }, "Paid Complete": { bg: S.greenBg, text: S.green }, "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red } };
+const STS = {
+  Pending: { bg: S.yellowBg, text: S.yellow },
+  Assigned: { bg: S.blueBg, text: S.blue },
+  AssignmentAccepted: { bg: "rgba(59,130,246,0.15)", text: "#60A5FA" },
+  AssignmentRejected: { bg: "rgba(239,68,68,0.15)", text: "#F87171" },
+  "Picked Up": { bg: S.purpleBg, text: S.purple },
+  "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold },
+  "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" },
+  Delivered: { bg: S.greenBg, text: S.green },
+  Cancelled: { bg: S.redBg, text: S.red },
+  Failed: { bg: S.redBg, text: "#F87171" },
+  "Paid Complete": { bg: S.greenBg, text: S.green },
+  "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red }
+};
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -1465,6 +1478,15 @@ export default function AXDispatchPortal() {
   const ordersPageRef = useRef(1);
   
   useEffect(() => { ordersPageRef.current = ordersPage; }, [ordersPage]);
+  const reloadOrders = async () => {
+    try {
+      const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+      if (res) {
+         setOrders(res.results || res);
+         if (res.count !== undefined) setTotalOrdersCount(res.count);
+      }
+    } catch (e) { /* ignore */ }
+  };
   const [riders, setRiders] = useState([]);
   const [merchants, setMerchants] = useState([]);
   const [vehicleAssets, setVehicleAssets] = useState([]);
@@ -1799,7 +1821,7 @@ export default function AXDispatchPortal() {
     const r = riders.find(x => x.id === rid); if (!r) return;
     try {
       await OrdersAPI.assignRider(oid, rid);
-      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned" });
+      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned", dispatcher_assigned: true });
 	      // Allow assigning even if rider is already fulfilling another ride.
 	      // Don't overwrite an existing currentOrder (it represents the *active* ride).
 	      setRiders(p => p.map(x => {
@@ -1828,7 +1850,7 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns });
+        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
         addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
 	        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
@@ -1873,7 +1895,7 @@ export default function AXDispatchPortal() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
-          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned", "AssignmentAccepted", "AssignmentRejected"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
         <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
@@ -1897,7 +1919,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1956,6 +1978,7 @@ export default function AXDispatchPortal() {
           relayLegsCount: created.relayLegsCount || 0,
           relayLegs: created.relayLegs || [],
           suggestedRiderId: created.suggestedRiderId || null,
+          source: created.source || "dispatcher_web",
         };
         setOrders(p => [newOrder, ...p]);
       }} />}
@@ -2190,12 +2213,21 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
 }
 
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
+  const [expandedRows, setExpandedRows] = useState({});
+  const toggleExpand = (e, id) => {
+    e.stopPropagation();
+    setExpandedRows(p => ({ ...p, [id]: !p[id] }));
+  };
   const [search, setSearch] = useState("");
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
+  const [loadingExport, setLoadingExport] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isExporting, setIsExporting] = useState(false);
 
   const handlePayNow = async (order) => {
     if (order.paymentInfo) {
@@ -2247,7 +2279,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 
   const periodOrders = orders.filter(inPeriod);
 
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
+  const tabs = ["All", "Pending", "Assigned", "AssignmentAccepted", "AssignmentRejected", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
   const filtered = periodOrders.filter(o => {
     if (statusFilter !== "All") {
       if (statusFilter === "Paid Complete") {
@@ -2262,25 +2294,86 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     return true;
   });
 
-  const exportCSV = () => {
-    const esc = v => {
-      const s = v == null ? "" : String(v);
-      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
-    };
-    const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
-    const rows = filtered.map(o => {
-      const dt = formatOrderDateTime(o.created);
-      return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
-    });
-    const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const label = statusFilter === "All" ? "all" : statusFilter.toLowerCase().replace(/ /g, "_");
-    a.download = `orders_${label}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const exportCSV = async () => {
+    setLoadingExport(true);
+    try {
+      // Fetch all orders with no filters applied (backend handles 'all=true' by disabling pagination & role-limits)
+      const res = await OrdersAPI.getAll({ all: "true" });
+      
+      // Handle potential wrapped response or paginated response format
+      const dataToExport = res?.results || (Array.isArray(res) ? res : []);
+      
+      if (!dataToExport || dataToExport.length === 0) {
+        alert("No orders found to export.");
+        return;
+      }
+
+      const esc = v => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
+      const rows = dataToExport.map(o => {
+        const dt = formatOrderDateTime(o.created);
+        return [
+          o.id, 
+          dt.date, 
+          dt.time, 
+          o.customer, 
+          o.customerPhone, 
+          o.merchant, 
+          o.pickup, 
+          o.dropoff, 
+          o.rider || "Unassigned", 
+          o.vehicle, 
+          o.waitingTime || "", 
+          o.deliveryTime || "", 
+          o.totalOrderTime || "", 
+          o.amount, 
+          o.cod, 
+          o.codFee, 
+          o.payment_status || "", 
+          o.status
+        ];
+      });
+
+      const csv = [headers.map(esc), ...rows.map(r => r.map(esc))].map(r => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `all_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export orders. Please try again.");
+    } finally {
+      setLoadingExport(false);
+    }
+  };
+
+  const handleExportHistoryEmail = async () => {
+    if (!exportStartDate || !exportEndDate) {
+      alert("Please select both start and end dates.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const res = await OrdersAPI.exportHistory({
+        start_date: exportStartDate,
+        end_date: exportEndDate,
+      });
+      alert(res.message || "Export started. You will receive an email shortly.");
+    } catch (err) {
+      console.error("Export error:", err);
+      alert(err.message || "Failed to trigger export history.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const PERIOD_OPTS = [
@@ -2289,6 +2382,95 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     { value: "week", label: "This Week" },
     { value: "month", label: "This Month" },
   ];
+
+  const renderOrderRow = (rowOrder, isChild = false, isLastChild = false) => {
+    const dt = formatOrderDateTime(rowOrder.created);
+    const psLower = (rowOrder.payment_status || "").toLowerCase();
+    const isPaid = psLower === "paid" || psLower === "success";
+    
+    return (
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+        <div
+          onClick={(e) => {
+            if (!isChild && rowOrder.isRelayOrder) toggleExpand(e, rowOrder.id);
+          }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            cursor: (!isChild && rowOrder.isRelayOrder) ? "pointer" : "default",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isChild && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, background: S.borderLight, padding: "2px 4px", borderRadius: 4 }}>
+                LEG {rowOrder.relayLegNumber || "-"}
+              </span>
+            )}
+            {rowOrder.source === "merchant_web" ? (
+              <span title="Merchant Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.blue, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(59,130,246,0.3)" }}>M</span>
+            ) : rowOrder.source === "dispatcher_web" ? (
+              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>G</span>
+            ) : null}
+            <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
+              {rowOrder.id}
+            </span>
+          </div>
+          {!isChild && rowOrder.isRelayOrder && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 4px",
+              borderRadius: 4,
+              background: S.purpleBg,
+              color: S.purple,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+            }}>
+              Relay
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                ›
+              </span>
+            </div>
+          )}
+        </div>
+        <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
+        <div><div style={{ fontSize: 12, fontWeight: 600 }}>{rowOrder.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{rowOrder.customerPhone}</div></div>
+        <span style={{ fontSize: 12, color: S.textDim }}>{rowOrder.merchant}</span>
+        <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowOrder.pickup.split(",")[0]} → {rowOrder.dropoff.split(",")[0]}</div>
+        <div>{rowOrder.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{rowOrder.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.waitingTime || "—"}</span>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.deliveryTime || "—"}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{rowOrder.totalOrderTime || "—"}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.amount.toLocaleString()}</div>
+          {rowOrder.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.pricePerKm.toFixed(0)}/km</div>}
+        </div>
+        <span style={{ fontSize: 11, color: rowOrder.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{rowOrder.cod > 0 ? `₦${(rowOrder.cod / 1000).toFixed(0)}K` : "—"}</span>
+        <div>
+          <button onClick={(e) => { e.stopPropagation(); onSelect(rowOrder.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+            <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
+          </button>
+        </div>
+        <div>
+          {isPaid ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+            </div>
+          )}
+        </div>
+        <Badge status={rowOrder.status} />
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -2324,7 +2506,21 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <span style={{ opacity: 0.4 }}>{I.search}</span>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
-        <button onClick={exportCSV} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV ({filtered.length})</button>
+        <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: S.card, borderRadius: 10, border: `1px solid ${S.border}` }}>
+          <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Export Range:</span>
+          <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <span style={{ color: S.textDim }}>to</span>
+          <input type="date" value={exportEndDate} onChange={e => setExportEndDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <button onClick={handleExportHistoryEmail} disabled={isExporting} style={{ background: isExporting ? S.border : S.gold, color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: isExporting ? "not-allowed" : "pointer", marginLeft: 4 }}>
+            {isExporting ? "Processing..." : "Email CSV Export"}
+          </button>
+        </div>
+
+        <button onClick={exportCSV} disabled={loadingExport} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: loadingExport ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "inherit", opacity: loadingExport ? 0.7 : 1 }}>
+          {loadingExport ? "Preparing..." : <>{I.download} Quick Export (UI)</>}
+        </button>
       </div>
 
       <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
@@ -2335,47 +2531,59 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
               {filtered.map(o => {
-                const dt = formatOrderDateTime(o.created);
-                const psLower = (o.payment_status || "").toLowerCase();
-                const psStyle = psLower === "paid" || psLower === "success" ? { bg: S.greenBg, text: S.green } : psLower === "pending" ? { bg: S.goldPale, text: S.gold } : psLower === "failed" || psLower === "cancelled" ? { bg: S.redBg, text: S.red } : { bg: S.borderLight, text: S.textMuted };
-                const isPaid = psLower === "paid" || psLower === "success";
+                // Do not render sub-orders as top-level rows
+                if (o.parentOrderNumber) return null;
+
+                // Find all sub-orders of this parent
+                const childOrders = orders.filter(child => child.parentOrderNumber === String(o.id));
+                childOrders.sort((a, b) => (a.relayLegNumber || 0) - (b.relayLegNumber || 0));
 
                 return (
-                  <div key={o.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(o.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
-                <div><div style={{ fontSize: 12, fontWeight: 600 }}>{o.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{o.customerPhone}</div></div>
-                <span style={{ fontSize: 12, color: S.textDim }}>{o.merchant}</span>
-                <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-                <div>{o.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{o.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.waitingTime || "—"}</span>
-                <span style={{ fontSize: 11, color: S.textMuted }}>{o.deliveryTime || "—"}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{o.totalOrderTime || "—"}</span>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</div>
-                  {o.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{o.pricePerKm.toFixed(0)}/km</div>}
-                </div>
-                <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                <div>
-                  <button onClick={(e) => { e.stopPropagation(); onSelect(o.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
-                    <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
-                  </button>
-                </div>
-                <div>
-                  {isPaid ? (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
-                    </div>
-                  ) : (
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
-                      <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
-                    </div>
-                  )}
-                </div>
-                <Badge status={o.status} />
-              </div>
-            );
-          })}
+                  <React.Fragment key={o.id}>
+                    {renderOrderRow(o, false, false)}
+                    {expandedRows[o.id] && o.isRelayOrder && (
+                      <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
+                        {childOrders.length > 0 ? (
+                          <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${S.border}`, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                            {childOrders.map((child, idx) => renderOrderRow(child, true, idx === childOrders.length - 1))}
+                          </div>
+                        ) : o.sub_orders && o.sub_orders.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+                              <span>Leg No.</span>
+                              <span>Order ID</span>
+                              <span>Created Date</span>
+                              <span>Assigned Rider</span>
+                              <span>Amount</span>
+                              <span style={{ textAlign: "center" }}>Status</span>
+                            </div>
+                            {o.sub_orders.map((sub) => (
+                              <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
+                                <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
+                                <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
+                                <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
+                                <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                                  {sub.rider ? (
+                                    <>
+                                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
+                                      <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
+                                    </>
+                                  ) : "—"}
+                                </span>
+                                <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
+                                <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
           {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
             </div>
             
@@ -2408,6 +2616,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [acceptRelayLoading, setAcceptRelayLoading] = useState(false);
+  const [acceptRelayError, setAcceptRelayError] = useState("");
+  const [assigningLeg, setAssigningLeg] = useState(null);
+  const [assigningLegLoading, setAssigningLegLoading] = useState(false);
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
   
@@ -2421,7 +2633,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   // Status flow for progression
   const nextStatuses = () => {
-    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
+    const flow = ["Pending", "Assigned", "AssignmentAccepted", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
     const idx = flow.indexOf(order.status);
     const opts = [];
     if (idx >= 0 && idx < flow.length - 1) opts.push(flow[idx + 1]);
@@ -2483,6 +2695,34 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
     }
   };
 
+  const handleAcceptRelayRoute = async () => {
+    setAcceptRelayLoading(true);
+    setAcceptRelayError("");
+    try {
+      const updated = await OrdersAPI.acceptRelayRoute(order.id);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Relay route accepted and sub-orders created`, "Dispatch", "create");
+    } catch (e) {
+      setAcceptRelayError(e?.error || e?.message || "Failed to create assignment");
+    } finally {
+      setAcceptRelayLoading(false);
+    }
+  };
+
+  const handleAssignLegRider = async (legNumber, riderId) => {
+    setAssigningLegLoading(true);
+    try {
+      const updated = await OrdersAPI.assignRelayLeg(order.id, legNumber, riderId);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Rider ${riderId ? 'assigned' : 'unassigned'} for Leg ${legNumber}`, "Dispatch", "assign");
+      setAssigningLeg(null);
+    } catch (e) {
+      alert(e?.error || e?.message || "Failed to assign leg rider");
+    } finally {
+      setAssigningLegLoading(false);
+    }
+  };
+
   const logColors = { create: S.gold, payment: S.blue, assign: S.green, status: S.textDim, pickup: S.purple, transit: S.gold, cod: S.green, delivered: S.green, settlement: S.gold, cancel: S.red, fail: S.red, edit: S.blue };
 
   const iStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", color: S.navy, background: "#fff" };
@@ -2499,6 +2739,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 12, color: S.textMuted }}>{order.created}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
+          {order.rider && (
+            order.dispatcher_assigned === true ? (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {I.check} DISPATCHER ASSIGNED
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.borderLight, color: S.textMuted, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                RIDER CLAIMED
+              </span>
+            )
+          )}
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -2538,7 +2789,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            {["Pending", "Assigned", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
+            {["Pending", "Assigned", "AssignmentAccepted", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
               // "Picked Up" is a transient state — treat it as "In Transit" on the bar
               const barStatus = order.status === "Picked Up" ? "In Transit" : order.status;
               const idx = arr.indexOf(barStatus);
@@ -2843,9 +3094,14 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     </button>
                   )}
                   {order.isRelayOrder && order.routingStatus === "ready" && (
-                    <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                      🔄 Re-generate
-                    </button>
+                    <>
+                      <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                        🔄 Re-generate
+                      </button>
+                      <button disabled={acceptRelayLoading} onClick={handleAcceptRelayRoute} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: acceptRelayLoading ? "not-allowed" : "pointer", background: `linear-gradient(135deg,${S.green},#22c55e)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit", marginLeft: 8, opacity: acceptRelayLoading ? 0.7 : 1 }}>
+                        {acceptRelayLoading ? "Creating..." : "✅ Create Assignment"}
+                      </button>
+                    </>
                   )}
                 </>
               )}
@@ -2853,9 +3109,9 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
 
             {/* Error message */}
-            {(relayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
+            {(relayError || acceptRelayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
               <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: S.redBg, border: `1px solid ${S.red}30`, fontSize: 11, color: S.red, fontWeight: 500 }}>
-                ⚠ {relayError || order.routingError}
+                ⚠ {relayError || acceptRelayError || order.routingError}
               </div>
             )}
 
@@ -2924,12 +3180,45 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                       <span>⏱ {leg.duration_minutes || 0} min</span>
                       {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
                     </div>
-                    {suggestedName && (
-                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, color: S.blue, display: "flex", alignItems: "center", gap: 6 }}>
-                        <span>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span></span>
-                        {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                    {/* Assignment / Suggested Rider Inline Block */}
+                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {leg.riderName ? (
+                            <span style={{ color: S.green }}>✅ <span style={{ fontWeight: 700 }}>{leg.riderName}</span></span>
+                          ) : suggestedName ? (
+                            <span style={{ color: S.blue }}>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span> (Suggested)</span>
+                          ) : (
+                            <span style={{ color: S.textMuted }}>No rider selected</span>
+                          )}
+                          {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                        </div>
+                        <button
+                          onClick={() => setAssigningLeg(assigningLeg === leg.leg_number ? null : leg.leg_number)}
+                          style={{ padding: "3px 8px", fontSize: 9, borderRadius: 5, border: `1px solid ${S.border}`, background: assigningLeg === leg.leg_number ? S.borderLight : "#fff", color: S.navy, cursor: "pointer", fontWeight: 600 }}
+                        >
+                          {assigningLeg === leg.leg_number ? "Cancel" : leg.riderName || suggestedName ? "Change" : "Assign"}
+                        </button>
                       </div>
-                    )}
+
+                      {assigningLeg === leg.leg_number && (
+                        <div style={{ marginTop: 4, padding: 8, borderRadius: 6, background: "#fff", border: `1px solid ${S.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <span style={{ fontWeight: 600, color: S.navy }}>Select Rider for Leg {leg.leg_number}</span>
+                          <div style={{ maxHeight: 120, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 6, background: S.bgHover }}>
+                            {riders.map(r => (
+                              <div
+                                key={r.id}
+                                onClick={() => !assigningLegLoading && handleAssignLegRider(leg.leg_number, r.id)}
+                                style={{ padding: "6px 8px", borderBottom: `1px solid ${S.border}`, fontSize: 10, display: "flex", justifyContent: "space-between", cursor: assigningLegLoading ? "not-allowed" : "pointer", opacity: assigningLegLoading ? 0.6 : 1, background: "#fff" }}
+                              >
+                                <span style={{ fontWeight: 600, color: S.navy }}>{r.name}</span>
+                                <span style={{ color: S.textMuted }}>{r.capacityLoad || 'Bike'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   );
                 })}
@@ -2953,31 +3242,6 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 })()}
               </div>
             )}
-
-            {/* Suggested rider for leg 1 */}
-            {order.routingStatus === "ready" && order.suggestedRiderId && (() => {
-              const suggestedRider = riders.find(r => r._uuid === order.suggestedRiderId);
-              const leg1 = order.relayLegs?.[0];
-              const endAddr = leg1?.end_relay_node?.name || order.dropoff;
-              const rLat = suggestedRider?.lat ? parseFloat(suggestedRider.lat) : null;
-              const rLng = suggestedRider?.lng ? parseFloat(suggestedRider.lng) : null;
-              const pLat = order.pickupLat ? parseFloat(order.pickupLat) : null;
-              const pLng = order.pickupLng ? parseFloat(order.pickupLng) : null;
-              const distKm = (rLat && rLng && pLat && pLng) ? haversineKm(rLat, rLng, pLat, pLng) : null;
-              return (
-                <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ color: S.blue, fontWeight: 700 }}>💡 Suggested for Leg 1: {suggestedRider?.name || `Rider #${order.suggestedRiderId}`}</span>
-                    <button onClick={() => suggestedRider && onAssign(order.id, suggestedRider.id)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: suggestedRider ? S.blue : S.textMuted, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 3, color: S.textDim, fontSize: 10 }}>
-                    <span><span style={{ color: S.green, fontWeight: 600 }}>From:</span> {order.pickup}</span>
-                    <span><span style={{ color: S.red, fontWeight: 600 }}>To:</span> {endAddr}</span>
-                    {distKm !== null && <span style={{ color: S.textMuted }}>🏍️ {distKm.toFixed(1)} km from pickup</span>}
-                  </div>
-                </div>
-              );
-            })()}
 
             {/* Relay Route Map — shows the full multi-hop path on a Google Map */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
@@ -6524,7 +6788,7 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
 
 // ─── ADD DISPATCHER MODAL ────────────────────────────────────────
 function AddDispatcherModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "" });
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", role: "admin" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -6533,7 +6797,7 @@ function AddDispatcherModal({ onClose, onCreated }) {
   const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
 
   const handleSubmit = async () => {
-    if (!form.first_name || !form.last_name || !form.phone || !form.email || !form.password) {
+    if (!form.first_name || !form.last_name || !form.phone || !form.email || !form.password || !form.role) {
       setError("All fields are required."); return;
     }
     setSubmitting(true); setError("");
@@ -6589,10 +6853,20 @@ function AddDispatcherModal({ onClose, onCreated }) {
             <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="dispatcher@company.com" style={iSt} />
           </div>
 
-          <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 14 }}>
             <label style={lSt}>Password</label>
             <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters" style={iSt} />
             <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>The dispatcher will use this to log in to the portal.</div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={lSt}>Role</label>
+            <select value={form.role} onChange={e => set("role", e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
+              <option value="admin">Admin</option>
+              <option value="zone_lead">Zone Lead</option>
+              <option value="hub_captain">Hub Captain</option>
+            </select>
+            <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>Access level granted to this dispatcher.</div>
           </div>
 
           {error && (

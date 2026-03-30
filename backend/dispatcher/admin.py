@@ -1,4 +1,7 @@
 from django.contrib import admin
+from import_export.admin import ImportExportModelAdmin
+from import_export import resources, fields
+
 from .models import (
     Rider,
     DispatcherProfile,
@@ -38,6 +41,130 @@ class VehicleAssetAdmin(admin.ModelAdmin):
     readonly_fields = ("id", "asset_id", "created_at", "updated_at")
 
 
+class RiderResource(resources.ModelResource):
+    rider_name = fields.Field(column_name="Rider Name")
+    yesterday_completed_order_count = fields.Field(
+        column_name="Yesterday Completed Orders"
+    )
+    total_amount_for_previous_day = fields.Field(
+        column_name="Previous Day Total Amount"
+    )
+    yesterday_distance_covered = fields.Field(column_name="Previous Day Distance (km)")
+    yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
+
+    class Meta:
+        model = Rider
+        fields = (
+            "rider_id",
+            "status",
+            "rating",
+            "total_deliveries",
+            "is_active",
+            "rider_name",
+            "yesterday_completed_order_count",
+            "total_amount_for_previous_day",
+            "yesterday_distance_covered",
+            "yesterday_order_distance",
+        )
+        export_order = fields
+
+    def dehydrate_rider_name(self, rider):
+        return rider.user.get_full_name()
+
+    def dehydrate_yesterday_completed_order_count(self, rider):
+        if hasattr(rider, "yesterday_completed_order_count_annotated"):
+            return rider.yesterday_completed_order_count_annotated
+        else:
+            from django.utils import timezone
+            from datetime import timedelta
+            from orders.models import Order
+
+            yesterday = timezone.now().date() - timedelta(days=1)
+            return Order.objects.filter(
+                rider=rider, status="Done", completed_at__date=yesterday
+            ).count()
+
+    def dehydrate_total_amount_for_previous_day(self, rider):
+        if hasattr(rider, "total_amount_for_previous_day_annotated"):
+            val = rider.total_amount_for_previous_day_annotated
+        else:
+            from django.utils import timezone
+            from datetime import timedelta
+            from orders.models import Order
+            from django.db.models import Sum
+
+            yesterday = timezone.now().date() - timedelta(days=1)
+            val = Order.objects.filter(
+                rider=rider, status="Done", completed_at__date=yesterday
+            ).aggregate(total=Sum("total_amount"))["total"]
+        return round(val, 2) if val else 0.00
+
+    def dehydrate_yesterday_order_distance(self, rider):
+        val = getattr(rider, "total_yesterday_order_distance_annotated", 0)
+        return round(val, 2) if val else 0.00
+
+    def dehydrate_yesterday_distance_covered(self, rider):
+        if not rider.vehicle_asset:
+            return 0.00
+
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.core.cache import cache
+        from .models import VehicleTracking
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{rider.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset=rider.vehicle_asset, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Count, Sum, Q
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+
+        qs = qs.annotate(
+            yesterday_completed_order_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
+                distinct=True,
+            ),
+            total_amount_for_previous_day_annotated=Sum(
+                "rider_orders__total_amount",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
+            ),
+            total_yesterday_order_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(rider_orders__created_at__date=yesterday),
+            ),
+        )
+        return qs
+
+
 @admin.register(VehicleTracking)
 class VehicleTrackingAdmin(admin.ModelAdmin):
     list_display = (
@@ -60,21 +187,26 @@ class VehicleTrackingAdmin(admin.ModelAdmin):
 
 
 @admin.register(Rider)
-class RiderAdmin(admin.ModelAdmin):
+class RiderAdmin(ImportExportModelAdmin):
+    resource_class = RiderResource
     list_display = (
-        "user",
+        "rider_name",
         "rider_id",
         "status",
-        "home_zone",
+        "hub",
         "vehicle_type",
         "vehicle_asset",
         "rating",
         "total_deliveries",
         "is_active",
+        "yesterday_completed_order_count",
+        "total_amount_for_previous_day",
+        "yesterday_distance_covered",
+        "yesterday_order_distance",
     )
     list_filter = (
         "status",
-        "home_zone",
+        "hub__zone",
         "vehicle_type",
         "vehicle_asset__vehicle_type",
         "is_active",
@@ -86,7 +218,7 @@ class RiderAdmin(admin.ModelAdmin):
         "rider_id",
         "user__phone",
     )
-    autocomplete_fields = ("vehicle_asset", "home_zone")
+    autocomplete_fields = ("vehicle_asset", "hub")
     actions = ["assign_zone", "soft_delete_riders"]
 
     @admin.action(description="Soft delete selected riders")
@@ -100,37 +232,37 @@ class RiderAdmin(admin.ModelAdmin):
             level=messages.SUCCESS,
         )
 
-    @admin.action(description="Assign selected riders to a zone")
+    @admin.action(description="Assign selected riders to a hub")
     def assign_zone(self, request, queryset):
         from django.shortcuts import render
         from django.http import HttpResponseRedirect
         from django import forms
         from django.contrib import messages
-        from .models import Zone
+        from .models import RelayNode
 
-        class AssignZoneForm(forms.Form):
+        class AssignHubForm(forms.Form):
             _selected_action = forms.CharField(widget=forms.MultipleHiddenInput)
-            zone = forms.ModelChoiceField(
-                queryset=Zone.objects.filter(is_active=True),
+            hub = forms.ModelChoiceField(
+                queryset=RelayNode.objects.filter(is_active=True),
                 required=True,
-                label="Target Zone",
+                label="Target Hub",
             )
 
         if "apply" in request.POST:
-            form = AssignZoneForm(request.POST)
+            form = AssignHubForm(request.POST)
             if form.is_valid():
-                zone = form.cleaned_data["zone"]
-                updated_count = queryset.update(home_zone=zone)
+                hub = form.cleaned_data["hub"]
+                updated_count = queryset.update(hub=hub)
                 self.message_user(
                     request,
-                    f"Successfully assigned {updated_count} riders to {zone.name}.",
+                    f"Successfully assigned {updated_count} riders to {hub.name}.",
                     level=messages.SUCCESS,
                 )
                 return HttpResponseRedirect(request.get_full_path())
         else:
             from django.contrib.admin import helpers
 
-            form = AssignZoneForm(
+            form = AssignHubForm(
                 initial={
                     "_selected_action": request.POST.getlist(
                         helpers.ACTION_CHECKBOX_NAME
@@ -142,16 +274,105 @@ class RiderAdmin(admin.ModelAdmin):
         context.update(
             {
                 "form": form,
-                "title": "Assign Zone to Riders",
+                "title": "Assign Hub to Riders",
                 "queryset": queryset,
             }
         )
         return render(request, "admin/assign_zone_intermediate.html", context)
 
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.db.models import Count, Sum, Q
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+
+        qs = qs.annotate(
+            yesterday_completed_order_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
+                distinct=True,
+            ),
+            total_amount_for_previous_day_annotated=Sum(
+                "rider_orders__total_amount",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=yesterday,
+                ),
+            ),
+            total_yesterday_order_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(rider_orders__created_at__date=yesterday),
+            ),
+        )
+        return qs
+
+    @admin.display(description="Rider Name", ordering="user__first_name")
+    def rider_name(self, obj):
+        return obj.user.get_full_name()
+
+    @admin.display(
+        description="Yesterday Completed Orders",
+        ordering="yesterday_completed_order_count_annotated",
+    )
+    def yesterday_completed_order_count(self, obj):
+        return getattr(obj, "yesterday_completed_order_count_annotated", 0)
+
+    @admin.display(
+        description="Prev Day Total Amount",
+        ordering="total_amount_for_previous_day_annotated",
+    )
+    def total_amount_for_previous_day(self, obj):
+        val = getattr(obj, "total_amount_for_previous_day_annotated", 0)
+        return round(val, 2) if val else 0.00
+
+    @admin.display(description="Prev Day Distance (km)")
+    def yesterday_distance_covered(self, obj):
+        if not obj.vehicle_asset:
+            return 0.00
+
+        from django.utils import timezone
+        from datetime import timedelta
+        from django.core.cache import cache
+        from .models import VehicleTracking
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{obj.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset=obj.vehicle_asset, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
+    @admin.display(
+        description="Prev Day Orders (km)",
+        ordering="total_yesterday_order_distance_annotated",
+    )
+    def yesterday_order_distance(self, obj):
+        val = getattr(obj, "total_yesterday_order_distance_annotated", 0)
+        return round(val, 2) if val else 0.00
+
 
 @admin.register(DispatcherProfile)
 class DispatcherProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "created_at")
+    list_display = ("user", "role", "created_at")
     search_fields = (
         "user__first_name",
         "user__last_name",
@@ -160,16 +381,77 @@ class DispatcherProfileAdmin(admin.ModelAdmin):
     )
 
 
+class MerchantResource(resources.ModelResource):
+    name = fields.Field(column_name="Name")
+    email = fields.Field(attribute="user__email", column_name="Email")
+    phone = fields.Field(attribute="user__phone", column_name="Phone")
+    last_login = fields.Field(attribute="user__last_login", column_name="Last Login")
+
+    class Meta:
+        model = Merchant
+        fields = (
+            "name",
+            "email",
+            "phone",
+            "last_login",
+            "merchant_id",
+            "activity_status",
+            "acquisition_source",
+            "created_at",
+        )
+        export_order = (
+            "name",
+            "email",
+            "phone",
+            "merchant_id",
+            "activity_status",
+            "acquisition_source",
+            "created_at",
+            "last_login",
+        )
+
+    def dehydrate_name(self, merchant):
+        return merchant.user.get_full_name()
+
+
 @admin.register(Merchant)
-class MerchantAdmin(admin.ModelAdmin):
-    list_display = ("user", "merchant_id", "zone", "activity_status", "created_at")
-    list_filter = ("activity_status", "zone")
+class MerchantAdmin(ImportExportModelAdmin):
+    resource_class = MerchantResource
+    list_display = (
+        "get_name",
+        "get_email",
+        "get_phone",
+        "merchant_id",
+        "activity_status",
+        "acquisition_source",
+        "created_at",
+        "get_last_login",
+    )
+    list_filter = ("activity_status", "zone", "acquisition_source")
     search_fields = (
-        "user__username",
+        "user__first_name",
+        "user__last_name",
         "user__email",
+        "user__phone",
         "merchant_id",
         "user__business_name",
     )
+
+    @admin.display(description="Name", ordering="user__first_name")
+    def get_name(self, obj):
+        return obj.user.get_full_name()
+
+    @admin.display(description="Email", ordering="user__email")
+    def get_email(self, obj):
+        return obj.user.email
+
+    @admin.display(description="Phone Number", ordering="user__phone")
+    def get_phone(self, obj):
+        return obj.user.phone
+
+    @admin.display(description="Last Login", ordering="user__last_login")
+    def get_last_login(self, obj):
+        return obj.user.last_login
 
 
 @admin.register(SystemSettings)
@@ -236,7 +518,6 @@ class ZoneAdmin(admin.ModelAdmin):
             f"Successfully marked {updated_count} zones as inactive.",
             level=messages.SUCCESS,
         )
-
 
 
 class RelayNodeInline(admin.TabularInline):

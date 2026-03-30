@@ -35,9 +35,13 @@ class SignupView(APIView):
     def post(self, request):
         """Register a new merchant user."""
         serializer = SignupSerializer(data=request.data)
+        # get the acquisition from the query param
 
         if serializer.is_valid():
-            user = serializer.save()
+            reg_source = request.query_params.get("source", "web")
+            print("Let's see the souce: ", reg_source)
+            user = serializer.save(registration_source=reg_source)
+            print("user register source: ", user.registration_source)
 
             # Generate OTP
             otp = OTPService.generate_otp()

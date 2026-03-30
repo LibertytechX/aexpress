@@ -1,3 +1,4 @@
+from devs.models import ErrorLog
 import traceback
 from dispatcher.models import SystemSettings
 import logging
@@ -11,6 +12,7 @@ from django.utils import timezone
 from decimal import Decimal
 from .models import Order, Delivery, Vehicle, OrderEvent
 from .utils import calculate_route
+from .pricing import calculate_effective_fare
 from .serializers import (
     OrderSerializer,
     VehicleSerializer,
@@ -31,6 +33,13 @@ from wallet.corebanking_service import create_virtual_account
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
 from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from dispatcher.serializers import OrderEventSerializer
+from subscriptions.services import (
+    process_order_subscription,
+    get_active_postpaid_subscription,
+    accumulate_postpaid_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +50,34 @@ class VehicleListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Get all active vehicles with pricing."""
+        """Get all active vehicles with pricing, applying merchant overrides if present."""
+        from .models import MerchantPricingOverride
+
         vehicles = Vehicle.objects.filter(is_active=True)
-        serializer = VehicleSerializer(vehicles, many=True)
+        results = []
+
+        for vehicle in vehicles:
+            # Check for merchant override
+            override = MerchantPricingOverride.objects.filter(
+                merchant=request.user, vehicle=vehicle, is_active=True
+            ).first()
+
+            v_data = VehicleSerializer(vehicle).data
+
+            if override:
+                # Apply override to serialized data
+                if override.flat_fee is not None:
+                    v_data["base_fare"] = float(override.flat_fee)
+                    v_data["rate_per_km"] = 0.0
+                    v_data["rate_per_minute"] = 0.0
+                    v_data["pricing_tiers"] = None
+                elif override.pricing_tiers:
+                    v_data["pricing_tiers"] = override.pricing_tiers
+
+            results.append(v_data)
 
         return Response(
-            {"success": True, "vehicles": serializer.data}, status=status.HTTP_200_OK
+            {"success": True, "vehicles": results}, status=status.HTTP_200_OK
         )
 
 
@@ -116,10 +147,12 @@ class QuickSendView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        total_amount = vehicle.calculate_fare(distance_km, duration_minutes)
+        total_amount = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
 
         # Create order
         order = Order.objects.create(
@@ -138,6 +171,79 @@ class QuickSendView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
             cod_amount=data.get("cod_amount"),
         )
+
+        if data.get("payment_method") == "subscription":
+
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
+
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Create single delivery
         Delivery.objects.create(
@@ -313,11 +419,13 @@ class MultiDropView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
         total_amount = unit_fare * num_deliveries
 
         # Create order
@@ -337,6 +445,79 @@ class MultiDropView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
+        # [NEW] Subscription processing
+        if data.get("payment_method") == "pay_with_subscription":
+
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
+
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -490,11 +671,13 @@ class BulkImportView(APIView):
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
-        # Calculate total amount using new fare structure
+        # Calculate total amount using effective fare (handles overrides)
         num_deliveries = len(data["deliveries"])
         distance_km = data.get("distance_km", 0)
         duration_minutes = data.get("duration_minutes", 0)
-        unit_fare = vehicle.calculate_fare(distance_km, duration_minutes)
+        unit_fare = calculate_effective_fare(
+            request.user, vehicle, distance_km, duration_minutes
+        )
         total_amount = unit_fare * num_deliveries
 
         # Create order
@@ -513,6 +696,79 @@ class BulkImportView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
+
+        if data.get("payment_method") == "pay_with_subscription":
+
+            # [NEW] Subscription processing
+            from subscriptions.services import process_order_subscription
+
+            subscription = process_order_subscription(order)
+            if not subscription:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to process subscription payment. User has no active subscription."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        if data.get("payment_method") == "postpaid":
+            # Postpaid processing
+            merchant_profile = getattr(request.user, "merchant_profile", None)
+            if not merchant_profile:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"payment_method": ["User is not a merchant."]},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+            if not postpaid_sub:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "You do not have an active postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if postpaid_sub.status == "blocked":
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Your postpaid plan is blocked due to unpaid invoice."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Accumulate amount
+            accumulated = accumulate_postpaid_order(order)
+            if not accumulated:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "payment_method": [
+                                "Failed to accumulate order amount to postpaid plan."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
@@ -737,6 +993,28 @@ class OrderListView(APIView):
         )
 
 
+class OrderEventAPIView(APIView):
+    """
+    Order Event API View for listing the events for a particular order
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice()
+    def get(self, request, *args, **kwargs):
+        order_number = kwargs.get("order_number")
+        order = Order.objects.get(order_number=order_number)
+        events_queryset = order.events.all().order_by("-created_at")
+        serializer = OrderEventSerializer(events_queryset, many=True)
+
+        return service_response(
+            status="success",
+            message="Order events retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
 class OrderDetailView(APIView):
     """API endpoint to get details of a specific order."""
 
@@ -845,8 +1123,8 @@ class CalculateFareView(APIView):
             )
 
         try:
-            total_amount = vehicle.calculate_fare(
-                float(distance_km), int(duration_minutes)
+            total_amount = calculate_effective_fare(
+                request.user, vehicle, float(distance_km), int(duration_minutes)
             )
 
             return Response(
@@ -915,7 +1193,9 @@ class BulkCalculateFareView(APIView):
                 dur_mins = route_data["duration_minutes"]
 
                 for vehicle in vehicles:
-                    fare = vehicle.calculate_fare(dist_km, dur_mins)
+                    fare = calculate_effective_fare(
+                        request.user, vehicle, dist_km, dur_mins
+                    )
                     results[vehicle.name] = {
                         "price": fare,
                         "distance_km": dist_km,
@@ -944,7 +1224,9 @@ class BulkCalculateFareView(APIView):
                         "fares": {},
                     }
                     for vehicle in vehicles:
-                        fare = vehicle.calculate_fare(dist_km, dur_mins)
+                        fare = calculate_effective_fare(
+                            request.user, vehicle, dist_km, dur_mins
+                        )
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
@@ -1215,8 +1497,11 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     # Proximity check for pickup actions
     if new_status in ["PickedUp", "Fulfilling"]:
-        lat = ser.validated_data.get("latitude")
-        lng = ser.validated_data.get("longitude")
+        # let's just use the rider's known location instead
+        # lat = ser.validated_data.get("latitude")
+        # lng = ser.validated_data.get("longitude")
+        lat = request.user.rider_profile.current_latitude
+        lng = request.user.rider_profile.current_longitude
 
         if lat is None or lng is None:
             return service_response(
@@ -1224,6 +1509,9 @@ def _advance_order(request, order_number, new_status, event_desc):
                 message="Latitude and longitude are required to mark order as picked up.",
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Ensure types are float for distance calculation
+        lat, lng = float(lat), float(lng)
 
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
             from dispatcher.models import Zone
@@ -1258,7 +1546,7 @@ def _advance_order(request, order_number, new_status, event_desc):
     order.save(update_fields=update_fields)
 
     # Trigger transactional emails
-    from orders.marketing_tasks import send_transactional_email
+    from orders.tasks import send_transactional_email
 
     if new_status == "Started":
         send_transactional_email.delay("F1", str(order.id))
@@ -1326,6 +1614,7 @@ class OrderPickupView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1471,6 +1760,7 @@ class OrderCompleteView(APIView):
     # Default commission percentage if SystemSettings row doesn't exist yet
     DEFAULT_COMMISSION_PCT = Decimal("20.00")
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         try:
             if not order_number:
@@ -1535,46 +1825,7 @@ class OrderCompleteView(APIView):
                     )
 
             # ── Step 1: COD wallet balance check ─────────────────────────────────
-            # is_cod = order.payment_method in self.COD_METHODS
-            logger.info("Let's see the payment method %s", order.payment_method)
-            logger.info("Let's see the payment methods %s", self.COD_METHODS)
             cod_total = Decimal("0.00")
-
-            # if is_cod:
-            #     # Sum COD across all deliveries for this order
-            #     from django.db.models import Sum
-
-            #     cod_total = order.deliveries.aggregate(Sum("cod_amount"))[
-            #         "cod_amount__sum"
-            #     ] or Decimal("0.00")
-
-            #     if cod_total > 0:
-            #         try:
-            #             rider_wallet = Wallet.objects.get(user=rider.user)
-            #         except Wallet.DoesNotExist:
-            #             return service_response(
-            #                 status="error",
-            #                 message="Rider wallet not found. Cannot process COD payment.",
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #             )
-
-            #         if not rider_wallet.can_debit(cod_total):
-            #             return service_response(
-            #                 status="error",
-            #                 message=f"Insufficient wallet balance for COD settlement. Required: ₦{cod_total}, Available: ₦{rider_wallet.balance}",
-            #                 status_code=status.HTTP_400_BAD_REQUEST,
-            #             )
-
-            #         # Debit COD amount from rider wallet
-            #         rider_wallet.debit(
-            #             amount=cod_total,
-            #             description=f"COD remittance for order #{order_number}",
-            #             reference=f"COD-{order_number}-{order.id.hex[:8].upper()}",
-            #             metadata={
-            #                 "order_number": order_number,
-            #                 "order_id": str(order.id),
-            #             },
-            #         )
 
             # ── Step 2: Calculate and record rider earnings ───────────────────────
             settings_obj = SystemSettings.objects.first()
@@ -1875,7 +2126,7 @@ class DeliveryCompleteView(APIView):
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
 
-            from orders.marketing_tasks import send_transactional_email
+            from orders.tasks import send_transactional_email
 
             send_transactional_email.delay("F2", str(order.id))
 

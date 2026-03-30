@@ -200,6 +200,8 @@ class Order(models.Model):
     STATUS_CHOICES = [
         ("Pending", "Pending"),
         ("Assigned", "Assigned"),
+        ("AssignmentAccepted", "Assignment Accepted"),
+        ("AssignmentRejected", "Assignment Rejected"),
         ("Started", "Started"),
         ("Pickup", "Pick Up"),
         ("Fulfilling", "Fulfilling"),
@@ -215,6 +217,8 @@ class Order(models.Model):
         ("cash", "Cash"),
         ("cash_on_pickup", "Cash on Pickup"),
         ("receiver_pays", "Receiver Pays"),
+        ("postpaid", "Postpaid"),
+        ("subscription", "Subscription"),
     ]
 
     PAYMENT_STATUS_CHOICES = [
@@ -222,6 +226,7 @@ class Order(models.Model):
         ("Paid", "Paid"),
         ("Failed", "Failed"),
         ("Refunded", "Refunded"),
+        ("Postpaid", "Postpaid"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -233,6 +238,10 @@ class Order(models.Model):
         null=True,
         blank=True,
         related_name="rider_orders",
+    )
+    dispatcher_assigned = models.BooleanField(
+        default=False,
+        help_text="True if the rider was manually assigned by a dispatcher",
     )
 
     # Order details
@@ -350,6 +359,18 @@ class Order(models.Model):
         null=True,
         blank=True,
         help_text="Amount the rider should collect from the customer (COD)",
+    )
+
+    # Source detection
+    SOURCE_CHOICES = [
+        ("merchant_web", "Merchant Web"),
+        ("dispatcher_web", "Dispatcher Web"),
+    ]
+    source = models.CharField(
+        max_length=20,
+        choices=SOURCE_CHOICES,
+        default="merchant_web",
+        help_text="Where the order was created from",
     )
 
     # Additional info

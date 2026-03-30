@@ -1,5 +1,7 @@
 import logging
 import datetime
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
 
 from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
@@ -15,6 +17,7 @@ from .models import (
     Zone,
     RelayNode,
     VehicleAsset,
+    VerticalLead,
     Vertical,
     RiderDutyLog,
 )
@@ -31,6 +34,7 @@ from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
+from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +43,31 @@ User = get_user_model()
 
 class RiderViewSet(viewsets.ModelViewSet):
     queryset = Rider.objects.all().select_related(
-        "user", "vehicle_type", "vehicle_asset"
+        "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
     )
     serializer_class = RiderSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
+        # user = self.request.user
+        # role = user.dispatcher_profile.role
+        # if the dispatcher role is zone_lead
+        # if role == "zone_lead":
+        #     try:
+        #         zone_lead = VerticalLead.objects.get(user=user)
+        #         zones = zone_lead.area_zones.all()
+        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
+        #         return Rider.objects.filter(hub__in=relay_nodes).select_related(
+        #             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
+        #         )
+        #     except VerticalLead.DoesNotExist:
+        #         pass
         return Rider.objects.all().select_related(
-            "user", "vehicle_type", "vehicle_asset"
+            "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
 
     @action(detail=True, methods=["post"], url_path="reset_password")
@@ -185,23 +206,52 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     serializer_class = OrderSerializer
     pagination_class = OrderPagination
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcher]
+
+    def paginate_queryset(self, queryset):
+        if self.request.query_params.get("all") == "true":
+            return None
+        return super().paginate_queryset(queryset)
 
     def get_serializer_class(self):
         if self.action == "create":
             return self.OrderCreateSerializer
         return self.OrderSerializer
 
-    permission_classes = [permissions.IsAuthenticated]
+    # permission_classes = [permissions.IsAuthenticated]
     lookup_field = "order_number"
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-created_at")
 
-        paid_compete = self.request.query_params.get("paid_complete")
+        user = self.request.user
+        role = getattr(user.dispatcher_profile, "role", None)
+        is_all = self.request.query_params.get("all") == "true"
+
+        # if the dispatcher role is zone_lead
+        if role == "zone_lead" and not is_all:
+            try:
+                zone_lead = VerticalLead.objects.get(user=user)
+                zones = zone_lead.area_zones.all()
+                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+
+                # Filter orders:
+                # 1. Status is Pending
+                # 2. Assigned rider's hub is in my zones
+                # 3. Any relay leg starts/ends in my zones
+                qs = qs.filter(
+                    Q(status="Pending")
+                    | Q(rider__hub__in=relay_nodes)
+                    | Q(legs__start_relay_node__in=relay_nodes)
+                    | Q(legs__end_relay_node__in=relay_nodes)
+                ).distinct()
+            except VerticalLead.DoesNotExist:
+                pass
+
+        paid_complete = self.request.query_params.get("paid_complete")
         unpaid_complete = self.request.query_params.get("unpaid_complete")
 
-        if paid_compete:
+        if paid_complete:
             qs = qs.filter(payment_status="Paid", status="Done")
         if unpaid_complete:
             qs = qs.filter(payment_status="Pending", status="Done")
@@ -218,6 +268,9 @@ class OrderViewSet(viewsets.ModelViewSet):
             "legs__suggested_rider__user",
             "events",
             "events__created_by",
+            "sub_orders",
+            "sub_orders__rider",
+            "sub_orders__rider__user",
         )
 
     def create(self, request, *args, **kwargs):
@@ -312,6 +365,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             rider = Rider.objects.get(rider_id=rider_id)
             order.rider = rider
             order.status = "Assigned"
+            order.dispatcher_assigned = True
             # if not getattr(order, "assigned_at", None):
             order.assigned_at = timezone.now()
             order.save()
@@ -373,6 +427,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             "CustomerCanceled": ("cancelled", "red"),
             "RiderCanceled": ("cancelled", "red"),
             "Failed": ("failed", "red"),
+            "AssignmentAccepted": ("assignment_accepted", "green"),
+            "AssignmentRejected": ("assignment_rejected", "red"),
         }
 
         if new_status not in STATUS_MAP:
@@ -389,7 +445,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         update_fields = ["status", "updated_at"]
         if new_status == "Assigned" and not getattr(order, "assigned_at", None):
             order.assigned_at = now
+            order.dispatcher_assigned = True
             update_fields.append("assigned_at")
+            update_fields.append("dispatcher_assigned")
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
@@ -518,6 +576,177 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data)
 
+    @exception_advice()
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, order_number=None):
+        """List all events for a particular order."""
+        order = self.get_object()
+        events_queryset = order.events.all().order_by("-created_at")
+
+        from .serializers import OrderEventSerializer
+
+        serializer = OrderEventSerializer(events_queryset, many=True)
+
+        return service_response(
+            status="success",
+            message="Order events retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
+
+    @action(detail=False, methods=["post"], url_path="export-history")
+    def export_history(self, request):
+        """Trigger an async task to export order history within a date range and email it."""
+        from .tasks import export_orders_history_task
+
+        start_date = request.data.get("start_date")
+        end_date = request.data.get("end_date")
+
+        if not start_date or not end_date:
+            return service_response(
+                status="error",
+                message="Start date and end date are required",
+                data={},
+                status_code=400,
+            )
+
+        # Trigger Celery task
+        export_orders_history_task.delay(request.user.id, start_date, end_date)
+
+        return service_response(
+            status="success",
+            message="Export is being processed and will be sent to your email shortly.",
+            data={},
+            status_code=200,
+        )
+
+    @action(detail=True, methods=["post"], url_path="assign-relay-leg")
+    def assign_relay_leg(self, request, order_number=None):
+        """Assign or change the rider for a specific relay leg.
+        If the sub-order has already been created, updates the sub-order too.
+        """
+        from orders.models import Order
+
+        order = self.get_object()
+        leg_number = request.data.get("leg_number")
+        rider_id = request.data.get("rider_id")
+
+        if not order.is_relay_order:
+            return Response(
+                {"error": "This order is not a relay order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        leg = order.legs.filter(leg_number=leg_number).first()
+        if not leg:
+            return Response(
+                {"error": f"Leg {leg_number} not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # Retrieve the updated rider or None
+        if not rider_id:
+            rider = None
+        else:
+            try:
+                rider = Rider.objects.get(rider_id=rider_id)
+            except Rider.DoesNotExist:
+                return Response(
+                    {"error": "Rider not found"}, status=status.HTTP_404_NOT_FOUND
+                )
+
+        # Check if the sub-order already exists for this leg
+        sub_order = Order.objects.filter(
+            parent_order=order, relay_leg_number=leg_number
+        ).first()
+
+        if sub_order:
+            # Sub-order exists! This means accept_relay_route was already called.
+            # We must update the sub-order's rider and notify them.
+            if not rider:
+                sub_order.rider = None
+                sub_order.status = "Pending"
+                sub_order.save(update_fields=["rider", "status"])
+                emit_activity(
+                    event_type="unassigned",
+                    order_id=sub_order.order_number,
+                    text=f"Leg {leg_number} unassigned from {sub_order.order_number}",
+                    color="yellow",
+                    metadata={},
+                )
+                leg.rider = None
+                leg.status = "Pending"
+                leg.save(update_fields=["rider", "status"])
+            else:
+                sub_order.rider = rider
+                sub_order.status = "Assigned"
+                sub_order.assigned_at = timezone.now()
+                sub_order.dispatcher_assigned = True
+                sub_order.save(
+                    update_fields=[
+                        "rider",
+                        "status",
+                        "assigned_at",
+                        "dispatcher_assigned",
+                    ]
+                )
+                rider_name = getattr(rider.user, "contact_name", None) or getattr(
+                    rider.user, "phone", "Unknown"
+                )
+                emit_activity(
+                    event_type="assigned",
+                    order_id=sub_order.order_number,
+                    text=f"Leg {leg_number} assigned to {rider_name}",
+                    color="blue",
+                    metadata={"rider": rider_name, "rider_id": rider.rider_id},
+                )
+                leg.rider = rider
+                leg.status = "Assigned"
+                leg.assigned_at = sub_order.assigned_at
+                leg.save(update_fields=["rider", "status", "assigned_at"])
+
+                # Notify the newly assigned rider
+                try:
+                    from riders.notifications import notify_rider
+
+                    notify_rider(
+                        rider=rider,
+                        title="Relay Leg Assigned 🔁",
+                        body=f"You have been assigned Leg {leg_number} of relay order #{order.order_number}. Pick up from: {sub_order.pickup_address}.",
+                        data={
+                            "order_number": sub_order.order_number,
+                            "status": "Assigned",
+                        },
+                    )
+                    publish_order_assigned_event(sub_order, rider)
+                except Exception as exc:
+                    logger.warning(f"Relay leg assignment notification failed: {exc}")
+        else:
+            # Sub-order not yet created. Just update the suggested rider on the leg.
+            leg.suggested_rider = rider
+            leg.save(update_fields=["suggested_rider"])
+
+        # Re-fetch parent order with all relations so the serializer runs cleanly
+        order = (
+            Order.objects.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "legs__rider",
+                "legs__rider__user",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
+                "sub_orders",
+                "deliveries",
+                "events",
+                "events__created_by",
+            )
+            .select_related("user", "rider", "rider__user", "suggested_rider")
+            .get(pk=order.pk)
+        )
+
+        return Response(self.get_serializer(order).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="accept-relay-route")
     def accept_relay_route(self, request, order_number=None):
         """Accept a generated relay route: create one sub-order per leg, assign the
@@ -584,153 +813,10 @@ class OrderViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        with transaction.atomic():
-            created_sub_orders = []
+        # Trigger the celery task asynchronously to create sub-orders
+        from .tasks import process_accepted_relay_route_task
 
-            for leg in legs:
-                is_first_leg = leg.leg_number == 1
-                is_last_leg = leg.leg_number == len(legs)
-
-                # ── Pickup for this leg ───────────────────────────────────────
-                if is_first_leg:
-                    # First leg always picks up from the original order origin.
-                    pickup_address = order.pickup_address
-                    pickup_lat = order.pickup_latitude
-                    pickup_lng = order.pickup_longitude
-                    pickup_sender_name = order.sender_name
-                    pickup_sender_phone = order.sender_phone
-                else:
-                    # Subsequent legs pick up from the previous leg's end relay node.
-                    node = leg.start_relay_node
-                    pickup_address = node.address
-                    pickup_lat = node.latitude
-                    pickup_lng = node.longitude
-                    pickup_sender_name = node.name
-                    pickup_sender_phone = ""
-
-                # ── Dropoff for this leg ──────────────────────────────────────
-                if is_last_leg:
-                    # Last leg delivers to the original order destination.
-                    dropoff_address = first_delivery.dropoff_address
-                    dropoff_lat = first_delivery.dropoff_latitude
-                    dropoff_lng = first_delivery.dropoff_longitude
-                    receiver_name = first_delivery.receiver_name
-                    receiver_phone = first_delivery.receiver_phone
-                else:
-                    # Intermediate legs deliver to the leg's end relay node (hub).
-                    node = leg.end_relay_node
-                    dropoff_address = node.address
-                    dropoff_lat = node.latitude
-                    dropoff_lng = node.longitude
-                    receiver_name = node.name
-                    receiver_phone = ""
-
-                assigned_rider = leg.suggested_rider
-                sub_status = "Assigned" if assigned_rider else "Pending"
-
-                # ── Create the sub-order ──────────────────────────────────────
-                sub_order = Order.objects.create(
-                    user=order.user,
-                    rider=assigned_rider,
-                    parent_order=order,
-                    relay_leg_number=leg.leg_number,
-                    mode=order.mode,
-                    vehicle=order.vehicle,
-                    pickup_address=pickup_address,
-                    pickup_latitude=pickup_lat,
-                    pickup_longitude=pickup_lng,
-                    sender_name=pickup_sender_name,
-                    sender_phone=pickup_sender_phone,
-                    payment_method=order.payment_method,
-                    payment_status="Pending",
-                    total_amount=leg.rider_payout,
-                    distance_km=leg.distance_km,
-                    duration_minutes=leg.duration_minutes,
-                    status=sub_status,
-                    assigned_at=timezone.now() if assigned_rider else None,
-                    notes=(
-                        f"Relay sub-order — Leg {leg.leg_number} of {len(legs)} "
-                        f"for parent order {order.order_number}"
-                    ),
-                    is_relay_order=False,
-                )
-
-                # ── Create the delivery record for this sub-order ─────────────
-                Delivery.objects.create(
-                    order=sub_order,
-                    pickup_address=pickup_address,
-                    pickup_latitude=pickup_lat,
-                    pickup_longitude=pickup_lng,
-                    sender_name=pickup_sender_name,
-                    sender_phone=pickup_sender_phone,
-                    dropoff_address=dropoff_address,
-                    dropoff_latitude=dropoff_lat,
-                    dropoff_longitude=dropoff_lng,
-                    receiver_name=receiver_name,
-                    receiver_phone=receiver_phone,
-                    package_type=first_delivery.package_type,
-                    notes=first_delivery.notes,
-                    sequence=leg.leg_number,
-                    distance_km=leg.distance_km,
-                    duration_minutes=leg.duration_minutes,
-                )
-
-                # ── Assign suggested rider onto the leg itself ────────────────
-                leg.rider = assigned_rider
-                if assigned_rider:
-                    leg.status = OrderLeg.Status.ASSIGNED
-                    leg.assigned_at = timezone.now()
-                leg.save(update_fields=["rider", "status", "assigned_at"])
-
-                created_sub_orders.append((leg, sub_order))
-
-                # ── Notify the assigned rider ─────────────────────────────────
-                if assigned_rider:
-                    try:
-                        from riders.notifications import notify_rider
-
-                        notify_rider(
-                            rider=assigned_rider,
-                            title="Relay Leg Assigned 🔁",
-                            body=(
-                                f"You have been assigned Leg {leg.leg_number} of relay order "
-                                f"#{order.order_number}. Pick up from: {pickup_address}."
-                            ),
-                            data={
-                                "order_number": sub_order.order_number,
-                                "parent_order_number": order.order_number,
-                                "leg_number": str(leg.leg_number),
-                                "status": "Assigned",
-                            },
-                        )
-                        publish_order_assigned_event(sub_order, assigned_rider)
-                    except Exception as exc:
-                        logger.warning(
-                            f"Relay leg assignment notification failed: {exc}"
-                        )
-
-        emit_activity(
-            event_type="relay_route_accepted",
-            order_id=order.order_number,
-            text=f"Relay route accepted for {order.order_number} — {len(legs)} sub-orders created",
-            color="green",
-            metadata={
-                "legs": len(legs),
-                "sub_orders": [sub.order_number for _, sub in created_sub_orders],
-            },
-        )
-
-        # Notify vertical leads of their assigned riders via SMS (background task).
-        from .tasks import notify_relay_vertical_leads
-
-        assigned_sub_ids = [
-            str(sub.id) for _, sub in created_sub_orders if sub.rider_id
-        ]
-        if assigned_sub_ids:
-            notify_relay_vertical_leads.delay(
-                parent_order_number=order.order_number,
-                sub_order_ids=assigned_sub_ids,
-            )
+        process_accepted_relay_route_task.delay(str(order.id))
 
         # Re-fetch with all relations so the serializer returns the full picture.
         from orders.models import Order as OrderModel
@@ -944,7 +1030,11 @@ class MerchantViewSet(viewsets.ModelViewSet):
     from .serializers import MerchantSerializer
 
     serializer_class = MerchantSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+    permission_classes = [IsDispatcherAdmin]
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
@@ -960,7 +1050,7 @@ class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
         "merchant", "vehicle"
     ).all()
     serializer_class = MerchantPricingOverrideSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-updated_at")
@@ -980,7 +1070,7 @@ class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
 
 
 class SystemSettingsView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
 
     def get(self, request):
         from .models import SystemSettings
@@ -1003,7 +1093,7 @@ class SystemSettingsView(views.APIView):
 
 
 class RiderOnboardingView(views.APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsDispatcherAdmin]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
 
     def post(self, request):
@@ -1075,6 +1165,10 @@ class RelayNodeViewSet(viewsets.ModelViewSet):
 
     queryset = RelayNode.objects.all().select_related("zone").order_by("name")
     serializer_class = RelayNodeSerializer
+    authentication_classes = [
+        ServiceAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):

@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from orders.marketing_tasks import process_weekly_monday_reports
+from orders.tasks import process_weekly_monday_reports
 
 class Command(BaseCommand):
     help = 'Runs the process_weekly_monday_reports task manually'

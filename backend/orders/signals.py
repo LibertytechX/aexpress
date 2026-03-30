@@ -47,34 +47,7 @@ def on_order_completed(sender, instance, created, **kwargs):
     if not instance.rider:
         return
 
-    rider = instance.rider
+    from .tasks import handle_order_completion_tasks
 
-    # 1. Update streak
-    try:
-        from riders.gamification import update_rider_streak
-
-        update_rider_streak(rider)
-    except Exception:
-        import traceback
-
-        traceback.print_exc()
-
-    # 2. Update challenge progress
-    try:
-        from riders.gamification import update_challenge_progress
-
-        update_challenge_progress(rider, instance)
-    except Exception:
-        import traceback
-
-        traceback.print_exc()
-
-    # 3. Fire referral commission
-    try:
-        from referrals.services import fire_referral_commission
-
-        fire_referral_commission(instance)
-    except Exception:
-        import traceback
-
-        traceback.print_exc()
+    # Offload streaks, challenges, and commissions to background task
+    handle_order_completion_tasks.delay(instance.id)

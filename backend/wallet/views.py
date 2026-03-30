@@ -606,6 +606,56 @@ def corebanking_webhook(request):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
+        # Check if it's a Subscription Invoice
+        if transaction_reference.startswith("SUB-INV-"):
+            from subscriptions.models import SubscriptionInvoice
+
+            try:
+                invoice = SubscriptionInvoice.objects.get(
+                    payment_ref=transaction_reference
+                )
+
+                # If already paid, skip
+                if invoice.status == "paid":
+                    logger.info(
+                        f"CoreBanking webhook skipped - Invoice {transaction_reference} already paid - Log ID: {webhook_log.id}"
+                    )
+                    webhook_log.mark_skipped(
+                        f"Invoice {transaction_reference} already paid"
+                    )
+                    return Response({"success": True})
+
+                with db_transaction.atomic():
+                    # For subscriptions, the merchant pays the platform.
+                    # We mark the invoice and subscription as paid.
+                    invoice.status = "paid"
+                    invoice.save(update_fields=["status"])
+
+                    sub = invoice.subscription
+                    sub.is_paid = True
+                    sub.save(update_fields=["is_paid"])
+
+                    # record webhook processed
+                    webhook_log.mark_processed()
+
+                logger.info(
+                    f"CoreBanking webhook processed Invoice successfully - {transaction_reference} - Log ID: {webhook_log.id}"
+                )
+                return Response({"success": True})
+
+            except SubscriptionInvoice.DoesNotExist:
+                logger.error(
+                    f"CoreBanking webhook - Invoice {transaction_reference} not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed(f"Invoice {transaction_reference} not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Invoice not found"},
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
         # Find the merchant via virtual account
         try:
             virtual_account = VirtualAccount.objects.select_related("user").get(
