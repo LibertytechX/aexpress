@@ -226,8 +226,10 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
         role = getattr(user.dispatcher_profile, "role", None)
+        is_all = self.request.query_params.get("all") == "true"
+
         # if the dispatcher role is zone_lead
-        if role == "zone_lead":
+        if role == "zone_lead" and not is_all:
             try:
                 zone_lead = VerticalLead.objects.get(user=user)
                 zones = zone_lead.area_zones.all()
@@ -589,6 +591,32 @@ class OrderViewSet(viewsets.ModelViewSet):
             status="success",
             message="Order events retrieved successfully",
             data=serializer.data,
+            status_code=200,
+        )
+
+    @action(detail=False, methods=["post"], url_path="export-history")
+    def export_history(self, request):
+        """Trigger an async task to export order history within a date range and email it."""
+        from .tasks import export_orders_history_task
+
+        start_date = request.data.get("start_date")
+        end_date = request.data.get("end_date")
+
+        if not start_date or not end_date:
+            return service_response(
+                status="error",
+                message="Start date and end date are required",
+                data={},
+                status_code=400,
+            )
+
+        # Trigger Celery task
+        export_orders_history_task.delay(request.user.id, start_date, end_date)
+
+        return service_response(
+            status="success",
+            message="Export is being processed and will be sent to your email shortly.",
+            data={},
             status_code=200,
         )
 

@@ -320,18 +320,33 @@ const normalizeOrder = (o) => ({
 export const OrdersAPI = {
     async getAll(params = {}) {
         const query = new URLSearchParams(params).toString();
-        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ''}`);
-        if (!res.ok) throw new Error('Failed to fetch orders');
+        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ""}`);
+        if (!res.ok) throw new Error("Failed to fetch orders");
         const data = await res.json();
+
+        // Support both paginated (data.results) and non-paginated (data is array) responses.
+        // Also support wrapped service_response (data.data) if backend uses it.
+        const rawList = data.results || (Array.isArray(data) ? data : data.data) || [];
+
         if (data && data.results) {
             return {
-                results: data.results.map(normalizeOrder),
+                results: rawList.map(normalizeOrder),
                 count: data.count,
                 next: data.next,
-                previous: data.previous
+                previous: data.previous,
             };
         }
-        return data.map(normalizeOrder);
+        // If it's a plain list (or wrapped in .data), return it normalized
+        return rawList.map(normalizeOrder);
+    },
+
+    async exportHistory(params = {}) {
+        const res = await fetchWithAuth(`/dispatch/orders/export-history/`, {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error("Failed to trigger export");
+        return await res.json();
     },
 
     async getOne(orderNumber) {

@@ -2225,6 +2225,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [payLoading, setPayLoading] = useState(null);
   const [loadingExport, setLoadingExport] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isExporting, setIsExporting] = useState(false);
 
   const handlePayNow = async (order) => {
     if (order.paymentInfo) {
@@ -2294,31 +2297,82 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const exportCSV = async () => {
     setLoadingExport(true);
     try {
-      const res = await OrdersAPI.getAll({ all: "true" }).catch(() => null);
-      const dataToExport = res?.results || res || [];
+      // Fetch all orders with no filters applied (backend handles 'all=true' by disabling pagination & role-limits)
+      const res = await OrdersAPI.getAll({ all: "true" });
       
+      // Handle potential wrapped response or paginated response format
+      const dataToExport = res?.results || (Array.isArray(res) ? res : []);
+      
+      if (!dataToExport || dataToExport.length === 0) {
+        alert("No orders found to export.");
+        return;
+      }
+
       const esc = v => {
         const s = v == null ? "" : String(v);
         return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
+
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
       const rows = dataToExport.map(o => {
         const dt = formatOrderDateTime(o.created);
-        return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
+        return [
+          o.id, 
+          dt.date, 
+          dt.time, 
+          o.customer, 
+          o.customerPhone, 
+          o.merchant, 
+          o.pickup, 
+          o.dropoff, 
+          o.rider || "Unassigned", 
+          o.vehicle, 
+          o.waitingTime || "", 
+          o.deliveryTime || "", 
+          o.totalOrderTime || "", 
+          o.amount, 
+          o.cod, 
+          o.codFee, 
+          o.payment_status || "", 
+          o.status
+        ];
       });
-      const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
+
+      const csv = [headers.map(esc), ...rows.map(r => r.map(esc))].map(r => r.join(",")).join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `all_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Export failed:", e);
+    } catch (err) {
+      console.error("Export failed:", err);
       alert("Failed to export orders. Please try again.");
     } finally {
       setLoadingExport(false);
+    }
+  };
+
+  const handleExportHistoryEmail = async () => {
+    if (!exportStartDate || !exportEndDate) {
+      alert("Please select both start and end dates.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const res = await OrdersAPI.exportHistory({
+        start_date: exportStartDate,
+        end_date: exportEndDate,
+      });
+      alert(res.message || "Export started. You will receive an email shortly.");
+    } catch (err) {
+      console.error("Export error:", err);
+      alert(err.message || "Failed to trigger export history.");
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -2453,8 +2507,19 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
+        
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: S.card, borderRadius: 10, border: `1px solid ${S.border}` }}>
+          <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Export Range:</span>
+          <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <span style={{ color: S.textDim }}>to</span>
+          <input type="date" value={exportEndDate} onChange={e => setExportEndDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <button onClick={handleExportHistoryEmail} disabled={isExporting} style={{ background: isExporting ? S.border : S.gold, color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: isExporting ? "not-allowed" : "pointer", marginLeft: 4 }}>
+            {isExporting ? "Processing..." : "Email CSV Export"}
+          </button>
+        </div>
+
         <button onClick={exportCSV} disabled={loadingExport} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: loadingExport ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "inherit", opacity: loadingExport ? 0.7 : 1 }}>
-          {loadingExport ? "Preparing..." : <>{I.download} Export All ({totalOrdersCount})</>}
+          {loadingExport ? "Preparing..." : <>{I.download} Quick Export (UI)</>}
         </button>
       </div>
 
