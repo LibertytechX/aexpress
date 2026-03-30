@@ -102,3 +102,10 @@ class MerchantEmailLogAdmin(admin.ModelAdmin):
     search_fields = ["merchant__business_name", "merchant__phone", "merchant__email", "template_code"]
     ordering = ["-sent_at"]
     readonly_fields = ["sent_at"]
+    actions = ["trigger_weekly_reports"]
+
+    @admin.action(description="Trigger process_weekly_monday_reports task")
+    def trigger_weekly_reports(self, request, queryset):
+        from orders.tasks import process_weekly_monday_reports
+        process_weekly_monday_reports.delay()
+        self.message_user(request, "Triggered process_weekly_monday_reports task successfully.")
