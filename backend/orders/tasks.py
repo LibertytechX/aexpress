@@ -206,9 +206,10 @@ SENDER_EMAIL = "assuredxpressng@gmail.com"
 def _send_marketing_email(merchant, template_code, subject, context=None):
     """Helper to render and send marketing emails, logging to prevent duplicates."""
 
-    # Check if already sent
+    # Check if already sent for the date
+    today = timezone.now().date()
     if MerchantEmailLog.objects.filter(
-        merchant=merchant, template_code=template_code
+        merchant=merchant, template_code=template_code, sent_at__date=today
     ).exists():
         logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
         return False
