@@ -110,6 +110,11 @@ class User(AbstractBaseUser, PermissionsMixin):
             return f"{self.first_name} {self.last_name}"
         return self.contact_name or self.phone
 
+    # fullname getter
+    @property
+    def full_name(self):
+        return self.get_full_name()
+
     def get_short_name(self):
         return self.business_name
 

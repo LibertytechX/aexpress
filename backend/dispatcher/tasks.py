@@ -561,7 +561,11 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
             continue
 
         hub = rider.hub
-        rider_name = rider.user.contact_name if (rider.user and rider.user.contact_name) else rider.rider_id
+        rider_name = (
+            rider.user.contact_name
+            if (rider.user and rider.user.contact_name)
+            else rider.rider_id
+        )
         leg_summary = (
             f"Leg {sub.relay_leg_number}: {rider_name} ({rider.rider_id}) — "
             f"pickup: {sub.pickup_address}"
@@ -574,7 +578,9 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
                 vl = zone.zone_lead
                 if vl and vl.is_active:
                     lead_phone = vl.user.phone
-                    lead_name = vl.user.contact_name or vl.user.get_full_name() or "Lead"
+                    lead_name = (
+                        vl.user.contact_name or vl.user.get_full_name() or "Lead"
+                    )
                     key = (lead_phone, lead_name)
                     lead_legs.setdefault(key, []).append(leg_summary)
             except VerticalLead.DoesNotExist:
@@ -607,10 +613,14 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         )
         if send_sms(phone, message):
             sent += 1
-            logger.info(f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone})")
+            logger.info(
+                f"notify_relay_vertical_leads: SMS sent to vertical lead {name} ({phone})"
+            )
         else:
             failed += 1
-            logger.error(f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})")
+            logger.error(
+                f"notify_relay_vertical_leads: SMS FAILED for vertical lead {name} ({phone})"
+            )
 
     # Send consolidated SMS to Hub Captains
     for (phone, name), legs in captain_legs.items():
@@ -623,10 +633,14 @@ def notify_relay_vertical_leads(self, parent_order_number, sub_order_ids):
         )
         if send_sms(phone, message):
             sent += 1
-            logger.info(f"notify_relay_vertical_leads: SMS sent to hub captain {name} ({phone})")
+            logger.info(
+                f"notify_relay_vertical_leads: SMS sent to hub captain {name} ({phone})"
+            )
         else:
             failed += 1
-            logger.error(f"notify_relay_vertical_leads: SMS FAILED for hub captain {name} ({phone})")
+            logger.error(
+                f"notify_relay_vertical_leads: SMS FAILED for hub captain {name} ({phone})"
+            )
 
     logger.info(
         f"notify_relay_vertical_leads: done for order #{parent_order_number} — "
@@ -717,7 +731,8 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
                 "Merchant",
                 "Pickup",
                 "Dropoff",
-                "Rider",
+                "Rider ID",
+                "Rider Name",
                 "Vehicle",
                 "Amount",
                 "Status",
@@ -733,7 +748,15 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
             first_del = o.deliveries.first()
             customer_name = first_del.receiver_name if first_del else "Unknown"
             customer_phone = first_del.receiver_phone if first_del else ""
-            dropoff_address = first_del.dropoff_address if first_del else o.pickup_address  # Fallback
+            dropoff_address = (
+                first_del.dropoff_address if first_del else o.pickup_address
+            )  # Fallback
+
+            rider_name = (
+                o.rider.user.full_name
+                if (o.rider and getattr(o.rider, "user", None))
+                else "Unassigned"
+            )
 
             wait_time = (
                 _format_td(o.assigned_at - o.created_at)
@@ -743,8 +766,7 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
             delivery_time = (
                 _format_td(o.completed_at - o.assigned_at)
                 if (
-                    getattr(o, "completed_at", None)
-                    and getattr(o, "assigned_at", None)
+                    getattr(o, "completed_at", None) and getattr(o, "assigned_at", None)
                 )
                 else ""
             )
@@ -764,6 +786,7 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
                     o.pickup_address,
                     dropoff_address,
                     o.rider.rider_id if o.rider else "Unassigned",
+                    rider_name,
                     o.vehicle.name if o.vehicle else "Bike",
                     o.total_amount,
                     o.status,
@@ -1003,7 +1026,9 @@ def generate_relay_legs_sync(order_id):
                 try:
                     suggested = None
                     if prev_node:
-                        suggested = _nearest_rider_to(start_lat, start_lng, hub=prev_node)
+                        suggested = _nearest_rider_to(
+                            start_lat, start_lng, hub=prev_node
+                        )
                     if not suggested:
                         suggested = _nearest_rider_to(start_lat, start_lng)
                 except Exception:
@@ -1103,7 +1128,7 @@ def generate_relay_legs_sync(order_id):
 @shared_task
 def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     """
-    Background task to assign a rider to a sub-order and relay leg, 
+    Background task to assign a rider to a sub-order and relay leg,
     and send the corresponding notification.
     """
     from django.utils import timezone
@@ -1114,11 +1139,11 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     import logging
 
     logger = logging.getLogger(__name__)
-    
+
     try:
         sub_order = Order.objects.select_related("parent_order").get(id=sub_order_id)
         leg = OrderLeg.objects.get(id=leg_id)
-        
+
         if rider_id:
             rider = Rider.objects.get(id=rider_id)
         else:
@@ -1126,9 +1151,11 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
             start_lat = float(sub_order.pickup_latitude)
             start_lng = float(sub_order.pickup_longitude)
             prev_node = leg.start_relay_node
-            
-            logger.info(f"assign_rider_to_sub_order_task: Searching for nearest rider for sub-order {sub_order_id} at ({start_lat}, {start_lng})")
-            
+
+            logger.info(
+                f"assign_rider_to_sub_order_task: Searching for nearest rider for sub-order {sub_order_id} at ({start_lat}, {start_lng})"
+            )
+
             try:
                 rider = None
                 if prev_node:
@@ -1136,26 +1163,36 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
                 if not rider:
                     rider = _nearest_rider_to(start_lat, start_lng)
             except Exception as e:
-                logger.error(f"assign_rider_to_sub_order_task: Error searching for rider: {e}")
+                logger.error(
+                    f"assign_rider_to_sub_order_task: Error searching for rider: {e}"
+                )
                 rider = None
-                
+
             if not rider:
-                logger.warning(f"assign_rider_to_sub_order_task: No available rider found for sub-order {sub_order_id}")
+                logger.warning(
+                    f"assign_rider_to_sub_order_task: No available rider found for sub-order {sub_order_id}"
+                )
                 return False
-                
+
     except Exception as exc:
-        logger.error(f"assign_rider_to_sub_order_task: missing relation or error: {exc}")
+        logger.error(
+            f"assign_rider_to_sub_order_task: missing relation or error: {exc}"
+        )
         return False
 
     if sub_order.rider or sub_order.status not in ["Pending", "assigning"]:
-        logger.info(f"assign_rider_to_sub_order_task: Sub-order {sub_order_id} already has a rider or is not Pending.")
+        logger.info(
+            f"assign_rider_to_sub_order_task: Sub-order {sub_order_id} already has a rider or is not Pending."
+        )
         return False
 
     sub_order.rider = rider
     sub_order.status = "Assigned"
     sub_order.assigned_at = timezone.now()
     sub_order.dispatcher_assigned = True
-    sub_order.save(update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"])
+    sub_order.save(
+        update_fields=["rider", "status", "assigned_at", "dispatcher_assigned"]
+    )
 
     leg.rider = rider
     leg.status = OrderLeg.Status.ASSIGNED
@@ -1180,7 +1217,7 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
         publish_order_assigned_event(sub_order, rider)
     except Exception as exc:
         logger.warning(f"Relay leg assignment notification failed: {exc}")
-        
+
     notify_relay_vertical_leads.delay(
         parent_order_number=sub_order.parent_order.order_number,
         sub_order_ids=[str(sub_order.id)],
@@ -1201,7 +1238,7 @@ def process_accepted_relay_route_task(order_id):
     from riders.notifications import notify_rider
     from riders.views import publish_order_assigned_event
     from .utils import emit_activity
-    
+
     try:
         order = Order.objects.get(id=order_id)
     except Order.DoesNotExist:
@@ -1219,7 +1256,9 @@ def process_accepted_relay_route_task(order_id):
 
     first_delivery = order.deliveries.first()
     if not first_delivery:
-        logger.error(f"process_accepted_relay_route_task: Parent order {order_id} has no delivery record.")
+        logger.error(
+            f"process_accepted_relay_route_task: Parent order {order_id} has no delivery record."
+        )
         return False
 
     with transaction.atomic():
@@ -1265,7 +1304,7 @@ def process_accepted_relay_route_task(order_id):
                 receiver_phone = ""
 
             assigned_rider = leg.suggested_rider
-            
+
             if is_first_leg:
                 sub_status = "Assigned" if assigned_rider else "Pending"
                 actual_rider = assigned_rider
@@ -1356,12 +1395,13 @@ def process_accepted_relay_route_task(order_id):
                             f"Relay leg assignment notification failed: {exc}"
                         )
                 else:
-                    eta_time = timezone.now() + timezone.timedelta(minutes=cumulative_duration_minutes)
-                    assign_rider_to_sub_order_task.apply_async(
-                        args=[str(sub_order.id), str(leg.id), None],
-                        eta=eta_time
+                    eta_time = timezone.now() + timezone.timedelta(
+                        minutes=cumulative_duration_minutes
                     )
-            
+                    assign_rider_to_sub_order_task.apply_async(
+                        args=[str(sub_order.id), str(leg.id), None], eta=eta_time
+                    )
+
             cumulative_duration_minutes += leg.duration_minutes
 
     emit_activity(
@@ -1375,9 +1415,7 @@ def process_accepted_relay_route_task(order_id):
         },
     )
 
-    assigned_sub_ids = [
-        str(sub.id) for _, sub in created_sub_orders if sub.rider_id
-    ]
+    assigned_sub_ids = [str(sub.id) for _, sub in created_sub_orders if sub.rider_id]
     if assigned_sub_ids:
         # call other celery task
         notify_relay_vertical_leads.delay(
