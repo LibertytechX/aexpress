@@ -8,6 +8,18 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-30] — Merchant API Access Request
+
+### Added
+- **Merchant API Access Request**: New endpoint for regular merchants to switch their account type to `api`, enabling API key management.
+- **API Endpoints**: 
+    - `POST /api/merchant/request-api-access/`: Switches a merchant's account type to `api` (JWT authenticated).
+
+### Changed
+- **OTP Request Cleanup**: Optimized the `MerchantAPIKeyRequestOTPView` logic and removed redundant type checks.
+
+---
+
 ## [2026-03-30] — Merchant API Key Authentication
 
 ### Added

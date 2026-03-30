@@ -416,9 +416,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         """
         order = self.get_object()
         new_status = request.data.get("status")
+        user = request.user
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
+            "Assignment Accepted": "AssignmentAccepted",
             "In Transit": "Started",
             "At Dropoff": "Arrived",  # rider is at the dropoff location
             "Delivered": "Done",
@@ -452,12 +454,28 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.status = new_status
 
         # Keep timestamps consistent with rider-app completion flows.
-        update_fields = ["status", "updated_at"]
-        if new_status == "Assigned" and not getattr(order, "assigned_at", None):
-            order.assigned_at = now
-            order.dispatcher_assigned = True
-            update_fields.append("assigned_at")
-            update_fields.append("dispatcher_assigned")
+        update_fields = ["status", "updated_at", "payment_status"]
+        if new_status == "Cancelled":
+            order.payment_status = "Cancelled"
+            # cancel the order charge as well
+            charge = order.charges.all().first()
+            if charge.status == "completed":
+                # refund the user wallet
+                wallet = user.wallet
+                wallet.credit(
+                    charge.amount,
+                    f"Refund for order #{order.order_number}",
+                    f"REFUND-{order.order_number}",
+                )
+            charge.status = "canceled"
+            charge.save()
+
+        if new_status == "Assigned":
+            return Response(
+                {"error": f"Please go assign a rider first biko! 😡"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
@@ -465,6 +483,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             order.arrived_at = now
             update_fields.append("arrived_at")
         if new_status == "Done" and not getattr(order, "completed_at", None):
+            if not order.rider:
+                return Response(
+                    {
+                        "error": f"You can't complete an order that has rider assigned! 😡"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             order.completed_at = now
             update_fields.append("completed_at")
 
@@ -777,6 +802,10 @@ class MerchantAPIKeyRequestOTPView(views.APIView):
                 status_code=403,
                 message="Only merchants of type 'api' can request an API key.",
             )
+        if merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403, message="Merchant must have api access! 🙈"
+            )
 
         # Generate OTP
         otp = OTPService.generate_otp()
@@ -859,6 +888,44 @@ class MerchantAPIKeyRetrieveView(views.APIView):
             status="success",
             message="API Key generated successfully. Please store it securely.",
             data={"api_key": raw_key},
+            status_code=200,
+        )
+
+
+class MerchantRequestAPIAccessView(views.APIView):
+    """
+    Allow a regular merchant to switch their account type to 'api'.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        merchant_profile = getattr(user, "merchant_profile", None)
+
+        if not merchant_profile:
+            raise ServiceException(
+                status_code=403, message="Only merchant users can request API access."
+            )
+
+        if merchant_profile.merchant_type == "api":
+            return service_response(
+                status="success",
+                message="Account is already set to API type.",
+                data={},
+                status_code=200,
+            )
+
+        merchant_profile.merchant_type = "api"
+        merchant_profile.save(update_fields=["merchant_type"])
+
+        logger.info(f"Merchant {user.email} switched to API type.")
+
+        return service_response(
+            status="success",
+            message="Your account has been switched to API type successfully.",
+            data={},
             status_code=200,
         )
 

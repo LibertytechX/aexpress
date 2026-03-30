@@ -353,6 +353,23 @@ Authorization: Bearer <access_token>
 
 ## Merchant API Key Management
 
+### 0. Request API Access
+**Endpoint:** `POST /api/merchant/request-api-access/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Switches a regular merchant account to an `api` account type. This is required before an API key can be requested.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Your account has been switched to API type successfully.",
+  "data": {},
+  "status_code": 200
+}
+```
+
+---
+
 ### 1. Request API Key Retrieval OTP
 **Endpoint:** `POST /api/merchant/apikey/request-otp/`  
 **Authentication:** Required (Bearer Token)  
