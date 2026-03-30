@@ -75,7 +75,7 @@ const playStaleAlertChime = () => playChime([
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
-  warning: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  warning: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
   dashboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>,
   orders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16h6" /><path d="M19 13v6" /><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><path d="m7.5 4.27 9 5.15" /><polyline points="3.29 7 12 12 20.71 7" /><line x1="12" y1="22" x2="12" y2="12" /></svg>,
   riders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18.5" cy="17.5" r="3.5" /><circle cx="5.5" cy="17.5" r="3.5" /><circle cx="15" cy="5" r="1" /><path d="M12 17.5V14l-3-3 4-3 2 3h2" /></svg>,
@@ -487,7 +487,7 @@ function DeliveryRouteMap({ order, rider }) {
       if (directionsRendererRef.current) {
         directionsRendererRef.current.setPath([pickupLoc, dropoffLoc]);
       }
-      
+
       const bounds = new window.google.maps.LatLngBounds();
       bounds.extend(pickupLoc);
       bounds.extend(dropoffLoc);
@@ -1042,13 +1042,13 @@ function LoginScreen({ onLogin, onForgotPassword }) {
   const ShieldIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
   const ZapIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
   const PackageIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>;
-  const LoaderIcon = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>;
+  const LoaderIcon = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="7.76" y2="16.24" /><line x1="16.24" y1="7.76" x2="19.07" y2="4.93" /></svg>;
   const ArrowRightIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>;
 
   return (
     <div style={{ minHeight: "100vh", width: "100%", display: "flex", background: "#fff", fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      
+
       {/* ─── LEFT PANEL (desktop only) ─── */}
       {isDesktop && (
         <div style={{ width: "55%", position: "relative", overflow: "hidden", background: "#2F3758", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "48px", zIndex: 0 }}>
@@ -1069,8 +1069,8 @@ function LoginScreen({ onLogin, onForgotPassword }) {
               <span style={{ fontWeight: 900, fontSize: 16, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
             </div>
             <div>
-               <p style={{ color: "#fff", fontWeight: 800, fontSize: 13, letterSpacing: "1px", margin: 0 }}>ASSURED XPRESS</p>
-               <p style={{ color: S.gold, fontSize: 9, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
+              <p style={{ color: "#fff", fontWeight: 800, fontSize: 13, letterSpacing: "1px", margin: 0 }}>ASSURED XPRESS</p>
+              <p style={{ color: S.gold, fontSize: 9, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
             </div>
           </div>
 
@@ -1099,15 +1099,15 @@ function LoginScreen({ onLogin, onForgotPassword }) {
             {/* Slide Navigation Dots */}
             <div style={{ display: "flex", gap: 8, marginTop: 40 }}>
               {slides.map((_, idx) => (
-                <button 
-                  key={idx} 
+                <button
+                  key={idx}
                   onClick={() => setCurrentSlide(idx)}
-                  style={{ 
-                    height: 6, width: currentSlide === idx ? 32 : 8, 
+                  style={{
+                    height: 6, width: currentSlide === idx ? 32 : 8,
                     borderRadius: 3, padding: 0, border: "none",
-                    background: currentSlide === idx ? S.gold : "#475569", 
-                    cursor: "pointer", transition: "all 0.3s ease" 
-                  }} 
+                    background: currentSlide === idx ? S.gold : "#475569",
+                    cursor: "pointer", transition: "all 0.3s ease"
+                  }}
                 />
               ))}
             </div>
@@ -1117,215 +1117,216 @@ function LoginScreen({ onLogin, onForgotPassword }) {
 
       {/* ─── RIGHT PANEL / MOBILE FULL PAGE ─── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", position: "relative", overflow: "hidden" }}>
-        
+
         {/* Mobile Header Hero (Hidden on Desktop) */}
         {!isDesktop && (
           <div style={{ position: "relative", width: "100%", minHeight: 280, overflow: "hidden", background: "#1e2540" }}>
-             {/* Abstract Background for Mobile Hero */}
-             <div style={{ position: "absolute", inset: 0, opacity: 0.12, backgroundImage: "radial-gradient(rgba(255,255,255,0.8) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
-             <div style={{ position: "absolute", top: "-30%", right: "-20%", width: 320, height: 320, background: "radial-gradient(circle, rgba(251,177,47,0.25) 0%, transparent 70%)", borderRadius: "50%" }} />
-             <div style={{ position: "absolute", bottom: "-20%", left: "-10%", width: 280, height: 280, background: "radial-gradient(circle, rgba(0,182,122,0.2) 0%, transparent 70%)", borderRadius: "50%" }} />
+            {/* Abstract Background for Mobile Hero */}
+            <div style={{ position: "absolute", inset: 0, opacity: 0.12, backgroundImage: "radial-gradient(rgba(255,255,255,0.8) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+            <div style={{ position: "absolute", top: "-30%", right: "-20%", width: 320, height: 320, background: "radial-gradient(circle, rgba(251,177,47,0.25) 0%, transparent 70%)", borderRadius: "50%" }} />
+            <div style={{ position: "absolute", bottom: "-20%", left: "-10%", width: 280, height: 280, background: "radial-gradient(circle, rgba(0,182,122,0.2) 0%, transparent 70%)", borderRadius: "50%" }} />
 
-             <div style={{ padding: "24px 24px 40px 24px", position: "relative", zIndex: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(to bottom right, ${S.gold}, #F5C563)`, boxShadow: `0 4px 12px ${S.gold}4d` }}>
-                    <span style={{ fontWeight: 900, fontSize: 14, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
-                  </div>
-                  <div>
-                    <p style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: "1.5px", margin: 0 }}>ASSURED XPRESS</p>
-                    <p style={{ color: S.gold, fontSize: 8, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
-                  </div>
+            <div style={{ padding: "24px 24px 40px 24px", position: "relative", zIndex: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(to bottom right, ${S.gold}, #F5C563)`, boxShadow: `0 4px 12px ${S.gold}4d` }}>
+                  <span style={{ fontWeight: 900, fontSize: 14, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
                 </div>
-
-                <div key={currentSlide} style={{ animation: "fadeInUp 0.4s ease" }}>
-                  <h1 style={{ color: "#fff", fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 4px 0" }}>{slides[currentSlide].title}</h1>
-                  <h2 style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)`, fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 20px 0" }}>{slides[currentSlide].subtitle}</h2>
-                  
-                  <div style={{ display: "flex", gap: 20 }}>
-                    {slides[currentSlide].stats.map((stat, i) => (
-                      <div key={i} style={{ display: "flex", flexDirection: "column" }}>
-                        <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
-                        <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
-                      </div>
-                    ))}
-                  </div>
+                <div>
+                  <p style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: "1.5px", margin: 0 }}>ASSURED XPRESS</p>
+                  <p style={{ color: S.gold, fontSize: 8, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
                 </div>
+              </div>
 
-                <div style={{ display: "flex", gap: 6, marginTop: 24 }}>
-                  {slides.map((_, idx) => (
-                    <button 
-                      key={idx} 
-                      onClick={() => setCurrentSlide(idx)}
-                      style={{ 
-                        height: 4, width: currentSlide === idx ? 24 : 6, 
-                        borderRadius: 2, padding: 0, border: "none",
-                        background: currentSlide === idx ? S.gold : "rgba(255,255,255,0.3)", 
-                        cursor: "pointer", transition: "all 0.3s ease" 
-                      }} 
-                    />
+              <div key={currentSlide} style={{ animation: "fadeInUp 0.4s ease" }}>
+                <h1 style={{ color: "#fff", fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 4px 0" }}>{slides[currentSlide].title}</h1>
+                <h2 style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)`, fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 20px 0" }}>{slides[currentSlide].subtitle}</h2>
+
+                <div style={{ display: "flex", gap: 20 }}>
+                  {slides[currentSlide].stats.map((stat, i) => (
+                    <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
+                      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
+                    </div>
                   ))}
                 </div>
-             </div>
-             
-             {/* Wave mask at bottom */}
-             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 32, background: "#fff", borderRadius: "40px 40px 0 0" }} />
+              </div>
+
+              <div style={{ display: "flex", gap: 6, marginTop: 24 }}>
+                {slides.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentSlide(idx)}
+                    style={{
+                      height: 4, width: currentSlide === idx ? 24 : 6,
+                      borderRadius: 2, padding: 0, border: "none",
+                      background: currentSlide === idx ? S.gold : "rgba(255,255,255,0.3)",
+                      cursor: "pointer", transition: "all 0.3s ease"
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Wave mask at bottom */}
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 32, background: "#fff", borderRadius: "40px 40px 0 0" }} />
           </div>
         )}
 
         {/* Form Container */}
         <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: isDesktop ? "center" : "flex-start", alignItems: "center", padding: isDesktop ? 32 : "16px 24px 32px 24px", position: "relative" }}>
-           
-           {/* Desktop Subtle BG accents */}
-           {isDesktop && (
-             <div style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
-               <div style={{ position: "absolute", top: "-10%", right: "-20%", width: 300, height: 300, background: "rgba(251,177,47,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
-               <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 400, height: 400, background: "rgba(0,182,122,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
-             </div>
-           )}
 
-           <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 10 }}>
-              
-              <div style={{ marginBottom: 28 }}>
-                <h2 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 700, color: S.navy, margin: "0 0 4px 0" }}>Control Access 👋</h2>
-                <p style={{ color: S.textMuted, fontSize: 14, margin: 0 }}>Authorize entry into dispatch control.</p>
+          {/* Desktop Subtle BG accents */}
+          {isDesktop && (
+            <div style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
+              <div style={{ position: "absolute", top: "-10%", right: "-20%", width: 300, height: 300, background: "rgba(251,177,47,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+              <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 400, height: 400, background: "rgba(0,182,122,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+            </div>
+          )}
+
+          <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 10 }}>
+
+            <div style={{ marginBottom: 28 }}>
+              <h2 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 700, color: S.navy, margin: "0 0 4px 0" }}>Control Access 👋</h2>
+              <p style={{ color: S.textMuted, fontSize: 14, margin: 0 }}>Authorize entry into dispatch control.</p>
+            </div>
+
+            {error && (
+              <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fee2e2", borderRadius: 12, display: "flex", alignItems: "center", gap: 12, color: "#dc2626", fontSize: 14, marginBottom: 24, animation: "fadeInDown 0.3s ease" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Phone Field */}
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 6 }}>Phone Number</label>
+                <div style={{ position: "relative" }}>
+                  {/* Icon */}
+                  <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                    {PhoneIcon}
+                  </div>
+                  {/* Prefix */}
+                  <div style={{ position: "absolute", left: 48, top: "50%", transform: "translateY(-50%)", fontSize: 14, fontWeight: 500, color: "#64748b", borderRight: "1px solid #e2e8f0", paddingRight: 12, zIndex: 10, display: "flex", alignItems: "center", height: 20 }}>
+                    +234
+                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val.length <= 11) setPhone(val);
+                    }}
+                    onKeyPress={handleKeyPress}
+                    placeholder="8099999999"
+                    required
+                    style={{
+                      width: "100%", padding: "14px 16px 14px 96px",
+                      background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0",
+                      borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy,
+                      outline: "none", transition: "all 0.2s", fontFamily: "inherit"
+                    }}
+                    onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                    onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                  />
+                </div>
               </div>
 
-              {error && (
-                <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fee2e2", borderRadius: 12, display: "flex", alignItems: "center", gap: 12, color: "#dc2626", fontSize: 14, marginBottom: 24, animation: "fadeInDown 0.3s ease" }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
-                  {error}
+              {/* Password Field */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Password</label>
+                  <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", fontSize: 13, fontWeight: 600, color: S.gold, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Forgot password?</button>
                 </div>
-              )}
-
-              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                
-                {/* Phone Field */}
-                <div>
-                  <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 6 }}>Phone Number</label>
-                  <div style={{ position: "relative" }}>
-                    {/* Icon */}
-                    <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
-                      {PhoneIcon}
-                    </div>
-                    {/* Prefix */}
-                    <div style={{ position: "absolute", left: 48, top: "50%", transform: "translateY(-50%)", fontSize: 14, fontWeight: 500, color: "#64748b", borderRight: "1px solid #e2e8f0", paddingRight: 12, zIndex: 10, display: "flex", alignItems: "center", height: 20 }}>
-                      +234
-                    </div>
-                    <input
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/\D/g, '');
-                        if (val.length <= 11) setPhone(val);
-                      }}
-                      onKeyPress={handleKeyPress}
-                      placeholder="8099999999"
-                      required
-                      style={{ 
-                        width: "100%", padding: "14px 16px 14px 96px", 
-                        background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0", 
-                        borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy, 
-                        outline: "none", transition: "all 0.2s", fontFamily: "inherit" 
-                      }}
-                      onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
-                      onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
-                    />
+                <div style={{ position: "relative" }}>
+                  {/* Icon */}
+                  <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                    {LockIcon}
                   </div>
+                  <input
+                    type={showPass ? "text" : "password"}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Enter your password"
+                    required
+                    style={{
+                      width: "100%", padding: "14px 48px 14px 52px",
+                      background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0",
+                      borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy,
+                      outline: "none", transition: "all 0.2s", fontFamily: "inherit"
+                    }}
+                    onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                    onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass(!showPass)}
+                    style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#94a3b8", cursor: "pointer", padding: 0 }}
+                  >
+                    {showPass ? EyeOffIcon : EyeIcon}
+                  </button>
                 </div>
+              </div>
 
-                {/* Password Field */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                    <label style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Password</label>
-                    <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", fontSize: 13, fontWeight: 600, color: S.gold, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Forgot password?</button>
-                  </div>
-                  <div style={{ position: "relative" }}>
-                    {/* Icon */}
-                    <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
-                      {LockIcon}
-                    </div>
-                    <input
-                      type={showPass ? "text" : "password"}
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      placeholder="Enter your password"
-                      required
-                      style={{ 
-                        width: "100%", padding: "14px 48px 14px 52px", 
-                        background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0", 
-                        borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy, 
-                        outline: "none", transition: "all 0.2s", fontFamily: "inherit" 
-                      }}
-                      onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
-                      onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
-                    />
-                    <button 
-                      type="button" 
-                      onClick={() => setShowPass(!showPass)} 
-                      style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#94a3b8", cursor: "pointer", padding: 0 }}
-                    >
-                      {showPass ? EyeOffIcon : EyeIcon}
-                    </button>
-                  </div>
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  marginTop: 8, width: "100%", padding: "16px", borderRadius: 12, border: "none",
+                  background: S.navy, color: "#fff", fontSize: 15, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  cursor: loading ? "not-allowed" : "pointer", position: "relative", overflow: "hidden",
+                  opacity: loading ? 0.8 : 1, transition: "background 0.2s", fontFamily: "inherit",
+                  boxShadow: "0 8px 16px rgba(47,55,88,0.2)"
+                }}
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#232a45"; }}
+                onMouseLeave={e => { if (!loading) e.currentTarget.style.background = S.navy; }}
+              >
+                <span style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                  {loading ? <>{LoaderIcon} Accessing Control...</> : <>Enter Command Center {ArrowRightIcon}</>}
+                </span>
+                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: S.gold }} />
+              </button>
+            </form>
+
+            {/* Mobile Trust Badges */}
+            {!isDesktop && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 24 }}>
+                  <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+                  <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>Secured Platform</span>
+                  <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
                 </div>
-
-                {/* Submit Button */}
-                <button 
-                  type="submit" 
-                  disabled={loading} 
-                  style={{ 
-                    marginTop: 8, width: "100%", padding: "16px", borderRadius: 12, border: "none",
-                    background: S.navy, color: "#fff", fontSize: 15, fontWeight: 700,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                    cursor: loading ? "not-allowed" : "pointer", position: "relative", overflow: "hidden",
-                    opacity: loading ? 0.8 : 1, transition: "background 0.2s", fontFamily: "inherit",
-                    boxShadow: "0 8px 16px rgba(47,55,88,0.2)"
-                  }}
-                  onMouseEnter={e => { if(!loading) e.currentTarget.style.background = "#232a45"; }}
-                  onMouseLeave={e => { if(!loading) e.currentTarget.style.background = S.navy; }}
-                >
-                  <span style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 8 }}>
-                    {loading ? <>{LoaderIcon} Accessing Control...</> : <>Enter Command Center {ArrowRightIcon}</>}
-                  </span>
-                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: S.gold }} />
-                </button>
-              </form>
-
-              {/* Mobile Trust Badges */}
-              {!isDesktop && (
-                <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 24 }}>
-                    <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
-                    <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>Secured Platform</span>
-                    <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "center", gap: 24 }}>
-                    {[
-                      { icon: ShieldIcon, label: "Internal SSL" },
-                      { icon: ZapIcon, label: "Live Sockets" },
-                      { icon: PackageIcon, label: "Admin Rights" }
-                    ].map((badge, i) => (
-                      <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(47,55,88,0.05)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(47,55,88,0.6)" }}>
-                          {badge.icon}
-                        </div>
-                        <span style={{ fontSize: 9, fontWeight: 600, color: "#94a3b8" }}>{badge.label}</span>
+                <div style={{ display: "flex", justifyContent: "center", gap: 24 }}>
+                  {[
+                    { icon: ShieldIcon, label: "Internal SSL" },
+                    { icon: ZapIcon, label: "Live Sockets" },
+                    { icon: PackageIcon, label: "Admin Rights" }
+                  ].map((badge, i) => (
+                    <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(47,55,88,0.05)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(47,55,88,0.6)" }}>
+                        {badge.icon}
                       </div>
-                    ))}
-                  </div>
-                </>
-              )}
-           </div>
-           
-           {/* Footer */}
-           <div style={{ position: "absolute", bottom: 16, width: "100%", textAlign: "center", fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
-             &copy; {new Date().getFullYear()} Assured Xpress Operations.
-           </div>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: "#94a3b8" }}>{badge.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ position: "absolute", bottom: 16, width: "100%", textAlign: "center", fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
+            &copy; {new Date().getFullYear()} Assured Xpress Operations.
+          </div>
         </div>
       </div>
-      
-      <style dangerouslySetInnerHTML={{__html:`
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes fadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes spin { 100% { transform: rotate(360deg); } }
@@ -1476,14 +1477,14 @@ export default function AXDispatchPortal() {
   const [totalOrdersCount, setTotalOrdersCount] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
   const ordersPageRef = useRef(1);
-  
+
   useEffect(() => { ordersPageRef.current = ordersPage; }, [ordersPage]);
   const reloadOrders = async () => {
     try {
       const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
       if (res) {
-         setOrders(res.results || res);
-         if (res.count !== undefined) setTotalOrdersCount(res.count);
+        setOrders(res.results || res);
+        if (res.count !== undefined) setTotalOrdersCount(res.count);
       }
     } catch (e) { /* ignore */ }
   };
@@ -1506,7 +1507,7 @@ export default function AXDispatchPortal() {
     const checkStale = () => {
       const nowMs = Date.now();
       const STALE_THRESHOLD_MS = 7 * 60 * 1000; // 7 minutes
-      
+
       const stale = orders.filter(o => {
         if (o.status !== "Pending") return false;
         const createdMs = new Date(o.created).getTime();
@@ -1669,8 +1670,8 @@ export default function AXDispatchPortal() {
               setOrders(prev => {
                 if (!prev.find(o => o.id === d.order_id)) {
                   OrdersAPI.getAll({ page: ordersPageRef.current }).then(data => {
-                      setOrders(cur => mergeOrders(data.results || data, cur));
-                      if (data.count !== undefined) setTotalOrdersCount(data.count);
+                    setOrders(cur => mergeOrders(data.results || data, cur));
+                    if (data.count !== undefined) setTotalOrdersCount(data.count);
                   }).catch(() => { });
                 }
                 return prev;
@@ -1695,7 +1696,7 @@ export default function AXDispatchPortal() {
             prev.forEach(v => { map[v.id] = v; });
             // Merge-patch: spread existing state first so any field the Ably payload
             // omits is preserved (e.g. orders_today from the REST API initial load).
-            incoming.forEach(v => { 
+            incoming.forEach(v => {
               const existing = map[v.id] || {};
               const merged = { ...existing, ...v };
               // Protect fields from being overwritten by null/omitted telemetry
@@ -1703,7 +1704,7 @@ export default function AXDispatchPortal() {
               if (v.orders_today === null && existing.orders_today != null) merged.orders_today = existing.orders_today;
               if (v.total_distance === null && existing.total_distance != null) merged.total_distance = existing.total_distance;
               if (v.distance_today === null && existing.distance_today != null) merged.distance_today = existing.distance_today;
-              map[v.id] = merged; 
+              map[v.id] = merged;
             });
             return Object.values(map);
           });
@@ -1746,8 +1747,8 @@ export default function AXDispatchPortal() {
       try {
         const data = await OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => null);
         if (data) {
-           setOrders(prev => mergeOrders(data.results || data, prev));
-           if (data.count !== undefined) setTotalOrdersCount(data.count);
+          setOrders(prev => mergeOrders(data.results || data, prev));
+          if (data.count !== undefined) setTotalOrdersCount(data.count);
         }
       } catch (_) { /* ignore */ }
     }, 60000);
@@ -1765,14 +1766,14 @@ export default function AXDispatchPortal() {
   useEffect(() => {
     if (!isAuthenticated) return;
     if (ordersPage === 1 && !ordersPageRef.current_hasChanged) {
-        ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
+      ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
     }
     const fetchPage = async () => {
       try {
         const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
         if (res) {
-           setOrders(res.results || res);
-           if (res.count !== undefined) setTotalOrdersCount(res.count);
+          setOrders(res.results || res);
+          if (res.count !== undefined) setTotalOrdersCount(res.count);
         }
       } catch (e) { /* ignore */ }
     };
@@ -1822,16 +1823,16 @@ export default function AXDispatchPortal() {
     try {
       await OrdersAPI.assignRider(oid, rid);
       updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned", dispatcher_assigned: true });
-	      // Allow assigning even if rider is already fulfilling another ride.
-	      // Don't overwrite an existing currentOrder (it represents the *active* ride).
-	      setRiders(p => p.map(x => {
-	        if (x.id !== rid) return x;
-	        const next = { ...x };
-	        if (!next.currentOrder) next.currentOrder = oid;
-	        // Keep status if already on_delivery; otherwise mark as on_delivery for visibility.
-	        if (next.status === "online") next.status = "on_delivery";
-	        return next;
-	      }));
+      // Allow assigning even if rider is already fulfilling another ride.
+      // Don't overwrite an existing currentOrder (it represents the *active* ride).
+      setRiders(p => p.map(x => {
+        if (x.id !== rid) return x;
+        const next = { ...x };
+        if (!next.currentOrder) next.currentOrder = oid;
+        // Keep status if already on_delivery; otherwise mark as on_delivery for visibility.
+        if (next.status === "online") next.status = "on_delivery";
+        return next;
+      }));
       addLog(oid, `Assigned to ${r.name}`, "Dispatch", "assign");
       addLog(oid, "Status → Assigned", "System", "status");
     } catch (error) {
@@ -1853,14 +1854,14 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
         addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-	        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
-	        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
-	          setRiders(p => p.map(r => {
-	            if (r.id !== o.riderId) return r;
-	            if (r.currentOrder && r.currentOrder !== oid) return r;
-	            return { ...r, currentOrder: null, status: "online" };
-	          }));
-	        }
+        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
+        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
+          setRiders(p => p.map(r => {
+            if (r.id !== o.riderId) return r;
+            if (r.currentOrder && r.currentOrder !== oid) return r;
+            return { ...r, currentOrder: null, status: "online" };
+          }));
+        }
       }
     } catch (err) {
       console.error("Failed to update status:", err);
@@ -1929,10 +1930,10 @@ export default function AXDispatchPortal() {
           {screen === "teams" && <TeamsScreen dispatchers={dispatchers} onDispatcherCreated={(d) => setDispatchers(p => [d, ...p])} />}
         </div>
       </main>
-      
+
       {/* ─── GLOBAL PENDING STALENESS ALERT ─── */}
       {staleOrders.length > 0 && (
-        <button 
+        <button
           onClick={() => setShowStaleModal(true)}
           style={{
             position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 900,
@@ -1949,8 +1950,8 @@ export default function AXDispatchPortal() {
       )}
 
       {showStaleModal && (
-        <StaleOrdersModal 
-          staleOrders={staleOrders} 
+        <StaleOrdersModal
+          staleOrders={staleOrders}
           onClose={() => setShowStaleModal(false)}
           onViewOrder={(id) => navTo("orders", id)}
         />
@@ -1982,7 +1983,8 @@ export default function AXDispatchPortal() {
         };
         setOrders(p => [newOrder, ...p]);
       }} />}
-      <style dangerouslySetInnerHTML={{__html:`
+      <style dangerouslySetInnerHTML={{
+        __html: `
         @keyframes stalePulseGlobal {
           0% { box-shadow: 0 0 0 0 rgba(232,168,56,0.5); }
           70% { box-shadow: 0 0 0 16px rgba(232,168,56,0); }
@@ -2018,7 +2020,7 @@ function DashboardScreen({ orders, riders, vehicleAssets, activityFeed, onViewOr
     const d = parseCreated(o);
     if (!d) return false;
     if (period === "today") return o.created.startsWith(todayStr) || o.created.includes(todayStr);
-    if (period === "week")  return d >= weekStart;
+    if (period === "week") return d >= weekStart;
     if (period === "month") return d >= monthStart;
     return false;
   });
@@ -2163,7 +2165,7 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
-        
+
         {/* Header */}
         <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: S.redBg }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -2183,28 +2185,28 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
           {staleOrders.length === 0 ? (
             <div style={{ textAlign: "center", padding: "32px 0", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>No stale orders. You're all caught up!</div>
           ) : (
-             staleOrders.map(o => {
-               // Calculate exactly how many minutes they are stale
-               const mins = Math.floor((new Date() - new Date(o.created)) / 60000);
-               return (
-                 <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px", border: `1px solid ${S.border}`, borderRadius: 12, background: S.bg }}>
-                   <div>
-                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-                       <span style={{ fontSize: 14, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                       <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>{mins} mins ago</span>
-                     </div>
-                     <div style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{o.merchant}</div>
-                     <div style={{ fontSize: 11, color: S.textDim }}>{o.pickup.split(',')[0]} → {o.dropoff.split(',')[0]}</div>
-                   </div>
-                   <button 
-                     onClick={() => { onClose(); onViewOrder(o.id); }} 
-                     style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: S.navy, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
-                   >
-                     View & Assign
-                   </button>
-                 </div>
-               )
-             })
+            staleOrders.map(o => {
+              // Calculate exactly how many minutes they are stale
+              const mins = Math.floor((new Date() - new Date(o.created)) / 60000);
+              return (
+                <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px", border: `1px solid ${S.border}`, borderRadius: 12, background: S.bg }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>{mins} mins ago</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{o.merchant}</div>
+                    <div style={{ fontSize: 11, color: S.textDim }}>{o.pickup.split(',')[0]} → {o.dropoff.split(',')[0]}</div>
+                  </div>
+                  <button
+                    onClick={() => { onClose(); onViewOrder(o.id); }}
+                    style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: S.navy, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
+                  >
+                    View & Assign
+                  </button>
+                </div>
+              )
+            })
           )}
         </div>
       </div>
@@ -2272,7 +2274,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     if (periodFilter === "today") return o.created.startsWith(_todayStr) || o.created.includes(_todayStr);
     const d = new Date(o.created);
     if (isNaN(d)) return false;
-    if (periodFilter === "week")  return d >= _weekStart;
+    if (periodFilter === "week") return d >= _weekStart;
     if (periodFilter === "month") return d >= _monthStart;
     return true;
   };
@@ -2299,10 +2301,10 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     try {
       // Fetch all orders with no filters applied (backend handles 'all=true' by disabling pagination & role-limits)
       const res = await OrdersAPI.getAll({ all: "true" });
-      
+
       // Handle potential wrapped response or paginated response format
       const dataToExport = res?.results || (Array.isArray(res) ? res : []);
-      
+
       if (!dataToExport || dataToExport.length === 0) {
         alert("No orders found to export.");
         return;
@@ -2317,23 +2319,23 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       const rows = dataToExport.map(o => {
         const dt = formatOrderDateTime(o.created);
         return [
-          o.id, 
-          dt.date, 
-          dt.time, 
-          o.customer, 
-          o.customerPhone, 
-          o.merchant, 
-          o.pickup, 
-          o.dropoff, 
-          o.rider || "Unassigned", 
-          o.vehicle, 
-          o.waitingTime || "", 
-          o.deliveryTime || "", 
-          o.totalOrderTime || "", 
-          o.amount, 
-          o.cod, 
-          o.codFee, 
-          o.payment_status || "", 
+          o.id,
+          dt.date,
+          dt.time,
+          o.customer,
+          o.customerPhone,
+          o.merchant,
+          o.pickup,
+          o.dropoff,
+          o.rider || "Unassigned",
+          o.vehicle,
+          o.waitingTime || "",
+          o.deliveryTime || "",
+          o.totalOrderTime || "",
+          o.amount,
+          o.cod,
+          o.codFee,
+          o.payment_status || "",
           o.status
         ];
       });
@@ -2387,7 +2389,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     const dt = formatOrderDateTime(rowOrder.created);
     const psLower = (rowOrder.payment_status || "").toLowerCase();
     const isPaid = psLower === "paid" || psLower === "success";
-    
+
     return (
       <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
         <div
@@ -2410,7 +2412,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
             {rowOrder.source === "merchant_web" ? (
               <span title="Merchant Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.blue, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(59,130,246,0.3)" }}>M</span>
             ) : rowOrder.source === "dispatcher_web" ? (
-              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>G</span>
+              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>D</span>
             ) : null}
             <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
               {rowOrder.id}
@@ -2481,7 +2483,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           else if (t === "Paid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && o.payment_status === "Paid").length;
           else if (t === "Unpaid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && (!o.payment_status || o.payment_status === "Pending")).length;
           else cnt = periodOrders.filter(o => o.status === t).length;
-          
+
           return (
             <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
           );
@@ -2507,7 +2509,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
         </div>
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
-        
+
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: S.card, borderRadius: 10, border: `1px solid ${S.border}` }}>
           <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Export Range:</span>
           <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
@@ -2584,9 +2586,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                   </React.Fragment>
                 );
               })}
-          {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
+              {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
             </div>
-            
+
             <div style={{ padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${S.borderLight}` }}>
               <button disabled={ordersPage <= 1} onClick={() => setOrdersPage(p => p - 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage <= 1 ? "not-allowed" : "pointer", color: ordersPage <= 1 ? S.textMuted : S.navy, fontWeight: 600 }}>Previous Page</button>
               <div style={{ fontSize: 13, color: S.textMuted, fontWeight: 500 }}>
@@ -2594,7 +2596,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
               </div>
               <button disabled={ordersPage * 100 >= totalOrdersCount} onClick={() => setOrdersPage(p => p + 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage * 100 >= totalOrdersCount ? "not-allowed" : "pointer", color: ordersPage * 100 >= totalOrdersCount ? S.textMuted : S.navy, fontWeight: 600 }}>Next Page</button>
             </div>
-            
+
           </div>
         </div>
       </div>
@@ -2622,7 +2624,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [assigningLegLoading, setAssigningLegLoading] = useState(false);
   const [priceSaving, setPriceSaving] = useState(false);
   const [priceError, setPriceError] = useState("");
-  
+
   const [showCODModal, setShowCODModal] = useState(false);
   const [codLoading, setCodLoading] = useState(false);
   const [codData, setCodData] = useState(null);
@@ -2754,15 +2756,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {order.cod > 0 && (
-             <button 
-               onClick={handleGenerateCOD} 
-               disabled={codLoading}
-               style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "none", background: S.gold, color: "#fff", cursor: codLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, fontFamily: "inherit", opacity: codLoading ? 0.7 : 1, transition: "all 0.2s ease", boxShadow: "0 2px 8px rgba(245,158,11,0.25)" }}
-               onMouseEnter={e => !codLoading && (e.currentTarget.style.background = "#D97706")}
-               onMouseLeave={e => !codLoading && (e.currentTarget.style.background = S.gold)}
-             >
-               <span style={{ fontSize: 14 }}>💵</span> {codLoading ? "Generating..." : "Generate COD Account"}
-             </button>
+            <button
+              onClick={handleGenerateCOD}
+              disabled={codLoading}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "none", background: S.gold, color: "#fff", cursor: codLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, fontFamily: "inherit", opacity: codLoading ? 0.7 : 1, transition: "all 0.2s ease", boxShadow: "0 2px 8px rgba(245,158,11,0.25)" }}
+              onMouseEnter={e => !codLoading && (e.currentTarget.style.background = "#D97706")}
+              onMouseLeave={e => !codLoading && (e.currentTarget.style.background = S.gold)}
+            >
+              <span style={{ fontSize: 14 }}>💵</span> {codLoading ? "Generating..." : "Generate COD Account"}
+            </button>
           )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
@@ -2907,8 +2909,8 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {editPrice ? (
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <span>₦</span><input value={priceVal} onChange={e => setPriceVal(e.target.value)} style={{ width: 80, border: `1px solid ${S.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontFamily: "'Space Mono',monospace", textAlign: "right" }} />
-	                    <button onClick={savePrice} disabled={priceSaving} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>{priceSaving ? "…" : "✓"}</button>
-	                    <button onClick={() => { setEditPrice(false); setPriceError(""); }} disabled={priceSaving} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>✕</button>
+                    <button onClick={savePrice} disabled={priceSaving} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>{priceSaving ? "…" : "✓"}</button>
+                    <button onClick={() => { setEditPrice(false); setPriceError(""); }} disabled={priceSaving} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>✕</button>
                   </div>
                 ) : (
                   <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.amount.toLocaleString()}</span>
@@ -2920,7 +2922,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                   <span style={{ fontFamily: "'Space Mono',monospace" }}>₦{order.pricePerKm.toFixed(0)}/km</span>
                 </div>
               )}
-	              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
+              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
               {order.cod > 0 && <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD collection</span><span style={{ fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{order.cod.toLocaleString()}</span></div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD fee</span><span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.codFee.toLocaleString()}</span></div>
@@ -2934,7 +2936,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Payment Information</span>
                 <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
               </div>
-              
+
               {order.paymentInfo ? (
                 <div>
                   <div style={{ background: S.borderLight, borderRadius: 10, padding: 12, marginBottom: 10 }}>
@@ -3032,38 +3034,38 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <div style={{ marginTop: 12, borderTop: `1px solid ${S.border}`, paddingTop: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>SELECT RIDER</div>
                 {riders.filter(r => r.status !== "offline").map(r => {
-	                  // A rider can be assigned even if they are currently fulfilling another order.
-	                  // We still *indicate* busyness, but we do not block assignment.
-	                  const busy = (r.status === "on_delivery" && (!r.currentOrder || r.currentOrder !== order.id)) || (!!r.currentOrder && r.currentOrder !== order.id);
-	                  const available = !busy;
+                  // A rider can be assigned even if they are currently fulfilling another order.
+                  // We still *indicate* busyness, but we do not block assignment.
+                  const busy = (r.status === "on_delivery" && (!r.currentOrder || r.currentOrder !== order.id)) || (!!r.currentOrder && r.currentOrder !== order.id);
+                  const available = !busy;
                   return (
-	                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.75 : 1 }}>
+                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.75 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ width: 8, height: 8, borderRadius: "50%", background: r.status === "on_delivery" ? S.purple : S.green }} />
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name} <span style={{ fontSize: 10, color: S.textMuted }}>({r.vehicle})</span></div>
                           <div style={{ fontSize: 10, color: S.textMuted }}>
                             ⭐ {r.rating} • {r.todayOrders} today
-	                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 {r.currentOrder ? `Fulfilling ${r.currentOrder}` : "On delivery"}</span>}
+                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 {r.currentOrder ? `Fulfilling ${r.currentOrder}` : "On delivery"}</span>}
                             {available && r.status === "online" && <span style={{ color: S.green, fontWeight: 700, marginLeft: 6 }}>✓ Available</span>}
                           </div>
                         </div>
                       </div>
-	                      <button
-	                        onClick={() => {
-	                          if (busy) {
-	                            const msg = r.currentOrder
-	                              ? `${r.name} is currently fulfilling order ${r.currentOrder}. Assign this order anyway?`
-	                              : `${r.name} is currently on delivery. Assign this order anyway?`;
-	                            if (!confirm(msg)) return;
-	                          }
-	                          onAssign(order.id, r.id);
-	                          setShowAssign(false);
-	                        }}
-	                        style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}
-	                      >
-	                        {busy ? "Assign anyway" : "Assign"}
-	                      </button>
+                      <button
+                        onClick={() => {
+                          if (busy) {
+                            const msg = r.currentOrder
+                              ? `${r.name} is currently fulfilling order ${r.currentOrder}. Assign this order anyway?`
+                              : `${r.name} is currently on delivery. Assign this order anyway?`;
+                            if (!confirm(msg)) return;
+                          }
+                          onAssign(order.id, r.id);
+                          setShowAssign(false);
+                        }}
+                        style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}
+                      >
+                        {busy ? "Assign anyway" : "Assign"}
+                      </button>
                     </div>
                   );
                 })}
@@ -3161,65 +3163,65 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                   const legNetPay = legPayout * (1 - commissionPct / 100);
 
                   return (
-                  <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
-                        {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{legPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 500 }}>Rider gets: <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{legNetPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> <span style={{ color: S.textMuted }}>({100 - commissionPct}%)</span></div>
-                      </div>
-                    </div>
-                    <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
-                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
-                    </div>
-                    <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
-                      <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
-                      <span>⏱ {leg.duration_minutes || 0} min</span>
-                      {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
-                    </div>
-                    {/* Assignment / Suggested Rider Inline Block */}
-                    <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          {leg.riderName ? (
-                            <span style={{ color: S.green }}>✅ <span style={{ fontWeight: 700 }}>{leg.riderName}</span></span>
-                          ) : suggestedName ? (
-                            <span style={{ color: S.blue }}>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span> (Suggested)</span>
-                          ) : (
-                            <span style={{ color: S.textMuted }}>No rider selected</span>
-                          )}
-                          {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                          <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
+                          {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
                         </div>
-                        <button
-                          onClick={() => setAssigningLeg(assigningLeg === leg.leg_number ? null : leg.leg_number)}
-                          style={{ padding: "3px 8px", fontSize: 9, borderRadius: 5, border: `1px solid ${S.border}`, background: assigningLeg === leg.leg_number ? S.borderLight : "#fff", color: S.navy, cursor: "pointer", fontWeight: 600 }}
-                        >
-                          {assigningLeg === leg.leg_number ? "Cancel" : leg.riderName || suggestedName ? "Change" : "Assign"}
-                        </button>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{legPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                          <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 500 }}>Rider gets: <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{legNetPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> <span style={{ color: S.textMuted }}>({100 - commissionPct}%)</span></div>
+                        </div>
                       </div>
-
-                      {assigningLeg === leg.leg_number && (
-                        <div style={{ marginTop: 4, padding: 8, borderRadius: 6, background: "#fff", border: `1px solid ${S.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
-                          <span style={{ fontWeight: 600, color: S.navy }}>Select Rider for Leg {leg.leg_number}</span>
-                          <div style={{ maxHeight: 120, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 6, background: S.bgHover }}>
-                            {riders.map(r => (
-                              <div
-                                key={r.id}
-                                onClick={() => !assigningLegLoading && handleAssignLegRider(leg.leg_number, r.id)}
-                                style={{ padding: "6px 8px", borderBottom: `1px solid ${S.border}`, fontSize: 10, display: "flex", justifyContent: "space-between", cursor: assigningLegLoading ? "not-allowed" : "pointer", opacity: assigningLegLoading ? 0.6 : 1, background: "#fff" }}
-                              >
-                                <span style={{ fontWeight: 600, color: S.navy }}>{r.name}</span>
-                                <span style={{ color: S.textMuted }}>{r.capacityLoad || 'Bike'}</span>
-                              </div>
-                            ))}
+                      <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
+                        <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
+                      </div>
+                      <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
+                        <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
+                        <span>⏱ {leg.duration_minutes || 0} min</span>
+                        {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
+                      </div>
+                      {/* Assignment / Suggested Rider Inline Block */}
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {leg.riderName ? (
+                              <span style={{ color: S.green }}>✅ <span style={{ fontWeight: 700 }}>{leg.riderName}</span></span>
+                            ) : suggestedName ? (
+                              <span style={{ color: S.blue }}>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span> (Suggested)</span>
+                            ) : (
+                              <span style={{ color: S.textMuted }}>No rider selected</span>
+                            )}
+                            {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
                           </div>
+                          <button
+                            onClick={() => setAssigningLeg(assigningLeg === leg.leg_number ? null : leg.leg_number)}
+                            style={{ padding: "3px 8px", fontSize: 9, borderRadius: 5, border: `1px solid ${S.border}`, background: assigningLeg === leg.leg_number ? S.borderLight : "#fff", color: S.navy, cursor: "pointer", fontWeight: 600 }}
+                          >
+                            {assigningLeg === leg.leg_number ? "Cancel" : leg.riderName || suggestedName ? "Change" : "Assign"}
+                          </button>
                         </div>
-                      )}
+
+                        {assigningLeg === leg.leg_number && (
+                          <div style={{ marginTop: 4, padding: 8, borderRadius: 6, background: "#fff", border: `1px solid ${S.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <span style={{ fontWeight: 600, color: S.navy }}>Select Rider for Leg {leg.leg_number}</span>
+                            <div style={{ maxHeight: 120, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 6, background: S.bgHover }}>
+                              {riders.map(r => (
+                                <div
+                                  key={r.id}
+                                  onClick={() => !assigningLegLoading && handleAssignLegRider(leg.leg_number, r.id)}
+                                  style={{ padding: "6px 8px", borderBottom: `1px solid ${S.border}`, fontSize: 10, display: "flex", justifyContent: "space-between", cursor: assigningLegLoading ? "not-allowed" : "pointer", opacity: assigningLegLoading ? 0.6 : 1, background: "#fff" }}
+                                >
+                                  <span style={{ fontWeight: 600, color: S.navy }}>{r.name}</span>
+                                  <span style={{ color: S.textMuted }}>{r.capacityLoad || 'Bike'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
                   );
                 })}
                 {(() => {
@@ -3317,10 +3319,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
         </div>
       </div>
       {showCODModal && (
-        <CODAccountModal 
-          codData={codData} 
-          error={codError} 
-          onClose={() => setShowCODModal(false)} 
+        <CODAccountModal
+          codData={codData}
+          error={codError}
+          onClose={() => setShowCODModal(false)}
         />
       )}
     </div>
@@ -3931,15 +3933,15 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   }
 
   const sMap = { "Online": "online", "On Delivery": "on_delivery", "Offline": "offline" };
-	  const filtered = riders.filter(r => {
-	    if (filter !== "All" && r.status !== sMap[filter]) return false;
-	    if (search) {
-	      const s = search.toLowerCase();
-	      const plate = (r.vehicle_asset?.plate_number || "").toLowerCase();
-	      return r.name.toLowerCase().includes(s) || r.phone.includes(s) || plate.includes(s);
-	    }
-	    return true;
-	  });
+  const filtered = riders.filter(r => {
+    if (filter !== "All" && r.status !== sMap[filter]) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      const plate = (r.vehicle_asset?.plate_number || "").toLowerCase();
+      return r.name.toLowerCase().includes(s) || r.phone.includes(s) || plate.includes(s);
+    }
+    return true;
+  });
   const sc = (s) => s === "online" ? S.green : s === "on_delivery" ? S.purple : S.textMuted;
 
   return (
@@ -3969,13 +3971,13 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               {I.plus} Add Rider
             </button>
           </div>
-	          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-	            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-	              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
-	            </div>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
+            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(r => (
-	                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name.split(" ").map(n => n[0]).join("")}</div>
@@ -3983,7 +3985,7 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                   </div>
                   <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
-	                  <span style={{ fontSize: 11, color: r.vehicle_asset?.plate_number ? S.textDim : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: r.vehicle_asset?.plate_number ? 700 : 400 }}>{r.vehicle_asset?.plate_number || "—"}</span>
+                  <span style={{ fontSize: 11, color: r.vehicle_asset?.plate_number ? S.textDim : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: r.vehicle_asset?.plate_number ? 700 : 400 }}>{r.vehicle_asset?.plate_number || "—"}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
                   <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
                   <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
@@ -4311,8 +4313,8 @@ function VehiclesLocationMap({ vehicles }) {
             (latest.make || latest.model ? `<div style="color:#888;font-size:10px;">${latest.make || ''} ${latest.model || ''}</div>` : '') +
             (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
             `<div style="color:#555;font-size:10px;margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">` +
-              `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
-              `<span><span style="color:#888;font-weight:700;">Today:</span> ${distanceTodayStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Today:</span> ${distanceTodayStr}</span>` +
             `</div>` +
             (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
             `</div>`
@@ -4435,14 +4437,14 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-		  const gridCols = "70px 1.2fr 60px 1fr 1fr 80px 110px 110px 120px 80px 1.5fr 80px";
-	  const fmtDistance = (raw, unit) => {
-	    if (raw === null || raw === undefined || raw === "") return "—";
-	    const n = (typeof raw === "number") ? raw : parseFloat(raw);
-	    if (!Number.isFinite(n)) return "—";
-	    const u = String(unit || "").trim();
-	    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
-	  };
+  const gridCols = "70px 1.2fr 60px 1fr 1fr 80px 110px 110px 120px 80px 1.5fr 80px";
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
 
   return (
     <div>
@@ -4467,23 +4469,23 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
               {I.plus} Add Vehicle
             </button>
           </div>
-		          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-	            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-		              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
-	            </div>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
+            </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
-	              {filtered.map(v => (
-	                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              {filtered.map(v => (
+                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
                   <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
                   <span title={v.make || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.make || '—'}</span>
                   <span title={v.model || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.model || '—'}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
-	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
-	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
-	                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
-		                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : fmtDistance(v.orders_today, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : fmtDistance(v.orders_today, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
                 </div>
@@ -4951,7 +4953,7 @@ function MessagingScreen() {
       setConversations(prev => prev.map(c =>
         c.id === activeId ? { ...c, unread_count: 0 } : c
       ));
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Subscribe to Ably channel for real-time messages
     const convo = conversations.find(c => c.id === activeId);
@@ -4976,7 +4978,7 @@ function MessagingScreen() {
     }
 
     return () => { cancelled = true; channelRef.current?.unsubscribe(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, ablyClient]);
 
   // ── Auto-scroll to bottom when messages change ──────────────────
@@ -5390,9 +5392,9 @@ function SettingsScreen() {
   const [bikeT1Rate, setBikeT1Rate] = useState(275);
   const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
   const [bikeT2Rate, setBikeT2Rate] = useState(235);
-	  const [bikeT3MaxKm, setBikeT3MaxKm] = useState(25);
-	  const [bikeT3Rate, setBikeT3Rate] = useState(200);
-	  const [bikeT4Rate, setBikeT4Rate] = useState(200);
+  const [bikeT3MaxKm, setBikeT3MaxKm] = useState(25);
+  const [bikeT3Rate, setBikeT3Rate] = useState(200);
+  const [bikeT4Rate, setBikeT4Rate] = useState(200);
   // Legacy bike state kept for getVC compatibility
   const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
   // Car uses tiered rate-switch pricing
@@ -5402,9 +5404,9 @@ function SettingsScreen() {
   const [carT1Rate, setCarT1Rate] = useState(350);
   const [carT2MaxKm, setCarT2MaxKm] = useState(15);
   const [carT2Rate, setCarT2Rate] = useState(300);
-	  const [carT3MaxKm, setCarT3MaxKm] = useState(25);
-	  const [carT3Rate, setCarT3Rate] = useState(250);
-	  const [carT4Rate, setCarT4Rate] = useState(250);
+  const [carT3MaxKm, setCarT3MaxKm] = useState(25);
+  const [carT3Rate, setCarT3Rate] = useState(250);
+  const [carT4Rate, setCarT4Rate] = useState(250);
   const carBase = 0, carPerKm = 0, carMinKm = carFloorKm, carMin = carFloorFee;
   // Van uses tiered rate-switch pricing
   const [vanFloorKm, setVanFloorKm] = useState(3);
@@ -5413,9 +5415,9 @@ function SettingsScreen() {
   const [vanT1Rate, setVanT1Rate] = useState(500);
   const [vanT2MaxKm, setVanT2MaxKm] = useState(15);
   const [vanT2Rate, setVanT2Rate] = useState(450);
-	  const [vanT3MaxKm, setVanT3MaxKm] = useState(25);
-	  const [vanT3Rate, setVanT3Rate] = useState(400);
-	  const [vanT4Rate, setVanT4Rate] = useState(400);
+  const [vanT3MaxKm, setVanT3MaxKm] = useState(25);
+  const [vanT3Rate, setVanT3Rate] = useState(400);
+  const [vanT4Rate, setVanT4Rate] = useState(400);
   const vanBase = 0, vanPerKm = 0, vanMinKm = vanFloorKm, vanMin = vanFloorFee;
   const [codFee, setCodFee] = useState(500);
   const [codPct, setCodPct] = useState(1.5);
@@ -5478,17 +5480,17 @@ function SettingsScreen() {
   const [nodeFormOpen, setNodeFormOpen] = useState(false);
   const [nodeSaving, setNodeSaving] = useState(false);
 
-	  // Tiered price: rate-switch with boundary floors
-	  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3MaxKm, t3Rate, t4Rate) => {
-	    if (km <= floorKm) return floorFee;
-	    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
-	    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
-	    if (km <= t3MaxKm) return Math.max(km * t3Rate, t2MaxKm * t2Rate);
-	    return Math.max(km * t4Rate, t3MaxKm * t3Rate);
-	  };
-		  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3MaxKm, bikeT3Rate, bikeT4Rate);
-		  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3MaxKm, carT3Rate, carT4Rate);
-		  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3MaxKm, vanT3Rate, vanT4Rate);
+  // Tiered price: rate-switch with boundary floors
+  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3MaxKm, t3Rate, t4Rate) => {
+    if (km <= floorKm) return floorFee;
+    if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
+    if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
+    if (km <= t3MaxKm) return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+    return Math.max(km * t4Rate, t3MaxKm * t3Rate);
+  };
+  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3MaxKm, bikeT3Rate, bikeT4Rate);
+  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3MaxKm, carT3Rate, carT4Rate);
+  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3MaxKm, vanT3Rate, vanT4Rate);
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
     if (vehicleType === "bike") { price = calcBikePrice(km); }
@@ -5539,18 +5541,18 @@ function SettingsScreen() {
               setBikeFloorFee(pt.floor_fee ?? 1700);
               setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
               setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
-	              // Pricing breakpoints are fixed at 15km and 25km
-	              setBikeT2MaxKm(15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setBikeT2MaxKm(15);
               setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
-	              setBikeT3MaxKm(25);
-	              if ((pt.tiers?.length ?? 0) >= 4) {
-	                setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
-	                setBikeT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 200);
-	              } else {
-	                const legacyLast = pt.tiers?.[2]?.rate ?? 200;
-	                setBikeT3Rate(legacyLast);
-	                setBikeT4Rate(legacyLast);
-	              }
+              setBikeT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+                setBikeT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 200);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 200;
+                setBikeT3Rate(legacyLast);
+                setBikeT4Rate(legacyLast);
+              }
             } else {
               setBikeFloorKm(pf(v.min_distance_km, 6));
               setBikeFloorFee(pf(v.min_fee, 1700));
@@ -5562,18 +5564,18 @@ function SettingsScreen() {
               setCarFloorFee(pt.floor_fee ?? 2500);
               setCarT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setCarT1Rate(pt.tiers?.[0]?.rate ?? 350);
-	              // Pricing breakpoints are fixed at 15km and 25km
-	              setCarT2MaxKm(15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setCarT2MaxKm(15);
               setCarT2Rate(pt.tiers?.[1]?.rate ?? 300);
-	              setCarT3MaxKm(25);
-	              if ((pt.tiers?.length ?? 0) >= 4) {
-	                setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
-	                setCarT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 250);
-	              } else {
-	                const legacyLast = pt.tiers?.[2]?.rate ?? 250;
-	                setCarT3Rate(legacyLast);
-	                setCarT4Rate(legacyLast);
-	              }
+              setCarT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+                setCarT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 250);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 250;
+                setCarT3Rate(legacyLast);
+                setCarT4Rate(legacyLast);
+              }
             } else {
               setCarFloorKm(pf(v.min_distance_km, 3));
               setCarFloorFee(pf(v.min_fee, 2500));
@@ -5585,18 +5587,18 @@ function SettingsScreen() {
               setVanFloorFee(pt.floor_fee ?? 5000);
               setVanT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setVanT1Rate(pt.tiers?.[0]?.rate ?? 500);
-	              // Pricing breakpoints are fixed at 15km and 25km
-	              setVanT2MaxKm(15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setVanT2MaxKm(15);
               setVanT2Rate(pt.tiers?.[1]?.rate ?? 450);
-	              setVanT3MaxKm(25);
-	              if ((pt.tiers?.length ?? 0) >= 4) {
-	                setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
-	                setVanT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 400);
-	              } else {
-	                const legacyLast = pt.tiers?.[2]?.rate ?? 400;
-	                setVanT3Rate(legacyLast);
-	                setVanT4Rate(legacyLast);
-	              }
+              setVanT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+                setVanT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 400);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 400;
+                setVanT3Rate(legacyLast);
+                setVanT4Rate(legacyLast);
+              }
             } else {
               setVanFloorKm(pf(v.min_distance_km, 3));
               setVanFloorFee(pf(v.min_fee, 5000));
@@ -5675,11 +5677,11 @@ function SettingsScreen() {
     try {
       // PATCH each vehicle's pricing
       await Promise.all(
-	        [
-	          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: 15, rate: bikeT2Rate }, { max_km: 25, rate: bikeT3Rate }, { rate: bikeT4Rate }] } } },
-	          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: 15, rate: carT2Rate }, { max_km: 25, rate: carT3Rate }, { rate: carT4Rate }] } } },
-	          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: 15, rate: vanT2Rate }, { max_km: 25, rate: vanT3Rate }, { rate: vanT4Rate }] } } },
-	        ]
+        [
+          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: 15, rate: bikeT2Rate }, { max_km: 25, rate: bikeT3Rate }, { rate: bikeT4Rate }] } } },
+          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: 15, rate: carT2Rate }, { max_km: 25, rate: carT3Rate }, { rate: carT4Rate }] } } },
+          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: 15, rate: vanT2Rate }, { max_km: 25, rate: vanT3Rate }, { rate: vanT4Rate }] } } },
+        ]
           .filter(({ key }) => vehicleIds[key])
           .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
       );
@@ -5706,7 +5708,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-	  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3MaxKm(25); setBikeT3Rate(200); setBikeT4Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3MaxKm(25); setCarT3Rate(250); setCarT4Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3MaxKm(25); setVanT3Rate(400); setVanT4Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
+  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3MaxKm(25); setBikeT3Rate(200); setBikeT4Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3MaxKm(25); setCarT3Rate(250); setCarT4Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3MaxKm(25); setVanT3Rate(400); setVanT4Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
 
   const tabs = [{ id: "pricing", label: "Pricing & Fees", icon: "💰" }, { id: "zones", label: "Zones & Surcharges", icon: "🗺️" }, { id: "simulator", label: "Price Calculator", icon: "🧮" }, { id: "dispatch", label: "Dispatch Rules", icon: "⚙️" }, { id: "relay", label: "Relay Network", icon: "🔗" }, { id: "notifications", label: "Notifications", icon: "🔔" }, { id: "integrations", label: "API & Integrations", icon: "🔌" }];
 
@@ -5757,26 +5759,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
-	                <input value={bikeT2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={bikeT2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={bikeT2Rate} onChange={e => setBikeT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
-	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}–{bikeT3MaxKm}km)</span></div>
-	                <input value={bikeT3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
-	                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-	              </div>
-	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT3MaxKm}km+)</span></div>
-	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-	                <input value={bikeT4Rate} onChange={e => setBikeT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-	              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}–{bikeT3MaxKm}km)</span></div>
+                <input value={bikeT3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT3MaxKm}km+)</span></div>
+                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+                <input value={bikeT4Rate} onChange={e => setBikeT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = calcBikePrice(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= bikeFloorKm ? "#10B98130" : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: "#10B981", fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= bikeFloorKm && <div style={{ fontSize: 8, color: "#10B981", fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}–{bikeT3MaxKm}km → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). {bikeT3MaxKm}km+ → km × ₦{bikeT4Rate} (min ₦{(bikeT3MaxKm * bikeT3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}–{bikeT3MaxKm}km → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). {bikeT3MaxKm}km+ → km × ₦{bikeT4Rate} (min ₦{(bikeT3MaxKm * bikeT3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>
@@ -5787,16 +5789,16 @@ function SettingsScreen() {
           floorKm: carFloorKm, setFloorKm: setCarFloorKm, floorFee: carFloorFee, setFloorFee: setCarFloorFee,
           t1MaxKm: carT1MaxKm, setT1MaxKm: setCarT1MaxKm, t1Rate: carT1Rate, setT1Rate: setCarT1Rate,
           t2MaxKm: carT2MaxKm, setT2MaxKm: setCarT2MaxKm, t2Rate: carT2Rate, setT2Rate: setCarT2Rate,
-	          t3MaxKm: carT3MaxKm, setT3MaxKm: setCarT3MaxKm, t3Rate: carT3Rate, setT3Rate: setCarT3Rate,
-	          t4Rate: carT4Rate, setT4Rate: setCarT4Rate, calcFn: calcCarPrice
+          t3MaxKm: carT3MaxKm, setT3MaxKm: setCarT3MaxKm, t3Rate: carT3Rate, setT3Rate: setCarT3Rate,
+          t4Rate: carT4Rate, setT4Rate: setCarT4Rate, calcFn: calcCarPrice
         },
         {
           label: "Van", emoji: "🚐", color: "#8B5CF6", desc: "Bulk orders, furniture, large cargo. Max 500kg.",
           floorKm: vanFloorKm, setFloorKm: setVanFloorKm, floorFee: vanFloorFee, setFloorFee: setVanFloorFee,
           t1MaxKm: vanT1MaxKm, setT1MaxKm: setVanT1MaxKm, t1Rate: vanT1Rate, setT1Rate: setVanT1Rate,
           t2MaxKm: vanT2MaxKm, setT2MaxKm: setVanT2MaxKm, t2Rate: vanT2Rate, setT2Rate: setVanT2Rate,
-	          t3MaxKm: vanT3MaxKm, setT3MaxKm: setVanT3MaxKm, t3Rate: vanT3Rate, setT3Rate: setVanT3Rate,
-	          t4Rate: vanT4Rate, setT4Rate: setVanT4Rate, calcFn: calcVanPrice
+          t3MaxKm: vanT3MaxKm, setT3MaxKm: setVanT3MaxKm, t3Rate: vanT3Rate, setT3Rate: setVanT3Rate,
+          t4Rate: vanT4Rate, setT4Rate: setVanT4Rate, calcFn: calcVanPrice
         }
         ].map(v => (<div key={v.label} style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
           <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -5821,26 +5823,26 @@ function SettingsScreen() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
-	                <input value={v.t2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={v.t2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
                 <input value={v.t2Rate} onChange={e => v.setT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
-	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}–{v.t3MaxKm}km)</span></div>
-	                <input value={v.t3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
-	                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-	              </div>
-	              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
-	                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t3MaxKm}km+)</span></div>
-	                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
-	                <input value={v.t4Rate} onChange={e => v.setT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
-	              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}–{v.t3MaxKm}km)</span></div>
+                <input value={v.t3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t3MaxKm}km+)</span></div>
+                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+                <input value={v.t4Rate} onChange={e => v.setT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = v.calcFn(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= v.floorKm ? `${v.color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: v.color, fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= v.floorKm && <div style={{ fontSize: 8, color: v.color, fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-	              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}–{v.t3MaxKm}km → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). {v.t3MaxKm}km+ → km × ₦{v.t4Rate} (min ₦{(v.t3MaxKm * v.t3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}–{v.t3MaxKm}km → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). {v.t3MaxKm}km+ → km × ₦{v.t4Rate} (min ₦{(v.t3MaxKm * v.t3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>))}
@@ -6377,25 +6379,25 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (pt && pt.type === 'tiered' && routeDistance) {
       const km = routeDistance;
       if (km <= pt.floor_km) return pt.floor_fee;
-	      // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
-	      const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
-	      let prevMaxKm = Number(pt.floor_km || 0);
-	      let prevRate = null;
-	      for (let i = 0; i < tiers.length; i++) {
-	        const tier = tiers[i] || {};
-	        const rate = Number(tier.rate || 0);
-	        const maxKm = tier.max_km;
-	        const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
-	        if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
-	          return Math.max(Math.round(km * rate), minFloor);
-	        }
-	        prevMaxKm = Number(maxKm);
-	        prevRate = rate;
-	      }
-	      // Fallback for unexpected tier config
-	      const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
-	      const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
-	      return Math.max(Math.round(km * lastRate), minFloor);
+      // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+      const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+      let prevMaxKm = Number(pt.floor_km || 0);
+      let prevRate = null;
+      for (let i = 0; i < tiers.length; i++) {
+        const tier = tiers[i] || {};
+        const rate = Number(tier.rate || 0);
+        const maxKm = tier.max_km;
+        const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+        if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+          return Math.max(Math.round(km * rate), minFloor);
+        }
+        prevMaxKm = Number(maxKm);
+        prevRate = rate;
+      }
+      // Fallback for unexpected tier config
+      const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+      const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+      return Math.max(Math.round(km * lastRate), minFloor);
     }
     if (pt && pt.type === 'tiered') return pt.floor_fee;
     // Simple pricing fallback
@@ -6635,16 +6637,16 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
             <label style={lSt}>Assign Rider (Optional)</label>
             <select value={riderId} onChange={e => setRiderId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Auto-assign nearest rider</option>
-	              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (
-	                <option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>
-	              ))}
-	              {riders
-	                .filter(r => r.status !== "offline" && (r.status === "on_delivery" || !!r.currentOrder))
-	                .map(r => (
-	                  <option key={r.id} value={r.id}>
-	                    {r.name} — 📦 Busy{r.currentOrder ? ` (${r.currentOrder})` : ""}
-	                  </option>
-	                ))}
+              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (
+                <option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>
+              ))}
+              {riders
+                .filter(r => r.status !== "offline" && (r.status === "on_delivery" || !!r.currentOrder))
+                .map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} — 📦 Busy{r.currentOrder ? ` (${r.currentOrder})` : ""}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -6913,7 +6915,7 @@ function PaymentDetailsModal({ order, onClose }) {
         <div style={{ padding: 24 }}>
           <div style={{ background: S.goldPale, border: `1.5px dashed ${S.gold}40`, borderRadius: 12, padding: 20, textAlign: "center", marginBottom: 20 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 14 }}>Transfer to this account</div>
-            
+
             <div style={{ fontSize: 14, color: S.textDim, marginBottom: 4 }}>{info.bank_name || "Wema Bank"}</div>
             <div style={{ fontSize: 24, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace", marginBottom: 6 }}>{info.account_number || "—"}</div>
             <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>{info.account_name || "—"}</div>

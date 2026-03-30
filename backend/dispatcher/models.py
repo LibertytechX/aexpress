@@ -596,6 +596,11 @@ class Merchant(models.Model):
         ("inactive", "Inactive"),
     ]
 
+    MERCHANT_TYPE_CHOICES = [
+        ("regular", "Regular"),
+        ("api", "API"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
     user = models.OneToOneField(
@@ -634,6 +639,9 @@ class Merchant(models.Model):
         null=True,
         blank=True,
         help_text="Referral code used during signup",
+    )
+    merchant_type = models.CharField(
+        max_length=50, choices=MERCHANT_TYPE_CHOICES, default="regular"
     )
     has_active_subscription = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
