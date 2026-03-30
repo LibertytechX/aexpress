@@ -673,7 +673,8 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
             Order.objects.filter(
                 created_at__date__gte=start_date_str, created_at__date__lte=end_date_str
             )
-            .select_related("user", "rider")
+            .select_related("user", "rider", "vehicle")
+            .prefetch_related("deliveries")
             .order_by("-created_at")
         )
 
@@ -729,6 +730,11 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
         )
 
         for o in qs:
+            first_del = o.deliveries.first()
+            customer_name = first_del.receiver_name if first_del else "Unknown"
+            customer_phone = first_del.receiver_phone if first_del else ""
+            dropoff_address = first_del.dropoff_address if first_del else o.pickup_address  # Fallback
+
             wait_time = (
                 _format_td(o.assigned_at - o.created_at)
                 if (getattr(o, "assigned_at", None) and o.created_at)
@@ -752,13 +758,13 @@ def export_orders_history_task(user_id, start_date_str, end_date_str):
                 [
                     o.order_number,
                     o.created_at.strftime("%Y-%m-%d %H:%M"),
-                    o.customer_name,
-                    o.customer_phone,
+                    customer_name,
+                    customer_phone,
                     o.user.contact_name if (o.user and o.user.contact_name) else "N/A",
                     o.pickup_address,
-                    o.dropoff_address,
+                    dropoff_address,
                     o.rider.rider_id if o.rider else "Unassigned",
-                    o.vehicle.name if o.vehicle else "N/A",
+                    o.vehicle.name if o.vehicle else "Bike",
                     o.total_amount,
                     o.status,
                     o.payment_status or "Pending",
