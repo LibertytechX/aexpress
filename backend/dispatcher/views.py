@@ -226,8 +226,10 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         user = self.request.user
         role = getattr(user.dispatcher_profile, "role", None)
+        is_all = self.request.query_params.get("all") == "true"
+
         # if the dispatcher role is zone_lead
-        if role == "zone_lead":
+        if role == "zone_lead" and not is_all:
             try:
                 zone_lead = VerticalLead.objects.get(user=user)
                 zones = zone_lead.area_zones.all()

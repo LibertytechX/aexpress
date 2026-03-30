@@ -2294,28 +2294,59 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const exportCSV = async () => {
     setLoadingExport(true);
     try {
-      const res = await OrdersAPI.getAll({ all: "true" }).catch(() => null);
-      const dataToExport = res?.results || res || [];
+      // Fetch all orders with no filters applied (backend handles 'all=true' by disabling pagination & role-limits)
+      const res = await OrdersAPI.getAll({ all: "true" });
       
+      // Handle potential wrapped response or paginated response format
+      const dataToExport = res?.results || (Array.isArray(res) ? res : []);
+      
+      if (!dataToExport || dataToExport.length === 0) {
+        alert("No orders found to export.");
+        return;
+      }
+
       const esc = v => {
         const s = v == null ? "" : String(v);
         return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
       };
-      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (₦)", "COD (₦)", "COD Fee (₦)", "PAID", "Status"];
+
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
       const rows = dataToExport.map(o => {
         const dt = formatOrderDateTime(o.created);
-        return [o.id, dt.date, dt.time, o.customer, o.customerPhone, o.merchant, o.pickup, o.dropoff, o.rider || "Unassigned", o.vehicle, o.waitingTime || "", o.deliveryTime || "", o.totalOrderTime || "", o.amount, o.cod, o.codFee, o.payment_status || "", o.status].map(esc);
+        return [
+          o.id, 
+          dt.date, 
+          dt.time, 
+          o.customer, 
+          o.customerPhone, 
+          o.merchant, 
+          o.pickup, 
+          o.dropoff, 
+          o.rider || "Unassigned", 
+          o.vehicle, 
+          o.waitingTime || "", 
+          o.deliveryTime || "", 
+          o.totalOrderTime || "", 
+          o.amount, 
+          o.cod, 
+          o.codFee, 
+          o.payment_status || "", 
+          o.status
+        ];
       });
-      const csv = [headers.map(esc), ...rows].map(r => r.join(",")).join("\n");
+
+      const csv = [headers.map(esc), ...rows.map(r => r.map(esc))].map(r => r.join(",")).join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `all_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Export failed:", e);
+    } catch (err) {
+      console.error("Export failed:", err);
       alert("Failed to export orders. Please try again.");
     } finally {
       setLoadingExport(false);
