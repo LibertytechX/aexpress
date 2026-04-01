@@ -6339,12 +6339,18 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   // Load vehicle pricing from backend
   useEffect(() => {
-    VehiclesAPI.getAll().then(res => {
-      if (res.success && res.vehicles) {
-        const p = {};
-        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute), pricing_tiers: v.pricing_tiers || null }; });
-        setVehiclePricing(p);
-      }
+    VehiclesAPI.getAll().then(vehicles => {
+      if (!Array.isArray(vehicles) || vehicles.length === 0) return;
+      const p = {};
+      vehicles.forEach(v => {
+        p[v.name] = {
+          base_fare: parseFloat(v.base_fare),
+          rate_per_km: parseFloat(v.rate_per_km),
+          rate_per_minute: parseFloat(v.rate_per_minute),
+          pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
+        };
+      });
+      setVehiclePricing(p);
     }).catch(() => { });
   }, []);
 
