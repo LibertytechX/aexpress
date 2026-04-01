@@ -61,6 +61,17 @@ export interface Vehicle {
   base_fare: number;
   rate_per_km: number;
   rate_per_minute: number;
+  has_manual_pricing?: boolean;
+  manual_price_list?: {
+    name: string;
+    items: Array<{
+      label: string;
+      min_km: number;
+      max_km: number;
+      fixed_fee: number;
+    }>;
+  } | null;
+  pricing_tiers?: any;
 }
 
 // --- Token Management ---

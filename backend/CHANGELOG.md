@@ -4,6 +4,25 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-03-31] — Merchant API Key Authentication Class
+
+### Added
+- **`MerchantAPIKeyAuthentication`** in `dispatcher/authentication.py`: A DRF `BaseAuthentication` subclass that validates `ak_live_` prefixed API keys.
+    - Resolves to the real Django `User` object, so `request.user` works normally on any secured view.
+    - Tracks `last_used_at` on each successful request.
+    - Designed to be used alongside JWT auth via `authentication_classes`:
+      ```python
+      from dispatcher.authentication import MerchantAPIKeyAuthentication
+      from rest_framework.settings import api_settings
+
+      authentication_classes = [
+          MerchantAPIKeyAuthentication,
+          *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+      ]
+      ```
+
+---
+
 - Registered `Webhook` and `WebhookOutbox` models in the Django Admin for the `webhooks` app, enabling internal management of webhook configurations and inspection of delivery attempts.
 
 ---

@@ -644,6 +644,7 @@ class Merchant(models.Model):
         max_length=50, choices=MERCHANT_TYPE_CHOICES, default="regular"
     )
     has_active_subscription = models.BooleanField(default=False)
+    has_price_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

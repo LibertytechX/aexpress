@@ -35,7 +35,21 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
   const autocompleteService = useRef<any>(null);
   const placesService = useRef<any>(null);
-  const geocoderRef = useRef<any>(null);
+  const sessionTokenRef = useRef<any>(null);
+  const latestPredictionRequestIdRef = useRef(0);
+  const lastPredictionQueryRef = useRef('');
+
+  const resetAutocompleteSession = () => {
+    sessionTokenRef.current = null;
+    lastPredictionQueryRef.current = '';
+  };
+
+  const ensureSessionToken = () => {
+    if (!sessionTokenRef.current && window.google?.maps?.places?.AutocompleteSessionToken) {
+      sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+    }
+    return sessionTokenRef.current;
+  };
 
   // Initialize Google Maps services
   useEffect(() => {
@@ -44,7 +58,6 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
-        geocoderRef.current = new window.google.maps.Geocoder();
         setError(null);
       } else {
         setError('Google Maps not loaded');
@@ -58,6 +71,14 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
       window.addEventListener('google-maps-loaded', initServices);
       return () => window.removeEventListener('google-maps-loaded', initServices);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) {
+        clearTimeout(debounceTimer.current);
+      }
+    };
   }, []);
 
   // Close dropdown when clicking outside
@@ -78,6 +99,8 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     if (!input || input.length < 3) {
       setSuggestions([]);
       setShowDropdown(false);
+      setLoading(false);
+      resetAutocompleteSession();
       return;
     }
 
@@ -96,6 +119,8 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
       clearTimeout(debounceTimer.current);
     }
 
+    const requestId = ++latestPredictionRequestIdRef.current;
+
     debounceTimer.current = setTimeout(() => {
       // Bias results towards Lagos using both bounds + location
       const lagosBounds = new window.google.maps.LatLngBounds(
@@ -113,13 +138,24 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
           ? input
           : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
 
+      const normalizedQuery = searchInput.trim().toLowerCase();
+      if (normalizedQuery === lastPredictionQueryRef.current) {
+        setLoading(false);
+        return;
+      }
+      lastPredictionQueryRef.current = normalizedQuery;
+
+      const sessionToken = ensureSessionToken();
+
       const request = {
         input: searchInput,
         bounds: lagosBounds,
         componentRestrictions: { country: 'ng' },
+        ...(sessionToken ? { sessionToken } : {}),
       };
 
       autocompleteService.current.getPlacePredictions(request, (predictions: any[], status: string) => {
+        if (requestId !== latestPredictionRequestIdRef.current) return;
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
           // All results are already scoped to Nigeria via componentRestrictions + Lagos bounds.
@@ -148,24 +184,41 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
-    // Geocode the selection and validate it falls within Lagos State
-    if (geocoderRef.current) {
-      geocoderRef.current.geocode({ placeId: suggestion.place_id }, (results: any[], status: string) => {
-        if (status === 'OK' && results[0]?.geometry) {
-          const loc = results[0].geometry.location;
+
+    if (!placesService.current) {
+      resetAutocompleteSession();
+      onChange(suggestion.description);
+      return;
+    }
+
+    latestPredictionRequestIdRef.current += 1;
+    setLoading(true);
+    const sessionToken = sessionTokenRef.current;
+
+    placesService.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['formatted_address', 'geometry.location'],
+        ...(sessionToken ? { sessionToken } : {}),
+      },
+      (place: any, status: string) => {
+        setLoading(false);
+        resetAutocompleteSession();
+
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const loc = place.geometry.location;
           if (!isInLagos(loc.lat(), loc.lng())) {
             onChange('');
             setError('⚠️ Outside service area — we only deliver within Lagos State.');
           } else {
-            onChange(suggestion.description);
+            onChange(place.formatted_address || suggestion.description);
           }
-        } else {
-          onChange(suggestion.description); // geocode failed, allow through and let backend validate
+          return;
         }
-      });
-    } else {
-      onChange(suggestion.description);
-    }
+
+        onChange(suggestion.description); // Details lookup failed, allow through and let backend validate
+      }
+    );
   };
 
   return (

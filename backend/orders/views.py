@@ -50,29 +50,59 @@ class VehicleListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Get all active vehicles with pricing, applying merchant overrides if present."""
-        from .models import MerchantPricingOverride
+        """Get all active vehicles with pricing, applying merchant overrides or manual price lists."""
+        from .models import MerchantPricingOverride, MerchantPriceList
 
         vehicles = Vehicle.objects.filter(is_active=True)
         results = []
 
         for vehicle in vehicles:
-            # Check for merchant override
-            override = MerchantPricingOverride.objects.filter(
-                merchant=request.user, vehicle=vehicle, is_active=True
-            ).first()
-
             v_data = VehicleSerializer(vehicle).data
+            v_data["has_manual_pricing"] = False
+            v_data["manual_price_list"] = None
 
-            if override:
-                # Apply override to serialized data
-                if override.flat_fee is not None:
-                    v_data["base_fare"] = float(override.flat_fee)
-                    v_data["rate_per_km"] = 0.0
-                    v_data["rate_per_minute"] = 0.0
-                    v_data["pricing_tiers"] = None
-                elif override.pricing_tiers:
-                    v_data["pricing_tiers"] = override.pricing_tiers
+            # 1. Check for manual Price List (highest precedence)
+            price_list = (
+                MerchantPriceList.objects.filter(
+                    merchant=request.user, vehicle=vehicle, is_active=True
+                )
+                .prefetch_related("items")
+                .first()
+            )
+
+            if price_list:
+                v_data["has_manual_pricing"] = True
+                v_data["manual_price_list"] = {
+                    "name": price_list.name,
+                    "items": [
+                        {
+                            "label": item.label,
+                            "min_km": float(item.min_km),
+                            "max_km": float(item.max_km),
+                            "fixed_fee": float(item.fixed_fee),
+                        }
+                        for item in price_list.items.all()
+                    ],
+                }
+                # For manual lists, we nullify standard rates to avoid confusion
+                v_data["base_fare"] = 0.0
+                v_data["rate_per_km"] = 0.0
+                v_data["rate_per_minute"] = 0.0
+                v_data["pricing_tiers"] = None
+            else:
+                # 2. Check for traditional merchant override
+                override = MerchantPricingOverride.objects.filter(
+                    merchant=request.user, vehicle=vehicle, is_active=True
+                ).first()
+
+                if override:
+                    if override.flat_fee is not None:
+                        v_data["base_fare"] = float(override.flat_fee)
+                        v_data["rate_per_km"] = 0.0
+                        v_data["rate_per_minute"] = 0.0
+                        v_data["pricing_tiers"] = None
+                    elif override.pricing_tiers:
+                        v_data["pricing_tiers"] = override.pricing_tiers
 
             results.append(v_data)
 
@@ -1123,24 +1153,37 @@ class CalculateFareView(APIView):
             )
 
         try:
-            total_amount = calculate_effective_fare(
-                request.user, vehicle, float(distance_km), int(duration_minutes)
+            pricing_data = calculate_effective_fare(
+                request.user,
+                vehicle,
+                float(distance_km),
+                int(duration_minutes),
+                return_metadata=True,
             )
+            total_amount = pricing_data["fare"]
+            source = pricing_data["source"]
+            label = pricing_data["label"]
 
-            return Response(
-                {
-                    "success": True,
-                    "price": total_amount,
-                    "breakdown": {
-                        "base_fare": vehicle.base_fare,
-                        "distance_cost": float(distance_km)
-                        * float(vehicle.rate_per_km),
-                        "time_cost": int(duration_minutes)
-                        * float(vehicle.rate_per_minute),
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
+            response_data = {
+                "success": True,
+                "price": total_amount,
+                "pricing_source": source,
+                "pricing_label": label,
+            }
+
+            if source == "manual_list":
+                response_data["breakdown"] = {
+                    "type": "Manual Price List",
+                    "description": f"Fixed rate for range matching '{label}'",
+                }
+            else:
+                response_data["breakdown"] = {
+                    "base_fare": vehicle.base_fare,
+                    "distance_cost": float(distance_km) * float(vehicle.rate_per_km),
+                    "time_cost": int(duration_minutes) * float(vehicle.rate_per_minute),
+                }
+
+            return Response(response_data, status=status.HTTP_200_OK)
 
         except (ValueError, TypeError) as e:
             return Response(
