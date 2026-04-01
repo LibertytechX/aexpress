@@ -6324,11 +6324,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [dropoffLng, setDropoffLng] = useState(null);
 
   // Pricing & route state
-  const [vehiclePricing, setVehiclePricing] = useState({
-    Bike: { base_fare: 1200, rate_per_km: 80, rate_per_minute: 5 },
-    Car: { base_fare: 4500, rate_per_km: 150, rate_per_minute: 8 },
-    Van: { base_fare: 12000, rate_per_km: 250, rate_per_minute: 12 }
-  });
+  const [vehiclePricing, setVehiclePricing] = useState({});
   const [routeDistance, setRouteDistance] = useState(null);
   const [routeDuration, setRouteDuration] = useState(null);
   const [calculatingRoute, setCalculatingRoute] = useState(false);
@@ -6413,7 +6409,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     return Math.round(p.base_fare);
   };
 
-  const displayPrice = priceOverride ? parseInt(priceOverride) : (calcPrice(vehicle) || 0);
+  const displayPrice = priceOverride ? parseInt(priceOverride) : calcPrice(vehicle);
 
   // Local helpers for reliable coordinate capture
   const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
@@ -6660,7 +6656,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           <div style={{ marginBottom: 16, padding: "14px 16px", borderRadius: 10, background: S.goldPale, border: `1px solid ${S.gold}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Estimated Price</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{displayPrice.toLocaleString()}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{displayPrice != null ? `₦${displayPrice.toLocaleString()}` : "—"}</div>
               {routeDistance && <div style={{ fontSize: 11, color: S.textMuted, marginTop: 2 }}>{routeDistance}km • {routeDuration}min</div>}
             </div>
             <div style={{ textAlign: "right" }}>
