@@ -312,11 +312,14 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
     
     // 1. Manual pricing list
     if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
-      const matchedBucket = pricing.manual_price_list.items.find((item: any) => 
-        distanceKm >= item.min_km && distanceKm <= item.max_km
-      );
+      const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
+      const matchedBucket = pricing.manual_price_list.items.find((item: any) => {
+        const minKm = getVal(item.min_km);
+        const maxKm = getVal(item.max_km);
+        return distanceKm >= minKm && distanceKm <= maxKm;
+      });
       if (matchedBucket) {
-        return matchedBucket.fixed_fee;
+        return getVal(matchedBucket.fixed_fee);
       }
     }
 
