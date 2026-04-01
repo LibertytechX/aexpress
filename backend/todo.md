@@ -10,6 +10,6 @@
 - [x] add check for rider acceptance of order offer to make sure the order within their zone.
 - [] Bonus: integrate AI chatbot to the merchant support chats
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires
-- [] Move all map services to a separate secure service and use it across the platform 
+- [x] Move all map services to a separate secure service and use it across the platform 
 - [x] update the onboard dispatcher in teams to support role assignment.
-
+- [] implement merchant delete endpoint, merchant notifications, notification_settings toggle, merchants chat api
