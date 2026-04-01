@@ -148,9 +148,8 @@ class OrderOfferAcceptView(APIView):
             )
         try:
             rider_hub = rider.hub
-            zone_hubs = offer.zone.relay_nodes.all().value_list("id", flat=True)
+            zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
         except Exception as exc:
-            traceback.print_exc()
             logger.warning(f"Error getting rider hub or zone hubs: {exc}")
             return Response(
                 {"success": False, "message": "Error getting rider hub or zone hubs."},
