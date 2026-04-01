@@ -82,7 +82,7 @@ class TransactionAdmin(admin.ModelAdmin):
         "wallet__user__business_name",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
-    list_filter = ["type", "status", "created_at"]
+    list_filter = ["type", "status", "created_at", "wallet"]
 
     fieldsets = (
         (
@@ -194,7 +194,15 @@ class WebhookLogAdmin(admin.ModelAdmin):
 
 @admin.register(Charge)
 class ChargeAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "order", "amount", "status", "is_active", "created_at"]
+    list_display = [
+        "id",
+        "user",
+        "order",
+        "amount",
+        "status",
+        "is_active",
+        "created_at",
+    ]
     list_filter = ["status", "is_active", "created_at"]
     search_fields = [
         "user__email",
