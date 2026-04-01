@@ -147,7 +147,7 @@ class OrderOfferAcceptView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
         try:
-            rider_hub = rider.hub
+            rider_hub_id = rider.hub.id
             zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
         except Exception as exc:
             logger.warning(f"Error getting rider hub or zone hubs: {exc}")
@@ -155,7 +155,7 @@ class OrderOfferAcceptView(APIView):
                 {"success": False, "message": "Error getting rider hub or zone hubs."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
-        if rider_hub not in zone_hubs:
+        if rider_hub_id not in zone_hubs:
             return Response(
                 {"success": False, "message": "Rider is not in the zone."},
                 status=status.HTTP_403_FORBIDDEN,
