@@ -1,3 +1,4 @@
+import traceback
 from devs.models import ErrorLog
 import asyncio
 import logging
@@ -249,6 +250,7 @@ class OrderOfferAcceptView(APIView):
             )
 
         except Exception as e:
+            traceback.print_exc()
             return Response(
                 {"success": False, "message": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
