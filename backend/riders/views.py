@@ -1,3 +1,4 @@
+from backend.devs.models import ErrorLog
 import asyncio
 import logging
 from datetime import timedelta
@@ -95,6 +96,7 @@ class OrderOfferListView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         # now = timezone.now()
         offers = (
@@ -117,6 +119,7 @@ class OrderOfferAcceptView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     @transaction.atomic
     def post(self, request, offer_id):
         try:
