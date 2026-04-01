@@ -1,4 +1,4 @@
-from backend.devs.models import ErrorLog
+from devs.models import ErrorLog
 import asyncio
 import logging
 from datetime import timedelta
