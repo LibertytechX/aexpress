@@ -1,3 +1,6 @@
+import traceback
+import traceback
+from devs.models import ErrorLog
 import asyncio
 import logging
 from datetime import timedelta
@@ -95,11 +98,12 @@ class OrderOfferListView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         # now = timezone.now()
         offers = (
             OrderOffer.objects.filter(
-                status="pending", rider__isnull=True, order__status="pending"
+                status="pending", rider__isnull=True, order__status="Pending"
             )
             .select_related("order", "order__vehicle", "order__user")
             .prefetch_related("order__deliveries")
@@ -117,139 +121,141 @@ class OrderOfferAcceptView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     @transaction.atomic
     def post(self, request, offer_id):
+
+        # Get rider profile
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Authenticated user is not a driver.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        #
+
+        # Get the offer and lock it for update
         try:
-            # Get rider profile
-            rider = getattr(request.user, "rider_profile", None)
-            if not rider:
-                return Response(
-                    {
-                        "success": False,
-                        "message": "Authenticated user is not a driver.",
-                    },
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            #
-
-            # Get the offer and lock it for update
-            try:
-                offer = OrderOffer.objects.select_for_update().get(id=offer_id)
-            except (OrderOffer.DoesNotExist, ValueError):
-                return Response(
-                    {"success": False, "message": "Offer not found."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-            rider_hub = rider.hub
-            zone_hubs = offer.zone.relay_nodes.all().value_list("id", flat=True)
-            if rider_hub not in zone_hubs:
-                return Response(
-                    {"success": False, "message": "Rider is not in the zone."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-
-            # 1. Validation
-            if offer.status != "pending":
-                return Response(
-                    {"success": False, "message": f"Offer is already {offer.status}."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            order = offer.order
-            if order.status != "Pending":
-                OrderOffer.objects.filter(order=order, status="pending").exclude(
-                    id=offer_id
-                ).update(status="accepted")
-                return Response(
-                    {"success": False, "message": "Order is no longer available."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # 2. Acceptance Phase
-            offer.status = "accepted"
-            offer.rider = rider
-            offer.save(update_fields=["status", "rider"])
-
-            # 3. Order Assignment
-            order.rider = rider
-            # order.status = "AssignmentAccepted"
-            order.status = "Assigned"
-            order.assigned_at = timezone.now()
-            order.dispatcher_assigned = False
-            order.save(
-                update_fields=[
-                    "rider",
-                    "status",
-                    "assigned_at",
-                    "dispatcher_assigned",
-                    "updated_at",
-                ]
+            offer = OrderOffer.objects.select_for_update().get(id=offer_id)
+        except (OrderOffer.DoesNotExist, ValueError):
+            return Response(
+                {"success": False, "message": "Offer not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            rider_hub_id = rider.hub.id
+            zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
+        except Exception as exc:
+            logger.warning(f"Error getting rider hub or zone hubs: {exc}")
+            return Response(
+                {"success": False, "message": "Error getting rider hub or zone hubs."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        if rider_hub_id not in zone_hubs:
+            return Response(
+                {"success": False, "message": "Rider is not in the zone."},
+                status=status.HTTP_403_FORBIDDEN,
             )
 
-            # 3.5 Log Event
-            OrderEvent.objects.create(
-                order=order,
-                event="assignment_accepted",
-                description=f"Rider {rider.rider_id} accepted the offer. Order status updated to AssignmentAccepted.",
-                created_by=request.user,
+        # 1. Validation
+        if offer.status != "pending":
+            return Response(
+                {"success": False, "message": f"Offer is already {offer.status}."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            # 4. COD Logic
-            if order.collect_on_delivery:
-                RiderCodRecord.objects.create(
-                    rider=rider,
-                    order=order,
-                    amount=order.total_amount,
-                    status=RiderCodRecord.Status.PENDING,
-                )
-
-            # 5. Cleanup: Decline/Expire other broadcast offers for this order
+        order = offer.order
+        if order.status != "Pending":
             OrderOffer.objects.filter(order=order, status="pending").exclude(
                 id=offer_id
             ).update(status="accepted")
-
-            # 6. Logging/Activity
-            emit_activity(
-                event_type="assigned",
-                order_id=order.order_number,
-                text=f"Offer accepted by rider {rider.rider_id}. Order assigned.",
-                color="blue",
-                metadata={
-                    "rider_id": str(rider.id),
-                    "offer_id": str(offer.id),
-                    "order_number": order.order_number,
-                },
-            )
-
-            # 7. Push notification to rider
-            try:
-                notify_rider(
-                    rider=rider,
-                    title="Order Assigned 📦",
-                    body=f"You've been assigned order #{order.order_number}. Head to the pickup location.",
-                    data={"order_number": order.order_number, "status": "Assigned"},
-                )
-            except Exception as exc:
-                logger.warning(f"Assignment notification failed: {exc}")
-
-            # 8. Publish Ably event to rider-specific channel
-            # publish_order_assigned_event(order, rider)
-
             return Response(
-                {
-                    "success": True,
-                    "message": "Offer accepted and order assigned successfully.",
-                    "order_number": order.order_number,
-                },
-                status=status.HTTP_200_OK,
+                {"success": False, "message": "Order is no longer available."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-        except Exception as e:
-            return Response(
-                {"success": False, "message": str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        # 2. Acceptance Phase
+        offer.status = "accepted"
+        offer.rider = rider
+        offer.save(update_fields=["status", "rider"])
+
+        # 3. Order Assignment
+        order.rider = rider
+        # order.status = "AssignmentAccepted"
+        order.status = "Assigned"
+        order.assigned_at = timezone.now()
+        order.dispatcher_assigned = False
+        order.save(
+            update_fields=[
+                "rider",
+                "status",
+                "assigned_at",
+                "dispatcher_assigned",
+                "updated_at",
+            ]
+        )
+
+        # 3.5 Log Event
+        OrderEvent.objects.create(
+            order=order,
+            event="assignment_accepted",
+            description=f"Rider {rider.rider_id} accepted the offer. Order status updated to AssignmentAccepted.",
+            created_by=request.user,
+        )
+
+        # 4. COD Logic
+        if order.collect_on_delivery:
+            RiderCodRecord.objects.create(
+                rider=rider,
+                order=order,
+                amount=order.total_amount,
+                status=RiderCodRecord.Status.PENDING,
             )
+
+        # 5. Cleanup: Decline/Expire other broadcast offers for this order
+        OrderOffer.objects.filter(order=order, status="pending").exclude(
+            id=offer_id
+        ).update(status="accepted")
+
+        # 6. Logging/Activity
+        emit_activity(
+            event_type="assigned",
+            order_id=order.order_number,
+            text=f"Offer accepted by rider {rider.rider_id}. Order assigned.",
+            color="blue",
+            metadata={
+                "rider_id": str(rider.id),
+                "offer_id": str(offer.id),
+                "order_number": order.order_number,
+            },
+        )
+
+        # 7. Push notification to rider
+        try:
+            notify_rider(
+                rider=rider,
+                title="Order Assigned 📦",
+                body=f"You've been assigned order #{order.order_number}. Head to the pickup location.",
+                data={"order_number": order.order_number, "status": "Assigned"},
+            )
+        except Exception as exc:
+            logger.warning(f"Assignment notification failed: {exc}")
+
+        # 8. Publish Ably event to rider-specific channel
+        # publish_order_assigned_event(order, rider)
+
+        return Response(
+            {
+                "success": True,
+                "message": "Offer accepted and order assigned successfully.",
+                "order_number": order.order_number,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class AreaDemandListView(APIView):

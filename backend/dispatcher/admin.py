@@ -397,6 +397,7 @@ class MerchantResource(resources.ModelResource):
             "merchant_id",
             "activity_status",
             "acquisition_source",
+            "merchant_type",
             "created_at",
         )
         export_order = (
@@ -424,6 +425,7 @@ class MerchantAdmin(ImportExportModelAdmin):
         "merchant_id",
         "activity_status",
         "acquisition_source",
+        "merchant_type",
         "created_at",
         "get_last_login",
     )

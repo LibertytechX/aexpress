@@ -112,6 +112,8 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
               rate_per_km: parseFloat(v.rate_per_km),
               rate_per_minute: parseFloat(v.rate_per_minute),
               pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
+              has_manual_pricing: v.has_manual_pricing || false,
+              manual_price_list: v.manual_price_list || null,
             };
           });
           setVehiclePricing(pricing);
@@ -303,20 +305,38 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   };
 
   // ─── Price calculation ───
-  // Calculate price for a specific vehicle using early route data
-  const calculateEarlyPrice = (vehicleName: string) => {
-    if (!earlyRouteDistance || !earlyRouteDuration) return null;
+  // Calculate price for a specific vehicle using distance and duration
+  const calcFareForVehicle = (vName: string, distanceKm: number | null, durationMin: number | null) => {
+    const pricing = vehiclePricing[vName];
+    if (!pricing) return 0;
+    
+    // 1. Manual pricing list
+    if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
+      const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
+      const matchedBucket = pricing.manual_price_list.items.find((item: any) => {
+        const minKm = getVal(item.min_km);
+        const maxKm = getVal(item.max_km);
+        return distanceKm >= minKm && distanceKm <= maxKm;
+      });
+      if (matchedBucket) {
+        return getVal(matchedBucket.fixed_fee);
+      }
+    }
 
-    const pricing = vehiclePricing[vehicleName];
-    if (!pricing) return null;
+    // 2. Tiered pricing
+    if (distanceKm !== null) {
+      const tiered = calcTieredPrice(distanceKm, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+    }
 
-    // Use tiered pricing if available
-    const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-    if (tiered !== null) return tiered;
+    // 3. Simple distance/duration
+    if (distanceKm !== null && durationMin !== null) {
+      return Math.round(pricing.base_fare + distanceKm * pricing.rate_per_km + durationMin * pricing.rate_per_minute);
+    }
 
-    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    return Math.round(pricing.base_fare + distanceCost + timeCost);
+    // Fallback
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
+    return pricing.base_fare;
   };
 
   const getActiveDropoffs = () => {
@@ -330,26 +350,16 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
   // Calculate dynamic cost based on route distance and duration
   const calculateCost = () => {
-    const pricing = vehiclePricing[vehicle];
-    if (!pricing) return 0;
-
     // Step 2 uses the full route (map) calculation.
     if (step === 2 && routeDistance && routeDuration) {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
+      return calcFareForVehicle(vehicle, routeDistance, routeDuration);
     }
-
     // Step 1 (Quick Send): if we already calculated an early route, use it
     if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
+      return calcFareForVehicle(vehicle, earlyRouteDistance, earlyRouteDuration);
     }
-
-    // Fallback: floor fee for tiered, or base fare for simple
-    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
-    return pricing.base_fare;
+    // Fallback
+    return calcFareForVehicle(vehicle, null, null);
   };
 
   const unitCost = calculateCost();
@@ -598,9 +608,8 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 {Object.keys(vehiclePricing).map(vName => {
                   const isComingSoon = vName === 'Car' || vName === 'Van';
                   const isSelected = vehicle === vName && !isComingSoon;
-                  const earlyP = (mode === 'quick' && earlyRouteDistance)
-                    ? calcTieredPrice(earlyRouteDistance, vehiclePricing[vName]?.pricing_tiers) ??
-                    Math.round((vehiclePricing[vName]?.base_fare || 0) + earlyRouteDistance * (vehiclePricing[vName]?.rate_per_km || 0) + (earlyRouteDuration || 0) * (vehiclePricing[vName]?.rate_per_minute || 0))
+                  const earlyP = (mode === 'quick' && earlyRouteDistance && earlyRouteDuration)
+                    ? calcFareForVehicle(vName, earlyRouteDistance, earlyRouteDuration)
                     : null;
 
                   return (

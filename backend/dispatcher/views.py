@@ -20,6 +20,8 @@ from .models import (
     VerticalLead,
     Vertical,
     RiderDutyLog,
+    Merchant,
+    MerchantAPIKey,
 )
 from .serializers import (
     RiderSerializer,
@@ -32,6 +34,14 @@ from .utils import emit_activity
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Count, Q, Prefetch
 from django.utils import timezone
+
+# Merchant API Key imports
+from authentication.services import OTPService
+from devs.models import ErrorLog
+from sparky_utils.exceptions import ServiceException
+import secrets
+import hashlib
+
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
@@ -406,9 +416,11 @@ class OrderViewSet(viewsets.ModelViewSet):
         """
         order = self.get_object()
         new_status = request.data.get("status")
+        user = request.user
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
+            "Assignment Accepted": "AssignmentAccepted",
             "In Transit": "Started",
             "At Dropoff": "Arrived",  # rider is at the dropoff location
             "Delivered": "Done",
@@ -442,12 +454,29 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.status = new_status
 
         # Keep timestamps consistent with rider-app completion flows.
-        update_fields = ["status", "updated_at"]
-        if new_status == "Assigned" and not getattr(order, "assigned_at", None):
-            order.assigned_at = now
-            order.dispatcher_assigned = True
-            update_fields.append("assigned_at")
-            update_fields.append("dispatcher_assigned")
+        update_fields = ["status", "updated_at", "payment_status"]
+        if new_status == "CustomerCanceled":
+            order.payment_status = "Cancelled"
+            # cancel the order charge as well
+            charge = order.charges.all().first()
+            if charge:
+                if charge.status == "completed":
+                    # refund the user wallet
+                    wallet = user.wallet
+                    wallet.credit(
+                        charge.amount,
+                        f"Refund for order #{order.order_number}",
+                        f"REFUND-{order.order_number}",
+                    )
+                charge.status = "canceled"
+                charge.save()
+
+        if new_status == "Assigned":
+            return Response(
+                {"error": f"Please go assign a rider first biko! 😡"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
             order.picked_up_at = now
             update_fields.append("picked_up_at")
@@ -455,6 +484,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             order.arrived_at = now
             update_fields.append("arrived_at")
         if new_status == "Done" and not getattr(order, "completed_at", None):
+            if not order.rider:
+                return Response(
+                    {
+                        "error": f"You can't complete an order that has rider assigned! 😡"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             order.completed_at = now
             update_fields.append("completed_at")
 
@@ -746,6 +782,355 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(order).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="accept-relay-route")
+    def accept_relay_route(self, request, order_number=None):
+        """Accept a generated relay route: create one sub-order per leg, assign the
+        suggested rider to each, set correct pickup/delivery locations, and link
+        every sub-order back to this parent order via Order.parent_order.
+
+        The parent order's routing_status must already be READY (i.e.
+        generate-relay-route has been called and succeeded).
+        """
+        from django.db import transaction
+        from orders.models import Order, OrderLeg, Delivery
+
+        order = self.get_object()
+
+        # ── Guards ────────────────────────────────────────────────────────────
+        if not order.is_relay_order:
+            return Response(
+                {"error": "This order is not a relay order."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if order.routing_status != Order.RoutingStatus.READY:
+            return Response(
+                {
+                    "error": (
+                        f"Relay route is not ready (current status: {order.routing_status}). "
+                        "Please generate the relay route first."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        legs = list(
+            order.legs.select_related(
+                "start_relay_node",
+                "end_relay_node",
+                "suggested_rider",
+                "suggested_rider__user",
+            ).order_by("leg_number")
+        )
+
+        if not legs:
+            return Response(
+                {
+                    "error": "No relay legs found. Please generate the relay route first."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Guard against double-acceptance: check if sub-orders already exist.
+        if order.sub_orders.exists():
+            return Response(
+                {
+                    "error": "This relay route has already been accepted and sub-orders created."
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # ── Resolve origin and final destination from parent order ─────────────
+        first_delivery = order.deliveries.first()
+        if not first_delivery:
+            return Response(
+                {"error": "Parent order has no delivery record."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Trigger the celery task asynchronously to create sub-orders
+        from .tasks import process_accepted_relay_route_task
+
+        process_accepted_relay_route_task.delay(str(order.id))
+
+        # Re-fetch with all relations so the serializer returns the full picture.
+        from orders.models import Order as OrderModel
+
+        order = (
+            OrderModel.objects.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "legs__rider",
+                "legs__rider__user",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
+                "sub_orders",
+                "deliveries",
+                "events",
+                "events__created_by",
+            )
+            .select_related("user", "rider", "rider__user", "suggested_rider")
+            .get(pk=order.pk)
+        )
+
+        return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="generate-relay-route")
+    def generate_relay_route(self, request, order_number=None):
+        """Synchronously generate relay legs for this order (triggered manually by dispatcher)."""
+        from orders.models import Order
+        from .tasks import generate_relay_legs_sync
+
+        order = self.get_object()
+
+        # Auto-convert non-relay orders to relay when dispatcher triggers routing
+        if not getattr(order, "is_relay_order", False):
+            # Geocode missing coordinates from address strings
+            from orders.utils import geocode_address
+
+            first_delivery = order.deliveries.first()
+
+            if not order.pickup_latitude or not order.pickup_longitude:
+                if order.pickup_address:
+                    geo = geocode_address(order.pickup_address)
+                    if geo:
+                        order.pickup_latitude = geo["lat"]
+                        order.pickup_longitude = geo["lng"]
+
+            if first_delivery and (
+                not first_delivery.dropoff_latitude
+                or not first_delivery.dropoff_longitude
+            ):
+                if first_delivery.dropoff_address:
+                    geo = geocode_address(first_delivery.dropoff_address)
+                    if geo:
+                        first_delivery.dropoff_latitude = geo["lat"]
+                        first_delivery.dropoff_longitude = geo["lng"]
+                        first_delivery.save(
+                            update_fields=["dropoff_latitude", "dropoff_longitude"]
+                        )
+
+            # Check again after geocoding attempt
+            pickup_ok = order.pickup_latitude and order.pickup_longitude
+            dropoff_ok = (
+                first_delivery
+                and first_delivery.dropoff_latitude
+                and first_delivery.dropoff_longitude
+            )
+
+            if not pickup_ok or not dropoff_ok:
+                missing = []
+                if not pickup_ok:
+                    missing.append("pickup")
+                if not dropoff_ok:
+                    missing.append("dropoff")
+                return Response(
+                    {
+                        "error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            order.is_relay_order = True
+            order.routing_status = Order.RoutingStatus.PENDING
+            order.save(
+                update_fields=[
+                    "is_relay_order",
+                    "routing_status",
+                    "pickup_latitude",
+                    "pickup_longitude",
+                ]
+            )
+
+        # If already ready with legs and not a forced retry, return current state
+        if (
+            getattr(order, "routing_status", None) == Order.RoutingStatus.READY
+            and order.legs.exists()
+            and not request.data.get("force", False)
+        ):
+            serializer = self.get_serializer(order)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        emit_activity(
+            event_type="relay_route_processing",
+            order_id=order.order_number,
+            text=f"Relay routing started for {order.order_number}",
+            color="blue",
+            metadata={},
+        )
+
+        # Run synchronously — blocking until legs are created or an error is set
+        generate_relay_legs_sync(str(order.id))
+
+        # Re-fetch with all needed relations so the serializer includes relay legs
+        from orders.models import Order as OrderModel
+
+        order = (
+            OrderModel.objects.prefetch_related(
+                "legs",
+                "legs__start_relay_node",
+                "legs__end_relay_node",
+                "legs__suggested_rider",
+                "legs__suggested_rider__user",
+                "deliveries",
+            )
+            .select_related(
+                "user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider"
+            )
+            .get(pk=order.pk)
+        )
+
+        serializer = self.get_serializer(order)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class MerchantAPIKeyRequestOTPView(views.APIView):
+    """
+    Step 1: Request an OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. OTP is sent to the merchant's registered email.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can request an API key.",
+            )
+        if merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403, message="Merchant must have api access! 🙈"
+            )
+
+        # Generate OTP
+        otp = OTPService.generate_otp()
+        user.otp = otp
+        user.otp_created_at = timezone.now()
+        user.save(update_fields=["otp", "otp_created_at"])
+
+        # Send OTP via Email
+        try:
+            OTPService.send_email_otp(user, otp)
+            logger.info(f"Merchant API Key OTP sent to {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to send Merchant API Key OTP email: {str(e)}")
+            raise ServiceException(
+                status_code=500,
+                message="Failed to send OTP email. Please try again later.",
+            )
+
+        return service_response(
+            status="success",
+            message="OTP sent to your registered email.",
+            data={},
+            status_code=200,
+        )
+
+
+class MerchantAPIKeyRetrieveView(views.APIView):
+    """
+    Step 2: Provide OTP to retrieve/rotate the Merchant API Key.
+    JWT authenticated. Returns the raw API key ONLY ONCE.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        otp = request.data.get("otp")
+
+        if not otp:
+            raise ServiceException(status_code=400, message="OTP is required.")
+
+        # Ensure user is a merchant of type 'api'
+        merchant_profile = getattr(user, "merchant_profile", None)
+        if not merchant_profile or merchant_profile.merchant_type != "api":
+            raise ServiceException(
+                status_code=403,
+                message="Only merchants of type 'api' can retrieve an API key.",
+            )
+
+        # Basic OTP validation (expiry - 10 minutes)
+        if user.otp != otp:
+            raise ServiceException(status_code=400, message="Invalid OTP.")
+
+        expiry_time = timezone.now() - datetime.timedelta(minutes=10)
+        if not user.otp_created_at or user.otp_created_at < expiry_time:
+            raise ServiceException(status_code=400, message="OTP has expired.")
+
+        # OTP is valid, clear it
+        user.otp = None
+        user.save(update_fields=["otp"])
+
+        # Generate new API Key
+        raw_key = f"ak_live_{secrets.token_urlsafe(32)}"
+        prefix = raw_key[:11]
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+        # Update or create the API key
+        MerchantAPIKey.objects.update_or_create(
+            merchant=user,
+            defaults={
+                "key_hash": key_hash,
+                "prefix": prefix,
+                "is_active": True,
+                "created_at": timezone.now(),
+            },
+        )
+
+        return service_response(
+            status="success",
+            message="API Key generated successfully. Please store it securely.",
+            data={"api_key": raw_key},
+            status_code=200,
+        )
+
+
+class MerchantRequestAPIAccessView(views.APIView):
+    """
+    Allow a regular merchant to switch their account type to 'api'.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        user = request.user
+        merchant_profile = getattr(user, "merchant_profile", None)
+
+        if not merchant_profile:
+            raise ServiceException(
+                status_code=403, message="Only merchant users can request API access."
+            )
+
+        if merchant_profile.merchant_type == "api":
+            return service_response(
+                status="success",
+                message="Account is already set to API type.",
+                data={},
+                status_code=200,
+            )
+
+        merchant_profile.merchant_type = "api"
+        merchant_profile.save(update_fields=["merchant_type"])
+
+        logger.info(f"Merchant {user.email} switched to API type.")
+
+        return service_response(
+            status="success",
+            message="Your account has been switched to API type successfully.",
+            data={},
+            status_code=200,
+        )
 
     @action(detail=True, methods=["post"], url_path="accept-relay-route")
     def accept_relay_route(self, request, order_number=None):

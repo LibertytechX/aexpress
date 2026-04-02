@@ -16,6 +16,11 @@ Including another URLconf
 """
 
 from orders.views import OrderCompleteView
+from dispatcher.views import (
+    MerchantAPIKeyRequestOTPView,
+    MerchantAPIKeyRetrieveView,
+    MerchantRequestAPIAccessView,
+)
 from django.contrib import admin
 from django.urls import path, include
 
@@ -38,4 +43,22 @@ urlpatterns = [
     path("api/chats/", include("chats.urls")),
     path("api/whatsapp/", include("whatsapp_messaging.urls")),
     path("api/subscriptions/", include("subscriptions.urls")),
+    
+    path(
+        "api/merchant/request-api-access/",
+        MerchantRequestAPIAccessView.as_view(),
+        name="merchant_request_api_access",
+    ),
+
+    # Merchant API Key management
+    path(
+        "api/merchant/apikey/request-otp/",
+        MerchantAPIKeyRequestOTPView.as_view(),
+        name="merchant_apikey_request_otp",
+    ),
+    path(
+        "api/merchant/apikey/retrieve/",
+        MerchantAPIKeyRetrieveView.as_view(),
+        name="merchant_apikey_retrieve",
+    ),
 ]

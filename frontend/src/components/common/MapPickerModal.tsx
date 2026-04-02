@@ -2,12 +2,27 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+declare global {
+  interface Window {
+    google: any;
+    googleMapsLoaded?: boolean;
+  }
+}
+
 /* ─── Lagos Bounds ──────────────────────────────────────────────── */
 const LAGOS_CENTER = { lat: 6.5244, lng: 3.3792 };
 const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
 const isInLagos = (lat: number, lng: number) =>
   lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
   lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+const REVERSE_GEOCODE_MIN_DELTA = 0.00015;
+const reverseGeocodeCacheKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+const hasMeaningfulCenterChange = (
+  previous: { lat: number; lng: number } | null,
+  next: { lat: number; lng: number }
+) => !previous ||
+Math.abs(previous.lat - next.lat) > REVERSE_GEOCODE_MIN_DELTA ||
+  Math.abs(previous.lng - next.lng) > REVERSE_GEOCODE_MIN_DELTA;
 
 interface MapPickerModalProps {
   /** Called when user confirms a location. Receives the resolved address string. */
@@ -37,11 +52,30 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
   // Search States
   const autocompleteServiceRef = useRef<any>(null);
+  const placesServiceRef = useRef<any>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionTokenRef = useRef<any>(null);
+  const latestSearchRequestIdRef = useRef(0);
+  const lastSearchQueryRef = useRef('');
+  const reverseGeocodeCacheRef = useRef<Map<string, string>>(new Map());
+  const lastReverseGeocodeCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  const skipNextIdleReverseGeocodeRef = useRef(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+
+  const resetAutocompleteSession = () => {
+    sessionTokenRef.current = null;
+    lastSearchQueryRef.current = '';
+  };
+
+  const ensureSessionToken = () => {
+    if (!sessionTokenRef.current && window.google?.maps?.places?.AutocompleteSessionToken) {
+      sessionTokenRef.current = new window.google.maps.places.AutocompleteSessionToken();
+    }
+    return sessionTokenRef.current;
+  };
 
   // ── Initialise map once panel is mounted ──────────────────────
   useEffect(() => {
@@ -66,6 +100,8 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
       geocoderRef.current = new window.google.maps.Geocoder();
       if (window.google.maps.places) {
         autocompleteServiceRef.current = new window.google.maps.places.AutocompleteService();
+        const dummyDiv = document.createElement('div');
+        placesServiceRef.current = new window.google.maps.places.PlacesService(dummyDiv);
       }
       setMapReady(true);
 
@@ -79,12 +115,33 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
         // Debounce
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
+          if (skipNextIdleReverseGeocodeRef.current) {
+            skipNextIdleReverseGeocodeRef.current = false;
+            setResolving(false);
+            return;
+          }
+
+          const centerPoint = { lat, lng };
           if (!isInLagos(lat, lng)) {
             setOutsideLagos(true);
             setResolvedAddress('');
             setResolving(false);
             return;
           }
+
+          if (!hasMeaningfulCenterChange(lastReverseGeocodeCenterRef.current, centerPoint)) {
+            return;
+          }
+
+          const cachedAddress = reverseGeocodeCacheRef.current.get(reverseGeocodeCacheKey(lat, lng));
+          if (cachedAddress) {
+            lastReverseGeocodeCenterRef.current = centerPoint;
+            setOutsideLagos(false);
+            setResolvedAddress(cachedAddress);
+            setResolving(false);
+            return;
+          }
+
           setOutsideLagos(false);
           setResolving(true);
 
@@ -93,9 +150,13 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
             (results: any[], status: string) => {
               setResolving(false);
               if (status === 'OK' && results[0]) {
-                setResolvedAddress(results[0].formatted_address);
+                const formattedAddress = results[0].formatted_address;
+                lastReverseGeocodeCenterRef.current = centerPoint;
+                reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), formattedAddress);
+                setResolvedAddress(formattedAddress);
               } else {
                 // Fallback to lat/lng string
+                lastReverseGeocodeCenterRef.current = centerPoint;
                 setResolvedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
               }
             }
@@ -112,6 +173,7 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     };
   }, []);
 
@@ -134,6 +196,8 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
     if (!value.trim() || value.length < 3) {
       setSuggestions([]);
       setShowSuggestions(false);
+      setIsSearching(false);
+      resetAutocompleteSession();
       return;
     }
 
@@ -141,9 +205,11 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
 
+    const requestId = ++latestSearchRequestIdRef.current;
+
     searchDebounceRef.current = setTimeout(() => {
       setIsSearching(true);
-      
+
       const lagosBounds = new window.google.maps.LatLngBounds(
         new window.google.maps.LatLng(LAGOS_BOUNDS.minLat, LAGOS_BOUNDS.minLng),
         new window.google.maps.LatLng(LAGOS_BOUNDS.maxLat, LAGOS_BOUNDS.maxLng)
@@ -151,16 +217,27 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
       const lower = value.toLowerCase();
       const query = lower.includes('lagos') || lower.includes('nigeria')
-          ? value
-          : value.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+        ? value
+        : value.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
+      const normalizedQuery = query.trim().toLowerCase();
+      if (normalizedQuery === lastSearchQueryRef.current) {
+        setIsSearching(false);
+        return;
+      }
+      lastSearchQueryRef.current = normalizedQuery;
+
+      const sessionToken = ensureSessionToken();
 
       autocompleteServiceRef.current.getPlacePredictions(
         {
           input: query,
           componentRestrictions: { country: 'ng' },
           bounds: lagosBounds,
+          ...(sessionToken ? { sessionToken } : {}),
         },
         (predictions: any[] | null, status: string) => {
+          if (requestId !== latestSearchRequestIdRef.current) return;
           setIsSearching(false);
           if (status === 'OK' && predictions) {
             setSuggestions(predictions.slice(0, 5));
@@ -175,36 +252,56 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
   };
 
   const handleSelectSuggestion = (suggestion: any) => {
-    setSearchQuery(suggestion.description);
     setShowSuggestions(false);
     setSuggestions([]);
+    latestSearchRequestIdRef.current += 1;
 
-    if (!geocoderRef.current || !mapInstanceRef.current) return;
+    if (!placesServiceRef.current || !mapInstanceRef.current) {
+      resetAutocompleteSession();
+      setSearchQuery(suggestion.description);
+      return;
+    }
 
-    // Resolve the prediction to geographic coordinates using Place ID or standard geocode
     setResolving(true);
-    geocoderRef.current.geocode(
-      { placeId: suggestion.place_id },
-      (results: any[], status: string) => {
-        if (status === 'OK' && results[0]) {
-          const loc = results[0].geometry.location;
+    const sessionToken = sessionTokenRef.current;
+
+    placesServiceRef.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['formatted_address', 'geometry.location'],
+        ...(sessionToken ? { sessionToken } : {}),
+      },
+      (place: any, status: string) => {
+        resetAutocompleteSession();
+
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const loc = place.geometry.location;
           const lat = loc.lat();
           const lng = loc.lng();
-          
+
           if (!isInLagos(lat, lng)) {
             setOutsideLagos(true);
             setResolving(false);
             setResolvedAddress('');
+            setSearchQuery(place.formatted_address || suggestion.description);
             mapInstanceRef.current.panTo(loc);
             return;
           }
-          
+
+          const formattedAddress = place.formatted_address || suggestion.description;
+          setSearchQuery(formattedAddress);
           setOutsideLagos(false);
+          setResolvedAddress(formattedAddress);
+          lastReverseGeocodeCenterRef.current = { lat, lng };
+          reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), formattedAddress);
+          skipNextIdleReverseGeocodeRef.current = true;
           mapInstanceRef.current.panTo(loc);
-          // Setting the location triggers the drag idle event which handles resolving address string
-        } else {
           setResolving(false);
+          return;
         }
+
+        setSearchQuery(suggestion.description);
+        setResolving(false);
       }
     );
   };
@@ -273,66 +370,66 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
         {/* ── Search Bar overlay ── */}
         <div style={{ position: 'relative', padding: '12px 16px', background: '#fff', borderBottom: '1px solid #e2e8f0', zIndex: 30 }}>
-            <div style={{ position: 'relative' }}>
-              <div style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }}>🔍</div>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={handleSearchInput}
-                onFocus={(e) => { 
-                  e.target.style.borderColor = '#1B2A4A';
-                  if (suggestions.length > 0) setShowSuggestions(true); 
-                }}
-                placeholder="Search for landmark, street, or area..."
-                style={{
-                  width: '100%', padding: '12px 12px 12px 36px', height: 44,
-                  border: '1.5px solid #e2e8f0', borderRadius: 10,
-                  fontSize: 14, fontWeight: 500, outline: 'none', color: '#1B2A4A',
-                  fontFamily: 'inherit',
-                  transition: 'border-color 0.2s'
-                }}
-                onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
-              />
-              {isSearching && (
-                <div style={{ position: 'absolute', right: 12, top: 14, fontSize: 12, color: '#94a3b8' }}>⏳</div>
-              )}
-            </div>
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', left: 12, top: 12, color: '#94a3b8' }}>🔍</div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearchInput}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#1B2A4A';
+                if (suggestions.length > 0) setShowSuggestions(true);
+              }}
+              placeholder="Search for landmark, street, or area..."
+              style={{
+                width: '100%', padding: '12px 12px 12px 36px', height: 44,
+                border: '1.5px solid #e2e8f0', borderRadius: 10,
+                fontSize: 14, fontWeight: 500, outline: 'none', color: '#1B2A4A',
+                fontFamily: 'inherit',
+                transition: 'border-color 0.2s'
+              }}
+              onBlur={(e) => e.target.style.borderColor = '#e2e8f0'}
+            />
+            {isSearching && (
+              <div style={{ position: 'absolute', right: 12, top: 14, fontSize: 12, color: '#94a3b8' }}>⏳</div>
+            )}
+          </div>
 
-            {/* Suggestions dropdown */}
-            {showSuggestions && suggestions.length > 0 && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 16, right: 16, marginTop: 4,
-                background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
-                boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden', zIndex: 40
-              }}>
-                {suggestions.map((s, i) => (
-                  <div key={s.place_id} 
-                    onClick={() => handleSelectSuggestion(s)}
-                    style={{
-                      padding: '12px 14px', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
-                      cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 10,
-                      transition: 'background 0.15s'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
-                  >
-                    <span style={{ color: '#E8A838', marginTop: 2 }}>📍</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{s.structured_formatting?.main_text || s.description}</div>
-                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{s.structured_formatting?.secondary_text || ''}</div>
-                    </div>
+          {/* Suggestions dropdown */}
+          {showSuggestions && suggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 16, right: 16, marginTop: 4,
+              background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.1)', overflow: 'hidden', zIndex: 40
+            }}>
+              {suggestions.map((s, i) => (
+                <div key={s.place_id}
+                  onClick={() => handleSelectSuggestion(s)}
+                  style={{
+                    padding: '12px 14px', borderBottom: i < suggestions.length - 1 ? '1px solid #f1f5f9' : 'none',
+                    cursor: 'pointer', display: 'flex', alignItems: 'flex-start', gap: 10,
+                    transition: 'background 0.15s'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#f8fafc'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ color: '#E8A838', marginTop: 2 }}>📍</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{s.structured_formatting?.main_text || s.description}</div>
+                    <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{s.structured_formatting?.secondary_text || ''}</div>
                   </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Click outside search overlay to close dropdown */}
-            {showSuggestions && (
-              <div 
-                style={{ position: 'fixed', inset: 0, zIndex: 35 }} 
-                onClick={() => setShowSuggestions(false)} 
-              />
-            )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Click outside search overlay to close dropdown */}
+          {showSuggestions && (
+            <div
+              style={{ position: 'fixed', inset: 0, zIndex: 35 }}
+              onClick={() => setShowSuggestions(false)}
+            />
+          )}
         </div>
 
         {/* ── Map container ── */}

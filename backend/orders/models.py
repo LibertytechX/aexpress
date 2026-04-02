@@ -223,6 +223,7 @@ class Order(models.Model):
 
     PAYMENT_STATUS_CHOICES = [
         ("Pending", "Pending"),
+        ("Cancelled", "Cancelled"),
         ("Paid", "Paid"),
         ("Failed", "Failed"),
         ("Refunded", "Refunded"),
@@ -650,3 +651,82 @@ class OrderLeg(models.Model):
         if not self.hub_pin:
             self.hub_pin = "".join(random.choices(string.digits, k=6))
         super().save(*args, **kwargs)
+
+
+class MerchantPriceList(models.Model):
+    """
+    Container for a set of destination pricing rules (manual tariffs).
+    A merchant can have one active list per vehicle type.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        "authentication.User",
+        on_delete=models.CASCADE,
+        related_name="merchant_pricelists",
+        help_text="Merchant user this list belongs to",
+    )
+    vehicle = models.ForeignKey(
+        Vehicle,
+        on_delete=models.CASCADE,
+        related_name="merchant_pricelists",
+        help_text="The vehicle type this price list applies to",
+    )
+    name = models.CharField(
+        max_length=255,
+        help_text="Display name for the list, e.g. 'Goldplates Chevron Pricing'",
+    )
+    is_active = models.BooleanField(
+        default=True, help_text="Inactive lists are ignored during fare calculation"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_pricelists"
+        unique_together = ["merchant", "vehicle"]
+
+    def __str__(self):
+        return f"{self.name} — {self.merchant.business_name or self.merchant.phone}"
+
+
+class MerchantPriceListItem(models.Model):
+    """
+    Individual rows (distance buckets) within a MerchantPriceList.
+    Defines a fixed fee for a specific distance range.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    price_list = models.ForeignKey(
+        MerchantPriceList,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    label = models.CharField(
+        max_length=255,
+        help_text="Human-readable destination or bucket name (e.g. 'Agungi')",
+    )
+    min_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Starting distance for this bucket (inclusive)",
+    )
+    max_km = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="Ending distance for this bucket (inclusive)",
+    )
+    fixed_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text="The total fee to be charged for this range",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_pricelist_items"
+        ordering = ["min_km"]
+
+    def __str__(self):
+        return f"{self.label}: {self.min_km}-{self.max_km}km = ₦{self.fixed_fee}"
