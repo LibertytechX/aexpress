@@ -1018,7 +1018,7 @@ export default function DashboardPage() {
                   let response;
 
                   // Call appropriate API based on order mode
-                  if (orderData.mode === 'quick') {
+                  if (orderData.mode === 'quick' || orderData.mode === 'grouped') {
                     const apiPayload = {
                       pickup_address: orderData.pickup,
                       sender_name: orderData.senderName || currentUser?.contact_name || '',
@@ -3372,11 +3372,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
     const distanceCost = earlyRouteDistance * pricing.rate_per_km;
     const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    return Math.round(pricing.base_fare + distanceCost + timeCost);
+    const price = Math.round(pricing.base_fare + distanceCost + timeCost);
+
+    // Apply 30% discount for grouped orders
+    return mode === 'grouped' ? Math.round(price * 0.7) : price;
   };
 
   const getActiveDropoffs = () => {
-    if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
+    if (mode === "quick" || mode === "grouped") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
     if (mode === "multi") return drops.filter(d => d.address.trim());
     if (mode === "bulk") return bulkRows.filter(r => r.valid !== false && r.address.trim());
     return [];
@@ -3390,7 +3393,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return 0;
 
     // Quick Send ALL STEPS: always use early route so prices match step 1
-    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
+    if ((mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration) {
       const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
       if (tiered !== null) return tiered;
       return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
@@ -3410,6 +3413,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   let unitCost = calculateCost();
   let totalCost = totalDeliveries * unitCost;
+
+  // Apply 30% discount for grouped orders
+  if (mode === 'grouped') {
+    totalCost = Math.round(totalCost * 0.7);
+  }
 
   if (mode === 'multi' && multiFares?.vehicles?.[vehicle]) {
     totalCost = multiFares.vehicles[vehicle].price;
@@ -3443,8 +3451,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         payMethod: payMethod,
         notes: notes,
         // Include route information for pricing calculation
-        distance_km: mode === 'quick' && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
-        duration_minutes: mode === 'quick' && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
+        distance_km: (mode === 'quick' || mode === 'grouped') && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
+        duration_minutes: (mode === 'quick' || mode === 'grouped') && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
       };
 
       // Debug: Log order data
@@ -3455,8 +3463,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         vehicle: orderData.vehicle
       });
 
-      if (mode === 'quick') {
-        // Quick Send - single delivery
+      if (mode === 'quick' || mode === 'grouped') {
+        // Quick Send or Grouped - single delivery
         orderData.dropoff = dropoffAddress;
         orderData.receiverName = receiverName;
         orderData.receiverPhone = receiverPhone;
@@ -3533,23 +3541,51 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       {step === 1 && (
         <>
           {/* Mode Selector */}
-          <div style={{ display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 14 : 20 }}>
-            {modeConfig.map(m => (
-              <button key={m.id} onClick={() => setMode(m.id)} style={{
-                flex: 1,
-                padding: isMobile ? "10px 6px" : "14px 12px",
-                borderRadius: isMobile ? 10 : 12,
-                cursor: "pointer", fontFamily: "inherit",
-                border: mode === m.id ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
-                background: mode === m.id ? S.goldPale : "#fff",
-                transition: "all 0.2s"
-              }}>
-                <div style={{ fontSize: isMobile ? 18 : 22, marginBottom: isMobile ? 2 : 4 }}>{m.icon}</div>
-                <div style={{ fontSize: isMobile ? 11 : 14, fontWeight: 700, color: S.navy, lineHeight: 1.2 }}>{m.label}</div>
-                {!isMobile && <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>{m.desc}</div>}
-              </button>
-            ))}
+          <div style={{ display: "flex", gap: isMobile ? 6 : 8, marginBottom: isMobile ? 12 : 16 }}>
+            {modeConfig.map(m => {
+              const isActive = (mode === m.id || (m.id === 'quick' && mode === 'grouped'));
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    if (m.id === 'quick') {
+                      if (mode !== 'quick' && mode !== 'grouped') setMode('quick');
+                    } else {
+                      setMode(m.id);
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? "10px 6px" : "14px 12px",
+                    borderRadius: isMobile ? 10 : 12,
+                    cursor: "pointer", fontFamily: "inherit",
+                    border: isActive ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
+                    background: isActive ? S.goldPale : "#fff",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  <div style={{ fontSize: isMobile ? 18 : 22, marginBottom: isMobile ? 2 : 4 }}>{m.icon}</div>
+                  <div style={{ fontSize: isMobile ? 11 : 14, fontWeight: 700, color: S.navy, lineHeight: 1.2 }}>{m.label}</div>
+                  {!isMobile && <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>{m.desc}</div>}
+                </button>
+              );
+            })}
           </div>
+
+          {/* Quick vs Grouped Sub-mode Select */}
+          {(mode === 'quick' || mode === 'grouped') && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Order Mode</label>
+              <select
+                value={mode}
+                onChange={(e) => setMode(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="quick">Quick Send (Single Delivery)</option>
+                <option value="grouped">Grouped Order (30% Discount)</option>
+              </select>
+            </div>
+          )}
 
           {/* ── Pickup (shared across all modes) ── */}
           <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: isMobile ? 14 : 20, marginBottom: 14 }}>
@@ -3585,7 +3621,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           </div>
 
           {/* ═══ QUICK SEND MODE ═══ */}
-          {mode === "quick" && (
+          {(mode === "quick" || mode === "grouped") && (
             <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 14 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                 <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.gold }} />
@@ -4086,11 +4122,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               {vehicles.map(v => {
                 const isSelected = vehicle === v.id;
 
-                const hasEarlyQuick = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
+                const hasEarlyQuick = (mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration;
                 const hasEarlyMulti = mode === 'multi' && multiFares?.vehicles?.[v.id];
                 const hasEarly = hasEarlyQuick || hasEarlyMulti;
 
-                const isCalculating = (mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute) ||
+                const isCalculating = ((mode === 'quick' || mode === 'grouped') && pickupAddress && dropoffAddress && calculatingRoute) ||
                   (mode === 'multi' && calculatingMultiRoute);
 
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
@@ -4165,7 +4201,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   <div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
                     <div style={{ fontSize: 20, fontWeight: 800, color: S.navy }}>
-                      ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
+                      ₦{((mode === 'quick' || mode === 'grouped') && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
                     </div>
                   </div>
                 )}

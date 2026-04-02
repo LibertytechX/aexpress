@@ -410,6 +410,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "delivery_proofs",
             "package_type",
+            "mode",
         ]
 
     def _get_first_delivery(self, obj):

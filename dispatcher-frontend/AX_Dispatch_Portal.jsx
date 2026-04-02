@@ -2230,6 +2230,8 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [isExporting, setIsExporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [merging, setMerging] = useState(false);
 
   const handlePayNow = async (order) => {
     if (order.paymentInfo) {
@@ -2378,6 +2380,53 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     }
   };
 
+  const handleToggleSelect = (e, id) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = (e) => {
+    if (selectedIds.size > 0) {
+      setSelectedIds(new Set());
+    } else {
+      const allIds = filtered.filter(o => !o.parentOrderNumber).map(o => o.id);
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const handleMergeGrouped = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length < 2) return;
+    
+    // Validate all selected orders are "grouped" and "Pending"
+    const selectedOrders = filtered.filter(o => selectedIds.has(o.id));
+    const nonGrouped = selectedOrders.filter(o => o.mode !== 'grouped' || o.status !== 'Pending');
+    
+    if (nonGrouped.length > 0) {
+      alert("Only 'Pending' orders in 'Grouped' mode can be merged.");
+      return;
+    }
+
+    if (!confirm(`Merge ${ids.length} orders into a single parent?`)) return;
+
+    setMerging(true);
+    try {
+      await OrdersAPI.mergeGroupedOrders(ids);
+      setSelectedIds(new Set());
+      onReloadOrders();
+      alert("Orders merged successfully!");
+    } catch (err) {
+      alert(err.message || "Failed to merge orders");
+    } finally {
+      setMerging(false);
+    }
+  };
+
   const PERIOD_OPTS = [
     { value: "all", label: "All Time" },
     { value: "today", label: "Today" },
@@ -2391,7 +2440,17 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     const isPaid = psLower === "paid" || psLower === "success";
 
     return (
-      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button') && e.target.tagName !== 'INPUT') onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "40px 100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {!isChild && (
+            <input 
+              type="checkbox" 
+              checked={selectedIds.has(rowOrder.id)} 
+              onChange={(e) => handleToggleSelect(e, rowOrder.id)}
+              style={{ cursor: "pointer", width: 16, height: 16, accentColor: S.gold }}
+            />
+          )}
+        </div>
         <div
           onClick={(e) => {
             if (!isChild && rowOrder.isRelayOrder) toggleExpand(e, rowOrder.id);
@@ -2437,6 +2496,26 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
               <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
                 ›
               </span>
+            </div>
+          )}
+          {!isChild && rowOrder.mode === "grouped" && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 6px",
+              borderRadius: 4,
+              background: S.goldPale,
+              color: S.gold,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+              marginTop: 2,
+              border: `1px solid ${S.gold}33`,
+            }}>
+              Grouped
             </div>
           )}
         </div>
@@ -2510,6 +2589,31 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         </div>
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
 
+        {selectedIds.size > 0 && (
+          <button 
+            onClick={handleMergeGrouped} 
+            disabled={merging || selectedIds.size < 2}
+            style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: 6, 
+              padding: "0 16px", 
+              borderRadius: 10, 
+              border: "none", 
+              background: selectedIds.size < 2 ? S.borderLight : S.gold, 
+              color: "#fff", 
+              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer", 
+              fontSize: 12, 
+              fontWeight: 700, 
+              fontFamily: "inherit",
+              boxShadow: selectedIds.size < 2 ? "none" : "0 4px 12px rgba(232,168,56,0.25)",
+              transition: "all 0.2s ease"
+            }}
+          >
+            {merging ? "Merging..." : <>{I.plus} Merge {selectedIds.size} Grouped Orders</>}
+          </button>
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: S.card, borderRadius: 10, border: `1px solid ${S.border}` }}>
           <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Export Range:</span>
           <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
@@ -2528,7 +2632,15 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
         <div style={{ overflowX: "auto" }}>
           <div style={{ minWidth: 1200 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+            <div style={{ display: "grid", gridTemplateColumns: "40px 100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <input 
+                  type="checkbox" 
+                  checked={selectedIds.size > 0 && selectedIds.size === filtered.filter(o => !o.parentOrderNumber).length}
+                  onChange={handleSelectAll}
+                  style={{ cursor: "pointer", width: 14, height: 14, accentColor: S.gold }}
+                />
+              </div>
               <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>PAID</span><span>Status</span>
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>

@@ -45,6 +45,8 @@ import hashlib
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
+from orders.serializers import MergeGroupedOrdersSerializer
+from django.db import transaction
 
 logger = logging.getLogger(__name__)
 
@@ -876,6 +878,62 @@ class OrderViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
+    @exception_advice(model_object=ErrorLog)
+    @transaction.atomic
+    def merge_grouped_orders(self, request):
+        """Bulk merge multiple grouped orders into a parent order (Dispatcher Action)."""
+        serializer = MergeGroupedOrdersSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order_ids = serializer.validated_data["order_ids"]
+        # Use simple Order model here if possible or self.queryset.model
+        from orders.models import Order
+        orders = Order.objects.filter(id__in=order_ids)
+        if not orders.exists():
+            return Response(
+                {"success": False, "message": "No valid orders found to merge"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        first_order = orders.first()
+        total_amount = sum(o.total_amount for o in orders)
+
+        # Create Parent Order
+        parent_order = Order.objects.create(
+            user=request.user,  # Dispatcher as creator
+            mode="grouped",
+            vehicle=first_order.vehicle,
+            pickup_address=first_order.pickup_address,
+            sender_name=first_order.sender_name,
+            sender_phone=first_order.sender_phone,
+            total_amount=total_amount,
+            status="Pending",
+            payment_method=first_order.payment_method,
+            distance_km=sum(o.distance_km for o in orders if o.distance_km) or 0,
+            duration_minutes=sum(
+                o.duration_minutes for o in orders if o.duration_minutes
+            )
+            or 0,
+        )
+
+        # Link sub-orders to the new parent
+        orders.update(parent_order=parent_order)
+
+        return service_response(
+            status="success",
+            message=f"Successfully merged {len(order_ids)} orders into parent {parent_order.order_number}",
+            data={
+                "parent_order_number": parent_order.order_number,
+                "parent_id": str(parent_order.id),
+            },
+            status_code=201,
+        )
 
     @action(detail=True, methods=["post"], url_path="generate-relay-route")
     def generate_relay_route(self, request, order_number=None):
