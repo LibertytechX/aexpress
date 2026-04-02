@@ -459,16 +459,17 @@ class OrderViewSet(viewsets.ModelViewSet):
             order.payment_status = "Cancelled"
             # cancel the order charge as well
             charge = order.charges.all().first()
-            if charge.status == "completed":
-                # refund the user wallet
-                wallet = user.wallet
-                wallet.credit(
-                    charge.amount,
-                    f"Refund for order #{order.order_number}",
-                    f"REFUND-{order.order_number}",
-                )
-            charge.status = "canceled"
-            charge.save()
+            if charge:
+                if charge.status == "completed":
+                    # refund the user wallet
+                    wallet = user.wallet
+                    wallet.credit(
+                        charge.amount,
+                        f"Refund for order #{order.order_number}",
+                        f"REFUND-{order.order_number}",
+                    )
+                charge.status = "canceled"
+                charge.save()
 
         if new_status == "Assigned":
             return Response(
