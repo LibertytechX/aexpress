@@ -195,6 +195,7 @@ class Order(models.Model):
         ("quick", "Quick Send"),
         ("multi", "Multi-Drop"),
         ("bulk", "Bulk Import"),
+        ("grouped", "Grouped"),
     ]
 
     STATUS_CHOICES = [

@@ -23,6 +23,7 @@ from .serializers import (
     AssignedRouteSerializer,
     OrderCancelSerializer,
     OrderStatusUpdateSerializer,
+    MergeGroupedOrdersSerializer,
 )
 from .permissions import IsRider
 from dispatcher.models import Rider
@@ -148,16 +149,21 @@ class QuickSendView(APIView):
         from django.utils import timezone
         from datetime import timedelta
 
+        # Get requested mode (defaults to quick)
+        requested_mode = request.data.get("mode", "quick")
+        if requested_mode not in ["quick", "grouped"]:
+            requested_mode = "quick"
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
-            user=request.user, mode="quick", created_at__gte=one_minute_ago
+            user=request.user, mode=requested_mode, created_at__gte=one_minute_ago
         ).exists():
             return Response(
                 {
                     "success": False,
                     "errors": {
                         "non_field_errors": [
-                            "Please wait a minute before creating another Quick Send order."
+                            f"Please wait a minute before creating another {requested_mode.replace('_', ' ').title()} order."
                         ]
                     },
                 },
@@ -184,10 +190,15 @@ class QuickSendView(APIView):
             request.user, vehicle, distance_km, duration_minutes
         )
 
+        # Apply 30% discount for grouped orders
+        if data.get("mode") == "grouped":
+            from decimal import Decimal
+            total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
+
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode="quick",
+            mode=data.get("mode", "quick"),
             vehicle=vehicle,
             pickup_address=data["pickup_address"],
             sender_name=data["sender_name"],
@@ -2223,3 +2234,59 @@ class DeliveryCompleteView(APIView):
         )
 
         return Response({"status": "Delivered", "previous": old_status})
+
+
+class MergeGroupedOrdersView(APIView):
+    """API view to merge multiple grouped orders into a parent order."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    @transaction.atomic
+    def post(self, request):
+        serializer = MergeGroupedOrdersSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order_ids = serializer.validated_data["order_ids"]
+        orders = Order.objects.filter(id__in=order_ids)
+
+        # Take common info from the first order to create parent
+        first_order = orders.first()
+
+        # Calculate aggregated total_amount
+        total_amount = sum(o.total_amount for o in orders)
+
+        # Create Parent Order
+        parent_order = Order.objects.create(
+            user=request.user,
+            mode="grouped",
+            vehicle=first_order.vehicle,
+            pickup_address=first_order.pickup_address,
+            sender_name=first_order.sender_name,
+            sender_phone=first_order.sender_phone,
+            total_amount=total_amount,
+            status="Pending",
+            payment_method=first_order.payment_method,
+            distance_km=sum(o.distance_km for o in orders if o.distance_km) or 0,
+            duration_minutes=sum(
+                o.duration_minutes for o in orders if o.duration_minutes
+            )
+            or 0,
+        )
+
+        # Link sub-orders to the new parent
+        orders.update(parent_order=parent_order)
+
+        return service_response(
+            status="success",
+            message=f"Successfully merged {len(order_ids)} orders into parent {parent_order.order_number}",
+            data={
+                "parent_order_number": parent_order.order_number,
+                "parent_id": str(parent_order.id),
+            },
+            status_code=201,
+        )
