@@ -195,6 +195,7 @@ class QuickSendSerializer(serializers.Serializer):
 
     # Order details
     vehicle = serializers.CharField(required=True)
+    mode = serializers.ChoiceField(choices=["quick", "grouped"], default="quick")
     payment_method = serializers.ChoiceField(
         choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )

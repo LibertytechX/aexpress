@@ -4,6 +4,16 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-02] — Grouped Order Mode
+
+### Added
+- **Grouped Order Mode**: Introduced a new `grouped` mode for single-delivery orders within the "Quick Send" flow.
+- **Backend Model**: Updated `Order.MODE_CHOICES` to include `grouped`.
+- **API Support**: Updated `QuickSendSerializer` to accept a `mode` field (`quick` or `grouped`) and `QuickSendView` to persist it.
+- **Frontend Toggle**: Added a "Quick Send" vs "Grouped Order" toggle in the `NewOrderScreen` component, allowing merchants to categorize their deliveries.
+
+---
+
 ## [2026-03-31] — Merchant API Key Authentication Class
 
 ### Added

@@ -3,9 +3,9 @@
 ## Overview
 
 The Order Management API provides endpoints for creating and managing delivery orders in three modes:
-- **Quick Send**: Single pickup, single delivery
-- **Multi-Drop**: Single pickup, multiple deliveries
-- **Bulk Import**: Single pickup, multiple deliveries (imported from CSV/text/OCR)
+- **Quick Send**: Single pickup, single delivery (Modes: `quick`, `grouped`)
+- **Multi-Drop**: Single pickup, multiple deliveries (Mode: `multi`)
+- **Bulk Import**: Single pickup, multiple deliveries (imported from CSV/text/OCR) (Mode: `bulk`)
 
 All endpoints require JWT authentication via the `Authorization: Bearer <token>` header.
 
@@ -107,6 +107,7 @@ Create a Quick Send order with a single delivery.
 - `receiver_name` (required): Name of receiver
 - `receiver_phone` (required): Phone number of receiver
 - `vehicle` (required): Vehicle type - "Bike", "Car", or "Van"
+- `mode` (optional): "quick" (default) or "grouped"
 - `payment_method` (optional): "wallet" (default), "cash_on_pickup", or "receiver_pays"
 - `package_type` (optional): "Box" (default), "Envelope", "Fragile", "Food", "Document", or "Other"
 - `notes` (optional): Additional delivery instructions
@@ -283,7 +284,7 @@ Get all orders for the authenticated user with optional filtering.
 
 **Query Parameters**:
 - `status` (optional): Filter by status - "Pending", "Assigned", "Started", "Done", "CustomerCanceled", "RiderCanceled", "Failed"
-- `mode` (optional): Filter by mode - "quick", "multi", "bulk"
+- `mode` (optional): Filter by mode - "quick", "grouped", "multi", "bulk"
 - `limit` (optional): Limit number of results (integer)
 
 **Examples**:

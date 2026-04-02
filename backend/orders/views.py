@@ -148,16 +148,21 @@ class QuickSendView(APIView):
         from django.utils import timezone
         from datetime import timedelta
 
+        # Get requested mode (defaults to quick)
+        requested_mode = request.data.get("mode", "quick")
+        if requested_mode not in ["quick", "grouped"]:
+            requested_mode = "quick"
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
-            user=request.user, mode="quick", created_at__gte=one_minute_ago
+            user=request.user, mode=requested_mode, created_at__gte=one_minute_ago
         ).exists():
             return Response(
                 {
                     "success": False,
                     "errors": {
                         "non_field_errors": [
-                            "Please wait a minute before creating another Quick Send order."
+                            f"Please wait a minute before creating another {requested_mode.replace('_', ' ').title()} order."
                         ]
                     },
                 },
@@ -184,10 +189,15 @@ class QuickSendView(APIView):
             request.user, vehicle, distance_km, duration_minutes
         )
 
+        # Apply 30% discount for grouped orders
+        if data.get("mode") == "grouped":
+            from decimal import Decimal
+            total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
+
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode="quick",
+            mode=data.get("mode", "quick"),
             vehicle=vehicle,
             pickup_address=data["pickup_address"],
             sender_name=data["sender_name"],
