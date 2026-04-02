@@ -361,6 +361,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "riderId",
             "rider",
             "status",
+            "mode",
             "amount",
             "distance",
             "time",
