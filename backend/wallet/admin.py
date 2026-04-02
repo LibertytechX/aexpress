@@ -203,7 +203,7 @@ class ChargeAdmin(admin.ModelAdmin):
         "is_active",
         "created_at",
     ]
-    list_filter = ["status", "is_active", "created_at"]
+    list_filter = ["status", "is_active", "created_at", "user"]
     search_fields = [
         "user__email",
         "user__phone",
