@@ -455,7 +455,7 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         # Keep timestamps consistent with rider-app completion flows.
         update_fields = ["status", "updated_at", "payment_status"]
-        if new_status == "Cancelled":
+        if new_status == "CustomerCanceled":
             order.payment_status = "Cancelled"
             # cancel the order charge as well
             charge = order.charges.all().first()
