@@ -1031,9 +1031,10 @@ export default function DashboardPage() {
                       package_type: orderData.packageType || 'Box',
                       notes: orderData.notes || '',
                       distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      duration_minutes: orderData.duration_minutes || 0,
+                      mode: orderData.mode
                     };
-                    console.log('📡 Sending to API (Quick Send):', apiPayload);
+                    console.log(`📡 Sending to API (${orderData.mode}):`, apiPayload);
                     response = await API.Orders.createQuickSend(apiPayload);
                   } else if (orderData.mode === 'multi') {
                     response = await API.Orders.createMultiDrop({

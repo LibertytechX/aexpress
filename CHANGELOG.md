@@ -10,6 +10,7 @@ All notable changes to the AXpress project are documented in this file.
 #### Changed
 - **Order Mode Selector**: Redesigned the "Quick vs Grouped" sub-mode selection from a standard dropdown to modern, interactive cards with icons and premium aesthetics.
 - **Grouped Pricing Fix**: Resolved a bug where "Grouped Order" failed to trigger route calculation and estimation.
+- **Payload Fix**: Ensured the `mode` field ("quick" or "grouped") is correctly included in the API payload when placing an order.
 - **Estimated Prices**: Optimized the dynamic pricing logic to correctly apply the 30% discount to both simple and tiered pricing models in "Grouped" mode.
 
 ---
