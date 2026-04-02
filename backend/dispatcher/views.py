@@ -894,7 +894,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         order_ids = serializer.validated_data["order_ids"]
         # Use simple Order model here if possible or self.queryset.model
         from orders.models import Order
-        orders = Order.objects.filter(id__in=order_ids)
+        orders = Order.objects.filter(order_number__in=order_ids)
         if not orders.exists():
             return Response(
                 {"success": False, "message": "No valid orders found to merge"},
