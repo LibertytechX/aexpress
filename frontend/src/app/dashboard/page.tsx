@@ -3052,10 +3052,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   useEffect(() => {
     console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
 
-    // Only calculate for Quick Send mode when both addresses are available
-    if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+    // Only calculate for Quick Send & Grouped mode when both addresses are available
+    if ((mode !== 'quick' && mode !== 'grouped') || !pickupAddress || !dropoffAddress) {
       console.log('⏭️ Skipping route calculation:', {
-        reason: mode !== 'quick' ? 'Not quick mode' : !pickupAddress ? 'No pickup' : 'No dropoff',
+        reason: (mode !== 'quick' && mode !== 'grouped') ? 'Not quick or grouped mode' : !pickupAddress ? 'No pickup' : 'No dropoff',
         mode,
         hasPickup: !!pickupAddress,
         hasDropoff: !!dropoffAddress
@@ -3368,13 +3368,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return null;
 
     const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-    if (tiered !== null) return tiered;
+    
+    // Apply 30% discount for grouped orders after calculating full estimate (simple or tiered)
+    const rawPrice = tiered !== null 
+      ? tiered 
+      : (pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
 
-    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const rawPrice = pricing.base_fare + distanceCost + timeCost;
-
-    // Apply 30% discount for grouped orders after calculating full estimate
     return mode === 'grouped' ? Math.round(rawPrice * 0.7) : Math.round(rawPrice);
   };
 
@@ -3575,16 +3574,111 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
           {/* Quick vs Grouped Sub-mode Select */}
           {(mode === 'quick' || mode === 'grouped') && (
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Order Mode</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="quick">Quick Send (Single Delivery)</option>
-                <option value="grouped">Grouped Order (30% Discount)</option>
-              </select>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ ...labelStyle, marginBottom: 10 }}>Order Mode</label>
+              <div style={{ 
+                display: "flex", 
+                gap: isMobile ? 10 : 16, 
+                flexDirection: isMobile ? "column" : "row" 
+              }}>
+                {/* Quick Send Card */}
+                <div 
+                  onClick={() => setMode('quick')}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? "14px" : "18px",
+                    borderRadius: 16,
+                    cursor: 'pointer',
+                    border: mode === 'quick' ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
+                    background: mode === 'quick' ? S.goldPale : "#fff",
+                    boxShadow: mode === 'quick' ? "0 4px 12px rgba(251, 177, 47, 0.12)" : "none",
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    position: "relative",
+                    overflow: "hidden"
+                  }}
+                >
+                  <div style={{ 
+                    width: 44, 
+                    height: 44, 
+                    borderRadius: 12, 
+                    background: mode === 'quick' ? S.gold : "#f1f5f9",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    transition: "all 0.2s"
+                  }}>
+                    ⚡
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: S.navy, marginBottom: 2 }}>Quick Send</div>
+                    <div style={{ fontSize: 12, color: S.grayLight, fontWeight: 500 }}>Single delivery, instant processing</div>
+                  </div>
+                  {mode === 'quick' && (
+                    <div style={{ 
+                      position: "absolute", bottom: -8, right: -8, width: 32, height: 32, 
+                      background: S.gold, borderRadius: "50%", opacity: 0.1 
+                    }} />
+                  )}
+                </div>
+
+                {/* Grouped Order Card */}
+                <div 
+                  onClick={() => setMode('grouped')}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? "14px" : "18px",
+                    borderRadius: 16,
+                    cursor: 'pointer',
+                    border: mode === 'grouped' ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
+                    background: mode === 'grouped' ? S.goldPale : "#fff",
+                    boxShadow: mode === 'grouped' ? "0 4px 12px rgba(251, 177, 47, 0.12)" : "none",
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    position: "relative",
+                    overflow: "hidden"
+                  }}
+                >
+                  {/* Discount Badge */}
+                  <div style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    background: S.gold,
+                    color: S.navy,
+                    fontSize: 10,
+                    fontWeight: 900,
+                    padding: "4px 12px",
+                    borderBottomLeftRadius: 14,
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                    letterSpacing: "0.02em"
+                  }}>
+                    30% DISCOUNT
+                  </div>
+                  <div style={{ 
+                    width: 44, 
+                    height: 44, 
+                    borderRadius: 12, 
+                    background: mode === 'grouped' ? S.gold : "#f1f5f9",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    transition: "all 0.2s"
+                  }}>
+                    📦
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: S.navy, marginBottom: 2 }}>Grouped Order</div>
+                    <div style={{ fontSize: 12, color: S.grayLight, fontWeight: 500 }}>Schedule multiple & save on fee</div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

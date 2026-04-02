@@ -4,6 +4,16 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+## [2026-04-02] — Order Mode Redesign & Grouped Pricing Fix
+
+### Frontend
+#### Changed
+- **Order Mode Selector**: Redesigned the "Quick vs Grouped" sub-mode selection from a standard dropdown to modern, interactive cards with icons and premium aesthetics.
+- **Grouped Pricing Fix**: Resolved a bug where "Grouped Order" failed to trigger route calculation and estimation.
+- **Estimated Prices**: Optimized the dynamic pricing logic to correctly apply the 30% discount to both simple and tiered pricing models in "Grouped" mode.
+
+---
+
 ## [2026-03-27] — Checkout Referral & Virtual Account Integration
 
 ### Frontend
