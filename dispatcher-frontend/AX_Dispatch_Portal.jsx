@@ -2453,13 +2453,13 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         </div>
         <div
           onClick={(e) => {
-            if (!isChild && rowOrder.isRelayOrder) toggleExpand(e, rowOrder.id);
+            if (!isChild && (rowOrder.isRelayOrder || rowOrder.mode === 'grouped')) toggleExpand(e, rowOrder.id);
           }}
           style={{
             display: "flex",
             flexDirection: "column",
             gap: 2,
-            cursor: (!isChild && rowOrder.isRelayOrder) ? "pointer" : "default",
+            cursor: (!isChild && (rowOrder.isRelayOrder || rowOrder.mode === 'grouped')) ? "pointer" : "default",
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2503,7 +2503,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
               display: "inline-flex",
               alignItems: "center",
               gap: 4,
-              padding: "2px 6px",
+              padding: "2px 4px",
               borderRadius: 4,
               background: S.goldPale,
               color: S.gold,
@@ -2516,6 +2516,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
               border: `1px solid ${S.gold}33`,
             }}>
               Grouped
+              {rowOrder.subOrders?.length > 0 && (
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                  ›
+                </span>
+              )}
             </div>
           )}
         </div>
