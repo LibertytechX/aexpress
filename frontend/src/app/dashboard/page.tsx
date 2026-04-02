@@ -3272,10 +3272,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
     const distanceCost = earlyRouteDistance * pricing.rate_per_km;
     const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const price = Math.round(pricing.base_fare + distanceCost + timeCost);
+    const rawPrice = pricing.base_fare + distanceCost + timeCost;
 
-    // Apply 30% discount for grouped orders
-    return mode === 'grouped' ? Math.round(price * 0.7) : price;
+    // Apply 30% discount for grouped orders after calculating full estimate
+    return mode === 'grouped' ? Math.round(rawPrice * 0.7) : Math.round(rawPrice);
   };
 
   const getActiveDropoffs = () => {
@@ -3312,12 +3312,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   let unitCost = calculateCost();
-  let totalCost = totalDeliveries * unitCost;
-
-  // Apply 30% discount for grouped orders
+  
+  // Apply 30% discount for grouped orders to both unit and total
   if (mode === 'grouped') {
-    totalCost = Math.round(totalCost * 0.7);
+    unitCost = Math.round(unitCost * 0.7);
   }
+
+  let totalCost = totalDeliveries * unitCost;
 
   if (mode === 'multi' && multiFares?.vehicles?.[vehicle]) {
     totalCost = multiFares.vehicles[vehicle].price;
