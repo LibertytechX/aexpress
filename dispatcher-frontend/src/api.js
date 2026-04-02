@@ -314,6 +314,7 @@ const normalizeOrder = (o) => ({
     parentOrderNumber: o.parent_order_number || null,
     relayLegNumber: o.relay_leg_number || 0,
     source: o.source || 'merchant_web',
+    mode: o.mode || 'quick',
     dispatcher_assigned: o.dispatcher_assigned || false,
 });
 
@@ -449,6 +450,16 @@ export const OrdersAPI = {
         });
         const data = await res.json();
         if (!res.ok) throw (data || new Error('Failed to generate COD account'));
+        return data;
+    },
+
+    async mergeGroupedOrders(orderIds) {
+        const res = await fetchWithAuth(`/dispatch/orders/merge-grouped-orders/`, {
+            method: "POST",
+            body: JSON.stringify({ order_ids: orderIds }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to merge orders'));
         return data;
     }
 };
