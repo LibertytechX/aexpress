@@ -274,6 +274,41 @@ Create a Bulk Import order with multiple deliveries (typically from CSV/text/OCR
 
 ---
 
+### 5. Merge Grouped Orders
+
+**POST** `/api/orders/merge-grouped-orders/`
+
+Merge multiple single-delivery "grouped" orders into a single parent/sub-order container for easier management and assignment.
+
+**Authentication**: Required
+
+**Request Body**:
+```json
+{
+  "order_ids": [
+    "uuid-grouped-order-1",
+    "uuid-grouped-order-2"
+  ]
+}
+```
+
+**Field Descriptions**:
+- `order_ids` (required): List of UUIDs of orders to merge. All orders must be in `grouped` mode and `Pending` status.
+
+**Response** (201 Created):
+```json
+{
+  "status": "success",
+  "message": "Successfully merged 2 orders into parent 6158003",
+  "data": {
+    "parent_order_number": "6158003",
+    "parent_id": "uuid-parent-order"
+  }
+}
+```
+
+---
+
 ### 5. Get All Orders
 
 **GET** `/api/orders/`
