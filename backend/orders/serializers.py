@@ -574,11 +574,11 @@ class MergeGroupedOrdersSerializer(serializers.Serializer):
     """Serializer for merging multiple grouped orders into a parent order."""
 
     order_ids = serializers.ListField(
-        child=serializers.UUIDField(), required=True, min_length=1
+        child=serializers.CharField(max_length=255), required=True, min_length=1
     )
 
     def validate_order_ids(self, value):
-        orders = Order.objects.filter(id__in=value)
+        orders = Order.objects.filter(order_number__in=value)
         if orders.count() != len(value):
             raise serializers.ValidationError("Some order IDs are invalid.")
 
