@@ -2660,9 +2660,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                 return (
                   <React.Fragment key={o.id}>
                     {renderOrderRow(o, false, false)}
-                    {expandedRows[o.id] && o.isRelayOrder && (
+                    {expandedRows[o.id] && (o.isRelayOrder || o.mode === 'grouped') && (
                       <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
-                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>Sub-Orders / Relay Legs</div>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>{o.mode === 'grouped' ? 'Grouped Orders' : 'Sub-Orders / Relay Legs'}</div>
                         {childOrders.length > 0 ? (
                           <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${S.border}`, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                             {childOrders.map((child, idx) => renderOrderRow(child, true, idx === childOrders.length - 1))}
@@ -2679,7 +2679,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
                             </div>
                             {o.sub_orders.map((sub) => (
                               <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
-                                <span style={{ fontWeight: 800, color: S.purple }}>LEG {sub.relay_leg_number || "-"}</span>
+                                <span style={{ fontWeight: 800, color: o.mode === 'grouped' ? S.gold : S.purple }}>{o.mode === 'grouped' ? `ORD ${idx + 1}` : `LEG ${sub.relay_leg_number || "-"}`}</span>
                                 <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
                                 <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
                                 <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
