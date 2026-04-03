@@ -193,6 +193,7 @@ class QuickSendView(APIView):
         # Apply 30% discount for grouped orders
         if data.get("mode") == "grouped":
             from decimal import Decimal
+
             total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
 
         # Create order
@@ -1573,7 +1574,7 @@ def _advance_order(request, order_number, new_status, event_desc):
             dist = Zone.haversine_distance(
                 lat, lng, order.pickup_latitude, order.pickup_longitude
             )
-            if dist > 1.5:  # 1500 meters
+            if dist > 2.0:  # 2000 kmeters
                 return service_response(
                     status="error",
                     message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
