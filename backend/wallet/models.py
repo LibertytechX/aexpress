@@ -66,7 +66,7 @@ class Wallet(models.Model):
 
         charges = Charge.objects.filter(
             user=self.user, status="pending", is_active=True
-        ).order_by("created_at")
+        ).order_by("-created_at")
 
         for charge in charges:
             if self.balance >= charge.amount:
