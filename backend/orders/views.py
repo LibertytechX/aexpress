@@ -1690,6 +1690,7 @@ class OrderStartView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1872,7 +1873,7 @@ class OrderCompleteView(APIView):
                     final_delivery.dropoff_latitude,
                     final_delivery.dropoff_longitude,
                 )
-                if dist > 1.5:  # 1500 meters
+                if dist > 2.0:  # 2000 meters
                     return service_response(
                         status="error",
                         message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
