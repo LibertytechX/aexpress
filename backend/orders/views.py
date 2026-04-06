@@ -1690,6 +1690,7 @@ class OrderStartView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
