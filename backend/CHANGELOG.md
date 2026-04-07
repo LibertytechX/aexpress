@@ -4,14 +4,13 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-04-07] — Merchant Deactivation (Delete)
-
-### Added
+## [2026-04-07] — Chats API & Merchant Deactivation
+- **Chats API Documentation**: Documented the Chat System REST API in `ENDPOINTS_DOCUMENTATION.md`.
 - **Merchant Deactivation (Delete)**: Implemented new endpoints for soft-deactivating merchant accounts.
     - **Dispatcher Portal**: Admins can deactivate merchants via `DELETE /api/dispatcher/merchants/<id>/`.
     - **Merchant Portal**: Merchants can deactivate their own accounts via `DELETE /api/auth/profile/`.
 - **Validation**: Added a check to prevent deactivation if a merchant has any active/ongoing orders (Pending, Assigned, Started, etc.) in both endpoints.
-- **API Documentation**: Created and updated `ENDPOINTS_DOCUMENTATION.md` to document the new capabilities.
+- **REST API Documentation**: Created and updated `ENDPOINTS_DOCUMENTATION.md` to document the new capabilities.
 
 ---
 

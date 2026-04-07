@@ -86,4 +86,51 @@
 
 ---
 
-(More documentation to be added as needed)
+## Chat System API Documentation
+
+## Base URL
+```
+/api/chats/
+```
+
+### 1. List Conversations
+**Endpoint:** `GET /conversations/`  
+**Authentication:** Required (Dispatcher/Agent)  
+**Description:** Returns a list of all conversations ordered by most recent activity.
+**Query Parameters:**
+- `type` (optional): Filter by user type (`customer` or `rider`).
+- `active` (optional): Filter by active status (`true` or `false`).
+
+---
+
+### 2. Start/Get Conversation
+**Endpoint:** `POST /conversations/start/`  
+**Authentication:** Required (Customer/Rider/Merchant)  
+**Description:** Opens a support conversation or returns the existing active one for the authenticated user.
+
+---
+
+### 3. List Messages
+**Endpoint:** `GET /conversations/<uuid:pk>/messages/`  
+**Authentication:** Required  
+**Description:** Returns the paginated message history for a specific conversation.
+
+---
+
+### 4. Send Message
+**Endpoint:** `POST /conversations/<uuid:pk>/messages/send/`  
+**Authentication:** Required  
+**Description:** Sends a message in a conversation. 
+**Request Body:**
+```json
+{
+  "content": "Hello, I need help with my order."
+}
+```
+
+---
+
+### 5. Mark as Read
+**Endpoint:** `POST /conversations/<uuid:pk>/read/`  
+**Authentication:** Required (Agent)  
+**Description:** Marks all unread messages in the conversation as read and resets the unread count.
