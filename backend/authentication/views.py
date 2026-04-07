@@ -86,6 +86,7 @@ class LoginView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Authenticate user and return JWT tokens."""
         serializer = LoginSerializer(data=request.data)
@@ -217,7 +218,7 @@ class LogoutView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        except Exception as e:
+        except Exception:
             return Response(
                 {
                     "success": False,
