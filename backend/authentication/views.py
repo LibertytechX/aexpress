@@ -22,6 +22,10 @@ from .services import OTPService
 from .tasks import send_onboarding_email_task
 import logging
 from django.db import models
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 
 logger = logging.getLogger(__name__)
@@ -147,6 +151,44 @@ class UserProfileView(APIView):
         return Response(
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request):
+        """Soft-deactivate own account by merchant."""
+        user = request.user
+
+        # Check for active orders
+        active_statuses = [
+            "Pending",
+            "Assigned",
+            "AssignmentAccepted",
+            "Started",
+            "Pickup",
+            "Fulfilling",
+            "Arrived",
+        ]
+        if user.orders.filter(status__in=active_statuses).exists():
+            raise ServiceException(
+                status_code=400,
+                message="Cannot deactivate account with active/ongoing orders.",
+            )
+
+        # Soft-deactivate user
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        # Update merchant profile status
+        if hasattr(user, "merchant_profile"):
+            profile = user.merchant_profile
+            profile.activity_status = "inactive"
+            profile.save(update_fields=["activity_status"])
+
+        return service_response(
+            status="success",
+            message="Your account has been deactivated successfully.",
+            data={},
+            status_code=200,
         )
 
 

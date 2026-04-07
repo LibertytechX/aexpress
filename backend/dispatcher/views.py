@@ -1482,6 +1482,44 @@ class MerchantViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
 
+    @exception_advice(model_object=ErrorLog)
+    def destroy(self, request, *args, **kwargs):
+        """Soft-deactivate a merchant account."""
+        instance = self.get_object()
+
+        # Check for active orders
+        active_statuses = [
+            "Pending",
+            "Assigned",
+            "AssignmentAccepted",
+            "Started",
+            "Pickup",
+            "Fulfilling",
+            "Arrived",
+        ]
+        if instance.orders.filter(status__in=active_statuses).exists():
+            raise ServiceException(
+                status_code=400,
+                message="Cannot delete merchant with active/ongoing orders.",
+            )
+
+        # Soft-deactivate user
+        instance.is_active = False
+        instance.save(update_fields=["is_active"])
+
+        # Update merchant profile status
+        if hasattr(instance, "merchant_profile"):
+            profile = instance.merchant_profile
+            profile.activity_status = "inactive"
+            profile.save(update_fields=["activity_status"])
+
+        return service_response(
+            status="success",
+            message=f"Merchant {instance.business_name or instance.phone} deactivated successfully.",
+            data={},
+            status_code=200,
+        )
+
 
 class MerchantPricingOverrideViewSet(viewsets.ModelViewSet):
     """CRUD (POST-upsert) for per-merchant/per-vehicle pricing overrides."""

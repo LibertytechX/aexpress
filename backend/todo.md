@@ -12,4 +12,4 @@
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires
 - [x] Move all map services to a separate secure service and use it across the platform 
 - [x] update the onboard dispatcher in teams to support role assignment.
-- [] implement merchant delete endpoint, merchant notifications, notification_settings toggle, merchants chat api
+- [x] implement merchant delete endpoint, merchant notifications, notification_settings toggle
