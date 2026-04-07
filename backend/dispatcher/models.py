@@ -4,6 +4,8 @@ import math
 
 from django.db import models
 from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 import uuid
 import random
 import string
@@ -596,6 +598,11 @@ class Merchant(models.Model):
         ("inactive", "Inactive"),
     ]
 
+    MERCHANT_TYPE_CHOICES = [
+        ("regular", "Regular"),
+        ("api", "API"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
     user = models.OneToOneField(
@@ -635,7 +642,11 @@ class Merchant(models.Model):
         blank=True,
         help_text="Referral code used during signup",
     )
+    merchant_type = models.CharField(
+        max_length=50, choices=MERCHANT_TYPE_CHOICES, default="regular"
+    )
     has_active_subscription = models.BooleanField(default=False)
+    has_price_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -986,3 +997,133 @@ class ZoneTarget(models.Model):
 
     def __str__(self):
         return f"Target: {self.zone.name} — {self.month.strftime('%b %Y')}"
+
+
+class MerchantAPIKey(models.Model):
+    """
+    API keys for merchants of type 'api'.
+    Used for authenticating programmatic requests.
+    Keys are hashed (SHA-256); the raw key is shown once at creation time.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_api_key_profile",
+    )
+    key_hash = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="SHA-256 hash of the raw API key",
+    )
+    prefix = models.CharField(
+        max_length=16,
+        unique=True,
+        help_text="First characters of the key (ak_live_) for DB lookup",
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "merchant_api_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications
+# ---------------------------------------------------------------------------
+
+
+class MerchantDevice(models.Model):
+    """
+    Stores FCM device tokens for merchant mobile app installs.
+    A merchant may have multiple active devices (multi-device support).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="devices",
+    )
+    device_id = models.CharField(max_length=255, unique=True, db_index=True)
+    fcm_token = models.CharField(max_length=500, blank=True, default="")
+    platform = models.CharField(max_length=50, blank=True, default="")
+    model_name = models.CharField(max_length=255, blank=True, default="")
+    os_version = models.CharField(max_length=50, blank=True, default="")
+    app_version = models.CharField(max_length=50, blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_devices"
+
+    def __str__(self):
+        return f"Device {self.device_id} for merchant {self.merchant.merchant_id}"
+
+
+class MerchantNotification(models.Model):
+    """
+    Persisted notification record for a merchant.
+    Created regardless of push delivery outcome so the merchant
+    can always see their notification history in-app.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(default=dict)
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "merchant_notifications"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"[{'read' if self.is_read else 'unread'}] {self.title} → merchant {self.merchant.merchant_id}"
+
+
+class MerchantNotificationSettings(models.Model):
+    """
+    Per-merchant notification preference toggles.
+    Auto-created when a Merchant is created (via post_save signal).
+    """
+
+    merchant = models.OneToOneField(
+        Merchant,
+        on_delete=models.CASCADE,
+        related_name="notification_settings",
+    )
+    push_enabled = models.BooleanField(default=True, help_text="Master switch for all push notifications")
+    order_assigned = models.BooleanField(default=True, help_text="Notify when a rider is assigned to an order")
+    order_completed = models.BooleanField(default=True, help_text="Notify when an order is delivered")
+    order_cancelled = models.BooleanField(default=True, help_text="Notify when an order is cancelled")
+    wallet_credit = models.BooleanField(default=True, help_text="Notify on wallet credits and escrow releases")
+    marketing = models.BooleanField(default=True, help_text="Promotional and marketing notifications")
+
+    class Meta:
+        db_table = "merchant_notification_settings"
+
+    def __str__(self):
+        return f"NotificationSettings for merchant {self.merchant.merchant_id}"
+
+
+@receiver(post_save, sender=Merchant)
+def create_merchant_notification_settings(sender, instance, created, **kwargs):
+    """Auto-create notification settings when a new Merchant is created."""
+    if created:
+        MerchantNotificationSettings.objects.get_or_create(merchant=instance)

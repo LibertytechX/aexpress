@@ -3,7 +3,73 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
- 
+
+## [2026-04-07] — Chats API & Merchant Deactivation
+- **Chats API Documentation**: Documented the Chat System REST API in `ENDPOINTS_DOCUMENTATION.md`.
+- **Merchant Deactivation (Delete)**: Implemented new endpoints for soft-deactivating merchant accounts.
+    - **Dispatcher Portal**: Admins can deactivate merchants via `DELETE /api/dispatcher/merchants/<id>/`.
+    - **Merchant Portal**: Merchants can deactivate their own accounts via `DELETE /api/auth/profile/`.
+- **Validation**: Added a check to prevent deactivation if a merchant has any active/ongoing orders (Pending, Assigned, Started, etc.) in both endpoints.
+- **REST API Documentation**: Created and updated `ENDPOINTS_DOCUMENTATION.md` to document the new capabilities.
+
+---
+
+## [2026-04-02] — Grouped Order Mode
+
+### Added
+- **Grouped Order Mode**: Introduced a new `grouped` mode for single-delivery orders within the "Quick Send" flow.
+- **Backend Model**: Updated `Order.MODE_CHOICES` to include `grouped`.
+- **API Support**: Updated `QuickSendSerializer` to accept a `mode` field (`quick` or `grouped`) and `QuickSendView` to persist it.
+- **Frontend Toggle**: Added a "Quick Send" vs "Grouped Order" toggle in the `NewOrderScreen` component, allowing merchants to categorize their deliveries.
+
+---
+
+## [2026-03-31] — Merchant API Key Authentication Class
+
+### Added
+- **`MerchantAPIKeyAuthentication`** in `dispatcher/authentication.py`: A DRF `BaseAuthentication` subclass that validates `ak_live_` prefixed API keys.
+    - Resolves to the real Django `User` object, so `request.user` works normally on any secured view.
+    - Tracks `last_used_at` on each successful request.
+    - Designed to be used alongside JWT auth via `authentication_classes`:
+      ```python
+      from dispatcher.authentication import MerchantAPIKeyAuthentication
+      from rest_framework.settings import api_settings
+
+      authentication_classes = [
+          MerchantAPIKeyAuthentication,
+          *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+      ]
+      ```
+
+---
+
+- Registered `Webhook` and `WebhookOutbox` models in the Django Admin for the `webhooks` app, enabling internal management of webhook configurations and inspection of delivery attempts.
+
+---
+
+## [2026-03-30] — Merchant API Access Request
+
+### Added
+- **Merchant API Access Request**: New endpoint for regular merchants to switch their account type to `api`, enabling API key management.
+- **API Endpoints**: 
+    - `POST /api/merchant/request-api-access/`: Switches a merchant's account type to `api` (JWT authenticated).
+
+### Changed
+- **OTP Request Cleanup**: Optimized the `MerchantAPIKeyRequestOTPView` logic and removed redundant type checks.
+
+---
+
+## [2026-03-30] — Merchant API Key Authentication
+
+### Added
+- **Merchant API Key System**: Implemented a secure, two-step OTP-based retrieval and rotation flow for merchants of type `api`.
+- **Models**: Added `MerchantAPIKey` model in `dispatcher` app to store hashed API keys (`ak_live_` prefix).
+- **API Endpoints**: 
+    - `POST /api/merchant/apikey/request-otp/`: Requests a 6-digit OTP for API key management (JWT authenticated).
+    - `POST /api/merchant/apikey/retrieve/`: Verifies the OTP and returns a newly generated raw API key (JWT authenticated).
+- **Security**: API keys are stored as SHA-256 hashes; raw keys are only displayed once during generation. Rotation is supported and overwrites the previous key.
+
+
  ## [2026-03-28] — Frontend Tiered Pricing Fix
  
  ### Fixed

@@ -52,44 +52,79 @@ def calculate_effective_fare(
     vehicle: object,
     distance_km: Any,
     duration_minutes: Any,
-) -> Decimal:
-    """Return fare using (merchant, vehicle) override if present.
+    return_metadata: bool = False,
+) -> Any:
+    """Return fare using manual price lists, overrides, or base calculation.
 
     Precedence (when is_active=True):
-      1) flat_fee (if not null)
-      2) pricing_tiers (if present and type=='tiered')
-      3) vehicle.calculate_fare()
+      1) MerchantPriceList (bucket match)
+      2) MerchantPricingOverride.flat_fee
+      3) MerchantPricingOverride.pricing_tiers
+      4) vehicle.calculate_fare()
     """
 
-    # Avoid importing Django models at module import time in case this file is
-    # imported early during app loading.
-    from .models import MerchantPricingOverride
+    # Avoid importing Django models at module import time
+    from .models import MerchantPricingOverride, MerchantPriceList
 
-    if not merchant_user or not getattr(merchant_user, "id", None):
-        return vehicle.calculate_fare(distance_km or 0, duration_minutes or 0)
+    fare = None
+    source = "base"
+    label = None
 
-    override = (
-        MerchantPricingOverride.objects.filter(
-            merchant_id=merchant_user.id,
-            vehicle_id=getattr(vehicle, "id", None),
-            is_active=True,
+    if merchant_user and getattr(merchant_user, "id", None):
+        # 1. Check for manual Price List (highest priority)
+        price_list = (
+            MerchantPriceList.objects.filter(
+                merchant_id=merchant_user.id,
+                vehicle_id=getattr(vehicle, "id", None),
+                is_active=True,
+            )
+            .prefetch_related("items")
+            .first()
         )
-        .order_by("-updated_at")
-        .first()
-    )
 
-    if not override:
-        return vehicle.calculate_fare(distance_km or 0, duration_minutes or 0)
+        if price_list:
+            km = Decimal(str(distance_km or 0))
+            # Find a bucket that covers this distance
+            bucket = price_list.items.filter(min_km__lte=km, max_km__gte=km).first()
+            if bucket:
+                fare = _money(bucket.fixed_fee)
+                source = "manual_list"
+                label = bucket.label
 
-    # flat_fee can be 0, so we must check against None.
-    if override.flat_fee is not None:
-        return _money(override.flat_fee)
+        # 2. Check for traditional Merchant Override
+        if fare is None:
+            override = (
+                MerchantPricingOverride.objects.filter(
+                    merchant_id=merchant_user.id,
+                    vehicle_id=getattr(vehicle, "id", None),
+                    is_active=True,
+                )
+                .order_by("-updated_at")
+                .first()
+            )
 
-    if override.pricing_tiers and isinstance(override.pricing_tiers, dict):
-        try:
-            return calculate_tiered_fare(distance_km or 0, override.pricing_tiers)
-        except Exception:
-            # Fall through to global vehicle fare.
-            pass
+            if override:
+                if override.flat_fee is not None:
+                    fare = _money(override.flat_fee)
+                    source = "override_flat"
+                elif override.pricing_tiers and isinstance(override.pricing_tiers, dict):
+                    try:
+                        fare = calculate_tiered_fare(
+                            distance_km or 0, override.pricing_tiers
+                        )
+                        source = "override_tiered"
+                    except Exception:
+                        pass
 
-    return vehicle.calculate_fare(distance_km or 0, duration_minutes or 0)
+    # 3. Fallback to basic vehicle calculation
+    if fare is None:
+        fare = vehicle.calculate_fare(distance_km or 0, duration_minutes or 0)
+
+    if return_metadata:
+        return {
+            "fare": fare,
+            "source": source,
+            "label": label,
+        }
+
+    return fare

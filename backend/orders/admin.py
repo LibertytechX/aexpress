@@ -9,11 +9,12 @@ from django.utils.translation import gettext_lazy as _
 from django.db.models import Sum
 
 from dispatcher.models import SystemSettings
+from dispatcher.tasks import send_merchant_notification
 from riders.models import RiderEarning, RiderCodRecord
 from riders.notifications import notify_rider
 from wallet.models import Wallet
 
-from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride
+from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride, MerchantPriceList, MerchantPriceListItem
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,24 @@ def complete_order_for_rider(modeladmin, request, queryset):
                 logger.warning(
                     "Failed to send completion notification to rider %s: %s",
                     rider.rider_id,
+                    exc,
+                )
+
+            # Notify the merchant that their order was delivered
+            try:
+                merchant_profile = getattr(order.merchant, "merchant_profile", None)
+                if merchant_profile:
+                    send_merchant_notification.delay(
+                        merchant_id=str(merchant_profile.id),
+                        title="Order Delivered ✅",
+                        body=f"Your order #{order_number} has been delivered successfully.",
+                        data={"order_number": order_number, "status": "Done"},
+                        category="order_completed",
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Merchant completion notification failed for order %s: %s",
+                    order_number,
                     exc,
                 )
 
@@ -221,6 +240,36 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
     list_filter = ["is_active", "vehicle", "created_at"]
     search_fields = ["merchant__id", "merchant__business_name", "merchant__phone"]
     ordering = ["-created_at"]
+
+
+class MerchantPriceListItemInline(admin.TabularInline):
+    model = MerchantPriceListItem
+    extra = 1
+
+
+@admin.register(MerchantPriceList)
+class MerchantPriceListAdmin(admin.ModelAdmin):
+    list_display = ["name", "merchant", "vehicle", "is_active", "created_at"]
+    list_filter = ["is_active", "vehicle", "created_at"]
+    search_fields = ["name", "merchant__business_name", "merchant__phone"]
+    inlines = [MerchantPriceListItemInline]
+    ordering = ["-created_at"]
+
+
+class MerchantPriceListItemResource(resources.ModelResource):
+    class Meta:
+        model = MerchantPriceListItem
+        fields = ("id", "price_list", "label", "min_km", "max_km", "fixed_fee")
+        export_order = fields
+
+
+@admin.register(MerchantPriceListItem)
+class MerchantPriceListItemAdmin(ImportExportModelAdmin):
+    resource_class = MerchantPriceListItemResource
+    list_display = ["label", "price_list", "min_km", "max_km", "fixed_fee"]
+    list_filter = ["price_list"]
+    search_fields = ["label", "price_list__name"]
+    ordering = ["min_km"]
 
 
 class OrderResource(resources.ModelResource):

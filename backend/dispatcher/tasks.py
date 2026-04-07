@@ -1218,6 +1218,28 @@ def assign_rider_to_sub_order_task(sub_order_id, leg_id, rider_id=None):
     except Exception as exc:
         logger.warning(f"Relay leg assignment notification failed: {exc}")
 
+    # Notify the merchant that a relay leg was assigned
+    try:
+        merchant_profile = getattr(sub_order.merchant, "merchant_profile", None)
+        if merchant_profile:
+            send_merchant_notification.delay(
+                merchant_id=str(merchant_profile.id),
+                title="Rider Assigned 🚀",
+                body=(
+                    f"Leg {leg.leg_number} of your relay order "
+                    f"#{sub_order.parent_order.order_number} has a rider assigned."
+                ),
+                data={
+                    "order_number": sub_order.order_number,
+                    "parent_order_number": sub_order.parent_order.order_number,
+                    "leg_number": str(leg.leg_number),
+                    "status": "Assigned",
+                },
+                category="order_assigned",
+            )
+    except Exception as exc:
+        logger.warning(f"Merchant relay leg notification failed: {exc}")
+
     notify_relay_vertical_leads.delay(
         parent_order_number=sub_order.parent_order.order_number,
         sub_order_ids=[str(sub_order.id)],
@@ -1394,6 +1416,32 @@ def process_accepted_relay_route_task(order_id):
                         logger.warning(
                             f"Relay leg assignment notification failed: {exc}"
                         )
+
+                    # Notify the merchant that the first relay leg has a rider
+                    try:
+                        merchant_profile = getattr(
+                            sub_order.merchant, "merchant_profile", None
+                        )
+                        if merchant_profile:
+                            send_merchant_notification.delay(
+                                merchant_id=str(merchant_profile.id),
+                                title="Rider Assigned 🚀",
+                                body=(
+                                    f"Leg {leg.leg_number} of your relay order "
+                                    f"#{order.order_number} has a rider assigned."
+                                ),
+                                data={
+                                    "order_number": sub_order.order_number,
+                                    "parent_order_number": order.order_number,
+                                    "leg_number": str(leg.leg_number),
+                                    "status": "Assigned",
+                                },
+                                category="order_assigned",
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            f"Merchant relay notification failed: {exc}"
+                        )
                 else:
                     eta_time = timezone.now() + timezone.timedelta(
                         minutes=cumulative_duration_minutes
@@ -1422,4 +1470,33 @@ def process_accepted_relay_route_task(order_id):
             parent_order_number=order.order_number,
             sub_order_ids=assigned_sub_ids,
         )
+
+
+# ---------------------------------------------------------------------------
+# Merchant Push Notifications
+# ---------------------------------------------------------------------------
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=10)
+def send_merchant_notification(self, merchant_id, title, body, data=None, category="general"):
+    """
+    Persist and push a notification to a merchant.
+
+    Args:
+        merchant_id (str): UUID string of the Merchant (dispatcher.Merchant.id).
+        title (str): Notification title.
+        body (str): Notification body text.
+        data (dict | None): Arbitrary payload forwarded to the FCM message.
+        category (str): Matches a toggle on MerchantNotificationSettings
+                        (e.g. "order_assigned", "order_completed").
+
+    Retries up to 3 times (10 s apart) on any unexpected failure.
+    """
+    from authentication.notifications import notify_merchant
+
+    try:
+        notify_merchant(merchant_id, title, body, data=data, category=category)
+    except Exception as exc:
+        logger.error(f"send_merchant_notification failed for merchant {merchant_id}: {exc}")
+        raise self.retry(exc=exc)
     return True

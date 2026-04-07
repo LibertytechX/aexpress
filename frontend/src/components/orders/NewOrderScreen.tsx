@@ -112,6 +112,8 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
               rate_per_km: parseFloat(v.rate_per_km),
               rate_per_minute: parseFloat(v.rate_per_minute),
               pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
+              has_manual_pricing: v.has_manual_pricing || false,
+              manual_price_list: v.manual_price_list || null,
             };
           });
           setVehiclePricing(pricing);
@@ -126,7 +128,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
   // Calculate early route
   useEffect(() => {
-    if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
+    if ((mode !== 'quick' && mode !== 'grouped') || !pickupAddress || !dropoffAddress) {
       setCalculatingRoute(false);
       setEarlyRouteDistance(null);
       setEarlyRouteDuration(null);
@@ -303,24 +305,42 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   };
 
   // ─── Price calculation ───
-  // Calculate price for a specific vehicle using early route data
-  const calculateEarlyPrice = (vehicleName: string) => {
-    if (!earlyRouteDistance || !earlyRouteDuration) return null;
+  // Calculate price for a specific vehicle using distance and duration
+  const calcFareForVehicle = (vName: string, distanceKm: number | null, durationMin: number | null) => {
+    const pricing = vehiclePricing[vName];
+    if (!pricing) return 0;
+    
+    // 1. Manual pricing list
+    if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
+      const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
+      const matchedBucket = pricing.manual_price_list.items.find((item: any) => {
+        const minKm = getVal(item.min_km);
+        const maxKm = getVal(item.max_km);
+        return distanceKm >= minKm && distanceKm <= maxKm;
+      });
+      if (matchedBucket) {
+        return getVal(matchedBucket.fixed_fee);
+      }
+    }
 
-    const pricing = vehiclePricing[vehicleName];
-    if (!pricing) return null;
+    // 2. Tiered pricing
+    if (distanceKm !== null) {
+      const tiered = calcTieredPrice(distanceKm, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+    }
 
-    // Use tiered pricing if available
-    const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-    if (tiered !== null) return tiered;
+    // 3. Simple distance/duration
+    if (distanceKm !== null && durationMin !== null) {
+      return Math.round(pricing.base_fare + distanceKm * pricing.rate_per_km + durationMin * pricing.rate_per_minute);
+    }
 
-    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    return Math.round(pricing.base_fare + distanceCost + timeCost);
+    // Fallback
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
+    return pricing.base_fare;
   };
 
   const getActiveDropoffs = () => {
-    if (mode === "quick") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
+    if (mode === "quick" || mode === "grouped") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
     if (mode === "multi") return drops.filter(d => d.address.trim());
     if (mode === "bulk") return bulkRows.filter(r => r.valid !== false && r.address.trim());
     return [];
@@ -330,30 +350,21 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
   // Calculate dynamic cost based on route distance and duration
   const calculateCost = () => {
-    const pricing = vehiclePricing[vehicle];
-    if (!pricing) return 0;
-
     // Step 2 uses the full route (map) calculation.
     if (step === 2 && routeDistance && routeDuration) {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
+      return calcFareForVehicle(vehicle, routeDistance, routeDuration);
     }
-
     // Step 1 (Quick Send): if we already calculated an early route, use it
-    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
+    if ((mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration) {
+      return calcFareForVehicle(vehicle, earlyRouteDistance, earlyRouteDuration);
     }
-
-    // Fallback: floor fee for tiered, or base fare for simple
-    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
-    return pricing.base_fare;
+    // Fallback
+    return calcFareForVehicle(vehicle, null, null);
   };
 
   const unitCost = calculateCost();
-  const totalCost = totalDeliveries * unitCost;
+  const rawTotal = totalDeliveries * unitCost;
+  const totalCost = mode === 'grouped' ? Math.round(rawTotal * 0.7) : rawTotal;
 
   // ─── Review & Confirm ───
   const isBlank = (v: any) => !v || !String(v).trim();
@@ -363,7 +374,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   if (isBlank(senderName)) proceedErrors.push('Sender name is required.');
   if (isBlank(senderPhone)) proceedErrors.push('Sender phone is required.');
 
-  if (mode === 'quick') {
+  if (mode === 'quick' || mode === 'grouped') {
     if (isBlank(dropoffAddress)) proceedErrors.push('Delivery address is required.');
     if (isBlank(receiverName)) proceedErrors.push('Receiver name is required.');
     if (isBlank(receiverPhone)) proceedErrors.push('Receiver phone is required.');
@@ -412,7 +423,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
       totalCost: totalCost,
     };
 
-    if (mode === 'quick') {
+    if (mode === 'quick' || mode === 'grouped') {
       orderData.dropoff = dropoffAddress;
       orderData.receiverName = receiverName;
       orderData.receiverPhone = receiverPhone;
@@ -451,20 +462,58 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
             {/* Mode Selection */}
             <div style={{ display: "flex", background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
-              {["quick", "multi", "bulk"].map(m => (
-                <button key={m} onClick={() => { setMode(m); setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]); setBulkRows([]); }}
+              {["quick", "multi", "bulk"].map(m => {
+                const isActive = (m === 'quick') ? (mode === 'quick' || mode === 'grouped') : (mode === m);
+                return (
+                  <button key={m} onClick={() => { 
+                    if (m === 'quick') {
+                      // Don't reset to 'quick' if already on 'grouped'
+                      if (mode !== 'quick' && mode !== 'grouped') setMode('quick');
+                    } else {
+                      setMode(m); 
+                    }
+                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]); 
+                    setBulkRows([]); 
+                  }}
+                    style={{
+                      flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
+                      background: isActive ? "#fff" : "transparent",
+                      color: isActive ? S.navy : S.gray, fontWeight: 600, fontSize: 13,
+                      boxShadow: isActive ? "0 2px 8px rgba(0,0,0,0.05)" : "none",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {m === "quick" ? "⚡ Quick Send" : m === "multi" ? "📍 Multi-Drop" : "📂 Bulk Import"}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick vs Grouped selection (Exclusive to Quick Send flow) */}
+            {(mode === 'quick' || mode === 'grouped') && (
+              <div style={{ display: "flex", gap: 12 }}>
+                <button 
+                  onClick={() => setMode('quick')}
                   style={{
-                    flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
-                    background: mode === m ? "#fff" : "transparent",
-                    color: mode === m ? S.navy : S.gray, fontWeight: 600, fontSize: 13,
-                    boxShadow: mode === m ? "0 2px 8px rgba(0,0,0,0.05)" : "none",
-                    transition: "all 0.2s"
+                    flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'quick' ? S.navy : '#e2e8f0'}`,
+                    background: mode === 'quick' ? S.navy : '#fff', color: mode === 'quick' ? '#fff' : S.navy,
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
                   }}
                 >
-                  {m === "quick" ? "⚡ Quick Send" : m === "multi" ? "📍 Multi-Drop" : "📂 Bulk Import"}
+                  Quick Send (Single)
                 </button>
-              ))}
-            </div>
+                <button 
+                  onClick={() => setMode('grouped')}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'grouped' ? S.navy : '#e2e8f0'}`,
+                    background: mode === 'grouped' ? S.navy : '#fff', color: mode === 'grouped' ? '#fff' : S.navy,
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  Grouped Order
+                </button>
+              </div>
+            )}
 
             {/* Pickup */}
             <div>
@@ -598,9 +647,8 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 {Object.keys(vehiclePricing).map(vName => {
                   const isComingSoon = vName === 'Car' || vName === 'Van';
                   const isSelected = vehicle === vName && !isComingSoon;
-                  const earlyP = (mode === 'quick' && earlyRouteDistance)
-                    ? calcTieredPrice(earlyRouteDistance, vehiclePricing[vName]?.pricing_tiers) ??
-                    Math.round((vehiclePricing[vName]?.base_fare || 0) + earlyRouteDistance * (vehiclePricing[vName]?.rate_per_km || 0) + (earlyRouteDuration || 0) * (vehiclePricing[vName]?.rate_per_minute || 0))
+                  const earlyP = ((mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration)
+                    ? calcFareForVehicle(vName, earlyRouteDistance, earlyRouteDuration)
                     : null;
 
                   return (
@@ -661,7 +709,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                     <div>
                       <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
                       <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
-                        ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
+                        ₦{((mode === 'quick' || mode === 'grouped') && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
                       </div>
                     </div>
                   )}

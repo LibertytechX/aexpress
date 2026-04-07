@@ -195,6 +195,7 @@ class QuickSendSerializer(serializers.Serializer):
 
     # Order details
     vehicle = serializers.CharField(required=True)
+    mode = serializers.ChoiceField(choices=["quick", "grouped"], default="quick")
     payment_method = serializers.ChoiceField(
         choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
@@ -409,6 +410,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "delivery_proofs",
             "package_type",
+            "mode",
         ]
 
     def _get_first_delivery(self, obj):
@@ -566,3 +568,34 @@ class OrderStatusUpdateSerializer(serializers.Serializer):
     latitude = serializers.FloatField(required=False)
     longitude = serializers.FloatField(required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class MergeGroupedOrdersSerializer(serializers.Serializer):
+    """Serializer for merging multiple grouped orders into a parent order."""
+
+    order_ids = serializers.ListField(
+        child=serializers.CharField(max_length=255), required=True, min_length=1
+    )
+
+    def validate_order_ids(self, value):
+        orders = Order.objects.filter(order_number__in=value)
+        if orders.count() != len(value):
+            raise serializers.ValidationError("Some order IDs are invalid.")
+
+        # Check modes
+        if any(o.mode != "grouped" for o in orders):
+            raise serializers.ValidationError("All orders must be in 'grouped' mode.")
+
+        # Check status
+        if any(o.status != "Pending" for o in orders):
+            raise serializers.ValidationError("All orders must be in 'Pending' status.")
+
+        # Check vehicle (must be same for all to be picked up by one rider)
+        # We check the first one and compare against the rest.
+        first_order = orders.first()
+        if any(o.vehicle_id != first_order.vehicle_id for o in orders):
+            raise serializers.ValidationError(
+                "All orders must use the same vehicle type."
+            )
+
+        return value

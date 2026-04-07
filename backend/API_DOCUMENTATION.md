@@ -348,8 +348,73 @@ Authorization: Bearer <access_token>
 }
 ```
 
+
 ---
 
-## Order Integration
-Merchants with an active, non-blocked postpaid plan can now select `"postpaid"` as a `payment_method` when creating orders via `QuickSend`, `MultiDrop`, or `BulkImport`. The order amount will be added to their `accumulated_amount`, and the order `payment_status` will be set to `"Postpaid"`.
+## Merchant API Key Management
+
+### 0. Request API Access
+**Endpoint:** `POST /api/merchant/request-api-access/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Switches a regular merchant account to an `api` account type. This is required before an API key can be requested.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Your account has been switched to API type successfully.",
+  "data": {},
+  "status_code": 200
+}
+```
+
+---
+
+### 1. Request API Key Retrieval OTP
+**Endpoint:** `POST /api/merchant/apikey/request-otp/`  
+**Authentication:** Required (Bearer Token)  
+**Requirement:** `merchant_type` must be `'api'`.  
+**Description:** Generates a 6-digit OTP and sends it to the merchant's registered email for secure retrieval or rotation of the API key.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "OTP sent to your registered email.",
+  "data": {},
+  "status_code": 200
+}
+```
+
+---
+
+### 2. Retrieve Merchant API Key
+**Endpoint:** `POST /api/merchant/apikey/retrieve/`  
+**Authentication:** Required (Bearer Token)  
+**Requirement:** `merchant_type` must be `'api'`.  
+**Description:** Verifies the 6-digit OTP and returns a newly generated raw API key. **Store this key securely as it is only shown once.** Subsequent calls with a valid OTP will rotate/overwrite the existing key.
+
+**Request Body:**
+```json
+{
+  "otp": "123456"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "API Key generated successfully. Please store it securely.",
+  "data": {
+    "api_key": "ak_live_..."
+  },
+  "status_code": 200
+}
+```
+
+**Security Note:** 
+- API Keys are prefixed with `ak_live_`.
+- Only the SHA-256 hash is stored in the database.
+- Key rotation is mandatory upon each retrieval call (every call to this endpoint generates a *new* key and voids the previous one).
 

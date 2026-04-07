@@ -22,6 +22,10 @@ from .services import OTPService
 from .tasks import send_onboarding_email_task
 import logging
 from django.db import models
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 
 logger = logging.getLogger(__name__)
@@ -39,9 +43,7 @@ class SignupView(APIView):
 
         if serializer.is_valid():
             reg_source = request.query_params.get("source", "web")
-            print("Let's see the souce: ", reg_source)
             user = serializer.save(registration_source=reg_source)
-            print("user register source: ", user.registration_source)
 
             # Generate OTP
             otp = OTPService.generate_otp()
@@ -84,6 +86,7 @@ class LoginView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Authenticate user and return JWT tokens."""
         serializer = LoginSerializer(data=request.data)
@@ -151,6 +154,44 @@ class UserProfileView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request):
+        """Soft-deactivate own account by merchant."""
+        user = request.user
+
+        # Check for active orders
+        active_statuses = [
+            "Pending",
+            "Assigned",
+            "AssignmentAccepted",
+            "Started",
+            "Pickup",
+            "Fulfilling",
+            "Arrived",
+        ]
+        if user.orders.filter(status__in=active_statuses).exists():
+            raise ServiceException(
+                status_code=400,
+                message="Cannot deactivate account with active/ongoing orders.",
+            )
+
+        # Soft-deactivate user
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        # Update merchant profile status
+        if hasattr(user, "merchant_profile"):
+            profile = user.merchant_profile
+            profile.activity_status = "inactive"
+            profile.save(update_fields=["activity_status"])
+
+        return service_response(
+            status="success",
+            message="Your account has been deactivated successfully.",
+            data={},
+            status_code=200,
+        )
+
 
 class LogoutView(APIView):
     """API endpoint for user logout."""
@@ -177,7 +218,7 @@ class LogoutView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        except Exception as e:
+        except Exception:
             return Response(
                 {
                     "success": False,
@@ -874,3 +915,181 @@ class MobileResetPasswordView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications
+# ---------------------------------------------------------------------------
+
+from dispatcher.permissions import IsMerchant  # noqa: E402
+from dispatcher.models import MerchantDevice, MerchantNotification, MerchantNotificationSettings  # noqa: E402
+from .serializers import (  # noqa: E402
+    MerchantDeviceSerializer,
+    MerchantNotificationSerializer,
+    MerchantNotificationSettingsSerializer,
+)
+
+
+class MerchantDeviceRegistrationView(APIView):
+    """
+    POST /api/auth/device/
+    Register or update a merchant's mobile device for push notifications.
+    Uses device_id as the unique key — safe to call on every app launch.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request):
+        serializer = MerchantDeviceSerializer(data=request.data)
+        if not serializer.is_valid():
+            return service_response(
+                status="error",
+                message="Invalid device data.",
+                data=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        merchant = request.user.merchant_profile
+        data = serializer.validated_data
+
+        MerchantDevice.objects.update_or_create(
+            device_id=data["device_id"],
+            defaults={
+                "merchant": merchant,
+                "fcm_token": data["fcm_token"],
+                "platform": data["platform"],
+                "model_name": data["model_name"],
+                "os_version": data["os_version"],
+                "app_version": data["app_version"],
+                "is_active": True,
+            },
+        )
+
+        return service_response(
+            status="success",
+            message="Device registered successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationListView(APIView):
+    """
+    GET /api/auth/notifications/
+    Returns all notifications for the authenticated merchant, newest first.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def get(self, request):
+        merchant = request.user.merchant_profile
+        notifications = MerchantNotification.objects.filter(merchant=merchant)
+        serializer = MerchantNotificationSerializer(notifications, many=True)
+        return service_response(
+            status="success",
+            message="Notifications fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationDetailView(APIView):
+    """
+    GET /api/auth/notifications/<uuid:pk>/
+    Returns a single notification belonging to the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def get(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        serializer = MerchantNotificationSerializer(notification)
+        return service_response(
+            status="success",
+            message="Notification fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationMarkReadView(APIView):
+    """
+    POST /api/auth/notifications/<uuid:pk>/read/
+    Marks a single notification as read.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        notification.is_read = True
+        notification.save(update_fields=["is_read"])
+        return service_response(
+            status="success",
+            message="Notification marked as read.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationMarkAllReadView(APIView):
+    """
+    POST /api/auth/notifications/read-all/
+    Marks all unread notifications as read for the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request):
+        merchant = request.user.merchant_profile
+        updated = MerchantNotification.objects.filter(merchant=merchant, is_read=False).update(
+            is_read=True
+        )
+        return service_response(
+            status="success",
+            message=f"{updated} notification(s) marked as read.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationSettingsView(APIView):
+    """
+    GET  /api/auth/notifications/settings/  — retrieve current toggle preferences.
+    PATCH /api/auth/notifications/settings/ — update one or more toggles.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def _get_settings(self, merchant):
+        obj, _ = MerchantNotificationSettings.objects.get_or_create(merchant=merchant)
+        return obj
+
+    def get(self, request):
+        settings_obj = self._get_settings(request.user.merchant_profile)
+        serializer = MerchantNotificationSettingsSerializer(settings_obj)
+        return service_response(
+            status="success",
+            message="Notification settings fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    def patch(self, request):
+        settings_obj = self._get_settings(request.user.merchant_profile)
+        serializer = MerchantNotificationSettingsSerializer(
+            settings_obj, data=request.data, partial=True
+        )
+        if not serializer.is_valid():
+            return service_response(
+                status="error",
+                message="Invalid settings data.",
+                data=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save()
+        return service_response(
+            status="success",
+            message="Notification settings updated successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )

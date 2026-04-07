@@ -4,6 +4,7 @@ from .views import (
     QuickSendView,
     MultiDropView,
     BulkImportView,
+    MergeGroupedOrdersView,
     OrderListView,
     OrderDetailView,
     OrderStatsView,
@@ -43,6 +44,11 @@ urlpatterns = [
     path("quick-send/", QuickSendView.as_view(), name="quick_send"),
     path("multi-drop/", MultiDropView.as_view(), name="multi_drop"),
     path("bulk-import/", BulkImportView.as_view(), name="bulk_import"),
+    path(
+        "merge-grouped-orders/",
+        MergeGroupedOrdersView.as_view(),
+        name="merge_grouped_orders",
+    ),
     path("calculate-fare/", CalculateFareView.as_view(), name="calculate_fare"),
     path(
         "bulk-calculate-fare/",

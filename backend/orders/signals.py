@@ -51,3 +51,15 @@ def on_order_completed(sender, instance, created, **kwargs):
 
     # Offload streaks, challenges, and commissions to background task
     handle_order_completion_tasks.delay(instance.id)
+
+
+@receiver(post_save, sender="orders.MerchantPriceList")
+def update_merchant_pricelist_flag(sender, instance, created, **kwargs):
+    """
+    Auto-toggle the Merchant.has_price_list flag when a price list is created.
+    """
+    if created:
+        from dispatcher.models import Merchant
+
+        # Find the merchant profile for this user
+        Merchant.objects.filter(user=instance.merchant).update(has_price_list=True)

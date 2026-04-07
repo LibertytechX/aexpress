@@ -23,6 +23,7 @@ from .serializers import (
     AssignedRouteSerializer,
     OrderCancelSerializer,
     OrderStatusUpdateSerializer,
+    MergeGroupedOrdersSerializer,
 )
 from .permissions import IsRider
 from dispatcher.models import Rider
@@ -32,6 +33,7 @@ from wallet.escrow import EscrowManager
 from wallet.corebanking_service import create_virtual_account
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
+from dispatcher.tasks import send_merchant_notification
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
 from dispatcher.serializers import OrderEventSerializer
@@ -50,29 +52,59 @@ class VehicleListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        """Get all active vehicles with pricing, applying merchant overrides if present."""
-        from .models import MerchantPricingOverride
+        """Get all active vehicles with pricing, applying merchant overrides or manual price lists."""
+        from .models import MerchantPricingOverride, MerchantPriceList
 
         vehicles = Vehicle.objects.filter(is_active=True)
         results = []
 
         for vehicle in vehicles:
-            # Check for merchant override
-            override = MerchantPricingOverride.objects.filter(
-                merchant=request.user, vehicle=vehicle, is_active=True
-            ).first()
-
             v_data = VehicleSerializer(vehicle).data
+            v_data["has_manual_pricing"] = False
+            v_data["manual_price_list"] = None
 
-            if override:
-                # Apply override to serialized data
-                if override.flat_fee is not None:
-                    v_data["base_fare"] = float(override.flat_fee)
-                    v_data["rate_per_km"] = 0.0
-                    v_data["rate_per_minute"] = 0.0
-                    v_data["pricing_tiers"] = None
-                elif override.pricing_tiers:
-                    v_data["pricing_tiers"] = override.pricing_tiers
+            # 1. Check for manual Price List (highest precedence)
+            price_list = (
+                MerchantPriceList.objects.filter(
+                    merchant=request.user, vehicle=vehicle, is_active=True
+                )
+                .prefetch_related("items")
+                .first()
+            )
+
+            if price_list:
+                v_data["has_manual_pricing"] = True
+                v_data["manual_price_list"] = {
+                    "name": price_list.name,
+                    "items": [
+                        {
+                            "label": item.label,
+                            "min_km": float(item.min_km),
+                            "max_km": float(item.max_km),
+                            "fixed_fee": float(item.fixed_fee),
+                        }
+                        for item in price_list.items.all()
+                    ],
+                }
+                # For manual lists, we nullify standard rates to avoid confusion
+                v_data["base_fare"] = 0.0
+                v_data["rate_per_km"] = 0.0
+                v_data["rate_per_minute"] = 0.0
+                v_data["pricing_tiers"] = None
+            else:
+                # 2. Check for traditional merchant override
+                override = MerchantPricingOverride.objects.filter(
+                    merchant=request.user, vehicle=vehicle, is_active=True
+                ).first()
+
+                if override:
+                    if override.flat_fee is not None:
+                        v_data["base_fare"] = float(override.flat_fee)
+                        v_data["rate_per_km"] = 0.0
+                        v_data["rate_per_minute"] = 0.0
+                        v_data["pricing_tiers"] = None
+                    elif override.pricing_tiers:
+                        v_data["pricing_tiers"] = override.pricing_tiers
 
             results.append(v_data)
 
@@ -118,16 +150,21 @@ class QuickSendView(APIView):
         from django.utils import timezone
         from datetime import timedelta
 
+        # Get requested mode (defaults to quick)
+        requested_mode = request.data.get("mode", "quick")
+        if requested_mode not in ["quick", "grouped"]:
+            requested_mode = "quick"
+
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
-            user=request.user, mode="quick", created_at__gte=one_minute_ago
+            user=request.user, mode=requested_mode, created_at__gte=one_minute_ago
         ).exists():
             return Response(
                 {
                     "success": False,
                     "errors": {
                         "non_field_errors": [
-                            "Please wait a minute before creating another Quick Send order."
+                            f"Please wait a minute before creating another {requested_mode.replace('_', ' ').title()} order."
                         ]
                     },
                 },
@@ -154,10 +191,16 @@ class QuickSendView(APIView):
             request.user, vehicle, distance_km, duration_minutes
         )
 
+        # Apply 30% discount for grouped orders
+        if data.get("mode") == "grouped":
+            from decimal import Decimal
+
+            total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
+
         # Create order
         order = Order.objects.create(
             user=request.user,
-            mode="quick",
+            mode=data.get("mode", "quick"),
             vehicle=vehicle,
             pickup_address=data["pickup_address"],
             sender_name=data["sender_name"],
@@ -1123,24 +1166,37 @@ class CalculateFareView(APIView):
             )
 
         try:
-            total_amount = calculate_effective_fare(
-                request.user, vehicle, float(distance_km), int(duration_minutes)
+            pricing_data = calculate_effective_fare(
+                request.user,
+                vehicle,
+                float(distance_km),
+                int(duration_minutes),
+                return_metadata=True,
             )
+            total_amount = pricing_data["fare"]
+            source = pricing_data["source"]
+            label = pricing_data["label"]
 
-            return Response(
-                {
-                    "success": True,
-                    "price": total_amount,
-                    "breakdown": {
-                        "base_fare": vehicle.base_fare,
-                        "distance_cost": float(distance_km)
-                        * float(vehicle.rate_per_km),
-                        "time_cost": int(duration_minutes)
-                        * float(vehicle.rate_per_minute),
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
+            response_data = {
+                "success": True,
+                "price": total_amount,
+                "pricing_source": source,
+                "pricing_label": label,
+            }
+
+            if source == "manual_list":
+                response_data["breakdown"] = {
+                    "type": "Manual Price List",
+                    "description": f"Fixed rate for range matching '{label}'",
+                }
+            else:
+                response_data["breakdown"] = {
+                    "base_fare": vehicle.base_fare,
+                    "distance_cost": float(distance_km) * float(vehicle.rate_per_km),
+                    "time_cost": int(duration_minutes) * float(vehicle.rate_per_minute),
+                }
+
+            return Response(response_data, status=status.HTTP_200_OK)
 
         except (ValueError, TypeError) as e:
             return Response(
@@ -1392,6 +1448,20 @@ class CancelOrderView(APIView):
             },
         )
 
+        # Notify the merchant that their order was cancelled
+        try:
+            merchant_profile = getattr(order.merchant, "merchant_profile", None)
+            if merchant_profile:
+                send_merchant_notification.delay(
+                    merchant_id=str(merchant_profile.id),
+                    title="Order Cancelled",
+                    body=f"Your order #{order_number} has been cancelled.",
+                    data={"order_number": order_number, "status": "CustomerCanceled"},
+                    category="order_cancelled",
+                )
+        except Exception as exc:
+            logger.warning(f"Merchant cancellation notification failed: {exc}")
+
         # Prepare response
         response_data = {
             "success": True,
@@ -1519,7 +1589,7 @@ def _advance_order(request, order_number, new_status, event_desc):
             dist = Zone.haversine_distance(
                 lat, lng, order.pickup_latitude, order.pickup_longitude
             )
-            if dist > 1.5:  # 1500 meters
+            if dist > 2.0:  # 2000 kmeters
                 return service_response(
                     status="error",
                     message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
@@ -1635,6 +1705,7 @@ class OrderStartView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1817,7 +1888,7 @@ class OrderCompleteView(APIView):
                     final_delivery.dropoff_latitude,
                     final_delivery.dropoff_longitude,
                 )
-                if dist > 1.5:  # 1500 meters
+                if dist > 2.0:  # 2000 meters
                     return service_response(
                         status="error",
                         message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
@@ -1897,6 +1968,20 @@ class OrderCompleteView(APIView):
                 logger.warning(
                     f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
                 )
+
+            # Notify the merchant that their order was delivered
+            try:
+                merchant_profile = getattr(order.merchant, "merchant_profile", None)
+                if merchant_profile:
+                    send_merchant_notification.delay(
+                        merchant_id=str(merchant_profile.id),
+                        title="Order Delivered ✅",
+                        body=f"Your order #{order_number} has been delivered successfully.",
+                        data={"order_number": order_number, "status": "Done"},
+                        category="order_completed",
+                    )
+            except Exception as exc:
+                logger.warning(f"Merchant completion notification failed: {exc}")
 
             # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
             # but we can rely on `_advance_order` to handle it cleanly.
@@ -2180,3 +2265,59 @@ class DeliveryCompleteView(APIView):
         )
 
         return Response({"status": "Delivered", "previous": old_status})
+
+
+class MergeGroupedOrdersView(APIView):
+    """API view to merge multiple grouped orders into a parent order."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    @transaction.atomic
+    def post(self, request):
+        serializer = MergeGroupedOrdersSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        order_ids = serializer.validated_data["order_ids"]
+        orders = Order.objects.filter(id__in=order_ids)
+
+        # Take common info from the first order to create parent
+        first_order = orders.first()
+
+        # Calculate aggregated total_amount
+        total_amount = sum(o.total_amount for o in orders)
+
+        # Create Parent Order
+        parent_order = Order.objects.create(
+            user=request.user,
+            mode="grouped",
+            vehicle=first_order.vehicle,
+            pickup_address=first_order.pickup_address,
+            sender_name=first_order.sender_name,
+            sender_phone=first_order.sender_phone,
+            total_amount=total_amount,
+            status="Pending",
+            payment_method=first_order.payment_method,
+            distance_km=sum(o.distance_km for o in orders if o.distance_km) or 0,
+            duration_minutes=sum(
+                o.duration_minutes for o in orders if o.duration_minutes
+            )
+            or 0,
+        )
+
+        # Link sub-orders to the new parent
+        orders.update(parent_order=parent_order)
+
+        return service_response(
+            status="success",
+            message=f"Successfully merged {len(order_ids)} orders into parent {parent_order.order_number}",
+            data={
+                "parent_order_number": parent_order.order_number,
+                "parent_id": str(parent_order.id),
+            },
+            status_code=201,
+        )

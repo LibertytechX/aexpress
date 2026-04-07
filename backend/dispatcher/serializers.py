@@ -324,17 +324,22 @@ class OrderSerializer(serializers.ModelSerializer):
     sub_orders = serializers.SerializerMethodField()
 
     def get_sub_order_numbers(self, obj):
-        """Return list of sub-order order_numbers if this is a relay parent order."""
-        return list(
-            obj.sub_orders.values_list("order_number", flat=True).order_by(
-                "relay_leg_number"
+        """Return list of sub-order order_numbers if this is a relay or grouped parent order."""
+        if not obj.parent_order_id:
+            order_field = "relay_leg_number" if obj.is_relay_order else "created_at"
+            return list(
+                obj.sub_orders.values_list("order_number", flat=True).order_by(
+                    order_field
+                )
             )
-        )
+        return []
 
     def get_sub_orders(self, obj):
-        """Return simplified sub-order details if this is a relay parent order."""
-        if obj.is_relay_order and not obj.parent_order_id:
-            sub_orders = obj.sub_orders.all().order_by("relay_leg_number")
+        """Return simplified sub-order details if this is a relay or grouped parent order."""
+        is_parent = not obj.parent_order_id
+        if (obj.is_relay_order or obj.mode == "grouped") and is_parent:
+            order_field = "relay_leg_number" if obj.is_relay_order else "created_at"
+            sub_orders = obj.sub_orders.all().order_by(order_field)
             return [
                 {
                     "id": so.order_number,
@@ -361,6 +366,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "riderId",
             "rider",
             "status",
+            "mode",
             "amount",
             "distance",
             "time",
