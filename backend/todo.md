@@ -12,4 +12,7 @@
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires
 - [x] Move all map services to a separate secure service and use it across the platform 
 - [x] update the onboard dispatcher in teams to support role assignment.
-- [x] implement merchant delete endpoint, merchant notifications, notification_settings toggle
+- [x] implement merchant delete endpoint
+- [] merchant notifications, notification_settings toggle
+- [x] Adjust app server logging for faster error tracing and debugging and troubleshooting on axpress.
+- [] (Bonus). Integrate AI Chats using Gemini AI model to axpress customer chats features 

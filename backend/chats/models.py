@@ -43,7 +43,7 @@ class Conversation(models.Model):
 
     @property
     def ably_channel_name(self):
-        return f"chat:{self.type}:{self.user_id_id}"
+        return f"chat:{self.type}:{self.user_id.id}"
 
 
 class Message(models.Model):

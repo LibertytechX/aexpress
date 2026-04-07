@@ -9,7 +9,6 @@
 **Endpoint:** `GET/PUT/DELETE /profile/`  
 **Authentication:** Required (Bearer Token)  
 **Description:** Get, update, or deactivate the current merchant's account.
-
 **DELETE Behavior:**
 - Soft-deactivates the account.
 - **Pre-condition**: Must NOT have any active/ongoing orders.
@@ -87,6 +86,9 @@
 ---
 
 ## Chat System API Documentation
+
+> [!TIP]
+> **Real-time Integration:** For real-time chat updates using Ably, see the detailed [Ably Realtime Chats Integration Guide](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md).
 
 ## Base URL
 ```
