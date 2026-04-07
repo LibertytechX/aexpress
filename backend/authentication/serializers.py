@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from sparky_utils.exceptions import ServiceException
 from .models import User, Address
 
 
@@ -62,8 +63,8 @@ class SignupSerializer(serializers.ModelSerializer):
 
         # Check if phone already exists
         if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError(
-                "This phone number is already registered."
+            raise ServiceException(
+                status_code=400, message="This phone number is already registered."
             )
 
         return phone
@@ -71,15 +72,17 @@ class SignupSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         """Validate email uniqueness."""
         if User.objects.filter(email=value.lower()).exists():
-            raise serializers.ValidationError("This email is already registered.")
+            raise ServiceException(
+                status_code=400, message="This email is already registered."
+            )
 
         return value.lower()
 
     def validate(self, data):
         """Validate that passwords match."""
         if data.get("password") != data.get("confirm_password"):
-            raise serializers.ValidationError(
-                {"confirm_password": "Passwords do not match."}
+            raise ServiceException(
+                status_code=400, message="Passwords do not match."
             )
 
         return data
@@ -122,23 +125,31 @@ class LoginSerializer(serializers.Serializer):
         password = data.get("password")
 
         if not phone or not password:
-            raise serializers.ValidationError("Phone and password are required.")
+            raise ServiceException(
+                status_code=400, message="Phone and password are required."
+            )
 
         # Try to get the user
         try:
             user = User.objects.get(phone=phone)
         except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         # Check if user is active
         if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
+            raise ServiceException(
+                status_code=400, message="This account has been deactivated."
+            )
 
         # Authenticate user
         user = authenticate(username=phone, password=password)
 
         if not user:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         data["user"] = user
         return data
@@ -155,7 +166,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         """Validate email uniqueness (excluding current user)."""
         user = self.instance
         if User.objects.filter(email=value.lower()).exclude(id=user.id).exists():
-            raise serializers.ValidationError("This email is already in use.")
+            raise ServiceException(
+                status_code=400, message="This email is already in use."
+            )
 
         return value.lower()
 
@@ -176,7 +189,9 @@ class AddressSerializer(serializers.ModelSerializer):
         if not self.instance:
             existing_count = Address.objects.filter(user=user).count()
             if existing_count >= 3:
-                raise serializers.ValidationError("Maximum of 3 addresses allowed.")
+                raise ServiceException(
+                    status_code=400, message="Maximum of 3 addresses allowed."
+                )
 
         # Check unique label per user
         label = data.get("label")
@@ -185,8 +200,8 @@ class AddressSerializer(serializers.ModelSerializer):
             if self.instance:
                 query = query.exclude(id=self.instance.id)
             if query.exists():
-                raise serializers.ValidationError(
-                    {"label": "You already have an address with this label."}
+                raise ServiceException(
+                    status_code=400, message="You already have an address with this label."
                 )
 
         return data
