@@ -222,3 +222,45 @@ class AddressSerializer(serializers.ModelSerializer):
             )
 
         return super().update(instance, validated_data)
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications
+# ---------------------------------------------------------------------------
+
+from dispatcher.models import MerchantNotification, MerchantNotificationSettings  # noqa: E402
+
+
+class MerchantDeviceSerializer(serializers.Serializer):
+    """Validates device registration input for merchant mobile apps."""
+
+    device_id = serializers.CharField(max_length=255)
+    fcm_token = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    platform = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    model_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
+    os_version = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    app_version = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+
+
+class MerchantNotificationSerializer(serializers.ModelSerializer):
+    """Read-only serializer for merchant notification list and detail responses."""
+
+    class Meta:
+        model = MerchantNotification
+        fields = ["id", "title", "body", "data", "is_read", "created_at"]
+        read_only_fields = fields
+
+
+class MerchantNotificationSettingsSerializer(serializers.ModelSerializer):
+    """Read/write serializer for per-merchant notification preference toggles."""
+
+    class Meta:
+        model = MerchantNotificationSettings
+        fields = [
+            "push_enabled",
+            "order_assigned",
+            "order_completed",
+            "order_cancelled",
+            "wallet_credit",
+            "marketing",
+        ]

@@ -33,6 +33,7 @@ from wallet.escrow import EscrowManager
 from wallet.corebanking_service import create_virtual_account
 from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
+from dispatcher.tasks import send_merchant_notification
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
 from dispatcher.serializers import OrderEventSerializer
@@ -1447,6 +1448,20 @@ class CancelOrderView(APIView):
             },
         )
 
+        # Notify the merchant that their order was cancelled
+        try:
+            merchant_profile = getattr(order.merchant, "merchant_profile", None)
+            if merchant_profile:
+                send_merchant_notification.delay(
+                    merchant_id=str(merchant_profile.id),
+                    title="Order Cancelled",
+                    body=f"Your order #{order_number} has been cancelled.",
+                    data={"order_number": order_number, "status": "CustomerCanceled"},
+                    category="order_cancelled",
+                )
+        except Exception as exc:
+            logger.warning(f"Merchant cancellation notification failed: {exc}")
+
         # Prepare response
         response_data = {
             "success": True,
@@ -1953,6 +1968,20 @@ class OrderCompleteView(APIView):
                 logger.warning(
                     f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
                 )
+
+            # Notify the merchant that their order was delivered
+            try:
+                merchant_profile = getattr(order.merchant, "merchant_profile", None)
+                if merchant_profile:
+                    send_merchant_notification.delay(
+                        merchant_id=str(merchant_profile.id),
+                        title="Order Delivered ✅",
+                        body=f"Your order #{order_number} has been delivered successfully.",
+                        data={"order_number": order_number, "status": "Done"},
+                        category="order_completed",
+                    )
+            except Exception as exc:
+                logger.warning(f"Merchant completion notification failed: {exc}")
 
             # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
             # but we can rely on `_advance_order` to handle it cleanly.

@@ -17,6 +17,12 @@ from .views import (
     ResendOTPView,
     MobileRequestPasswordResetView,
     MobileResetPasswordView,
+    MerchantDeviceRegistrationView,
+    MerchantNotificationListView,
+    MerchantNotificationDetailView,
+    MerchantNotificationMarkReadView,
+    MerchantNotificationMarkAllReadView,
+    MerchantNotificationSettingsView,
 )
 
 app_name = "authentication"
@@ -72,5 +78,36 @@ urlpatterns = [
         "addresses/<uuid:address_id>/set-default/",
         SetDefaultAddressView.as_view(),
         name="set_default_address",
+    ),
+    # Merchant device & notification endpoints
+    path(
+        "device/",
+        MerchantDeviceRegistrationView.as_view(),
+        name="merchant_device_register",
+    ),
+    path(
+        "notifications/",
+        MerchantNotificationListView.as_view(),
+        name="merchant_notification_list",
+    ),
+    path(
+        "notifications/read-all/",
+        MerchantNotificationMarkAllReadView.as_view(),
+        name="merchant_notification_read_all",
+    ),
+    path(
+        "notifications/settings/",
+        MerchantNotificationSettingsView.as_view(),
+        name="merchant_notification_settings",
+    ),
+    path(
+        "notifications/<uuid:pk>/",
+        MerchantNotificationDetailView.as_view(),
+        name="merchant_notification_detail",
+    ),
+    path(
+        "notifications/<uuid:pk>/read/",
+        MerchantNotificationMarkReadView.as_view(),
+        name="merchant_notification_mark_read",
     ),
 ]
