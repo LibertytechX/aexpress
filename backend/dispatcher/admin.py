@@ -50,7 +50,8 @@ class RiderResource(resources.ModelResource):
         column_name="Previous Day Total Amount"
     )
     yesterday_distance_covered = fields.Field(column_name="Previous Day Distance (km)")
-    yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
+    # yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
+    yesterday_distance = fields.Field(column_name="Previous Day Distance (km)")
 
     class Meta:
         model = Rider
@@ -103,7 +104,7 @@ class RiderResource(resources.ModelResource):
         val = getattr(rider, "total_yesterday_order_distance_annotated", 0)
         return round(val, 2) if val else 0.00
 
-    def dehydrate_yesterday_distance_covered(self, rider):
+    def dehydrate_yesterday_distance(self, rider):
         return rider.yesterday_distance_covered()
 
     def get_queryset(self):
