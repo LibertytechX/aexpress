@@ -104,34 +104,7 @@ class RiderResource(resources.ModelResource):
         return round(val, 2) if val else 0.00
 
     def dehydrate_yesterday_distance_covered(self, rider):
-        if not rider.vehicle_asset:
-            return 0.00
-
-        from django.utils import timezone
-        from datetime import timedelta
-        from django.core.cache import cache
-        from .models import VehicleTracking
-
-        yesterday = timezone.now().date() - timedelta(days=1)
-        cache_key = f"yesterday_distance_{rider.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
-
-        cached_distance = cache.get(cache_key)
-        if cached_distance is not None:
-            return round(cached_distance, 2) if cached_distance else 0.00
-
-        trackings = VehicleTracking.objects.filter(
-            vehicle_asset=rider.vehicle_asset, created_at__date=yesterday
-        ).order_by("created_at")
-
-        distance = 0
-        if trackings.exists():
-            first_entry = trackings.first()
-            last_entry = trackings.last()
-            if first_entry.travelled is not None and last_entry.travelled is not None:
-                distance = float(last_entry.travelled) - float(first_entry.travelled)
-
-        cache.set(cache_key, distance, 60 * 60 * 24)
-        return round(distance, 2)
+        return rider.yesterday_distance_covered()
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -332,34 +305,7 @@ class RiderAdmin(ImportExportModelAdmin):
 
     @admin.display(description="Prev Day Distance (km)")
     def yesterday_distance_covered(self, obj):
-        if not obj.vehicle_asset:
-            return 0.00
-
-        from django.utils import timezone
-        from datetime import timedelta
-        from django.core.cache import cache
-        from .models import VehicleTracking
-
-        yesterday = timezone.now().date() - timedelta(days=1)
-        cache_key = f"yesterday_distance_{obj.vehicle_asset.id}_{yesterday.strftime('%Y-%m-%d')}"
-
-        cached_distance = cache.get(cache_key)
-        if cached_distance is not None:
-            return round(cached_distance, 2) if cached_distance else 0.00
-
-        trackings = VehicleTracking.objects.filter(
-            vehicle_asset=obj.vehicle_asset, created_at__date=yesterday
-        ).order_by("created_at")
-
-        distance = 0
-        if trackings.exists():
-            first_entry = trackings.first()
-            last_entry = trackings.last()
-            if first_entry.travelled is not None and last_entry.travelled is not None:
-                distance = float(last_entry.travelled) - float(first_entry.travelled)
-
-        cache.set(cache_key, distance, 60 * 60 * 24)
-        return round(distance, 2)
+        return obj.yesterday_distance_covered()
 
     @admin.display(
         description="Prev Day Orders (km)",

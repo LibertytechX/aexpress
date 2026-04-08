@@ -432,16 +432,16 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
 
     At each step:
     - stop once the dropoff is directly reachable within `max_leg_km_est`;
-    - prefer unused relay nodes reachable within `max_leg_km_est` that move
-      closer to the dropoff;
-    - among those, choose the node with the shortest remaining distance to the
-      destination, then the one closest to the ideal ~`max_leg_km_est` target;
+    - prefer unused relay nodes whose route distance from the current point is
+      within `max_leg_km_est` and that move closer to the dropoff;
+    - among those, choose the node with the shortest remaining route distance
+      to the destination, then the one closest to the ideal ~`max_leg_km_est`
+      target;
     - if none exist, fall back to the nearest unused relay node that still
       improves progress toward the destination;
     - fail if no forward progress is possible.
     """
     nodes = _get_active_relay_nodes_cached()
-    direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
     direct_route_km = _route_distance_km(pickup, dropoff)
 
     if direct_route_km <= max_leg_km_est:
@@ -453,7 +453,6 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
 
     hops = []
     cur = pickup
-    remaining = direct
     remaining_route_km = direct_route_km
     used_node_ids = set()
 
@@ -467,57 +466,73 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
                 continue
 
             n_lat, n_lng = float(n.latitude), float(n.longitude)
-            leg = _haversine_km(cur["lat"], cur["lng"], n_lat, n_lng)
-            if leg <= 0:
+            node_point = {"lat": n_lat, "lng": n_lng}
+            leg_route_km = _route_distance_km(cur, node_point)
+            if leg_route_km <= 0:
                 continue
 
-            rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
+            remaining_from_node_km = _route_distance_km(node_point, dropoff)
 
             # Only consider nodes that move the route closer to the destination.
-            if rem >= (remaining - RELAY_LEG_DISTANCE_EPSILON_KM):
+            if remaining_from_node_km >= (
+                remaining_route_km - RELAY_LEG_DISTANCE_EPSILON_KM
+            ):
                 continue
 
             target_gap = _haversine_km(target["lat"], target["lng"], n_lat, n_lng)
             tie_breaker = str(n.id)
 
-            if leg <= (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
-                strict_candidates.append(
-                    (
-                        rem,
-                        target_gap,
-                        abs(max_leg_km_est - leg),
-                        tie_breaker,
-                        n,
-                    )
-                )
+            candidate = {
+                "node": n,
+                "leg_km": leg_route_km,
+                "remaining_km": remaining_from_node_km,
+                "target_gap": target_gap,
+                "tie_breaker": tie_breaker,
+            }
+
+            if leg_route_km <= (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+                strict_candidates.append(candidate)
                 continue
 
-            fallback_candidates.append((leg, rem, target_gap, tie_breaker, n))
+            fallback_candidates.append(candidate)
 
         best = None
         best_remaining = None
         if strict_candidates:
-            _, _, _, _, best = min(strict_candidates)
-            best_remaining = _haversine_km(
-                float(best.latitude),
-                float(best.longitude),
-                dropoff["lat"],
-                dropoff["lng"],
+            best_candidate = min(
+                strict_candidates,
+                key=lambda c: (
+                    c["remaining_km"],
+                    c["target_gap"],
+                    abs(max_leg_km_est - c["leg_km"]),
+                    c["tie_breaker"],
+                ),
             )
+            best = best_candidate["node"]
+            best_remaining = best_candidate["remaining_km"]
         elif fallback_candidates:
-            _, best_remaining, _, _, best = min(fallback_candidates)
+            best_candidate = min(
+                fallback_candidates,
+                key=lambda c: (
+                    c["leg_km"],
+                    c["remaining_km"],
+                    c["target_gap"],
+                    c["tie_breaker"],
+                ),
+            )
+            best = best_candidate["node"]
+            best_remaining = best_candidate["remaining_km"]
 
         if not best or best_remaining is None:
             return None
 
-        if best_remaining >= (remaining - RELAY_LEG_DISTANCE_EPSILON_KM):
+        if best_remaining >= (remaining_route_km - RELAY_LEG_DISTANCE_EPSILON_KM):
             return None
 
         hops.append(best)
         used_node_ids.add(best.id)
         cur = {"lat": float(best.latitude), "lng": float(best.longitude)}
-        remaining = best_remaining
-        remaining_route_km = _route_distance_km(cur, dropoff)
+        remaining_route_km = best_remaining
 
     return hops
 
