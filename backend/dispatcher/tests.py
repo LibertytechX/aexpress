@@ -946,6 +946,50 @@ class GenerateRelayLegsSyncTests(TestCase):
         self.assertLessEqual(legs[2].distance_km, 20.0)
 
     @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
+    @patch("dispatcher.tasks._directions_legs")
+    def test_generate_relay_legs_uses_route_distance_for_relay_trigger(
+        self, directions_mock, _nearest_rider_mock, _emit_activity_mock
+    ):
+        from dispatcher.models import RelayNode
+        from dispatcher.tasks import generate_relay_legs_sync
+
+        hub = RelayNode.objects.create(
+            name="Bridge Hub",
+            address="10km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(10),
+            is_active=True,
+        )
+        order = self._create_order(total_km=19)
+
+        def directions_side_effect(origin, points):
+            if len(points) == 1:
+                if float(origin["lng"]) == 0.0:
+                    return [(53.0, 120)]
+                return [(15.0, 36)]
+
+            if len(points) == 2:
+                return [(10.0, 24), (15.0, 36)]
+
+            return None
+
+        directions_mock.side_effect = directions_side_effect
+
+        success = generate_relay_legs_sync(order.id)
+
+        self.assertTrue(success)
+        order.refresh_from_db()
+        legs = list(order.legs.order_by("leg_number"))
+
+        self.assertEqual(order.routing_status, order.RoutingStatus.READY)
+        self.assertEqual(len(legs), 2)
+        self.assertEqual(legs[0].end_relay_node_id, hub.id)
+        self.assertIsNone(legs[1].end_relay_node)
+        self.assertEqual(legs[0].distance_km, 10.0)
+        self.assertEqual(legs[1].distance_km, 15.0)
+
+    @patch("dispatcher.utils.emit_activity")
     @patch("dispatcher.tasks._directions_legs", return_value=None)
     @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
     def test_generate_relay_legs_fails_without_full_20km_hub_chain(
