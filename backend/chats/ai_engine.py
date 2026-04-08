@@ -5,6 +5,7 @@ from typing import Optional, List
 from django.conf import settings
 from pydantic import BaseModel, Field
 from asgiref.sync import sync_to_async
+from django.db.models import Q
 from .models import Conversation, Message
 from google.adk.agents import LlmAgent
 from google.adk.planners import BuiltInPlanner
@@ -23,9 +24,14 @@ class SupportResponse(BaseModel):
     """
     Structured output for the support agent.
     """
+
     response: str = Field(description="The final helpful response to the user.")
-    category: str = Field(description="The category of the request (e.g., Technical, Order, General).")
-    action_required: bool = Field(default=False, description="Whether human intervention is needed.")
+    category: str = Field(
+        description="The category of the request (e.g., Technical, Order, General)."
+    )
+    action_required: bool = Field(
+        default=False, description="Whether human intervention is needed."
+    )
 
 
 class DjangoMemoryService(BaseMemoryService):
@@ -36,10 +42,13 @@ class DjangoMemoryService(BaseMemoryService):
     async def add_session_to_memory(self, session):
         pass
 
-    async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
+    async def search_memory(
+        self, *, app_name: str, user_id: str, query: str
+    ) -> SearchMemoryResponse:
         """
         Search for past messages relevant to the current user.
         """
+
         # Wrap Django QuerySet in sync_to_async to avoid SynchronousOnlyOperation
         @sync_to_async
         def get_messages():
@@ -49,7 +58,7 @@ class DjangoMemoryService(BaseMemoryService):
             return [f"{msg.sender_type}: {msg.content}" for msg in reversed(messages)]
 
         history_lines = await get_messages()
-        
+
         # Proper ADK Memory Response format
         memories = []
         for line in history_lines:
@@ -57,11 +66,11 @@ class DjangoMemoryService(BaseMemoryService):
                 MemoryEntry(
                     content=types.Content(
                         role="model",  # or "user", but history is contextual
-                        parts=[types.Part(text=line)]
+                        parts=[types.Part(text=line)],
                     )
                 )
             )
-        
+
         return SearchMemoryResponse(memories=memories)
 
 
@@ -69,14 +78,15 @@ class DjangoMemoryService(BaseMemoryService):
 def get_user_profile(user_id: str) -> dict:
     """
     Fetches the user's profile info. Use this to identify the user's name and type.
-    
+
     Args:
         user_id: The unique ID of the user.
-        
+
     Returns:
         dict: {'status': 'success'/'error', 'data': user_info}
     """
     from django.contrib.auth import get_user_model
+
     User = get_user_model()
     try:
         user = User.objects.get(id=user_id)
@@ -86,34 +96,61 @@ def get_user_profile(user_id: str) -> dict:
                 "full_name": user.get_full_name(),
                 "phone": user.phone,
                 "email": user.email,
-                "usertype": user.usertype
-            }
+                "usertype": user.usertype,
+            },
         }
     except User.DoesNotExist:
         return {"status": "error", "message": "User not found."}
 
 
+@sync_to_async
 def check_order_status(order_id: str) -> dict:
     """
     Retrieves the current status and tracking info for an order.
-    
+    Supports both numeric IDs and ORD-XXXX format.
+
     Args:
-        order_id: The unique order identifier (e.g., ORD-123).
-        
+        order_id: The unique order identifier.
+
     Returns:
         dict: {'status': 'success'/'error', 'data': order_details}
     """
-    # Mock data for demonstration
-    if order_id.startswith("ORD"):
+    from orders.models import Order
+
+    # Normalize: strip "ORD-" prefix if user used it
+    clean_id = str(order_id).upper().replace("ORD-", "").strip()
+
+    try:
+        # Search by order_number or UUID (if long enough)
+        query = Q(order_number=clean_id)
+        if len(clean_id) >= 32:  # Potential UUID
+            query |= Q(id=clean_id)
+
+        order = Order.objects.select_related("rider", "vehicle").get(query)
+
+        # Get delivery count or locations
+        delivery_count = order.deliveries.count()
+
         return {
             "status": "success",
             "data": {
-                "order_id": order_id,
-                "status": "In Transit",
-                "eta": "2 days"
-            }
+                "order_number": order.order_number,
+                "status": order.get_status_display(),
+                "payment_status": order.payment_status,
+                "pickup_address": order.pickup_address,
+                "deliveries_count": delivery_count,
+                "rider": order.rider.name if order.rider else "Not yet assigned",
+                "vehicle": order.vehicle.name,
+                "created_at": order.created_at.strftime("%Y-%m-%d %H:%M"),
+                "total_amount": float(order.total_amount),
+            },
         }
-    return {"status": "error", "message": "Invalid order format. Order IDs start with 'ORD'."}
+    except Exception as e:
+        logger.warning(f"Order check failed for {order_id}: {e}")
+        return {
+            "status": "error",
+            "message": f"Order {order_id} not found. Ensure you provided the correct ID.",
+        }
 
 
 # Specialized Support Agent: Orders
@@ -142,8 +179,10 @@ order_support_agent = LlmAgent(
     """,
     tools=[FunctionTool(func=check_order_status)],
     planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=1024)
-    )
+        thinking_config=types.ThinkingConfig(
+            include_thoughts=True, thinking_budget=1024
+        )
+    ),
 )
 
 # Specialized Support Agent: Technical
@@ -169,7 +208,7 @@ technical_support_agent = LlmAgent(
     Input: "My app keeps crashing."
     Output: "I'm sorry to hear that. Could you please try clearing your app cache and restarting your phone?"
     """,
-    tools=[]
+    tools=[],
 )
 
 # Coordinator Agent
@@ -205,21 +244,25 @@ support_coordinator = LlmAgent(
     tools=[FunctionTool(func=get_user_profile)],
     output_schema=SupportResponse,
     planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=1024)
+        thinking_config=types.ThinkingConfig(
+            include_thoughts=True, thinking_budget=1024
+        )
     ),
     generate_content_config=types.GenerateContentConfig(
         temperature=0.5,
         safety_settings=[
             types.SafetySetting(
                 category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+                threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
             )
-        ]
-    )
+        ],
+    ),
 )
 
 
-async def get_ai_response(conversation_id: str, user_id: str, user_message_content: str):
+async def get_ai_response(
+    conversation_id: str, user_id: str, user_message_content: str
+):
     """
     Programmatic entry point for getting AI responses.
     """
@@ -230,31 +273,28 @@ async def get_ai_response(conversation_id: str, user_id: str, user_message_conte
         app_name="aexpress_support",
         agent=support_coordinator,
         session_service=session_service,
-        memory_service=memory_service
+        memory_service=memory_service,
     )
 
     try:
         # Pre-create session as required by ADK
         await session_service.create_session(
-            app_name="aexpress_support",
-            user_id=user_id,
-            session_id=conversation_id
+            app_name="aexpress_support", user_id=user_id, session_id=conversation_id
         )
 
         final_text = ""
-        
+
         async for event in runner.run_async(
             user_id=user_id,
             session_id=conversation_id,
             new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=user_message_content)]
-            )
+                role="user", parts=[types.Part(text=user_message_content)]
+            ),
         ):
             if event.is_final_response():
                 if event.content and event.content.parts:
                     final_text = event.content.parts[0].text
-        
+
         return final_text
 
     except Exception as e:
