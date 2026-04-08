@@ -1,0 +1,263 @@
+import logging
+import json
+import traceback
+from typing import Optional, List
+from django.conf import settings
+from pydantic import BaseModel, Field
+from asgiref.sync import sync_to_async
+from .models import Conversation, Message
+from google.adk.agents import LlmAgent
+from google.adk.planners import BuiltInPlanner
+from google.adk.tools import FunctionTool
+from google.adk.memory import BaseMemoryService
+from google.adk.memory.base_memory_service import SearchMemoryResponse
+from google.adk.memory.memory_entry import MemoryEntry
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+
+logger = logging.getLogger(__name__)
+
+
+class SupportResponse(BaseModel):
+    """
+    Structured output for the support agent.
+    """
+    response: str = Field(description="The final helpful response to the user.")
+    category: str = Field(description="The category of the request (e.g., Technical, Order, General).")
+    action_required: bool = Field(default=False, description="Whether human intervention is needed.")
+
+
+class DjangoMemoryService(BaseMemoryService):
+    """
+    Custom ADK MemoryService that uses Django models for persistence.
+    """
+
+    async def add_session_to_memory(self, session):
+        pass
+
+    async def search_memory(self, *, app_name: str, user_id: str, query: str) -> SearchMemoryResponse:
+        """
+        Search for past messages relevant to the current user.
+        """
+        # Wrap Django QuerySet in sync_to_async to avoid SynchronousOnlyOperation
+        @sync_to_async
+        def get_messages():
+            messages = Message.objects.filter(
+                conversation__user_id_id=user_id
+            ).order_by("-timestamp")[:5]
+            return [f"{msg.sender_type}: {msg.content}" for msg in reversed(messages)]
+
+        history_lines = await get_messages()
+        
+        # Proper ADK Memory Response format
+        memories = []
+        for line in history_lines:
+            memories.append(
+                MemoryEntry(
+                    content=types.Content(
+                        role="model",  # or "user", but history is contextual
+                        parts=[types.Part(text=line)]
+                    )
+                )
+            )
+        
+        return SearchMemoryResponse(memories=memories)
+
+
+@sync_to_async
+def get_user_profile(user_id: str) -> dict:
+    """
+    Fetches the user's profile info. Use this to identify the user's name and type.
+    
+    Args:
+        user_id: The unique ID of the user.
+        
+    Returns:
+        dict: {'status': 'success'/'error', 'data': user_info}
+    """
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    try:
+        user = User.objects.get(id=user_id)
+        return {
+            "status": "success",
+            "data": {
+                "full_name": user.get_full_name(),
+                "phone": user.phone,
+                "email": user.email,
+                "usertype": user.usertype
+            }
+        }
+    except User.DoesNotExist:
+        return {"status": "error", "message": "User not found."}
+
+
+def check_order_status(order_id: str) -> dict:
+    """
+    Retrieves the current status and tracking info for an order.
+    
+    Args:
+        order_id: The unique order identifier (e.g., ORD-123).
+        
+    Returns:
+        dict: {'status': 'success'/'error', 'data': order_details}
+    """
+    # Mock data for demonstration
+    if order_id.startswith("ORD"):
+        return {
+            "status": "success",
+            "data": {
+                "order_id": order_id,
+                "status": "In Transit",
+                "eta": "2 days"
+            }
+        }
+    return {"status": "error", "message": "Invalid order format. Order IDs start with 'ORD'."}
+
+
+# Specialized Support Agent: Orders
+order_support_agent = LlmAgent(
+    name="OrderSupportAgent",
+    model="gemini-2.5-flash",
+    instruction="""
+    # IDENTITY
+    You are the Order Specialist for AExpress. You have expert knowledge of delivery logistics and order tracking.
+
+    # MISSION
+    Help users track their packages and resolve delivery delays.
+
+    # METHODOLOGY
+    1. Always use 'check_order_status' to get real-time info.
+    2. If an order is not found, explain the correct format (ORD-XXXX).
+    3. Be empathetic about delays.
+
+    # BOUNDARIES
+    - NEVER promise a specific delivery time if not specified in the tool data.
+    - NEVER share internal warehouse locations.
+
+    # EXAMPLES
+    Input: "Where is ORD-999?" 
+    Output: "I've checked your order ORD-999, it is currently in transit and should arrive in 2 days."
+    """,
+    tools=[FunctionTool(func=check_order_status)],
+    planner=BuiltInPlanner(
+        thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=1024)
+    )
+)
+
+# Specialized Support Agent: Technical
+technical_support_agent = LlmAgent(
+    name="TechnicalSupportAgent",
+    model="gemini-2.5-flash",
+    instruction="""
+    # IDENTITY
+    You are the Technical Support Guru for AExpress.
+
+    # MISSION
+    Solve app glitches, login issues, and technical errors reported by customers and riders.
+
+    # METHODOLOGY
+    1. Ask for screenshots or error codes if not provided.
+    2. Provide step-by-step troubleshooting (clear cache, restart app).
+    
+    # BOUNDARIES
+    - NEVER ask for user passwords.
+    - NEVER promise an immediate fix for server-side bugs.
+
+    # EXAMPLES
+    Input: "My app keeps crashing."
+    Output: "I'm sorry to hear that. Could you please try clearing your app cache and restarting your phone?"
+    """,
+    tools=[]
+)
+
+# Coordinator Agent
+support_coordinator = LlmAgent(
+    name="SupportCoordinator",
+    model="gemini-2.5-flash",
+    description="Primary entry point for user support. Routes to Order or Tech agents.",
+    instruction="""
+    # IDENTITY
+    You are the AExpress Support Coordinator. You are the 'brain' of the customer service system.
+
+    # MISSION
+    Greet users and route them to the specialized OrderSupportAgent or TechnicalSupportAgent.
+
+    # METHODOLOGY
+    1. First, use 'get_user_profile' to know who you are talking to.
+    2. Analyze the user query.
+    3. Delegate to the correct specialized agent using their respective tools.
+    4. Summarize the resolution clearly using the SupportResponse schema.
+
+    # BOUNDARIES
+    - ALWAYS greet the user by name if 'get_user_profile' succeeds.
+    - NEVER respond to non-support queries (e.g., jokes, general chat).
+
+    # EXAMPLES
+    Input: "I can't see my order."
+    Process: 
+      - get_user_profile(user_id) -> username="John" (from full_name)
+      - Delegate to OrderSupportAgent
+    Output: "Hi John, I've asked our order specialist to help. They found that your order..."
+    """,
+    sub_agents=[order_support_agent, technical_support_agent],
+    tools=[FunctionTool(func=get_user_profile)],
+    output_schema=SupportResponse,
+    planner=BuiltInPlanner(
+        thinking_config=types.ThinkingConfig(include_thoughts=True, thinking_budget=1024)
+    ),
+    generate_content_config=types.GenerateContentConfig(
+        temperature=0.5,
+        safety_settings=[
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH
+            )
+        ]
+    )
+)
+
+
+async def get_ai_response(conversation_id: str, user_id: str, user_message_content: str):
+    """
+    Programmatic entry point for getting AI responses.
+    """
+    memory_service = DjangoMemoryService()
+    session_service = InMemorySessionService()
+
+    runner = Runner(
+        app_name="aexpress_support",
+        agent=support_coordinator,
+        session_service=session_service,
+        memory_service=memory_service
+    )
+
+    try:
+        # Pre-create session as required by ADK
+        await session_service.create_session(
+            app_name="aexpress_support",
+            user_id=user_id,
+            session_id=conversation_id
+        )
+
+        final_text = ""
+        
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=conversation_id,
+            new_message=types.Content(
+                role="user",
+                parts=[types.Part(text=user_message_content)]
+            )
+        ):
+            if event.is_final_response():
+                if event.content and event.content.parts:
+                    final_text = event.content.parts[0].text
+        
+        return final_text
+
+    except Exception as e:
+        traceback.print_exc()
+        logger.error(f"ADK Execution Error: {e}")
+        return '{"response": "An internal error occurred. Please try again.", "category": "General", "action_required": true}'

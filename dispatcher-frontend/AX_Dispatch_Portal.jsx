@@ -1898,7 +1898,7 @@ export default function AXDispatchPortal() {
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
           {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned", "AssignmentAccepted", "AssignmentRejected"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -1918,7 +1918,7 @@ export default function AXDispatchPortal() {
           <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
-        <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
+        <div style={{ flex: 1, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column", minHeight: 0 }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
@@ -5134,7 +5134,7 @@ function MessagingScreen() {
   const active = conversations.find(c => c.id === activeId) || null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "100%", width: "100%", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
       {/* Sidebar */}
       <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", borderBottom: `1px solid ${S.border}` }}>
@@ -5148,7 +5148,7 @@ function MessagingScreen() {
             </button>
           ))}
         </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
           {loadingConvos ? (
             <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>
           ) : list.length === 0 ? (
@@ -5194,7 +5194,7 @@ function MessagingScreen() {
           </div>
 
           {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ flex: 1, overflowY: "auto", minHeight: 0, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
             {loadingMsgs ? (
               <div style={{ textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading messages…</div>
             ) : messages.map(m => {
