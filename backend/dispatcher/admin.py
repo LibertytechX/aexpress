@@ -174,7 +174,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "is_active",
         "yesterday_completed_order_count",
         "total_amount_for_previous_day",
-        "yesterday_distance_covered",
+        "yesterday_distance",
         "yesterday_order_distance",
     )
     list_filter = (
@@ -304,7 +304,7 @@ class RiderAdmin(ImportExportModelAdmin):
         return round(val, 2) if val else 0.00
 
     @admin.display(description="Prev Day Distance (km)")
-    def yesterday_distance_covered(self, obj):
+    def yesterday_distance(self, obj):
         return obj.yesterday_distance_covered()
 
     @admin.display(
