@@ -371,7 +371,7 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
-MAX_RELAY_LEG_KM = 15.0
+MAX_RELAY_LEG_KM = 20.0
 RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
 RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
 
@@ -414,10 +414,15 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
     """
     Build a continuous relay-node chain from pickup to dropoff.
 
-    Preference order:
-    - prefer hubs reachable within `max_leg_km_est` from the current point;
-    - if none exist, fall back to the closest forward-moving hub;
-    - stop once the remaining distance to the dropoff is within the cap.
+    At each step:
+    - stop once the dropoff is directly reachable within `max_leg_km_est`;
+    - prefer unused relay nodes reachable within `max_leg_km_est` that move
+      closer to the dropoff;
+    - among those, choose the node with the shortest remaining distance to the
+      destination, then the one closest to the ideal ~`max_leg_km_est` target;
+    - if none exist, fall back to the nearest unused relay node that still
+      improves progress toward the destination;
+    - fail if no forward progress is possible.
     """
     nodes = _get_active_relay_nodes_cached()
     direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
@@ -425,19 +430,9 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
     if direct <= max_leg_km_est:
         return []
 
-    # Filter nodes roughly "near" the pickup→dropoff corridor (triangle inequality)
-    filtered = []
-    for n in nodes:
-        if n.latitude is None or n.longitude is None:
-            continue
-        d1 = _haversine_km(
-            pickup["lat"], pickup["lng"], float(n.latitude), float(n.longitude)
-        )
-        d2 = _haversine_km(
-            float(n.latitude), float(n.longitude), dropoff["lat"], dropoff["lng"]
-        )
-        if (d1 + d2) <= (direct * 1.5):
-            filtered.append(n)
+    available_nodes = [
+        n for n in nodes if n.latitude is not None and n.longitude is not None
+    ]
 
     hops = []
     cur = pickup
@@ -445,16 +440,11 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
     used_node_ids = set()
 
     while remaining > (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
-        hop_index = len(hops)
         target = _point_along_line(cur, dropoff, max_leg_km_est)
-        best_strict = None
-        best_strict_score = None
-        best_strict_remaining = None
-        best_fallback = None
-        best_fallback_score = None
-        best_fallback_remaining = None
+        strict_candidates = []
+        fallback_candidates = []
 
-        for n in filtered:
+        for n in available_nodes:
             if n.id in used_node_ids:
                 continue
 
@@ -465,40 +455,44 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
 
             rem = _haversine_km(n_lat, n_lng, dropoff["lat"], dropoff["lng"])
 
-            # Must make forward progress and avoid obvious detours.
-            if rem >= remaining:
-                continue
-            if (leg + rem) > (remaining * 1.35):
+            # Only consider nodes that move the route closer to the destination.
+            if rem >= (remaining - RELAY_LEG_DISTANCE_EPSILON_KM):
                 continue
 
             target_gap = _haversine_km(target["lat"], target["lng"], n_lat, n_lng)
+            tie_breaker = str(n.id)
 
             if leg <= (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
-                if hop_index == 0:
-                    score = (leg, target_gap, rem)
-                else:
-                    score = (target_gap, abs(max_leg_km_est - leg), rem)
-
-                if best_strict is None or score < best_strict_score:
-                    best_strict = n
-                    best_strict_score = score
-                    best_strict_remaining = rem
+                strict_candidates.append(
+                    (
+                        rem,
+                        target_gap,
+                        abs(max_leg_km_est - leg),
+                        tie_breaker,
+                        n,
+                    )
+                )
                 continue
 
-            fallback_score = (leg, target_gap, rem)
-            if best_fallback is None or fallback_score < best_fallback_score:
-                best_fallback = n
-                best_fallback_score = fallback_score
-                best_fallback_remaining = rem
+            fallback_candidates.append((leg, rem, target_gap, tie_breaker, n))
 
-        best = best_strict or best_fallback
-        best_remaining = (
-            best_strict_remaining
-            if best_strict is not None
-            else best_fallback_remaining
-        )
+        best = None
+        best_remaining = None
+        if strict_candidates:
+            _, _, _, _, best = min(strict_candidates)
+            best_remaining = _haversine_km(
+                float(best.latitude),
+                float(best.longitude),
+                dropoff["lat"],
+                dropoff["lng"],
+            )
+        elif fallback_candidates:
+            _, best_remaining, _, _, best = min(fallback_candidates)
 
         if not best or best_remaining is None:
+            return None
+
+        if best_remaining >= (remaining - RELAY_LEG_DISTANCE_EPSILON_KM):
             return None
 
         hops.append(best)
@@ -959,7 +953,7 @@ def generate_relay_legs_sync(order_id):
                 first_delivery.dropoff_latitude = dropoff["lat"]
                 first_delivery.dropoff_longitude = dropoff["lng"]
 
-            # Build a continuous chain that prefers ~15km relay spacing.
+            # Build a continuous chain that prefers ~20km relay spacing.
             # Orders within the cap go direct (single leg, no hub handoffs).
             # Longer routes use relay hubs, falling back to the closest forward
             # hub when no hub is available within the preferred cap.
