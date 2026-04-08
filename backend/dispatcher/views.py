@@ -894,6 +894,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         order_ids = serializer.validated_data["order_ids"]
         # Use simple Order model here if possible or self.queryset.model
         from orders.models import Order
+
         orders = Order.objects.filter(order_number__in=order_ids)
         if not orders.exists():
             return Response(
@@ -1003,13 +1004,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         # If already ready with legs and not a forced retry, return current state
-        if (
-            getattr(order, "routing_status", None) == Order.RoutingStatus.READY
-            and order.legs.exists()
-            and not request.data.get("force", False)
-        ):
-            serializer = self.get_serializer(order)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+        # if (
+        #     getattr(order, "routing_status", None) == Order.RoutingStatus.READY
+        #     and order.legs.exists()
+        #     and not request.data.get("force", False)
+        # ):
+        #     serializer = self.get_serializer(order)
+        #     return Response(serializer.data, status=status.HTTP_200_OK)
 
         emit_activity(
             event_type="relay_route_processing",
