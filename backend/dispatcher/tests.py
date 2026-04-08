@@ -1125,3 +1125,69 @@ class OrderViewSetListTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertNotIn("results", res.data)
         self.assertEqual(len(res.data), 110)
+
+
+class OrderViewSetGenerateRelayRouteTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from orders.models import Delivery, Order, Vehicle
+
+        self.user = User.objects.create_user(
+            phone="08022223333",
+            email="relay_route_test@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.vehicle = Vehicle.objects.create(
+            name="Bike-Relay-Route",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+        self.order = Order.objects.create(
+            order_number="ORD-RELAY-REGEN",
+            user=self.user,
+            vehicle=self.vehicle,
+            is_relay_order=True,
+            routing_status=Order.RoutingStatus.READY,
+            pickup_address="Pickup",
+            pickup_latitude=6.5,
+            pickup_longitude=3.3,
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            status="Pending",
+        )
+        Delivery.objects.create(
+            order=self.order,
+            dropoff_address="Dropoff",
+            dropoff_latitude=6.6,
+            dropoff_longitude=3.4,
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+        )
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks.generate_relay_legs_sync", return_value=True)
+    def test_generate_relay_route_always_regenerates_ready_orders(
+        self, generate_relay_legs_sync_mock, _emit_activity_mock
+    ):
+        from orders.models import OrderLeg
+
+        OrderLeg.objects.create(order=self.order, leg_number=1, status="Pending")
+
+        res = self.client.post(
+            f"/api/dispatch/orders/{self.order.order_number}/generate-relay-route/"
+        )
+
+        self.assertEqual(res.status_code, 200, res.data)
+        generate_relay_legs_sync_mock.assert_called_once_with(str(self.order.id))
