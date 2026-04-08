@@ -1005,6 +1005,7 @@ def generate_relay_legs_sync(order_id):
             created_legs = []
             prev_node = None
             for idx, (dist_km, dur_min) in enumerate(legs_metrics, start=1):
+                print("Regenerating Legs!!!")
                 next_node = hop_nodes[idx - 1] if idx - 1 < len(hop_nodes) else None
 
                 # Determine this leg's start coordinates for rider suggestion:
@@ -1044,6 +1045,8 @@ def generate_relay_legs_sync(order_id):
             # Settlement: each leg earns a proportional share of the full
             # order total_amount based on its distance fraction.
             # Formula: leg_payout = (leg_km / total_km) * total_amount
+            len_legs = len(created_legs)
+            print("Legs generated completed! ", len_legs)
             total_distance = sum(float(l.distance_km or 0) for l in created_legs) or 0.0
             order_total = order.total_amount or Decimal("0")
             if total_distance > 0:
