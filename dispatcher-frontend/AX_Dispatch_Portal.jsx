@@ -1918,7 +1918,7 @@ export default function AXDispatchPortal() {
           <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
-        <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
@@ -5001,6 +5001,7 @@ function MessagingScreen() {
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [loadingConvos, setLoadingConvos] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
@@ -5036,6 +5037,8 @@ function MessagingScreen() {
   // ── Fetch conversation list whenever tab changes ─────────────────
   const loadConversations = useCallback(async () => {
     setLoadingConvos(true);
+    // Keep activeId if it still exists in the new tab's list (optional optimization)
+    // For now, simpler to clear it on tab change as before.
     setActiveId(null);
     setMessages([]);
     try {
@@ -5111,7 +5114,6 @@ function MessagingScreen() {
     setInput('');
     try {
       const msg = await ChatsAPI.sendMessage(activeId, content);
-      // Optimistically append (Ably will also deliver it but dedup by id is fine)
       setMessages(prev => {
         if (prev.find(m => m.id === msg.id)) return prev;
         return [...prev, msg];
@@ -5128,82 +5130,128 @@ function MessagingScreen() {
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
 
-  const riders = conversations.filter(c => c.type === 'riders');
-  const customers = conversations.filter(c => c.type === 'customers');
-  const list = tab === 'riders' ? riders : customers;
-  const active = conversations.find(c => c.id === activeId) || null;
+  const ridersCount = conversations.filter(c => c.type === 'riders').reduce((s, c) => s + (c.unread_count || 0), 0);
+  const customersCount = conversations.filter(c => c.type === 'customers').reduce((s, c) => s + (c.unread_count || 0), 0);
+  
+  const filteredList = conversations.filter(c => 
+    c.type === tab && 
+    (c.participant?.name || c.participant?.phone || "").toLowerCase().includes(searchTerm.toLowerCase())
+  );
+  
+  const activeChat = conversations.find(c => c.id === activeId) || null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-      {/* Sidebar */}
-      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${S.border}` }}>
-          {[
-            { id: "customers", l: "Customers", c: customers.reduce((s, c) => s + (c.unread_count || 0), 0) },
-            { id: "riders", l: "Riders", c: riders.reduce((s, c) => s + (c.unread_count || 0), 0) },
-          ].map(t => (
-            <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); }}
-              style={{ flex: 1, padding: "12px 0", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, borderBottom: tab === t.id ? `2px solid ${S.gold}` : "2px solid transparent", color: tab === t.id ? S.gold : S.textMuted, background: "transparent" }}>
-              {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff", fontWeight: 700 }}>{t.c}</span>}
-            </button>
-          ))}
+    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gridTemplateRows: "100%", gap: 0, height: "100%", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.04)" }}>
+      {/* Sidebar - Enhanced list with search */}
+      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#f8fafc" }}>
+        <div style={{ padding: "20px 16px 15px", borderBottom: `1px solid ${S.border}`, background: "#fff" }}>
+          <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 12, padding: "3px", marginBottom: 16 }}>
+            {[
+              { id: "customers", l: "Customers", c: customersCount },
+              { id: "riders", l: "Riders", c: ridersCount },
+            ].map(t => (
+              <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); setSearchTerm(""); }}
+                style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: tab === t.id ? "#fff" : "transparent", color: tab === t.id ? S.gold : S.textMuted, boxShadow: tab === t.id ? "0 2px 6px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s" }}>
+                {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff" }}>{t.c}</span>}
+              </button>
+            ))}
+          </div>
+          <div style={{ position: "relative" }}>
+             <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted, lineHeight: 0 }}>{I.search}</span>
+             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search conversations..." 
+               style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 12, border: `1.5px solid ${S.border}`, fontSize: 13, outline: "none", background: "#f8fafc", fontFamily: "inherit", transition: "border-color 0.2s" }} 
+               onFocus={e => e.target.style.borderColor = S.gold}
+               onBlur={e => e.target.style.borderColor = S.border}
+             />
+          </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
+        
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
           {loadingConvos ? (
-            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>
-          ) : list.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No conversations</div>
-          ) : list.map(ch => (
-            <div key={ch.id} onClick={() => setActiveId(ch.id)}
-              style={{ padding: "12px 14px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", background: activeId === ch.id ? S.goldPale : "transparent", transition: "background 0.12s" }}
-              onMouseEnter={e => { if (activeId !== ch.id) e.currentTarget.style.background = S.borderLight; }}
-              onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: ch.unread_count ? 700 : 500 }}>
-                  {ch.participant?.name || ch.participant?.phone || 'Unknown'}
-                </span>
-                <span style={{ fontSize: 10, color: S.textMuted }}>{fmt(ch.updated_at)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 11, color: ch.unread_count ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>
-                  {ch.last_message || '—'}
-                </span>
-                {ch.unread_count > 0 && (
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: S.gold, color: "#fff", minWidth: 16, textAlign: "center" }}>
-                    {ch.unread_count}
-                  </span>
-                )}
-              </div>
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+              <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+              Loading…
             </div>
-          ))}
+          ) : filteredList.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>
+              <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.5 }}>📭</div>
+              {searchTerm ? "No results found" : "No conversations yet"}
+            </div>
+          ) : filteredList.map(ch => {
+            const isSelected = activeId === ch.id;
+            const hasUnread = ch.unread_count > 0;
+            return (
+              <div key={ch.id} onClick={() => setActiveId(ch.id)}
+                style={{ padding: "14px 14px", borderRadius: 12, marginBottom: 4, cursor: "pointer", background: isSelected ? "#fff" : "transparent", boxShadow: isSelected ? "0 4px 12px rgba(0,0,0,0.04)" : "none", border: isSelected ? `1px solid ${S.border}` : "1px solid transparent", transition: "all 0.2s" }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 14, fontWeight: isSelected || hasUnread ? 700 : 500, color: S.navy }}>
+                    {ch.participant?.name || ch.participant?.phone || 'Unknown'}
+                  </span>
+                  <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 500 }}>{fmt(ch.updated_at)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: hasUnread ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200, fontWeight: hasUnread ? 600 : 400 }}>
+                    {ch.last_message || 'No messages yet'}
+                  </span>
+                  {hasUnread && (
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 10, background: S.gold, color: "#fff", boxShadow: `0 2px 6px ${S.gold}40` }}>
+                      {ch.unread_count}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* Chat area */}
-      {active ? (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>
-              {(active.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{active.participant?.name || active.participant?.phone}</div>
-              <div style={{ fontSize: 10, color: S.textMuted }}>{active.type === 'riders' ? 'Rider' : 'Customer'} • {active.participant?.phone}</div>
+      {activeChat ? (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#fff" }}>
+          {/* Enhanced Chat Header */}
+          <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", zIndex: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 14, background: `linear-gradient(135deg, ${S.goldPale}, #fff)`, border: `1px solid ${S.gold}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, color: S.gold }}>
+                {(activeChat.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{activeChat.participant?.name || activeChat.participant?.phone}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }}></div>
+                  <div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600 }}>{activeChat.type === 'riders' ? 'Rider' : 'Customer'} • {activeChat.participant?.phone}</div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Modern Messages with dynamic bubbles */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: 14, background: "#fcfdfe" }}>
             {loadingMsgs ? (
-              <div style={{ textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading messages…</div>
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+                Loading history…
+              </div>
             ) : messages.map(m => {
               const isAgent = m.sender_type === 'agent';
               return (
-                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start" }}>
-                  <div style={{ maxWidth: "65%", padding: "10px 14px", borderRadius: 12, borderBottomRightRadius: isAgent ? 4 : 12, borderBottomLeftRadius: isAgent ? 12 : 4, background: isAgent ? S.goldPale : S.borderLight, fontSize: 12, lineHeight: 1.5 }}>
+                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start", animation: "fadeIn 0.2s ease-out" }}>
+                  <div style={{ 
+                    maxWidth: "75%", 
+                    padding: "12px 18px", 
+                    borderRadius: 18, 
+                    borderBottomRightRadius: isAgent ? 4 : 18, 
+                    borderBottomLeftRadius: isAgent ? 18 : 4, 
+                    background: isAgent ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#fff", 
+                    color: isAgent ? S.navy : S.text,
+                    fontSize: 13, 
+                    lineHeight: 1.5,
+                    boxShadow: isAgent ? "0 4px 12px rgba(232,168,56,0.2)" : "0 2px 8px rgba(0,0,0,0.05)",
+                    border: isAgent ? "none" : `1px solid ${S.borderLight}`
+                  }}>
                     <div>{m.content}</div>
-                    <div style={{ fontSize: 9, color: S.textMuted, marginTop: 4, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
+                    <div style={{ fontSize: 10, color: isAgent ? "rgba(27,42,74,0.6)" : S.textMuted, marginTop: 6, fontWeight: 600, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
                   </div>
                 </div>
               );
@@ -5211,40 +5259,56 @@ function MessagingScreen() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Quick replies */}
-          <div style={{ padding: "8px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 6, overflowX: "auto" }}>
-            {TEMPLATES.slice(0, 3).map((t, i) => (
-              <button key={i} onClick={() => setInput(t)}
-                style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.borderLight, color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}>
-                {t.substring(0, 32)}…
-              </button>
-            ))}
-          </div>
+          {/* Smart Input Controls */}
+          <div style={{ padding: "16px 24px", borderTop: `1px solid ${S.border}`, background: "#fff" }}>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+              {TEMPLATES.map((t, i) => (
+                <button key={i} onClick={() => setInput(t)}
+                  style={{ padding: "6px 14px", borderRadius: 30, border: `1px solid ${S.border}`, background: "#f8fafc", color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", transition: "all 0.2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = S.gold; e.currentTarget.style.color = S.gold; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.color = S.textDim; }}>
+                  {t}
+                </button>
+              ))}
+            </div>
 
-          {/* Input */}
-          <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 8 }}>
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Type a message…"
-              style={{ flex: 1, background: S.borderLight, border: `1px solid ${S.border}`, borderRadius: 8, padding: "0 14px", height: 40, color: S.text, fontSize: 12, fontFamily: "inherit", outline: "none" }}
-            />
-            <button onClick={sendMessage} disabled={sending || !input.trim()}
-              style={{ width: 40, height: 40, borderRadius: 8, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {I.send}
-            </button>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+              <div style={{ flex: 1, position: "relative" }}>
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  placeholder="Your message..."
+                  rows={Math.min(4, input.split('\n').length)}
+                  style={{ width: "100%", background: "#f1f5f9", border: `1.5px solid ${S.border}`, borderRadius: 16, padding: "12px 48px 12px 16px", color: S.text, fontSize: 14, fontFamily: "inherit", outline: "none", resize: "none", transition: "border-color 0.2s" }}
+                  onFocus={e => e.target.style.borderColor = S.gold}
+                  onBlur={e => e.target.style.borderColor = S.border}
+                />
+              </div>
+              <button onClick={sendMessage} disabled={sending || !input.trim()}
+                style={{ width: 48, height: 48, borderRadius: 16, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 12px rgba(232,168,56,0.3)", transform: "translateY(-2px)" }}>
+                {I.send}
+              </button>
+            </div>
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 40, opacity: 0.2 }}>💬</div>
-          <div style={{ fontSize: 14, color: S.textMuted }}>Select a conversation</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, flexDirection: "column", gap: 16, background: "#fcfdfe" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 24, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, opacity: 0.8 }}>💬</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>Messaging Portal</div>
+            <div style={{ fontSize: 14, color: S.textMuted, marginTop: 4 }}>Select a conversation to start chatting</div>
+          </div>
         </div>
       )}
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
+
 
 
 // ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
