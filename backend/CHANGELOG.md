@@ -5,6 +5,8 @@ All notable changes to the AXpress backend are documented in this file.
 ---
 
 ## [2026-04-07] — Chats API & Merchant Deactivation
+- **Ably Realtime Chats Documentation**: Created [ably_realtime_chats.md](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md) guide for client-side integration.
+- **`subscribe_chat` Management Command**: Added a new command to subscribe to real-time chat messages for debugging.
 - **Chats API Documentation**: Documented the Chat System REST API in `ENDPOINTS_DOCUMENTATION.md`.
 - **Merchant Deactivation (Delete)**: Implemented new endpoints for soft-deactivating merchant accounts.
     - **Dispatcher Portal**: Admins can deactivate merchants via `DELETE /api/dispatcher/merchants/<id>/`.
