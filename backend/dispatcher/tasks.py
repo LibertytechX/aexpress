@@ -371,6 +371,22 @@ def _estimate_legs_haversine(origin, points):
     return out
 
 
+def _route_distance_km(origin, destination):
+    """Best-effort route distance in KM for a single origin/destination pair."""
+    try:
+        legs = _directions_legs(origin, [destination])
+    except Exception as exc:
+        logger.warning(f"_route_distance_km directions lookup failed: {exc}")
+        legs = None
+
+    if legs:
+        return float(legs[0][0] or 0.0)
+
+    return _haversine_km(
+        origin["lat"], origin["lng"], destination["lat"], destination["lng"]
+    )
+
+
 MAX_RELAY_LEG_KM = 20.0
 RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
 RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
@@ -426,8 +442,9 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
     """
     nodes = _get_active_relay_nodes_cached()
     direct = _haversine_km(pickup["lat"], pickup["lng"], dropoff["lat"], dropoff["lng"])
+    direct_route_km = _route_distance_km(pickup, dropoff)
 
-    if direct <= max_leg_km_est:
+    if direct_route_km <= max_leg_km_est:
         return []
 
     available_nodes = [
@@ -437,9 +454,10 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
     hops = []
     cur = pickup
     remaining = direct
+    remaining_route_km = direct_route_km
     used_node_ids = set()
 
-    while remaining > (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
+    while remaining_route_km > (max_leg_km_est + RELAY_LEG_DISTANCE_EPSILON_KM):
         target = _point_along_line(cur, dropoff, max_leg_km_est)
         strict_candidates = []
         fallback_candidates = []
@@ -499,6 +517,7 @@ def _build_greedy_relay_hops(pickup, dropoff, max_leg_km_est=MAX_RELAY_LEG_KM):
         used_node_ids.add(best.id)
         cur = {"lat": float(best.latitude), "lng": float(best.longitude)}
         remaining = best_remaining
+        remaining_route_km = _route_distance_km(cur, dropoff)
 
     return hops
 
@@ -957,12 +976,7 @@ def generate_relay_legs_sync(order_id):
             # Orders within the cap go direct (single leg, no hub handoffs).
             # Longer routes use relay hubs, falling back to the closest forward
             # hub when no hub is available within the preferred cap.
-            direct_km = _haversine_km(
-                float(pickup["lat"]),
-                float(pickup["lng"]),
-                float(dropoff["lat"]),
-                float(dropoff["lng"]),
-            )
+            direct_km = _route_distance_km(pickup, dropoff)
             if direct_km <= RELAY_THRESHOLD_KM:
                 hop_nodes = []
             else:
