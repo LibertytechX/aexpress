@@ -21,6 +21,7 @@ from .serializers import (
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
 )
+from dispatcher.tasks import send_merchant_notification
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -706,6 +707,22 @@ def corebanking_webhook(request):
 
             # Mark webhook as processed
             webhook_log.mark_processed(transaction=transaction)
+
+        # Notify the merchant their wallet was credited
+        try:
+            merchant_profile = getattr(
+                virtual_account.user, "merchant_profile", None
+            )
+            if merchant_profile:
+                send_merchant_notification.delay(
+                    merchant_id=str(merchant_profile.id),
+                    title="Wallet Credited 💰",
+                    body=f"₦{amount} has been credited to your wallet.",
+                    data={"amount": str(amount), "source": "bank_transfer"},
+                    category="wallet_credit",
+                )
+        except Exception as exc:
+            logger.warning(f"Merchant wallet credit notification failed: {exc}")
 
         logger.info(
             f"CoreBanking webhook processed successfully - ₦{amount} credited to {virtual_account.user.business_name} - Log ID: {webhook_log.id}"
