@@ -168,7 +168,7 @@ def check_order_status(order_id: str) -> dict:
 # Specialized Support Agent: Orders
 order_support_agent = LlmAgent(
     name="OrderSupportAgent",
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     instruction="""
     # IDENTITY
     You are the Order Specialist for AExpress. You have expert knowledge of delivery logistics and order tracking.
@@ -200,7 +200,7 @@ order_support_agent = LlmAgent(
 # Specialized Support Agent: Technical
 technical_support_agent = LlmAgent(
     name="TechnicalSupportAgent",
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     instruction="""
     # IDENTITY
     You are the Technical Support Guru for AExpress.
@@ -226,7 +226,7 @@ technical_support_agent = LlmAgent(
 # Coordinator Agent
 support_coordinator = LlmAgent(
     name="SupportCoordinator",
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     description="Primary entry point for user support. Routes to Order or Tech agents.",
     instruction="""
     # IDENTITY
