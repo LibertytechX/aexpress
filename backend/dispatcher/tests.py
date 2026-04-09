@@ -5,7 +5,10 @@ import datetime
 
 from rest_framework import serializers
 from rest_framework.test import APIClient
+from django.contrib import admin
+from django.contrib.admin.utils import label_for_field, lookup_field
 from django.core.management import call_command
+from django.urls import reverse
 from django.utils import timezone
 
 
@@ -291,6 +294,62 @@ class VehicleDistanceTelemetryTests(TestCase):
         asset.refresh_from_db()
         self.assertEqual(asset.total_distance, Decimal("123.45"))
         self.assertEqual(asset.unit_of_distance, "km")
+
+
+class RiderAdminLookupTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from .admin import RiderAdmin
+        from .models import Rider
+
+        self.rider_model = Rider
+        self.model_admin = RiderAdmin(Rider, admin.site)
+        self.user = User.objects.create_user(
+            phone="08055550001",
+            email="rider_admin_lookup@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Lookup Rider",
+        )
+        self.rider = self.user.rider_profile
+        self.rider.rider_id = "654321"
+        self.rider.save(update_fields=["rider_id"])
+
+    def test_model_exposes_yesterday_distance_covered(self):
+        self.assertTrue(hasattr(self.rider, "yesterday_distance_covered"))
+        self.assertEqual(self.rider.yesterday_distance_covered(), 0.00)
+
+    def test_admin_lookup_resolves_yesterday_distance_covered(self):
+        label = label_for_field(
+            "yesterday_distance_covered", self.rider_model, self.model_admin
+        )
+        self.assertEqual(label, "Prev Day Distance (km)")
+
+        field, attr, value = lookup_field(
+            "yesterday_distance_covered", self.rider, self.model_admin
+        )
+        self.assertIsNone(field)
+        self.assertTrue(callable(attr))
+        self.assertEqual(value, 0.00)
+
+    def test_admin_changelist_renders(self):
+        from authentication.models import User
+
+        admin_user = User.objects.create_user(
+            phone="08055550002",
+            email="dispatcher_admin_lookup@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Admin User",
+        )
+        admin_user.is_staff = True
+        admin_user.is_superuser = True
+        admin_user.save(update_fields=["is_staff", "is_superuser"])
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("admin:dispatcher_rider_changelist"))
+
+        self.assertEqual(response.status_code, 200)
 
 
 class OrderPriceUpdateEndpointTests(TestCase):
@@ -795,7 +854,7 @@ class GenerateRelayLegsSyncTests(TestCase):
     @patch("dispatcher.utils.emit_activity")
     @patch("dispatcher.tasks._directions_legs", return_value=None)
     @patch("dispatcher.tasks._nearest_rider_to")
-    def test_generate_relay_legs_builds_continuous_15km_chain(
+    def test_generate_relay_legs_builds_continuous_20km_chain(
         self, nearest_rider_mock, _directions_mock, _emit_activity_mock
     ):
         from dispatcher.models import RelayNode
@@ -812,19 +871,26 @@ class GenerateRelayLegsSyncTests(TestCase):
 
         hub_one = RelayNode.objects.create(
             name="Hub 1",
-            address="15km Hub",
+            address="20km Hub",
             latitude=0,
-            longitude=self._lng_for_km(15),
+            longitude=self._lng_for_km(20),
             is_active=True,
         )
         hub_two = RelayNode.objects.create(
             name="Hub 2",
-            address="30km Hub",
+            address="40km Hub",
             latitude=0,
-            longitude=self._lng_for_km(30),
+            longitude=self._lng_for_km(40),
             is_active=True,
         )
-        order = self._create_order(total_km=45)
+        hub_three = RelayNode.objects.create(
+            name="Hub 3",
+            address="60km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(60),
+            is_active=True,
+        )
+        order = self._create_order(total_km=80)
 
         success = generate_relay_legs_sync(order.id)
 
@@ -833,26 +899,75 @@ class GenerateRelayLegsSyncTests(TestCase):
         legs = list(order.legs.order_by("leg_number"))
 
         self.assertEqual(order.routing_status, order.RoutingStatus.READY)
-        self.assertEqual(order.relay_legs_count, 3)
-        self.assertEqual(len(legs), 3)
+        self.assertEqual(order.relay_legs_count, 4)
+        self.assertEqual(len(legs), 4)
 
         self.assertIsNone(legs[0].start_relay_node)
         self.assertEqual(legs[0].end_relay_node_id, hub_one.id)
         self.assertEqual(legs[1].start_relay_node_id, hub_one.id)
         self.assertEqual(legs[1].end_relay_node_id, hub_two.id)
         self.assertEqual(legs[2].start_relay_node_id, hub_two.id)
-        self.assertIsNone(legs[2].end_relay_node)
+        self.assertEqual(legs[2].end_relay_node_id, hub_three.id)
+        self.assertEqual(legs[3].start_relay_node_id, hub_three.id)
+        self.assertIsNone(legs[3].end_relay_node)
 
-        self.assertTrue(all(leg.distance_km <= 15.0 for leg in legs))
-        self.assertEqual(len(rider_calls), 3)
+        self.assertTrue(all(leg.distance_km <= 20.0 for leg in legs))
+        self.assertEqual(len(rider_calls), 4)
         self.assertAlmostEqual(rider_calls[0][1], 0.0, places=4)
         self.assertAlmostEqual(rider_calls[1][1], float(hub_one.longitude), places=4)
         self.assertAlmostEqual(rider_calls[2][1], float(hub_two.longitude), places=4)
+        self.assertAlmostEqual(rider_calls[3][1], float(hub_three.longitude), places=4)
 
     @patch("dispatcher.utils.emit_activity")
     @patch("dispatcher.tasks._directions_legs", return_value=None)
     @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
-    def test_generate_relay_legs_falls_back_to_closest_hub_when_no_15km_hub_exists(
+    def test_generate_relay_legs_prefers_farthest_forward_hub_within_20km(
+        self, _nearest_rider_mock, _directions_mock, _emit_activity_mock
+    ):
+        from dispatcher.models import RelayNode
+        from dispatcher.tasks import generate_relay_legs_sync
+
+        nearer_hub = RelayNode.objects.create(
+            name="Nearer Hub",
+            address="12km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(12),
+            is_active=True,
+        )
+        forward_hub = RelayNode.objects.create(
+            name="Forward Hub",
+            address="19km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(19),
+            is_active=True,
+        )
+        final_hub = RelayNode.objects.create(
+            name="Final Hub",
+            address="37km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(37),
+            is_active=True,
+        )
+        order = self._create_order(total_km=55)
+
+        success = generate_relay_legs_sync(order.id)
+
+        self.assertTrue(success)
+        order.refresh_from_db()
+        legs = list(order.legs.order_by("leg_number"))
+
+        self.assertEqual(order.routing_status, order.RoutingStatus.READY)
+        self.assertEqual(len(legs), 3)
+        self.assertEqual(legs[0].end_relay_node_id, forward_hub.id)
+        self.assertEqual(legs[1].start_relay_node_id, forward_hub.id)
+        self.assertEqual(legs[1].end_relay_node_id, final_hub.id)
+        self.assertNotEqual(legs[0].end_relay_node_id, nearer_hub.id)
+        self.assertTrue(all(leg.distance_km <= 20.0 for leg in legs))
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks._directions_legs", return_value=None)
+    @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
+    def test_generate_relay_legs_falls_back_to_nearest_forward_hub_when_no_20km_hub_exists(
         self, _nearest_rider_mock, _directions_mock, _emit_activity_mock
     ):
         from dispatcher.models import RelayNode
@@ -860,19 +975,19 @@ class GenerateRelayLegsSyncTests(TestCase):
 
         first_hub = RelayNode.objects.create(
             name="Fallback Hub",
-            address="18km Hub",
+            address="23km Hub",
             latitude=0,
-            longitude=self._lng_for_km(18),
+            longitude=self._lng_for_km(23),
             is_active=True,
         )
         second_hub = RelayNode.objects.create(
             name="Forward Hub",
-            address="30km Hub",
+            address="43km Hub",
             latitude=0,
-            longitude=self._lng_for_km(30),
+            longitude=self._lng_for_km(43),
             is_active=True,
         )
-        order = self._create_order(total_km=45)
+        order = self._create_order(total_km=63)
 
         success = generate_relay_legs_sync(order.id)
 
@@ -885,14 +1000,150 @@ class GenerateRelayLegsSyncTests(TestCase):
         self.assertEqual(legs[0].end_relay_node_id, first_hub.id)
         self.assertEqual(legs[1].start_relay_node_id, first_hub.id)
         self.assertEqual(legs[1].end_relay_node_id, second_hub.id)
-        self.assertGreater(legs[0].distance_km, 15.0)
-        self.assertLessEqual(legs[1].distance_km, 15.0)
-        self.assertLessEqual(legs[2].distance_km, 15.0)
+        self.assertGreater(legs[0].distance_km, 20.0)
+        self.assertLessEqual(legs[1].distance_km, 20.0)
+        self.assertLessEqual(legs[2].distance_km, 20.0)
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
+    @patch("dispatcher.tasks._directions_legs")
+    def test_generate_relay_legs_uses_route_distance_for_relay_trigger(
+        self, directions_mock, _nearest_rider_mock, _emit_activity_mock
+    ):
+        from dispatcher.models import RelayNode
+        from dispatcher.tasks import generate_relay_legs_sync
+
+        hub = RelayNode.objects.create(
+            name="Bridge Hub",
+            address="10km Hub",
+            latitude=0,
+            longitude=self._lng_for_km(10),
+            is_active=True,
+        )
+        order = self._create_order(total_km=19)
+
+        def directions_side_effect(origin, points):
+            if len(points) == 1:
+                if float(origin["lng"]) == 0.0:
+                    return [(53.0, 120)]
+                return [(15.0, 36)]
+
+            if len(points) == 2:
+                return [(10.0, 24), (15.0, 36)]
+
+            return None
+
+        directions_mock.side_effect = directions_side_effect
+
+        success = generate_relay_legs_sync(order.id)
+
+        self.assertTrue(success)
+        order.refresh_from_db()
+        legs = list(order.legs.order_by("leg_number"))
+
+        self.assertEqual(order.routing_status, order.RoutingStatus.READY)
+        self.assertEqual(len(legs), 2)
+        self.assertEqual(legs[0].end_relay_node_id, hub.id)
+        self.assertIsNone(legs[1].end_relay_node)
+        self.assertEqual(legs[0].distance_km, 10.0)
+        self.assertEqual(legs[1].distance_km, 15.0)
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
+    @patch("dispatcher.tasks._route_distance_km")
+    @patch("dispatcher.tasks._directions_legs")
+    def test_generate_relay_legs_uses_route_distance_when_selecting_each_hop(
+        self,
+        directions_mock,
+        route_distance_mock,
+        _nearest_rider_mock,
+        _emit_activity_mock,
+    ):
+        from dispatcher.models import RelayNode
+        from dispatcher.tasks import generate_relay_legs_sync
+
+        ikorodu = RelayNode.objects.create(
+            name="Ikorodu Hub",
+            address="Ikorodu",
+            latitude=0,
+            longitude=self._lng_for_km(5),
+            is_active=True,
+        )
+        mile_12 = RelayNode.objects.create(
+            name="Mile 12 Hub",
+            address="Mile 12",
+            latitude=0,
+            longitude=self._lng_for_km(10),
+            is_active=True,
+        )
+        osapa = RelayNode.objects.create(
+            name="Osapa Hub",
+            address="Osapa",
+            latitude=-0.05,
+            longitude=self._lng_for_km(14),
+            is_active=True,
+        )
+        order = self._create_order(total_km=19)
+        dropoff = order.deliveries.first()
+
+        def point_key(point):
+            return (round(float(point["lat"]), 6), round(float(point["lng"]), 6))
+
+        pickup_key = (0.0, 0.0)
+        ikorodu_key = point_key({"lat": ikorodu.latitude, "lng": ikorodu.longitude})
+        mile_12_key = point_key({"lat": mile_12.latitude, "lng": mile_12.longitude})
+        osapa_key = point_key({"lat": osapa.latitude, "lng": osapa.longitude})
+        dropoff_key = point_key(
+            {"lat": dropoff.dropoff_latitude, "lng": dropoff.dropoff_longitude}
+        )
+
+        route_distances = {
+            (pickup_key, dropoff_key): 53.0,
+            (pickup_key, ikorodu_key): 8.0,
+            (pickup_key, mile_12_key): 27.0,
+            (pickup_key, osapa_key): 26.0,
+            (ikorodu_key, dropoff_key): 30.0,
+            (ikorodu_key, mile_12_key): 17.0,
+            (ikorodu_key, osapa_key): 24.0,
+            (mile_12_key, dropoff_key): 13.0,
+            (mile_12_key, osapa_key): 21.0,
+            (osapa_key, dropoff_key): 6.0,
+        }
+
+        def route_distance_side_effect(origin, destination):
+            return route_distances.get(
+                (point_key(origin), point_key(destination)), 999.0
+            )
+
+        def directions_side_effect(origin, points):
+            if len(points) == 3:
+                return [(8.0, 20), (17.0, 42), (13.0, 31)]
+            return None
+
+        route_distance_mock.side_effect = route_distance_side_effect
+        directions_mock.side_effect = directions_side_effect
+
+        success = generate_relay_legs_sync(order.id)
+
+        self.assertTrue(success)
+        order.refresh_from_db()
+        legs = list(order.legs.order_by("leg_number"))
+
+        self.assertEqual(order.routing_status, order.RoutingStatus.READY)
+        self.assertEqual(len(legs), 3)
+        self.assertEqual(legs[0].end_relay_node_id, ikorodu.id)
+        self.assertEqual(legs[1].start_relay_node_id, ikorodu.id)
+        self.assertEqual(legs[1].end_relay_node_id, mile_12.id)
+        self.assertEqual(legs[2].start_relay_node_id, mile_12.id)
+        self.assertIsNone(legs[2].end_relay_node)
+        self.assertEqual(legs[0].distance_km, 8.0)
+        self.assertEqual(legs[1].distance_km, 17.0)
+        self.assertEqual(legs[2].distance_km, 13.0)
 
     @patch("dispatcher.utils.emit_activity")
     @patch("dispatcher.tasks._directions_legs", return_value=None)
     @patch("dispatcher.tasks._nearest_rider_to", return_value=None)
-    def test_generate_relay_legs_fails_without_full_15km_hub_chain(
+    def test_generate_relay_legs_fails_without_full_20km_hub_chain(
         self, _nearest_rider_mock, _directions_mock, _emit_activity_mock
     ):
         from dispatcher.models import RelayNode
@@ -937,22 +1188,22 @@ class RiderAssignmentTaskTests(TestCase):
             min_fee=500,
             is_active=True,
         )
-        
+
         # Create a hub
         self.hub = RelayNode.objects.create(
             name="Test Hub",
             latitude=6.5,
             longitude=3.3,
             address="Test Hub Address",
-            is_active=True
+            is_active=True,
         )
-        
+
         # Create a rider near the hub
         self.rider_user = User.objects.create_user(
             phone="08022220000",
             email="rider@example.com",
             password="password",
-            usertype="Rider"
+            usertype="Rider",
         )
         self.rider = Rider.objects.create(
             user=self.rider_user,
@@ -960,16 +1211,18 @@ class RiderAssignmentTaskTests(TestCase):
             current_latitude=6.501,
             current_longitude=3.301,
             is_authorized=True,
-            hub=self.hub
+            hub=self.hub,
         )
 
     @patch("riders.notifications.notify_rider")
     @patch("riders.views.publish_order_assigned_event")
     @patch("dispatcher.tasks.notify_relay_vertical_leads.delay")
-    def test_assign_rider_dynamically(self, mock_notify_leads, mock_publish, mock_notify):
+    def test_assign_rider_dynamically(
+        self, mock_notify_leads, mock_publish, mock_notify
+    ):
         from orders.models import Order, OrderLeg
         from dispatcher.tasks import assign_rider_to_sub_order_task
-        
+
         # Create a parent order and a sub-order
         parent = Order.objects.create(
             order_number="P100",
@@ -978,7 +1231,7 @@ class RiderAssignmentTaskTests(TestCase):
             is_relay_order=True,
             pickup_address="Origin",
             pickup_latitude=6.4,
-            pickup_longitude=3.2
+            pickup_longitude=3.2,
         )
         sub_order = Order.objects.create(
             order_number="S101",
@@ -988,22 +1241,19 @@ class RiderAssignmentTaskTests(TestCase):
             pickup_latitude=6.5,
             pickup_longitude=3.3,
             status="Pending",
-            pickup_address="Hub Address"
+            pickup_address="Hub Address",
         )
         leg = OrderLeg.objects.create(
-            order=parent,
-            leg_number=2,
-            start_relay_node=self.hub,
-            status="Pending"
+            order=parent, leg_number=2, start_relay_node=self.hub, status="Pending"
         )
-        
+
         # Run task with rider_id=None
         success = assign_rider_to_sub_order_task(str(sub_order.id), str(leg.id), None)
-        
+
         self.assertTrue(success)
         sub_order.refresh_from_db()
         leg.refresh_from_db()
-        
+
         self.assertEqual(sub_order.rider, self.rider)
         self.assertEqual(leg.rider, self.rider)
         self.assertEqual(sub_order.status, "Assigned")
@@ -1037,6 +1287,7 @@ class OrderViewSetListTests(TestCase):
 
     def _create_orders(self, count):
         from orders.models import Order, Delivery
+
         for i in range(count):
             order = Order.objects.create(
                 order_number=f"ORD{1000+i}",
@@ -1069,3 +1320,69 @@ class OrderViewSetListTests(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertNotIn("results", res.data)
         self.assertEqual(len(res.data), 110)
+
+
+class OrderViewSetGenerateRelayRouteTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+        from orders.models import Delivery, Order, Vehicle
+
+        self.user = User.objects.create_user(
+            phone="08022223333",
+            email="relay_route_test@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.vehicle = Vehicle.objects.create(
+            name="Bike-Relay-Route",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+        self.order = Order.objects.create(
+            order_number="ORD-RELAY-REGEN",
+            user=self.user,
+            vehicle=self.vehicle,
+            is_relay_order=True,
+            routing_status=Order.RoutingStatus.READY,
+            pickup_address="Pickup",
+            pickup_latitude=6.5,
+            pickup_longitude=3.3,
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal("1000.00"),
+            payment_status="Pending",
+            status="Pending",
+        )
+        Delivery.objects.create(
+            order=self.order,
+            dropoff_address="Dropoff",
+            dropoff_latitude=6.6,
+            dropoff_longitude=3.4,
+            receiver_name="Receiver",
+            receiver_phone="08033334444",
+        )
+
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    @patch("dispatcher.utils.emit_activity")
+    @patch("dispatcher.tasks.generate_relay_legs_sync", return_value=True)
+    def test_generate_relay_route_always_regenerates_ready_orders(
+        self, generate_relay_legs_sync_mock, _emit_activity_mock
+    ):
+        from orders.models import OrderLeg
+
+        OrderLeg.objects.create(order=self.order, leg_number=1, status="Pending")
+
+        res = self.client.post(
+            f"/api/dispatch/orders/{self.order.order_number}/generate-relay-route/"
+        )
+
+        self.assertEqual(res.status_code, 200, res.data)
+        generate_relay_legs_sync_mock.assert_called_once_with(str(self.order.id))

@@ -31,7 +31,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
-
+ai_learnings/
 # Django
 *.log
 local_settings.py

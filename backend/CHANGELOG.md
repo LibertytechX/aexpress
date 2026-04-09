@@ -4,7 +4,18 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-09] — AI Agent Context & UUID Validation
+- **AI Agent Fix**: Resolved an issue where the AI Support Agent would hallucinate a placeholder `user_1234` ID when calling tools.
+    - **Injected Context**: Explicitly prepending `[SYSTEM CONTEXT: User ID = ...]` to user messages in `get_ai_response`.
+    - **Robust Validation**: Added `uuid.UUID` validation in `get_user_profile` to prevent `ValidationError` crashes, returning helpful errors to the agent instead.
+    - **Instruction Update**: Refined the `SupportCoordinator` instruction to explicitly look for the provided User ID in the context.
+- **Cleanup**: Removed redundant debug print statements in Celery tasks.
+
+---
+
 ## [2026-04-07] — Chats API & Merchant Deactivation
+- **Ably Realtime Chats Documentation**: Created [ably_realtime_chats.md](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md) guide for client-side integration.
+- **`subscribe_chat` Management Command**: Added a new command to subscribe to real-time chat messages for debugging.
 - **Chats API Documentation**: Documented the Chat System REST API in `ENDPOINTS_DOCUMENTATION.md`.
 - **Merchant Deactivation (Delete)**: Implemented new endpoints for soft-deactivating merchant accounts.
     - **Dispatcher Portal**: Admins can deactivate merchants via `DELETE /api/dispatcher/merchants/<id>/`.

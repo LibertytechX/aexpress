@@ -2,7 +2,7 @@
 const API_BASE_URL = 'https://www.orders.axpress.net/api';
 // const API_BASE_URL = 'http://147.182.251.211/api';
 
-// --- Interfaces ---
+// --- Interfaces ----
 
 export interface User {
   id: number;
@@ -180,8 +180,12 @@ async function apiRequest<T = any>(endpoint: string, options: ApiOptions = {}): 
 // --- API Modules ---
 
 export const AuthAPI = {
-  signup: async (userData: any): Promise<AuthResponse> => {
-    const response = await apiRequest<AuthResponse>('/auth/signup/', {
+  signup: async (userData: any, source?: string): Promise<AuthResponse> => {
+    let url = '/auth/signup/';
+    if (source) {
+      url += `?source=${encodeURIComponent(source)}`;
+    }
+    const response = await apiRequest<AuthResponse>(url, {
       method: 'POST',
       body: JSON.stringify(userData),
       skipAuth: true,
@@ -290,6 +294,11 @@ export const WalletAPI = {
   },
   initializePayment: async (amount: number) => apiRequest('/wallet/fund/initialize/', { method: 'POST', body: JSON.stringify({ amount: amount.toString() }) }),
   verifyPayment: async (reference: string) => apiRequest('/wallet/fund/verify/', { method: 'POST', body: JSON.stringify({ reference }) }),
+  getVirtualAccount: async () => {
+    return await apiRequest('/wallet/virtual-account/', {
+      method: 'GET',
+    });
+  },
 };
 
 // Chat interfaces
@@ -339,6 +348,25 @@ export const AblyTokenAPI = {
     apiRequest('/dispatch/ably-token/'),
 };
 
+export const SubscriptionAPI = {
+  getPlans: async () => apiRequest('/subscriptions/plans/', { method: 'GET' }),
+  subscribe: async (planId: string) => 
+    apiRequest(`/subscriptions/plans/${planId}/subscribe/`, { 
+      method: 'POST',
+      body: JSON.stringify({}) // Some backends require a body for POST
+    }),
+  getActiveSubscription: async () => apiRequest('/subscriptions/active/', { method: 'GET' }),
+  
+  // Postpaid plans
+  getPostpaidPlans: async () => apiRequest('/subscriptions/postpaid/plans/', { method: 'GET' }),
+  activatePostpaidPlan: async (planId: string) => 
+    apiRequest(`/subscriptions/postpaid/plans/${planId}/activate/`, { 
+      method: 'POST',
+      body: JSON.stringify({}) 
+    }),
+  getActivePostpaidSubscription: async () => apiRequest('/subscriptions/postpaid/active/', { method: 'GET' }),
+};
+
 // Default export matching original usage
 const API = {
   Auth: AuthAPI,
@@ -346,6 +374,7 @@ const API = {
   Wallet: WalletAPI,
   Token: TokenManager,
   Chats: ChatsAPI,
+  Subscription: SubscriptionAPI,
 };
 
 export default API;

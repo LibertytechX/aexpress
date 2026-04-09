@@ -333,6 +333,22 @@ class QuickSendView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                # check if user has unpaid charges
+                unpaid_charges = Charge.objects.filter(
+                    user=request.user, is_active=True, status="pending"
+                )
+                if unpaid_charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "non_field_errors": [
+                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow
@@ -584,6 +600,21 @@ class MultiDropView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                unpaid_charges = Charge.objects.filter(
+                    user=request.user, is_active=True, status="pending"
+                )
+                if unpaid_charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "non_field_errors": [
+                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow
@@ -836,6 +867,21 @@ class BulkImportView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                unpaid_charges = Charge.objects.filter(
+                    user=request.user, is_active=True, status="pending"
+                )
+                if unpaid_charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "non_field_errors": [
+                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow

@@ -564,6 +564,36 @@ class Rider(models.Model):
         self.status = self.Status.ONLINE
         self.save()
 
+    def yesterday_distance_covered(self):
+        """Return yesterday's odometer delta for the rider's assigned asset."""
+        if not self.vehicle_asset_id:
+            return 0.00
+
+        from datetime import timedelta
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{self.vehicle_asset_id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset_id=self.vehicle_asset_id, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 
@@ -1031,99 +1061,4 @@ class MerchantAPIKey(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return (
-            f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Merchant Notifications
-# ---------------------------------------------------------------------------
-
-
-class MerchantDevice(models.Model):
-    """
-    Stores FCM device tokens for merchant mobile app installs.
-    A merchant may have multiple active devices (multi-device support).
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    merchant = models.ForeignKey(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="devices",
-    )
-    device_id = models.CharField(max_length=255, unique=True, db_index=True)
-    fcm_token = models.CharField(max_length=500, blank=True, default="")
-    platform = models.CharField(max_length=50, blank=True, default="")
-    model_name = models.CharField(max_length=255, blank=True, default="")
-    os_version = models.CharField(max_length=50, blank=True, default="")
-    app_version = models.CharField(max_length=50, blank=True, default="")
-    is_active = models.BooleanField(default=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        db_table = "merchant_devices"
-
-    def __str__(self):
-        return f"Device {self.device_id} for merchant {self.merchant.merchant_id}"
-
-
-class MerchantNotification(models.Model):
-    """
-    Persisted notification record for a merchant.
-    Created regardless of push delivery outcome so the merchant
-    can always see their notification history in-app.
-    """
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    merchant = models.ForeignKey(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="notifications",
-    )
-    title = models.CharField(max_length=255)
-    body = models.TextField()
-    data = models.JSONField(default=dict)
-    is_read = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-
-    class Meta:
-        db_table = "merchant_notifications"
-        ordering = ["-created_at"]
-
-    def __str__(self):
-        return f"[{'read' if self.is_read else 'unread'}] {self.title} → merchant {self.merchant.merchant_id}"
-
-
-class MerchantNotificationSettings(models.Model):
-    """
-    Per-merchant notification preference toggles.
-    Auto-created when a Merchant is created (via post_save signal).
-    """
-
-    merchant = models.OneToOneField(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="notification_settings",
-    )
-    push_enabled = models.BooleanField(default=True, help_text="Master switch for all push notifications")
-    order_assigned = models.BooleanField(default=True, help_text="Notify when a rider is assigned to an order")
-    order_completed = models.BooleanField(default=True, help_text="Notify when an order is delivered")
-    order_cancelled = models.BooleanField(default=True, help_text="Notify when an order is cancelled")
-    wallet_credit = models.BooleanField(default=True, help_text="Notify on wallet credits and escrow releases")
-    marketing = models.BooleanField(default=True, help_text="Promotional and marketing notifications")
-
-    class Meta:
-        db_table = "merchant_notification_settings"
-
-    def __str__(self):
-        return f"NotificationSettings for merchant {self.merchant.merchant_id}"
-
-
-@receiver(post_save, sender=Merchant)
-def create_merchant_notification_settings(sender, instance, created, **kwargs):
-    """Auto-create notification settings when a new Merchant is created."""
-    if created:
-        MerchantNotificationSettings.objects.get_or_create(merchant=instance)
+        return f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"

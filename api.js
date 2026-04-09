@@ -501,6 +501,25 @@ const ActivityAPI = {
   },
 };
 
+const SubscriptionAPI = {
+  getPlans: async () => apiRequest('/subscriptions/plans/', { method: 'GET' }),
+  subscribe: async (planId) => 
+    apiRequest(`/subscriptions/plans/${planId}/subscribe/`, { 
+      method: 'POST',
+      body: JSON.stringify({})
+    }),
+  getActiveSubscription: async () => apiRequest('/subscriptions/active/', { method: 'GET' }),
+
+  // Postpaid plans
+  getPostpaidPlans: async () => apiRequest('/subscriptions/postpaid/plans/', { method: 'GET' }),
+  activatePostpaidPlan: async (planId) => 
+    apiRequest(`/subscriptions/postpaid/plans/${planId}/activate/`, { 
+      method: 'POST',
+      body: JSON.stringify({})
+    }),
+  getActivePostpaidSubscription: async () => apiRequest('/subscriptions/postpaid/active/', { method: 'GET' }),
+};
+
 // Export API modules
 window.API = {
   Auth: AuthAPI,
@@ -508,5 +527,6 @@ window.API = {
   Wallet: WalletAPI,
   Activity: ActivityAPI,
   Token: TokenManager,
+  Subscription: SubscriptionAPI,
 };
 
