@@ -387,7 +387,7 @@ def _route_distance_km(origin, destination):
     )
 
 
-MAX_RELAY_LEG_KM = 20.0
+MAX_RELAY_LEG_KM = 10.0
 RELAY_LEG_DISTANCE_EPSILON_KM = 0.01
 RELAY_THRESHOLD_KM = MAX_RELAY_LEG_KM
 
