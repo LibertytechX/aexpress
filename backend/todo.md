@@ -8,7 +8,7 @@
 - [x] complete the merchant referral implementation with agency banking
 - [x] move all marketing tasks to tasks.py and update their references in the codebase
 - [x] add check for rider acceptance of order offer to make sure the order within their zone.
-- [] Bonus: integrate AI chatbot to the merchant support chats
+- [x] Bonus: integrate AI chatbot to the merchant support chats
 - [] Bonus: Build an MCP tools for Axpress Order booking and basic enquires
 - [x] Move all map services to a separate secure service and use it across the platform 
 - [x] update the onboard dispatcher in teams to support role assignment.
