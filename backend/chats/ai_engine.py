@@ -151,7 +151,9 @@ def check_order_status(order_id: str) -> dict:
                 "payment_status": order.payment_status,
                 "pickup_address": order.pickup_address,
                 "deliveries_count": delivery_count,
-                "rider": order.rider.name if order.rider else "Not yet assigned",
+                "rider": (
+                    order.rider.user.full_name if order.rider else "Not yet assigned"
+                ),
                 "vehicle": order.vehicle.name,
                 "created_at": order.created_at.strftime("%Y-%m-%d %H:%M"),
                 "total_amount": float(order.total_amount),
@@ -318,4 +320,4 @@ async def get_ai_response(
     except Exception as e:
         traceback.print_exc()
         logger.error(f"ADK Execution Error: {e}")
-        return '{"response": "An internal error occurred. Please try again.", "category": "General", "action_required": true}'
+        return '{"response": "Our Virtual Agent is currently not available, a human will reach out in a please be patient, as we have notified our team", "category": "General", "action_required": true}'
