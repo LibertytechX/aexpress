@@ -16,3 +16,6 @@
 - [] merchant notifications, notification_settings toggle
 - [x] Adjust app server logging for faster error tracing and debugging and troubleshooting on axpress.
 - [] (Bonus). Integrate AI Chats using Gemini AI model to axpress customer chats features 
+- [x] update all relay sub orders payment status to paid when the main order is paid for.
+- [] Smartparcel integration
+
