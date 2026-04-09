@@ -1,6 +1,7 @@
 import logging
 import json
 import traceback
+import uuid
 from typing import Optional, List
 from django.conf import settings
 from pydantic import BaseModel, Field
@@ -88,8 +89,19 @@ def get_user_profile(user_id: str) -> dict:
     from django.contrib.auth import get_user_model
 
     User = get_user_model()
+
+    # Validate UUID
     try:
-        user = User.objects.get(id=user_id)
+        uuid_obj = uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid UUID received in get_user_profile: {user_id}")
+        return {
+            "status": "error",
+            "message": f"'{user_id}' is not a valid UUID. Please ensure you are using the actual User ID provided in the context.",
+        }
+
+    try:
+        user = User.objects.get(id=uuid_obj)
         return {
             "status": "success",
             "data": {
@@ -107,7 +119,7 @@ def get_user_profile(user_id: str) -> dict:
 def check_order_status(order_id: str) -> dict:
     """
     Retrieves the current status and tracking info for an order.
-    Supports both numeric IDs and ORD-XXXX format.
+    Supports numeric IDs format.
 
     Args:
         order_id: The unique order identifier.
@@ -166,7 +178,7 @@ order_support_agent = LlmAgent(
 
     # METHODOLOGY
     1. Always use 'check_order_status' to get real-time info.
-    2. If an order is not found, explain the correct format (ORD-XXXX).
+    2. If an order is not found, explain the correct format (6158XXX).
     3. Be empathetic about delays.
 
     # BOUNDARIES
@@ -174,8 +186,8 @@ order_support_agent = LlmAgent(
     - NEVER share internal warehouse locations.
 
     # EXAMPLES
-    Input: "Where is ORD-999?" 
-    Output: "I've checked your order ORD-999, it is currently in transit and should arrive in 2 days."
+    Input: "Where is 999123?" 
+    Output: "I've checked your order 999123, it is currently in transit and should arrive in 2 days."
     """,
     tools=[FunctionTool(func=check_order_status)],
     planner=BuiltInPlanner(
@@ -224,10 +236,11 @@ support_coordinator = LlmAgent(
     Greet users and route them to the specialized OrderSupportAgent or TechnicalSupportAgent.
 
     # METHODOLOGY
-    1. First, use 'get_user_profile' to know who you are talking to.
-    2. Analyze the user query.
-    3. Delegate to the correct specialized agent using their respective tools.
-    4. Summarize the resolution clearly using the SupportResponse schema.
+    1. First, look for the 'User ID' in the [SYSTEM CONTEXT] provided in the message.
+    2. Use 'get_user_profile(user_id)' with that ID to know who you are talking to.
+    3. Analyze the user query.
+    4. Delegate to the correct specialized agent using their respective tools.
+    5. Summarize the resolution clearly using the SupportResponse schema.
 
     # BOUNDARIES
     - ALWAYS greet the user by name if 'get_user_profile' succeeds.
@@ -266,6 +279,7 @@ async def get_ai_response(
     """
     Programmatic entry point for getting AI responses.
     """
+    print("The user ID: ", user_id)
     memory_service = DjangoMemoryService()
     session_service = InMemorySessionService()
 
@@ -283,12 +297,16 @@ async def get_ai_response(
         )
 
         final_text = ""
+        # Prepend system context to the user message so the agent knows the ID
+        contextual_message = (
+            f"[SYSTEM CONTEXT: User ID = {user_id}]\n\n{user_message_content}"
+        )
 
         async for event in runner.run_async(
             user_id=user_id,
             session_id=conversation_id,
             new_message=types.Content(
-                role="user", parts=[types.Part(text=user_message_content)]
+                role="user", parts=[types.Part(text=contextual_message)]
             ),
         ):
             if event.is_final_response():

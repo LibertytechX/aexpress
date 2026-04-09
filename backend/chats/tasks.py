@@ -15,7 +15,9 @@ def process_ai_response(conversation_id, user_id, user_message_content):
     """
     try:
         # 1. Run the AI Agent asynchronously
-        ai_response_raw = asyncio.run(get_ai_response(conversation_id, user_id, user_message_content))
+        ai_response_raw = asyncio.run(
+            get_ai_response(conversation_id, user_id, user_message_content)
+        )
 
         # 2. Parse structured output (if it's JSON)
         try:
@@ -40,6 +42,7 @@ def process_ai_response(conversation_id, user_id, user_message_content):
         # 5. Publish real-time event via Ably
         # We import here to avoid circular dependencies
         from .views import _publish_to_ably
+
         payload = {
             "id": str(message.id),
             "conversation_id": str(conversation.id),

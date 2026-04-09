@@ -180,6 +180,7 @@ class SendMessageView(APIView):
             process_ai_response.delay(
                 str(conversation.id), str(conversation.user_id.id), content
             )
+        print("Let's see the user Id ", conversation.user_id.id)
 
         # Publish real-time event via Ably REST
         payload = {
