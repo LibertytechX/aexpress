@@ -1075,7 +1075,6 @@ class MerchantDevice(models.Model):
     A single merchant may have multiple devices (e.g. phone and tablet).
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="devices"
     )
@@ -1119,7 +1118,6 @@ class MerchantNotification(models.Model):
     Allows for in-app 'Notification Center' / inbox functionality.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="notifications"
     )
@@ -1146,7 +1144,6 @@ class MerchantNotificationSettings(models.Model):
     Per-merchant notification preference toggles.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.OneToOneField(
         Merchant, on_delete=models.CASCADE, related_name="notification_settings"
     )
