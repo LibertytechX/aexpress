@@ -75,6 +75,9 @@
 
 ### 1. List Orders
 **Endpoint:** `GET /orders/`  
+**Description:** Returns a paginated list of orders.
+**Fields Added:**
+- `vertical_lead_name`: The name of the lead responsible for the order's vertical.
 
 ---
 
