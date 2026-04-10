@@ -4,11 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-04-10] — Dispatcher Dashboard Vertical Leads
+## [2026-04-10] — Dashboard & Weekly Reports
 - **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
     - Updated UI table with a new "Vertical Lead" column.
     - Included `vertical_lead_name` in the CSV export data.
     - Updated `OrderSerializer` to include the lead name derived from the order's vertical.
+- **Weekly Delivery Report Enhance**: Added `total_order_amount` to the weekly Monday reports (E1 template).
+    - Calculated total order amount for all orders requested during the past week.
+    - Updated `tasks.py` to include the amount in the email context, formatted with commas.
+    - Updated `E1.html` template to display the total order amount with a Naira symbol.
 
 ---
 

@@ -10,9 +10,10 @@
     <li>Total Deliveries Requested: <strong>{{ total_requested }}</strong></li>
     <li>Successfully Delivered: <strong>{{ total_delivered }}</strong></li>
     <li>Delivery Success Rate: <strong>{{ success_rate }}%</strong></li>
+    <li>Total Order Amount: <strong>₦{{ total_order_amount }}</strong></li>
 </ul>
 
-<h3>🏆 Highlights This Week</h3>
+{% comment %} <h3>🏆 Highlights This Week</h3>
 <ul>
     <li>Most Active Day: <strong>{{ most_active_day }}</strong></li>
     <li>Top Delivery Zone: <strong>{{ top_delivery_zone }}</strong></li>
@@ -23,7 +24,7 @@
     <li>Consider scheduling more deliveries on {{ most_active_day }}</li>
     <li>Keep up the great work in {{ top_delivery_zone }}</li>
     <li>Your success rate is {{ success_rate }}% — reach out if you'd like support improving this</li>
-</ul>
+</ul> {% endcomment %}
 
 <p>You're doing great! Keep the momentum going this week.</p>
 
