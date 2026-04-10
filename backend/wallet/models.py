@@ -94,6 +94,12 @@ class Wallet(models.Model):
                         order = charge.order
                         order.payment_status = "Paid"
                         order.save(update_fields=["payment_status"])
+                        # also if order is relay order, update the sub_orders payment_status
+                        if order.is_relay_order:
+                            sub_orders = order.sub_orders.all()
+                            for sub_order in sub_orders:
+                                sub_order.payment_status = "Paid"
+                                sub_order.save(update_fields=["payment_status"])
 
                         logger.info(
                             f"Auto-debited charge {charge.id} for order {order.order_number}"

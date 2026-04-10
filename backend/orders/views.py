@@ -333,17 +333,17 @@ class QuickSendView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
-                # check if user has unpaid charges
-                unpaid_charges = Charge.objects.filter(
-                    user=request.user, is_active=True, status="pending"
+                # check if this user has pending charges
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
                 )
-                if unpaid_charges.exists():
+                if charges.exists():
                     return Response(
                         {
                             "success": False,
                             "errors": {
-                                "non_field_errors": [
-                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
                                 ]
                             },
                         },
@@ -600,16 +600,16 @@ class MultiDropView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
-                unpaid_charges = Charge.objects.filter(
-                    user=request.user, is_active=True, status="pending"
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
                 )
-                if unpaid_charges.exists():
+                if charges.exists():
                     return Response(
                         {
                             "success": False,
                             "errors": {
-                                "non_field_errors": [
-                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
                                 ]
                             },
                         },
@@ -867,16 +867,16 @@ class BulkImportView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
-                unpaid_charges = Charge.objects.filter(
-                    user=request.user, is_active=True, status="pending"
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
                 )
-                if unpaid_charges.exists():
+                if charges.exists():
                     return Response(
                         {
                             "success": False,
                             "errors": {
-                                "non_field_errors": [
-                                    "You have unpaid charges. Please pay your charges before creating a new order."
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
                                 ]
                             },
                         },
@@ -992,11 +992,11 @@ class OrderPayNowView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if order.payment_status == "Paid":
-            return Response(
-                {"success": False, "message": "Order is already paid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # if order.payment_status == "Paid":
+        #     return Response(
+        #         {"success": False, "message": "Order is already paid."},
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
 
         # Get or create virtual account
         try:
