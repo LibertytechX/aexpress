@@ -4,6 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-10] — Dispatcher Dashboard Vertical Leads
+- **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
+    - Updated UI table with a new "Vertical Lead" column.
+    - Included `vertical_lead_name` in the CSV export data.
+    - Updated `OrderSerializer` to include the lead name derived from the order's vertical.
+
+---
+
 ## [2026-04-07] — Chats API & Merchant Deactivation
 - **Ably Realtime Chats Documentation**: Created [ably_realtime_chats.md](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md) guide for client-side integration.
 - **`subscribe_chat` Management Command**: Added a new command to subscribe to real-time chat messages for debugging.
