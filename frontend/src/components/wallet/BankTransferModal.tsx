@@ -3,27 +3,64 @@
 import React, { useState, useEffect } from 'react';
 import Icons from '@/components/Icons';
 import { S } from '@/lib/theme';
+import API from '@/lib/api';
 
-export default function BankTransferModal({ amount, onClose, onSuccess }) {
-  const [state, setState] = useState('loading'); // 'loading', 'show-details', 'confirming', 'success'
+// Loading Spinner Component moved outside to avoid "Cannot create components during render"
+const LoadingSpinner = ({ state }: { state: string }) => (
+  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px" }}>
+    <div style={{
+      width: 60,
+      height: 60,
+      border: `4px solid ${S.goldPale}`,
+      borderTop: `4px solid ${S.gold}`,
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite"
+    }} />
+    <style jsx>{`
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    `}</style>
+    <p style={{ marginTop: 24, fontSize: 15, fontWeight: 600, color: S.navy }}>
+      {state === 'loading' ? 'Generating account details...' : 'Processing confirmation...'}
+    </p>
+    <p style={{ marginTop: 8, fontSize: 13, color: S.grayLight }}>Please wait</p>
+  </div>
+);
+
+export default function BankTransferModal({ amount, onClose, onSuccess }: { amount: number, onClose: () => void, onSuccess: () => void }) {
+  const [state, setState] = useState('loading'); // 'loading', 'show-details', 'confirming', 'success', 'error'
   const [copied, setCopied] = useState(false);
+  const [bankDetails, setBankDetails] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Bank details
-  const bankDetails = {
-    bankName: "Wema Bank",
-    accountNumber: "7924567890",
-    accountName: "Assured Express Limited"
-  };
-
-  // Initial loading
+  // Initial loading - fetch virtual account
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setState('show-details');
-    }, 2500);
-    return () => clearTimeout(timer);
+    const fetchVirtualAccount = async () => {
+      try {
+        setState('loading');
+        const response = await API.Wallet.getVirtualAccount();
+        if (response.success) {
+          setBankDetails({
+            bankName: response.data.bank_name,
+            accountNumber: response.data.account_number,
+            accountName: response.data.account_name
+          });
+          setState('show-details');
+        } else {
+          setError(response.message || "Failed to load bank details");
+          setState('error');
+        }
+      } catch (err: any) {
+        console.error("Error fetching virtual account:", err);
+        setError("Network error. Please try again.");
+        setState('error');
+      }
+    };
+
+    fetchVirtualAccount();
   }, []);
 
   const copyAccountNumber = () => {
+    if (!bankDetails) return;
     navigator.clipboard.writeText(bankDetails.accountNumber);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -43,27 +80,6 @@ export default function BankTransferModal({ amount, onClose, onSuccess }) {
     onClose();
   };
 
-  // Loading Spinner Component
-  const LoadingSpinner = () => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px" }}>
-      <div style={{
-        width: 60,
-        height: 60,
-        border: `4px solid ${S.goldPale}`,
-        borderTop: `4px solid ${S.gold}`,
-        borderRadius: "50%",
-        animation: "spin 1s linear infinite"
-      }} />
-      <style jsx>{`
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      `}</style>
-      <p style={{ marginTop: 24, fontSize: 15, fontWeight: 600, color: S.navy }}>
-        {state === 'loading' ? 'Generating account details...' : 'Processing confirmation...'}
-      </p>
-      <p style={{ marginTop: 8, fontSize: 13, color: S.grayLight }}>Please wait</p>
-    </div>
-  );
-
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
       <div onClick={handleClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} />
@@ -82,7 +98,7 @@ export default function BankTransferModal({ amount, onClose, onSuccess }) {
         {/* Content */}
         <div style={{ padding: 24 }}>
           {/* Loading State */}
-          {(state === 'loading' || state === 'confirming') && <LoadingSpinner />}
+          {(state === 'loading' || state === 'confirming') && <LoadingSpinner state={state} />}
 
           {/* Show Bank Details */}
           {state === 'show-details' && (
@@ -156,6 +172,24 @@ export default function BankTransferModal({ amount, onClose, onSuccess }) {
                 boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
               }}>
                 I have paid
+              </button>
+            </div>
+          )}
+
+          {/* Error State */}
+          {state === 'error' && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ color: S.red, fontWeight: 600, marginBottom: 16 }}>{error}</p>
+              <button onClick={onClose} style={{
+                padding: "10px 24px",
+                borderRadius: 10,
+                border: "none",
+                background: S.navy,
+                color: "#fff",
+                fontWeight: 700,
+                cursor: "pointer"
+              }}>
+                Close
               </button>
             </div>
           )}

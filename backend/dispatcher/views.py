@@ -45,6 +45,7 @@ import hashlib
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
+from .tasks import send_merchant_notification
 from orders.serializers import MergeGroupedOrdersSerializer
 from django.db import transaction
 
@@ -350,6 +351,20 @@ class OrderViewSet(viewsets.ModelViewSet):
             except Exception as exc:
                 logger.warning(f"New order notification failed: {exc}")
 
+        # Notify the merchant that a rider was assigned to their order
+        try:
+            merchant_profile = getattr(order.merchant, "merchant_profile", None)
+            if merchant_profile:
+                send_merchant_notification.delay(
+                    merchant_id=str(merchant_profile.id),
+                    title="Rider Assigned 🚀",
+                    body=f"A rider has been assigned to your order #{order.order_number}.",
+                    data={"order_number": order.order_number, "status": "Assigned"},
+                    category="order_assigned",
+                )
+        except Exception as exc:
+            logger.warning(f"Merchant assignment notification failed: {exc}")
+
         return DRFResponse(response_serializer.data, status=drf_status.HTTP_201_CREATED)
 
     from rest_framework.decorators import action
@@ -402,6 +417,21 @@ class OrderViewSet(viewsets.ModelViewSet):
                 publish_order_assigned_event(order, rider)
             except Exception as exc:
                 logger.warning(f"Dispatcher assignment notification failed: {exc}")
+
+            # Notify the merchant that a rider was assigned
+            try:
+                merchant_profile = getattr(order.merchant, "merchant_profile", None)
+                if merchant_profile:
+                    send_merchant_notification.delay(
+                        merchant_id=str(merchant_profile.id),
+                        title="Rider Assigned 🚀",
+                        body=f"A rider has been assigned to your order #{order.order_number}.",
+                        data={"order_number": order.order_number, "status": "Assigned"},
+                        category="order_assigned",
+                    )
+            except Exception as exc:
+                logger.warning(f"Merchant assignment notification failed: {exc}")
+
             return Response(self.get_serializer(order).data)
         except Rider.DoesNotExist:
             return Response(
@@ -759,6 +789,25 @@ class OrderViewSet(viewsets.ModelViewSet):
                     publish_order_assigned_event(sub_order, rider)
                 except Exception as exc:
                     logger.warning(f"Relay leg assignment notification failed: {exc}")
+
+                # Notify the merchant that a rider was assigned to a relay leg
+                try:
+                    merchant_profile = getattr(sub_order.merchant, "merchant_profile", None)
+                    if merchant_profile:
+                        send_merchant_notification.delay(
+                            merchant_id=str(merchant_profile.id),
+                            title="Rider Assigned 🚀",
+                            body=f"Leg {leg_number} of your relay order #{order.order_number} has a rider assigned.",
+                            data={
+                                "order_number": sub_order.order_number,
+                                "parent_order_number": order.order_number,
+                                "leg_number": leg_number,
+                                "status": "Assigned",
+                            },
+                            category="order_assigned",
+                        )
+                except Exception as exc:
+                    logger.warning(f"Merchant relay notification failed: {exc}")
         else:
             # Sub-order not yet created. Just update the suggested rider on the leg.
             leg.suggested_rider = rider

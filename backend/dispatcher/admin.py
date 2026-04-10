@@ -65,7 +65,7 @@ class RiderResource(resources.ModelResource):
             "yesterday_completed_order_count",
             "total_amount_for_previous_day",
             "yesterday_distance_covered",
-            # "yesterday_order_distance",
+            "yesterday_order_distance",
             "yesterday_distance",
         )
         export_order = fields
