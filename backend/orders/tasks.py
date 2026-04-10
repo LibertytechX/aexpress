@@ -439,12 +439,17 @@ def process_weekly_monday_reports():
                     else top_delivery["dropoff_address"][:30]
                 )
 
+            total_order_amount = (
+                weekly_orders.aggregate(total=Sum("total_amount"))["total"] or 0
+            )
+
             context = {
                 "start_date": start_date,
                 "end_date": end_date,
                 "total_requested": total_requested,
                 "total_delivered": total_delivered,
                 "success_rate": success_rate,
+                "total_order_amount": f"{total_order_amount:,.2f}",
                 "most_active_day": most_active_day,
                 "top_delivery_zone": top_zone,
             }
