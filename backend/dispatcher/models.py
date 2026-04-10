@@ -1075,6 +1075,7 @@ class MerchantDevice(models.Model):
     A single merchant may have multiple devices (e.g. phone and tablet).
     """
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="devices"
     )
