@@ -945,11 +945,11 @@ class OrderPayNowView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if order.payment_status == "Paid":
-            return Response(
-                {"success": False, "message": "Order is already paid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # if order.payment_status == "Paid":
+        #     return Response(
+        #         {"success": False, "message": "Order is already paid."},
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
 
         # Get or create virtual account
         try:
