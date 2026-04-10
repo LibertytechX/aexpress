@@ -1062,3 +1062,114 @@ class MerchantAPIKey(models.Model):
 
     def __str__(self):
         return f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications & Devices
+# ---------------------------------------------------------------------------
+
+
+class MerchantDevice(models.Model):
+    """
+    Stores FCM registration tokens and device metadata for merchants.
+    A single merchant may have multiple devices (e.g. phone and tablet).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="devices"
+    )
+    device_id = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Unique hardware/vendor ID from the mobile app",
+    )
+    fcm_token = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Firebase Cloud Messaging token for push delivery",
+    )
+    platform = models.CharField(
+        max_length=50, blank=True, default="", help_text='e.g. "ios", "android"'
+    )
+    model_name = models.CharField(
+        max_length=255, blank=True, default="", help_text='e.g. "iPhone 13", "Pixel 6"'
+    )
+    os_version = models.CharField(max_length=50, blank=True, default="")
+    app_version = models.CharField(max_length=50, blank=True, default="")
+    is_active = models.BooleanField(
+        default=True, help_text="Set to False if token is invalid/expired"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_devices"
+        verbose_name = "Merchant Device"
+        verbose_name_plural = "Merchant Devices"
+
+    def __str__(self):
+        return f"{self.merchant.merchant_id} — {self.model_name or self.device_id[:8]}"
+
+
+class MerchantNotification(models.Model):
+    """
+    Stores the history of push notifications sent to a merchant.
+    Allows for in-app 'Notification Center' / inbox functionality.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(
+        default=dict, blank=True, help_text="Arbitrary JSON payload for deep linking"
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "merchant_notifications"
+        ordering = ["-created_at"]
+        verbose_name = "Merchant Notification"
+        verbose_name_plural = "Merchant Notifications"
+
+    def __str__(self):
+        return f"[{'READ' if self.is_read else 'UNREAD'}] {self.merchant.merchant_id}: {self.title[:30]}"
+
+
+class MerchantNotificationSettings(models.Model):
+    """
+    Per-merchant notification preference toggles.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="notification_settings"
+    )
+
+    # Master switch
+    push_enabled = models.BooleanField(
+        default=True, help_text="Global master switch for all push notifications"
+    )
+
+    # Category toggles
+    order_assigned = models.BooleanField(default=True)
+    order_completed = models.BooleanField(default=True)
+    order_cancelled = models.BooleanField(default=True)
+    wallet_credit = models.BooleanField(default=True)
+    marketing = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_notification_settings"
+        verbose_name = "Merchant Notification Settings"
+        verbose_name_plural = "Merchant Notification Settings"
+
+    def __str__(self):
+        return f"Settings for {self.merchant.merchant_id}"
