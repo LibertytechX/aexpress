@@ -18,4 +18,6 @@
 - [] (Bonus). Integrate AI Chats using Gemini AI model to axpress customer chats features 
 - [x] update all relay sub orders payment status to paid when the main order is paid for.
 - [] Smartparcel integration
+- [] update weekly report template to show order volume and amount for the week.
+
 
