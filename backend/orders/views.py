@@ -332,6 +332,22 @@ class QuickSendView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                # check if this user has pending charges
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
+                )
+                if charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow
@@ -583,6 +599,21 @@ class MultiDropView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
+                )
+                if charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow
@@ -835,6 +866,21 @@ class BulkImportView(APIView):
         # Hold funds in escrow if payment method is wallet
         if data["payment_method"] == "wallet":
             try:
+                charges = Charge.objects.filter(
+                    user=request.user, status="pending", is_active=True
+                )
+                if charges.exists():
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {
+                                "wallet": [
+                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
+                                ]
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 wallet = Wallet.objects.get(user=request.user)
 
                 # Hold funds in escrow
