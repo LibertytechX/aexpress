@@ -638,6 +638,7 @@ class Merchant(models.Model):
         on_delete=models.CASCADE,
         related_name="merchant_profile",
     )
+    can_group_orders = models.BooleanField(default=False)
     zone = models.ForeignKey(
         Zone,
         on_delete=models.SET_NULL,

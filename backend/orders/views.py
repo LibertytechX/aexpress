@@ -192,6 +192,19 @@ class QuickSendView(APIView):
 
         # Apply 30% discount for grouped orders
         if data.get("mode") == "grouped":
+            if not hasattr(request.user, "merchant_profile") or not request.user.merchant_profile.can_group_orders:
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "non_field_errors": [
+                                "You are not allowed to create grouped orders."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             from decimal import Decimal
 
             total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
