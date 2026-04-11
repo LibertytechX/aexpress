@@ -392,6 +392,13 @@ class Order(models.Model):
     def __str__(self):
         return f"Order {self.order_number} - {self.user.business_name}"
 
+    @property
+    def vertical_lead_name(self) -> str | None:
+        """Get the name of the vertical lead for this order."""
+        if self.rider and self.rider.hub and self.rider.hub.zone:
+            return self.rider.hub.zone.zone_lead.user.full_name
+        return None
+
     def save(self, *args, **kwargs):
         """Generate order number if not exists."""
         if not self.order_number:

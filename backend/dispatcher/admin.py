@@ -52,9 +52,12 @@ class RiderResource(resources.ModelResource):
     total_amount_for_previous_day = fields.Field(
         column_name="Previous Day Total Amount"
     )
-    yesterday_distance_covered = fields.Field(column_name="Previous Day Distance (km)")
-    # yesterday_order_distance = fields.Field(column_name="Previous Day Orders (km)")
     yesterday_distance = fields.Field(column_name="Previous Day Distance (km)")
+    completed_today = fields.Field(column_name="Completed Today")
+    completed_this_week = fields.Field(column_name="Completed This Week")
+    completed_this_month = fields.Field(column_name="Completed This Month")
+    overall_completed = fields.Field(column_name="Overall Completed")
+    distance_all_time = fields.Field(column_name="Distance All Time (km)")
 
     class Meta:
         model = Rider
@@ -67,9 +70,12 @@ class RiderResource(resources.ModelResource):
             "rider_name",
             "yesterday_completed_order_count",
             "total_amount_for_previous_day",
-            "yesterday_distance_covered",
-            "yesterday_order_distance",
             "yesterday_distance",
+            "completed_today",
+            "completed_this_week",
+            "completed_this_month",
+            "overall_completed",
+            "distance_all_time",
         )
         export_order = fields
 
@@ -111,13 +117,32 @@ class RiderResource(resources.ModelResource):
     def dehydrate_yesterday_distance(self, rider):
         return rider.yesterday_distance_covered()
 
+    def dehydrate_distance_all_time(self, rider):
+        val = getattr(rider, "all_time_distance_annotated", 0)
+        return round(val, 2) if val else 0.00
+
+    def dehydrate_completed_today(self, rider):
+        return getattr(rider, "today_completed_count_annotated", 0)
+
+    def dehydrate_completed_this_week(self, rider):
+        return getattr(rider, "week_completed_count_annotated", 0)
+
+    def dehydrate_completed_this_month(self, rider):
+        return getattr(rider, "month_completed_count_annotated", 0)
+
+    def dehydrate_overall_completed(self, rider):
+        return getattr(rider, "total_completed_count_annotated", 0)
+
     def get_queryset(self):
         qs = super().get_queryset()
         from django.utils import timezone
         from datetime import timedelta
         from django.db.models import Count, Sum, Q
 
-        yesterday = timezone.now().date() - timedelta(days=1)
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
 
         qs = qs.annotate(
             yesterday_completed_order_count_annotated=Count(
@@ -138,6 +163,39 @@ class RiderResource(resources.ModelResource):
             total_yesterday_order_distance_annotated=Sum(
                 "rider_orders__distance_km",
                 filter=Q(rider_orders__created_at__date=yesterday),
+            ),
+            today_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=today,
+                ),
+                distinct=True,
+            ),
+            week_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date__gte=week_start,
+                ),
+                distinct=True,
+            ),
+            month_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date__gte=month_start,
+                ),
+                distinct=True,
+            ),
+            total_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(rider_orders__status="Done"),
+                distinct=True,
+            ),
+            all_time_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(rider_orders__status="Done"),
             ),
         )
         return qs
@@ -177,10 +235,12 @@ class RiderAdmin(ImportExportModelAdmin):
         "rating",
         "total_deliveries",
         "is_active",
+        "completed_today",
+        "completed_this_week",
+        "completed_this_month",
+        "overall_completed",
+        "distance_all_time",
         "yesterday_completed_order_count",
-        "total_amount_for_previous_day",
-        # "yesterday_distance",
-        "yesterday_order_distance",
     )
     list_filter = (
         "status",
@@ -264,7 +324,10 @@ class RiderAdmin(ImportExportModelAdmin):
         from datetime import timedelta
         from django.db.models import Count, Sum, Q
 
-        yesterday = timezone.now().date() - timedelta(days=1)
+        today = timezone.now().date()
+        yesterday = today - timedelta(days=1)
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
 
         qs = qs.annotate(
             yesterday_completed_order_count_annotated=Count(
@@ -286,12 +349,81 @@ class RiderAdmin(ImportExportModelAdmin):
                 "rider_orders__distance_km",
                 filter=Q(rider_orders__created_at__date=yesterday),
             ),
+            today_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date=today,
+                ),
+                distinct=True,
+            ),
+            week_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date__gte=week_start,
+                ),
+                distinct=True,
+            ),
+            month_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(
+                    rider_orders__status="Done",
+                    rider_orders__completed_at__date__gte=month_start,
+                ),
+                distinct=True,
+            ),
+            total_completed_count_annotated=Count(
+                "rider_orders",
+                filter=Q(rider_orders__status="Done"),
+                distinct=True,
+            ),
+            all_time_distance_annotated=Sum(
+                "rider_orders__distance_km",
+                filter=Q(rider_orders__status="Done"),
+            ),
         )
         return qs
 
     @admin.display(description="Rider Name", ordering="user__first_name")
     def rider_name(self, obj):
         return obj.user.get_full_name()
+
+    @admin.display(
+        description="Today Orders",
+        ordering="today_completed_count_annotated",
+    )
+    def completed_today(self, obj):
+        return getattr(obj, "today_completed_count_annotated", 0)
+
+    @admin.display(
+        description="This Week Orders",
+        ordering="week_completed_count_annotated",
+    )
+    def completed_this_week(self, obj):
+        return getattr(obj, "week_completed_count_annotated", 0)
+
+    @admin.display(
+        description="This Month Orders",
+        ordering="month_completed_count_annotated",
+    )
+    def completed_this_month(self, obj):
+        return getattr(obj, "month_completed_count_annotated", 0)
+
+    @admin.display(
+        description="Overall Orders",
+        ordering="total_completed_count_annotated",
+    )
+    def overall_completed(self, obj):
+        return getattr(obj, "total_completed_count_annotated", 0)
+
+    @admin.display(
+        description="Distance All Time (km)",
+        ordering="all_time_distance_annotated",
+    )
+    def distance_all_time(self, obj):
+        val = getattr(obj, "all_time_distance_annotated", 0)
+        return round(val, 2) if val else 0.00
 
     @admin.display(
         description="Yesterday Completed Orders",
@@ -379,6 +511,7 @@ class MerchantAdmin(ImportExportModelAdmin):
         "merchant_type",
         "created_at",
         "get_last_login",
+        "can_group_orders",
     )
     list_filter = ("activity_status", "zone", "acquisition_source")
     search_fields = (

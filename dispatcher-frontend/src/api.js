@@ -316,6 +316,7 @@ const normalizeOrder = (o) => ({
     source: o.source || 'merchant_web',
     mode: o.mode || 'quick',
     dispatcher_assigned: o.dispatcher_assigned || false,
+    verticalLeadName: o.vertical_lead_name || null,
 });
 
 export const OrdersAPI = {

@@ -13,6 +13,23 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-10] — Dashboard & Weekly Reports
+- **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
+    - Updated UI table with a new "Vertical Lead" column.
+    - Included `vertical_lead_name` in the CSV export data.
+    - Updated `OrderSerializer` to include the lead name derived from the order's vertical.
+- **Weekly Delivery Report Enhance**: Added `total_order_amount` to the weekly Monday reports (E1 template).
+    - Calculated total order amount for all orders requested during the past week.
+    - Updated `tasks.py` to include the amount in the email context, formatted with commas.
+    - Updated `E1.html` template to display the total order amount with a Naira symbol.
+- **Rider Performance Metrics**: Added comprehensive order and distance metrics to the Django Admin.
+    - Implemented real-time order counts for Today, This Week (starting Monday), and This Month.
+    - Added "Overall Orders" and "Distance All Time" (km) tracking.
+    - Integrated metrics into the Rider list view and CSV export functionality via `RiderResource`.
+    - Added property methods to the `Rider` model for programmatic access to performance data.
+
+---
+
 ## [2026-04-07] — Chats API & Merchant Deactivation
 - **Ably Realtime Chats Documentation**: Created [ably_realtime_chats.md](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md) guide for client-side integration.
 - **`subscribe_chat` Management Command**: Added a new command to subscribe to real-time chat messages for debugging.

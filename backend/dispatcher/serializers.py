@@ -322,6 +322,7 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     sub_order_numbers = serializers.SerializerMethodField()
     sub_orders = serializers.SerializerMethodField()
+    vertical_lead_name = serializers.SerializerMethodField()
 
     def get_sub_order_numbers(self, obj):
         """Return list of sub-order order_numbers if this is a relay or grouped parent order."""
@@ -344,15 +345,30 @@ class OrderSerializer(serializers.ModelSerializer):
                 {
                     "id": so.order_number,
                     "status": so.status,
-                    "rider": so.rider.user.contact_name if so.rider and getattr(so.rider, "user", None) else None,
+                    "rider": (
+                        so.rider.user.contact_name
+                        if so.rider and getattr(so.rider, "user", None)
+                        else None
+                    ),
                     "riderId": so.rider.rider_id if so.rider else None,
-                    "created": so.created_at.strftime("%Y-%m-%d %H:%M") if getattr(so, "created_at", None) else None,
-                    "amount": float(so.total_amount) if getattr(so, "total_amount", None) else 0.0,
+                    "created": (
+                        so.created_at.strftime("%Y-%m-%d %H:%M")
+                        if getattr(so, "created_at", None)
+                        else None
+                    ),
+                    "amount": (
+                        float(so.total_amount)
+                        if getattr(so, "total_amount", None)
+                        else 0.0
+                    ),
                     "relay_leg_number": so.relay_leg_number,
                 }
                 for so in sub_orders
             ]
         return []
+
+    def get_vertical_lead_name(self, obj):
+        return obj.vertical_lead_name
 
     class Meta:
         from orders.models import Order
@@ -376,6 +392,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "collect_on_delivery",
             "payment",
             "items",
+            "vertical_lead_name",
             "pkg",
             "notes",
             "timeline",
