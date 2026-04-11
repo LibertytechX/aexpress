@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from django.db.models import Sum
 
 from dispatcher.models import SystemSettings
+from dispatcher.tasks import send_merchant_notification
 from riders.models import RiderEarning, RiderCodRecord
 from riders.notifications import notify_rider
 from wallet.models import Wallet
@@ -114,6 +115,24 @@ def complete_order_for_rider(modeladmin, request, queryset):
                 logger.warning(
                     "Failed to send completion notification to rider %s: %s",
                     rider.rider_id,
+                    exc,
+                )
+
+            # Notify the merchant that their order was delivered
+            try:
+                merchant_profile = getattr(order.merchant, "merchant_profile", None)
+                if merchant_profile:
+                    send_merchant_notification.delay(
+                        merchant_id=str(merchant_profile.id),
+                        title="Order Delivered ✅",
+                        body=f"Your order #{order_number} has been delivered successfully.",
+                        data={"order_number": order_number, "status": "Done"},
+                        category="order_completed",
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Merchant completion notification failed for order %s: %s",
+                    order_number,
                     exc,
                 )
 

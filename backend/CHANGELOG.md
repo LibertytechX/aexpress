@@ -4,6 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-09] — AI Agent Context & UUID Validation
+- **AI Agent Fix**: Resolved an issue where the AI Support Agent would hallucinate a placeholder `user_1234` ID when calling tools.
+    - **Injected Context**: Explicitly prepending `[SYSTEM CONTEXT: User ID = ...]` to user messages in `get_ai_response`.
+    - **Robust Validation**: Added `uuid.UUID` validation in `get_user_profile` to prevent `ValidationError` crashes, returning helpful errors to the agent instead.
+    - **Instruction Update**: Refined the `SupportCoordinator` instruction to explicitly look for the provided User ID in the context.
+- **Cleanup**: Removed redundant debug print statements in Celery tasks.
+
+---
+
 ## [2026-04-10] — Dashboard & Weekly Reports
 - **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
     - Updated UI table with a new "Vertical Lead" column.

@@ -14,6 +14,7 @@ from .serializers import (
     ConversationDetailSerializer,
     MessageSerializer,
 )
+from .tasks import process_ai_response
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +174,13 @@ class SendMessageView(APIView):
 
         # Refresh updated_at (auto_now fires on save, not update())
         conversation.save(update_fields=["updated_at"])
+
+        # Trigger AI agent if message is from user
+        if sender_type != "agent":
+            process_ai_response.delay(
+                str(conversation.id), str(conversation.user_id.id), content
+            )
+        print("Let's see the user Id ", conversation.user_id.id)
 
         # Publish real-time event via Ably REST
         payload = {

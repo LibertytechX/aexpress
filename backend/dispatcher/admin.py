@@ -21,6 +21,9 @@ from .models import (
     MerchantDailySnapshot,
     DeliveryRating,
     ZoneTarget,
+    MerchantDevice,
+    MerchantNotification,
+    MerchantNotificationSettings,
 )
 
 
@@ -669,3 +672,35 @@ class DeliveryRatingAdmin(admin.ModelAdmin):
     list_display = ("rider", "score", "created_at")
     list_filter = ("score",)
     readonly_fields = ("id", "created_at")
+    ordering = ("-created_at",)
+
+
+@admin.register(MerchantDevice)
+class MerchantDeviceAdmin(admin.ModelAdmin):
+    list_display = (
+        "merchant",
+        "device_id",
+        "platform",
+        "model_name",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("platform", "is_active", "created_at")
+    search_fields = ("merchant__merchant_id", "device_id", "fcm_token")
+    readonly_fields = ("id", "created_at", "updated_at")
+
+
+@admin.register(MerchantNotification)
+class MerchantNotificationAdmin(admin.ModelAdmin):
+    list_display = ("merchant", "title", "is_read", "created_at")
+    list_filter = ("is_read", "created_at")
+    search_fields = ("merchant__merchant_id", "title", "body")
+    readonly_fields = ("id", "created_at")
+
+
+@admin.register(MerchantNotificationSettings)
+class MerchantNotificationSettingsAdmin(admin.ModelAdmin):
+    list_display = ("merchant", "push_enabled", "updated_at")
+    list_filter = ("push_enabled",)
+    search_fields = ("merchant__merchant_id",)
+    readonly_fields = ("id", "created_at", "updated_at")
