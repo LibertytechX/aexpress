@@ -562,6 +562,55 @@ class Rider(models.Model):
         self.status = self.Status.ONLINE
         self.save()
 
+    @property
+    def orders_completed_today(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date=today
+        ).count()
+
+    @property
+    def orders_completed_this_week(self) -> int:
+        from django.utils import timezone
+        from datetime import timedelta
+        from orders.models import Order
+
+        today = timezone.now().date()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=week_start
+        ).count()
+
+    @property
+    def orders_completed_this_month(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        month_start = today.replace(day=1)
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=month_start
+        ).count()
+
+    @property
+    def total_distance_covered(self) -> float:
+        from django.db.models import Sum
+        from orders.models import Order
+
+        val = Order.objects.filter(rider=self, status="Done").aggregate(
+            total=Sum("distance_km")
+        )["total"]
+        return float(round(val, 2)) if val else 0.00
+
+    @property
+    def total_completed_orders(self) -> int:
+        from orders.models import Order
+
+        return Order.objects.filter(rider=self, status="Done").count()
+
     def yesterday_distance_covered(self):
         """Return yesterday's odometer delta for the rider's assigned asset."""
         if not self.vehicle_asset_id:

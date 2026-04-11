@@ -13,6 +13,11 @@ All notable changes to the AXpress backend are documented in this file.
     - Calculated total order amount for all orders requested during the past week.
     - Updated `tasks.py` to include the amount in the email context, formatted with commas.
     - Updated `E1.html` template to display the total order amount with a Naira symbol.
+- **Rider Performance Metrics**: Added comprehensive order and distance metrics to the Django Admin.
+    - Implemented real-time order counts for Today, This Week (starting Monday), and This Month.
+    - Added "Overall Orders" and "Distance All Time" (km) tracking.
+    - Integrated metrics into the Rider list view and CSV export functionality via `RiderResource`.
+    - Added property methods to the `Rider` model for programmatic access to performance data.
 
 ---
 

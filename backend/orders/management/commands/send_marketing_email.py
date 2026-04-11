@@ -71,6 +71,7 @@ class Command(BaseCommand):
                 "total_requested": 10,
                 "total_delivered": 9,
                 "success_rate": 90,
+                "total_order_amount": 30000,
                 "most_active_day": "Monday",
                 "top_delivery_zone": "Lagos Island",
             }
