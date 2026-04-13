@@ -388,7 +388,7 @@ def process_weekly_monday_reports():
 
         total_requested = weekly_orders.count()
 
-        if total_requested > 0:
+        if total_requested >= 0:
             # E1: Active Merchant
             total_delivered = weekly_orders.filter(status="Done").count()
             success_rate = (

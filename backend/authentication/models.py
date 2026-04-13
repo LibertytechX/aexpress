@@ -177,7 +177,7 @@ class MerchantEmailLog(models.Model):
 
     class Meta:
         db_table = "merchant_email_logs"
-        unique_together = [("merchant", "template_code")]
+        # unique_together = [("merchant", "template_code")]
         indexes = [
             models.Index(fields=["template_code"]),
         ]
