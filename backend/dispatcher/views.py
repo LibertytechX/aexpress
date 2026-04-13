@@ -1120,6 +1120,7 @@ class MerchantAPIKeyRequestOTPView(views.APIView):
 
         # Generate OTP
         otp = OTPService.generate_otp()
+        print(otp)
         user.otp = otp
         user.otp_created_at = timezone.now()
         user.save(update_fields=["otp", "otp_created_at"])

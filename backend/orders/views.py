@@ -1,3 +1,5 @@
+from rest_framework.settings import api_settings
+from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
 import traceback
 from dispatcher.models import SystemSettings
@@ -48,6 +50,11 @@ logger = logging.getLogger(__name__)
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -142,6 +149,11 @@ class VehicleUpdateView(generics.UpdateAPIView):
 class QuickSendView(APIView):
     """API endpoint for Quick Send order creation."""
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -193,7 +205,10 @@ class QuickSendView(APIView):
 
         # Apply 30% discount for grouped orders
         if data.get("mode") == "grouped":
-            if not hasattr(request.user, "merchant_profile") or not request.user.merchant_profile.can_group_orders:
+            if (
+                not hasattr(request.user, "merchant_profile")
+                or not request.user.merchant_profile.can_group_orders
+            ):
                 return Response(
                     {
                         "success": False,
@@ -1056,6 +1071,11 @@ class OrderPayNowView(APIView):
 class OrderListView(APIView):
     """API endpoint to list all orders for the authenticated user."""
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -1198,6 +1218,10 @@ class CalculateFareView(APIView):
     }
     """
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -1275,6 +1299,11 @@ class BulkCalculateFareView(APIView):
         "deliveries": [{"lat": 32.32, "long": 23.53}]
     }
     """
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
