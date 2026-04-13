@@ -378,6 +378,7 @@ def process_weekly_monday_reports():
     end_date = last_sunday.strftime("%b %d")
 
     merchants = User.objects.filter(usertype="Merchant", is_active=True)
+    context = {}
 
     for merchant in merchants:
         # Get orders from the past week
@@ -480,6 +481,21 @@ def process_weekly_monday_reports():
                 merchant, "E1", "Your Weekly Delivery Report 📊", context
             )
         else:
+            context = {
+                "total_requested": 0,
+                "total_delivered": 0,
+                "success_rate": 0,
+                "total_order_amount": 0,
+                "most_active_day": 0,
+                "cancelled_orders": 0,
+                "ongoing_orders": 0,
+                "completed_order_amount": 0,
+                "cancelled_order_amount": 0,
+                "ongoing_order_amount": 0,
+            }
+            _send_marketing_email(
+                merchant, "E1", "Your Weekly Delivery Report 📊", context
+            )
             # E2: Inactive Merchant
             _send_marketing_email(
                 merchant,
