@@ -9,8 +9,13 @@
 <ul>
     <li>Total Deliveries Requested: <strong>{{ total_requested }}</strong></li>
     <li>Successfully Delivered: <strong>{{ total_delivered }}</strong></li>
-    <li>Delivery Success Rate: <strong>{{ success_rate }}%</strong></li>
+    <li>Cancelled Orders: <strong>{{ cancelled_orders }}</strong></li>
+    <li>Ongoing Orders: <strong>{{ ongoing_orders }}</strong></li>
+    <li>Completed Order Amount: <strong>₦{{ completed_order_amount }}</strong></li>
+    <li>Cancelled Order Amount: <strong>₦{{ cancelled_order_amount }}</strong></li>
+    <li>Ongoing Order Amount: <strong>₦{{ ongoing_order_amount }}</strong></li>
     <li>Total Order Amount: <strong>₦{{ total_order_amount }}</strong></li>
+    {% comment %} <li>Delivery Success Rate: <strong>{{ success_rate }}%</strong></li> {% endcomment %}
 </ul>
 
 {% comment %} <h3>🏆 Highlights This Week</h3>
