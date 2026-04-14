@@ -1803,6 +1803,7 @@ class OrderStartView(APIView):
                 )
         except Exception as exc:
             logger.warning(f"Start notification failed: {exc}")
+            pass
 
         return response
 
@@ -1815,6 +1816,7 @@ class OrderArrivedView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1839,6 +1841,7 @@ class OrderStatusChangeView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         action = request.data.get("action")
@@ -1906,155 +1909,146 @@ class OrderCompleteView(APIView):
 
     @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
+        if not order_number:
+            return service_response(
+                status="error",
+                message="order_number is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            if not order_number:
+            order = Order.objects.get(order_number=order_number)
+        except Order.DoesNotExist:
+            return service_response(
+                status="error",
+                message="Order not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return service_response(
+                status="error",
+                message="Rider profile not found.",
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Proximity check for order completion (check final delivery location)
+        # Fetch rider's last known location from the database (since no payload is sent)
+        lat = rider.current_latitude
+        lng = rider.current_longitude
+
+        if lat is None or lng is None:
+            return service_response(
+                status="error",
+                message="Rider location not found. Please ensure GPS is active.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lat = float(lat)
+        lng = float(lng)
+
+        # Find the final delivery (highest sequence)
+        final_delivery = order.deliveries.order_by("-sequence").first()
+        if (
+            final_delivery
+            and final_delivery.dropoff_latitude is not None
+            and final_delivery.dropoff_longitude is not None
+        ):
+            from dispatcher.models import Zone
+
+            dist = Zone.haversine_distance(
+                lat,
+                lng,
+                final_delivery.dropoff_latitude,
+                final_delivery.dropoff_longitude,
+            )
+            if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
-                    message="order_number is required",
+                    message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
-            try:
-                order = Order.objects.get(order_number=order_number)
-            except Order.DoesNotExist:
-                return service_response(
-                    status="error",
-                    message="Order not found",
-                    status_code=status.HTTP_404_NOT_FOUND,
-                )
+        # ── Step 1: COD wallet balance check ─────────────────────────────────
+        cod_total = Decimal("0.00")
 
-            rider = getattr(request.user, "rider_profile", None)
-            if not rider:
-                return service_response(
-                    status="error",
-                    message="Rider profile not found.",
-                    status_code=status.HTTP_403_FORBIDDEN,
-                )
+        # ── Step 2: Calculate and record rider earnings ───────────────────────
+        settings_obj = SystemSettings.objects.first()
+        commission_pct = (
+            settings_obj.commission_pct if settings_obj else self.DEFAULT_COMMISSION_PCT
+        )
 
-            # Proximity check for order completion (check final delivery location)
-            # Fetch rider's last known location from the database (since no payload is sent)
-            lat = rider.current_latitude
-            lng = rider.current_longitude
+        order_amount = Decimal(str(order.total_amount))
+        commission_amount = (commission_pct / Decimal("100")) * order_amount
+        net_earning = commission_amount
 
-            if lat is None or lng is None:
-                return service_response(
-                    status="error",
-                    message="Rider location not found. Please ensure GPS is active.",
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
+        # Create or update RiderEarning for this order (idempotent)
+        earning, _ = RiderEarning.objects.get_or_create(
+            order=order,
+            defaults={
+                "rider": rider,
+                "base_fare": order_amount,
+                "commission_pct": commission_pct,
+                "commission_amount": commission_amount,
+                "net_earning": commission_amount,
+                "cod_amount": cod_total,
+            },
+        )
 
-            lat = float(lat)
-            lng = float(lng)
+        # Credit rider wallet with net earning
+        rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+        rider_wallet_for_credit.credit(
+            amount=commission_amount,
+            description=f"Trip earning for order #{order_number}",
+            reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+            metadata={
+                "order_number": order_number,
+                "gross": str(order_amount),
+                "commission_pct": str(commission_pct),
+                "net_earning": str(commission_amount),
+            },
+        )
 
-            # Find the final delivery (highest sequence)
-            final_delivery = order.deliveries.order_by("-sequence").first()
-            if (
-                final_delivery
-                and final_delivery.dropoff_latitude is not None
-                and final_delivery.dropoff_longitude is not None
-            ):
-                from dispatcher.models import Zone
+        # ── Step 3: Mark COD record as remitted ──────────────────────────────
+        # if order.collect_on_delivery:
+        #     RiderCodRecord.objects.filter(
+        #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+        #     ).update(
+        #         status=RiderCodRecord.Status.REMITTED,
+        #         remitted_at=timezone.now(),
+        #     )
 
-                dist = Zone.haversine_distance(
-                    lat,
-                    lng,
-                    final_delivery.dropoff_latitude,
-                    final_delivery.dropoff_longitude,
-                )
-                if dist > 2.0:  # 2000 meters
-                    return service_response(
-                        status="error",
-                        message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+        # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
 
-            # ── Step 1: COD wallet balance check ─────────────────────────────────
-            cod_total = Decimal("0.00")
-
-            # ── Step 2: Calculate and record rider earnings ───────────────────────
-            settings_obj = SystemSettings.objects.first()
-            commission_pct = (
-                settings_obj.commission_pct
-                if settings_obj
-                else self.DEFAULT_COMMISSION_PCT
-            )
-
-            order_amount = Decimal(str(order.total_amount))
-            commission_amount = (commission_pct / Decimal("100")) * order_amount
-            net_earning = commission_amount
-
-            # Create or update RiderEarning for this order (idempotent)
-            earning, _ = RiderEarning.objects.get_or_create(
-                order=order,
-                defaults={
-                    "rider": rider,
-                    "base_fare": order_amount,
-                    "commission_pct": commission_pct,
-                    "commission_amount": commission_amount,
-                    "net_earning": commission_amount,
-                    "cod_amount": cod_total,
-                },
-            )
-
-            # Credit rider wallet with net earning
-            rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
-            rider_wallet_for_credit.credit(
-                amount=commission_amount,
-                description=f"Trip earning for order #{order_number}",
-                reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
-                metadata={
+        # ── Step 5: Push notification ─────────────────────────────────────────
+        try:
+            notify_rider(
+                rider=rider,
+                title="Order Completed 🎉",
+                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                data={
                     "order_number": order_number,
-                    "gross": str(order_amount),
-                    "commission_pct": str(commission_pct),
-                    "net_earning": str(commission_amount),
+                    "net_earning": str(net_earning),
                 },
-            )
-
-            # ── Step 3: Mark COD record as remitted ──────────────────────────────
-            # if order.collect_on_delivery:
-            #     RiderCodRecord.objects.filter(
-            #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
-            #     ).update(
-            #         status=RiderCodRecord.Status.REMITTED,
-            #         remitted_at=timezone.now(),
-            #     )
-
-            # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
-            deliveries = order.deliveries.exclude(status="Delivered")
-            for d in deliveries:
-                d.status = "Delivered"
-                d.delivered_at = timezone.now()
-                d.save(update_fields=["status", "delivered_at"])
-
-            # ── Step 5: Push notification ─────────────────────────────────────────
-            try:
-                notify_rider(
-                    rider=rider,
-                    title="Order Completed 🎉",
-                    body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
-                    data={
-                        "order_number": order_number,
-                        "net_earning": str(net_earning),
-                    },
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
-                )
-
-            # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
-            # but we can rely on `_advance_order` to handle it cleanly.
-
-            return _advance_order(
-                request, order_number, "Done", "Order Completed (All Deliveries)"
             )
         except Exception as exc:
-            logger.error(f"Failed to complete order {order_number}: {exc}")
-            traceback.print_exc()
-            return Response(
-                {"success": False, "message": "Failed to complete order."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            logger.warning(
+                f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
             )
+            pass
+
+        # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
+        # but we can rely on `_advance_order` to handle it cleanly.
+
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
 
 
 class AssignedOrderDetailView(APIView):
