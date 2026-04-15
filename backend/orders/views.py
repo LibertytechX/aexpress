@@ -1,3 +1,4 @@
+from orders.serializers import CreateParcelSerializer
 from rest_framework.settings import api_settings
 from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
@@ -9,6 +10,8 @@ from rest_framework import serializers, status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
@@ -2383,55 +2386,6 @@ class MergeGroupedOrdersView(APIView):
 # ---------------------------------------------------------------------------
 
 
-class CreateParcelSerializer(serializers.Serializer):
-    """Validate the payload required to create a SmartParcel parcel."""
-
-    sender_name = serializers.CharField(max_length=120)
-    sender_phone = serializers.CharField(max_length=20)
-    sender_email = serializers.EmailField(required=False, allow_blank=True)
-    receiver_name = serializers.CharField(max_length=120)
-    receiver_phone = serializers.CharField(max_length=20)
-    receiver_email = serializers.EmailField(required=False, allow_blank=True)
-    box_id = serializers.CharField(
-        max_length=100, help_text="SmartParcel box / locker station identifier."
-    )
-    locker_size_id = serializers.CharField(
-        max_length=100, help_text="Chosen locker size identifier."
-    )
-    description = serializers.CharField(
-        max_length=500, required=False, allow_blank=True, default=""
-    )
-    value = serializers.FloatField(
-        min_value=0, help_text="Declared parcel value in NGN."
-    )
-    weight = serializers.FloatField(
-        min_value=0, help_text="Parcel weight in kilograms."
-    )
-    reference = serializers.CharField(
-        max_length=100,
-        required=False,
-        allow_blank=True,
-        default="",
-        help_text="Optional merchant-side reference / order number.",
-    )
-
-    def validate_value(self, value: float) -> float:
-        """Ensure the declared value is non-negative."""
-        if value < 0:
-            raise ServiceException(
-                status_code=400, message="Declared parcel value must be non-negative."
-            )
-        return value
-
-    def validate_weight(self, weight: float) -> float:
-        """Ensure the weight is non-negative."""
-        if weight < 0:
-            raise ServiceException(
-                status_code=400, message="Parcel weight must be non-negative."
-            )
-        return weight
-
-
 def _sp() -> SmartPercelIntegration:
     """Return a shared SmartPercelIntegration instance."""
     return SmartPercelIntegration()
@@ -2442,6 +2396,7 @@ class SmartParcelStatesView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
     @exception_advice(model_object=ErrorLog)
     def get(self, request, *args, **kwargs):
         ok, data = _sp().list_states()
@@ -2460,6 +2415,7 @@ class SmartParcelCitiesByStateView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @method_decorator(cache_page(60 * 30))
     @exception_advice(model_object=ErrorLog)
     def get(self, request, state_id: str, *args, **kwargs):
         ok, data = _sp().list_cities_by_state(state_id)
@@ -2473,13 +2429,12 @@ class SmartParcelCitiesByStateView(APIView):
         )
 
 
-
-
 class SmartParcelBoxesByCityView(APIView):
     """List all SmartParcel boxes in a specific city."""
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @method_decorator(cache_page(60 * 30))
     @exception_advice(model_object=ErrorLog)
     def get(self, request, city_id: str, *args, **kwargs):
         ok, data = _sp().list_boxes_by_city(city_id)
@@ -2516,11 +2471,12 @@ class SmartParcelAvailableBoxesView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @method_decorator(cache_page(60 * 30))
     @exception_advice(model_object=ErrorLog)
     def get(self, request, *args, **kwargs):
         city_id = request.query_params.get("city_id")
         if not city_id:
-             raise ServiceException(status_code=400, message="city_id is required.")
+            raise ServiceException(status_code=400, message="city_id is required.")
 
         ok, data = _sp().list_boxes_by_city(city_id)
         if not ok:
@@ -2538,6 +2494,7 @@ class SmartParcelLockerSizesView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @method_decorator(cache_page(60 * 30))
     @exception_advice(model_object=ErrorLog)
     def get(self, request, *args, **kwargs):
         ok, data = _sp().list_locker_sizes()
@@ -2576,9 +2533,7 @@ class SmartParcelCreateParcelView(APIView):
             "senderphone": vd["sender_phone"],
             "boxid": vd["box_id"],
             "sizeid": vd["locker_size_id"],
-            "parcelname": vd.get("reference", "Parcel"),
             "parceldescription": vd.get("description", ""),
-            "parcelvalue": vd["value"]
         }
 
         ok, data = _sp().create_parcel(payload)
@@ -2608,8 +2563,6 @@ class SmartParcelParcelDetailView(APIView):
             data=data,
             status_code=200,
         )
-
-
 
 
 class SmartParcelCancelParcelView(APIView):

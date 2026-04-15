@@ -99,6 +99,7 @@ class SmartPercelIntegration:
                 json=data,
                 timeout=_DEFAULT_TIMEOUT,
             )
+            print("status code: ", response.status_code)
             return self._parse(response)
         except requests.exceptions.Timeout:
             logger.error("SmartParcel API timeout — POST %s", url)
