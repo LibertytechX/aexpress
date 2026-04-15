@@ -1,12 +1,17 @@
+from orders.serializers import CreateParcelSerializer
+from rest_framework.settings import api_settings
+from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
 import traceback
 from dispatcher.models import SystemSettings
 import logging
 import threading
-from rest_framework import status, generics, permissions
+from rest_framework import serializers, status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
@@ -36,18 +41,25 @@ from riders.models import RiderEarning, RiderCodRecord
 from dispatcher.tasks import send_merchant_notification
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
 from dispatcher.serializers import OrderEventSerializer
 from subscriptions.services import (
     process_order_subscription,
     get_active_postpaid_subscription,
     accumulate_postpaid_order,
 )
+from .services import SmartPercelIntegration
 
 logger = logging.getLogger(__name__)
 
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -142,6 +154,11 @@ class VehicleUpdateView(generics.UpdateAPIView):
 class QuickSendView(APIView):
     """API endpoint for Quick Send order creation."""
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
     @transaction.atomic
@@ -193,7 +210,10 @@ class QuickSendView(APIView):
 
         # Apply 30% discount for grouped orders
         if data.get("mode") == "grouped":
-            if not hasattr(request.user, "merchant_profile") or not request.user.merchant_profile.can_group_orders:
+            if (
+                not hasattr(request.user, "merchant_profile")
+                or not request.user.merchant_profile.can_group_orders
+            ):
                 return Response(
                     {
                         "success": False,
@@ -1056,6 +1076,11 @@ class OrderPayNowView(APIView):
 class OrderListView(APIView):
     """API endpoint to list all orders for the authenticated user."""
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -1198,6 +1223,10 @@ class CalculateFareView(APIView):
     }
     """
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
@@ -1275,6 +1304,11 @@ class BulkCalculateFareView(APIView):
         "deliveries": [{"lat": 32.32, "long": 23.53}]
     }
     """
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1789,6 +1823,7 @@ class OrderStartView(APIView):
                 )
         except Exception as exc:
             logger.warning(f"Start notification failed: {exc}")
+            pass
 
         return response
 
@@ -1801,6 +1836,7 @@ class OrderArrivedView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1825,6 +1861,7 @@ class OrderStatusChangeView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         action = request.data.get("action")
@@ -1892,169 +1929,146 @@ class OrderCompleteView(APIView):
 
     @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
+        if not order_number:
+            return service_response(
+                status="error",
+                message="order_number is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            if not order_number:
+            order = Order.objects.get(order_number=order_number)
+        except Order.DoesNotExist:
+            return service_response(
+                status="error",
+                message="Order not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return service_response(
+                status="error",
+                message="Rider profile not found.",
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Proximity check for order completion (check final delivery location)
+        # Fetch rider's last known location from the database (since no payload is sent)
+        lat = rider.current_latitude
+        lng = rider.current_longitude
+
+        if lat is None or lng is None:
+            return service_response(
+                status="error",
+                message="Rider location not found. Please ensure GPS is active.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lat = float(lat)
+        lng = float(lng)
+
+        # Find the final delivery (highest sequence)
+        final_delivery = order.deliveries.order_by("-sequence").first()
+        if (
+            final_delivery
+            and final_delivery.dropoff_latitude is not None
+            and final_delivery.dropoff_longitude is not None
+        ):
+            from dispatcher.models import Zone
+
+            dist = Zone.haversine_distance(
+                lat,
+                lng,
+                final_delivery.dropoff_latitude,
+                final_delivery.dropoff_longitude,
+            )
+            if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
-                    message="order_number is required",
+                    message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
-            try:
-                order = Order.objects.get(order_number=order_number)
-            except Order.DoesNotExist:
-                return service_response(
-                    status="error",
-                    message="Order not found",
-                    status_code=status.HTTP_404_NOT_FOUND,
-                )
+        # ── Step 1: COD wallet balance check ─────────────────────────────────
+        cod_total = Decimal("0.00")
 
-            rider = getattr(request.user, "rider_profile", None)
-            if not rider:
-                return service_response(
-                    status="error",
-                    message="Rider profile not found.",
-                    status_code=status.HTTP_403_FORBIDDEN,
-                )
+        # ── Step 2: Calculate and record rider earnings ───────────────────────
+        settings_obj = SystemSettings.objects.first()
+        commission_pct = (
+            settings_obj.commission_pct if settings_obj else self.DEFAULT_COMMISSION_PCT
+        )
 
-            # Proximity check for order completion (check final delivery location)
-            # Fetch rider's last known location from the database (since no payload is sent)
-            lat = rider.current_latitude
-            lng = rider.current_longitude
+        order_amount = Decimal(str(order.total_amount))
+        commission_amount = (commission_pct / Decimal("100")) * order_amount
+        net_earning = commission_amount
 
-            if lat is None or lng is None:
-                return service_response(
-                    status="error",
-                    message="Rider location not found. Please ensure GPS is active.",
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
+        # Create or update RiderEarning for this order (idempotent)
+        earning, _ = RiderEarning.objects.get_or_create(
+            order=order,
+            defaults={
+                "rider": rider,
+                "base_fare": order_amount,
+                "commission_pct": commission_pct,
+                "commission_amount": commission_amount,
+                "net_earning": commission_amount,
+                "cod_amount": cod_total,
+            },
+        )
 
-            lat = float(lat)
-            lng = float(lng)
+        # Credit rider wallet with net earning
+        rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+        rider_wallet_for_credit.credit(
+            amount=commission_amount,
+            description=f"Trip earning for order #{order_number}",
+            reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+            metadata={
+                "order_number": order_number,
+                "gross": str(order_amount),
+                "commission_pct": str(commission_pct),
+                "net_earning": str(commission_amount),
+            },
+        )
 
-            # Find the final delivery (highest sequence)
-            final_delivery = order.deliveries.order_by("-sequence").first()
-            if (
-                final_delivery
-                and final_delivery.dropoff_latitude is not None
-                and final_delivery.dropoff_longitude is not None
-            ):
-                from dispatcher.models import Zone
+        # ── Step 3: Mark COD record as remitted ──────────────────────────────
+        # if order.collect_on_delivery:
+        #     RiderCodRecord.objects.filter(
+        #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+        #     ).update(
+        #         status=RiderCodRecord.Status.REMITTED,
+        #         remitted_at=timezone.now(),
+        #     )
 
-                dist = Zone.haversine_distance(
-                    lat,
-                    lng,
-                    final_delivery.dropoff_latitude,
-                    final_delivery.dropoff_longitude,
-                )
-                if dist > 2.0:  # 2000 meters
-                    return service_response(
-                        status="error",
-                        message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+        # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
 
-            # ── Step 1: COD wallet balance check ─────────────────────────────────
-            cod_total = Decimal("0.00")
-
-            # ── Step 2: Calculate and record rider earnings ───────────────────────
-            settings_obj = SystemSettings.objects.first()
-            commission_pct = (
-                settings_obj.commission_pct
-                if settings_obj
-                else self.DEFAULT_COMMISSION_PCT
-            )
-
-            order_amount = Decimal(str(order.total_amount))
-            commission_amount = (commission_pct / Decimal("100")) * order_amount
-            net_earning = commission_amount
-
-            # Create or update RiderEarning for this order (idempotent)
-            earning, _ = RiderEarning.objects.get_or_create(
-                order=order,
-                defaults={
-                    "rider": rider,
-                    "base_fare": order_amount,
-                    "commission_pct": commission_pct,
-                    "commission_amount": commission_amount,
-                    "net_earning": commission_amount,
-                    "cod_amount": cod_total,
-                },
-            )
-
-            # Credit rider wallet with net earning
-            rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
-            rider_wallet_for_credit.credit(
-                amount=commission_amount,
-                description=f"Trip earning for order #{order_number}",
-                reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
-                metadata={
+        # ── Step 5: Push notification ─────────────────────────────────────────
+        try:
+            notify_rider(
+                rider=rider,
+                title="Order Completed 🎉",
+                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                data={
                     "order_number": order_number,
-                    "gross": str(order_amount),
-                    "commission_pct": str(commission_pct),
-                    "net_earning": str(commission_amount),
+                    "net_earning": str(net_earning),
                 },
-            )
-
-            # ── Step 3: Mark COD record as remitted ──────────────────────────────
-            # if order.collect_on_delivery:
-            #     RiderCodRecord.objects.filter(
-            #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
-            #     ).update(
-            #         status=RiderCodRecord.Status.REMITTED,
-            #         remitted_at=timezone.now(),
-            #     )
-
-            # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
-            deliveries = order.deliveries.exclude(status="Delivered")
-            for d in deliveries:
-                d.status = "Delivered"
-                d.delivered_at = timezone.now()
-                d.save(update_fields=["status", "delivered_at"])
-
-            # ── Step 5: Push notification ─────────────────────────────────────────
-            try:
-                notify_rider(
-                    rider=rider,
-                    title="Order Completed 🎉",
-                    body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
-                    data={
-                        "order_number": order_number,
-                        "net_earning": str(net_earning),
-                    },
-                )
-            except Exception as exc:
-                logger.warning(
-                    f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
-                )
-
-            # Notify the merchant that their order was delivered
-            try:
-                merchant_profile = getattr(order.merchant, "merchant_profile", None)
-                if merchant_profile:
-                    send_merchant_notification.delay(
-                        merchant_id=str(merchant_profile.id),
-                        title="Order Delivered ✅",
-                        body=f"Your order #{order_number} has been delivered successfully.",
-                        data={"order_number": order_number, "status": "Done"},
-                        category="order_completed",
-                    )
-            except Exception as exc:
-                logger.warning(f"Merchant completion notification failed: {exc}")
-
-            # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
-            # but we can rely on `_advance_order` to handle it cleanly.
-
-            return _advance_order(
-                request, order_number, "Done", "Order Completed (All Deliveries)"
             )
         except Exception as exc:
-            logger.error(f"Failed to complete order {order_number}: {exc}")
-            traceback.print_exc()
-            return Response(
-                {"success": False, "message": "Failed to complete order."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            logger.warning(
+                f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
             )
+            pass
+
+        # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
+        # but we can rely on `_advance_order` to handle it cleanly.
+
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
 
 
 class AssignedOrderDetailView(APIView):
@@ -2379,4 +2393,237 @@ class MergeGroupedOrdersView(APIView):
                 "parent_id": str(parent_order.id),
             },
             status_code=201,
+        )
+
+
+# ---------------------------------------------------------------------------
+# SmartParcel Locker Delivery Integration
+# ---------------------------------------------------------------------------
+
+
+def _sp() -> SmartPercelIntegration:
+    """Return a shared SmartPercelIntegration instance."""
+    return SmartPercelIntegration()
+
+
+class SmartParcelStatesView(APIView):
+    """List all states where SmartParcel operates."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_states()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel states retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCitiesByStateView(APIView):
+    """List cities for a specific SmartParcel state."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, state_id: str, *args, **kwargs):
+        ok, data = _sp().list_cities_by_state(state_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel cities for state retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelBoxesByCityView(APIView):
+    """List all SmartParcel boxes in a specific city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelAssignedBoxesByCityView(APIView):
+    """List SmartParcel boxes assigned to the merchant, filtered by city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_assigned_boxes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        # SmartParcel API returns boxes in 'boxes' field for this endpoint
+        boxes = data.get("boxes", [])
+        if not isinstance(boxes, list):
+            # Fallback if the structure is different
+            boxes = data if isinstance(data, list) else []
+
+        # Filter by city_id
+        filtered_boxes = [
+            b for b in boxes if str(b.get("cityid")) == str(city_id)
+        ]
+
+        return service_response(
+            status="success",
+            message=f"SmartParcel assigned boxes for city {city_id} retrieved successfully.",
+            data=filtered_boxes,
+            status_code=200,
+        )
+
+
+class SmartParcelBoxDetailView(APIView):
+    """Retrieve details of a single SmartParcel box."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, box_id: str, *args, **kwargs):
+        ok, data = _sp().get_box_details(box_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel box details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelAvailableBoxesView(APIView):
+    """List all SmartParcel boxes in a specific city (wrapper for business logic)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        city_id = request.query_params.get("city_id")
+        if not city_id:
+            raise ServiceException(status_code=400, message="city_id is required.")
+
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelLockerSizesView(APIView):
+    """List all locker sizes on the SmartParcel network."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_locker_sizes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel locker sizes retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCreateParcelView(APIView):
+    """Create a new SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        serializer = CreateParcelSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise ServiceException(
+                status_code=400,
+                message=str(serializer.errors),
+            )
+
+        # Map to V2 Business API keys
+        vd = serializer.validated_data
+        payload = {
+            "recipientname": vd["receiver_name"],
+            "recipientemail": vd.get("receiver_email", ""),
+            "recipientphone": vd["receiver_phone"],
+            "sendername": vd["sender_name"],
+            "senderemail": vd.get("sender_email", ""),
+            "senderphone": vd["sender_phone"],
+            "boxid": vd["box_id"],
+            "sizeid": vd["locker_size_id"],
+            "parceldescription": vd.get("description", ""),
+        }
+
+        ok, data = _sp().create_parcel(payload)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel created successfully.",
+            data=data,
+            status_code=201,
+        )
+
+
+class SmartParcelParcelDetailView(APIView):
+    """Retrieve details of a SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().get_parcel_details(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCancelParcelView(APIView):
+    """Cancel an existing SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().cancel_parcel(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel cancelled successfully.",
+            data=data,
+            status_code=200,
         )

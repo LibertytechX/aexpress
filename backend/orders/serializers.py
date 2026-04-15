@@ -7,6 +7,26 @@ from .models import Order, Delivery, Vehicle
 from authentication.serializers import UserSerializer
 
 
+class CreateParcelSerializer(serializers.Serializer):
+    """Validate the payload required to create a SmartParcel parcel."""
+
+    sender_name = serializers.CharField(max_length=120)
+    sender_phone = serializers.CharField(max_length=20)
+    sender_email = serializers.EmailField(required=False, allow_blank=True)
+    receiver_name = serializers.CharField(max_length=120)
+    receiver_phone = serializers.CharField(max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
+    box_id = serializers.CharField(
+        max_length=100, help_text="SmartParcel box / locker station identifier."
+    )
+    locker_size_id = serializers.CharField(
+        max_length=100, help_text="Chosen locker size identifier."
+    )
+    description = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+
+
 class VehicleSerializer(serializers.ModelSerializer):
     """Serializer for Vehicle model."""
 
