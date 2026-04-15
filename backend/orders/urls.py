@@ -36,6 +36,7 @@ from .views import (
     SmartParcelCreateParcelView,
     SmartParcelParcelDetailView,
     SmartParcelCancelParcelView,
+    SmartParcelResolveCollectCodeView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -162,6 +163,11 @@ urlpatterns = [
         "smart-parcel/parcels/",
         SmartParcelCreateParcelView.as_view(),
         name="sp_create_parcel",
+    ),
+    path(
+        "smart-parcel/parcels/resolve-collect-code/<str:collect_code>/",
+        SmartParcelResolveCollectCodeView.as_view(),
+        name="sp_resolve_collect_code",
     ),
     path(
         "smart-parcel/parcels/<str:tracking_number>/",

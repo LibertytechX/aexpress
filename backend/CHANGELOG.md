@@ -11,6 +11,7 @@ All notable changes to the AXpress backend are documented in this file.
     - **Locker Pickup**: Validates `collect_code` against pending shipments and automatically resolves the locker station address.
     - **Locker Delivery**: Automatically generates a SmartParcel parcel after AXpress order creation.
     - **Service Protection**: Blocks order creation if SmartParcel API is down/errors (`503 Service Unavailable`).
+- **Resolve Collect Code**: Added a new endpoint `GET /api/orders/smart-parcel/parcels/resolve-collect-code/<str:collect_code>/` to manually resolve a collect code to its parcel details.
 - **Data Integrity**: Stores full SmartParcel parcel JSON details in the `percel_info` field for both pickup and delivery flows.
 
 ## [2026-04-15] — SmartParcel V2 Business API Overhaul

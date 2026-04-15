@@ -270,7 +270,19 @@
 
 ---
 
-#### 9. Cancel Parcel
+---
+ 
+ #### 9. Resolve Collect Code
+ **Endpoint:** `GET /parcels/resolve-collect-code/<str:collect_code>/`  
+ **Description:** Resolves a 4-8 character SmartParcel collect code to a pending parcel detail.
+ 
+ | Param | Type | Description |
+ |-------|------|-------------|
+ | `collect_code` | path `str` | The SmartParcel collect code |
+ 
+ ---
+ 
+ #### 10. Cancel Parcel
 **Endpoint:** `POST /parcels/<tracking_number>/cancel/`  
 **Description:** Cancels an existing parcel on the SmartParcel network.
 
