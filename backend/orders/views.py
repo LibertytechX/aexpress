@@ -198,6 +198,56 @@ class QuickSendView(APIView):
 
         data = serializer.validated_data
 
+        # ------------------------------------------------------------------
+        # SmartParcel Integration (Pre-Creation)
+        # ------------------------------------------------------------------
+        is_percel_order = False
+        is_pickup_percel = data.get("is_pickup_percel", False)
+        isdelivery_percel = data.get("isdelivery_percel", False)
+        percel_info = None
+
+        if is_pickup_percel:
+            is_percel_order = True
+            ok, response = _sp().list_pending_pickups()
+            if not ok:
+                raise ServiceException(
+                    status_code=503, message="percel order service not available"
+                )
+
+            parcels = response.get("parcels", []) or []
+            target_code = data.get("collect_code")
+            found_parcel = next(
+                (p for p in parcels if p.get("collectcode") == target_code), None
+            )
+
+            if not found_parcel:
+                raise ServiceException(
+                    status_code=400,
+                    message=f"No pending parcel found with collect code '{target_code}'.",
+                )
+
+            # Override pickup address with the actual locker station address
+            data["pickup_address"] = found_parcel.get(
+                "boxaddress", data["pickup_address"]
+            )
+            percel_info = found_parcel
+
+        if isdelivery_percel:
+            is_percel_order = True
+            # Fetch box details to resolve the delivery address
+            ok, box_response = _sp().get_box_details(data["box_id"])
+            if not ok:
+                raise ServiceException(
+                    status_code=503, message="percel order service not available"
+                )
+
+            box_data = box_response.get("data") or box_response
+            data["dropoff_address"] = (
+                box_data.get("boxaddress")
+                or box_data.get("address")
+                or data["dropoff_address"]
+            )
+
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
@@ -246,6 +296,10 @@ class QuickSendView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
             cod_amount=data.get("cod_amount"),
+            is_percel_order=is_percel_order,
+            is_pickup_percel=is_pickup_percel,
+            isdelivery_percel=isdelivery_percel,
+            percel_info=percel_info,
         )
 
         if data.get("payment_method") == "subscription":
@@ -339,6 +393,34 @@ class QuickSendView(APIView):
             sequence=1,
             cod_amount=data.get("cod_amount") or 0,
         )
+
+        # ------------------------------------------------------------------
+        # SmartParcel Integration (Post-Creation - Delivery only)
+        # ------------------------------------------------------------------
+        if isdelivery_percel:
+            payload = {
+                "sendername": data["sender_name"],
+                "senderphone": data["sender_phone"],
+                "senderemail": request.user.email,
+                "recipientname": data["receiver_name"],
+                "recipientphone": data["receiver_phone"],
+                "recipientemail": data.get("receiver_email", ""),
+                "boxid": data["box_id"],
+                "sizeid": data["locker_size_id"],
+                "parceldescription": data.get("notes", "Parcel Delivery"),
+                "parcelvalue": 0,  # default placeholder
+            }
+
+            ok, sp_response = _sp().create_parcel(payload)
+            if not ok:
+                # This will trigger a transaction rollback
+                raise ServiceException(
+                    status_code=503, message="percel order service not available"
+                )
+
+            # Store the resulting parcel JSON (containing tracking number etc)
+            order.percel_info = sp_response
+            order.save()
 
         # Emit activity event for live feed (fire-and-forget in background thread)
         merchant_name = (
@@ -2550,6 +2632,47 @@ class SmartParcelLockerSizesView(APIView):
             status="success",
             message="SmartParcel locker sizes retrieved successfully.",
             data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelResolveCollectCodeView(APIView):
+    """Resolve a SmartParcel collect code to a pending parcel detail."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, collect_code: str, *args, **kwargs):
+        ok, data = _sp().list_pending_pickups()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        parcels = data.get("parcels") or []
+        if not isinstance(parcels, list):
+            parcels = []
+
+        # Find the parcel with the matching collectcode (case-insensitive)
+        found_parcel = next(
+            (
+                p
+                for p in parcels
+                if str(p.get("collectcode")).strip().lower() == collect_code.strip().lower()
+            ),
+            None,
+        )
+
+        if not found_parcel:
+            return service_response(
+                status="error",
+                message=f"No pending parcel found for collect code '{collect_code}'.",
+                data={},
+                status_code=404,
+            )
+
+        return service_response(
+            status="success",
+            message="SmartParcel parcel resolved successfully.",
+            data=found_parcel,
             status_code=200,
         )
 

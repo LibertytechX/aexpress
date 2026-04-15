@@ -172,6 +172,10 @@ class SmartPercelIntegration:
     # Parcels
     # ------------------------------------------------------------------
 
+    def list_pending_pickups(self) -> tuple[bool, Any]:
+        """Retrieve the list of parcels ready for pickup (Uses Public Key in sandbox)."""
+        return self._post("pendingpickups/", use_public_key=True)
+
     def create_parcel(self, payload: dict) -> tuple[bool, Any]:
         """Create a new parcel on the network (Uses Secret Key)."""
         return self._post("parcels/create/", payload, use_public_key=False)
