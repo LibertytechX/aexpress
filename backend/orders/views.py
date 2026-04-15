@@ -5,7 +5,7 @@ import traceback
 from dispatcher.models import SystemSettings
 import logging
 import threading
-from rest_framework import status, generics, permissions
+from rest_framework import serializers, status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -37,12 +37,14 @@ from riders.notifications import notify_rider
 from riders.models import RiderEarning, RiderCodRecord
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
 from dispatcher.serializers import OrderEventSerializer
 from subscriptions.services import (
     process_order_subscription,
     get_active_postpaid_subscription,
     accumulate_postpaid_order,
 )
+from .services import SmartPercelIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -2373,4 +2375,256 @@ class MergeGroupedOrdersView(APIView):
                 "parent_id": str(parent_order.id),
             },
             status_code=201,
+        )
+
+
+# ---------------------------------------------------------------------------
+# SmartParcel Locker Delivery Integration
+# ---------------------------------------------------------------------------
+
+
+class CreateParcelSerializer(serializers.Serializer):
+    """Validate the payload required to create a SmartParcel parcel."""
+
+    sender_name = serializers.CharField(max_length=120)
+    sender_phone = serializers.CharField(max_length=20)
+    sender_email = serializers.EmailField(required=False, allow_blank=True)
+    receiver_name = serializers.CharField(max_length=120)
+    receiver_phone = serializers.CharField(max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
+    box_id = serializers.CharField(
+        max_length=100, help_text="SmartParcel box / locker station identifier."
+    )
+    locker_size_id = serializers.CharField(
+        max_length=100, help_text="Chosen locker size identifier."
+    )
+    description = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+    value = serializers.FloatField(
+        min_value=0, help_text="Declared parcel value in NGN."
+    )
+    weight = serializers.FloatField(
+        min_value=0, help_text="Parcel weight in kilograms."
+    )
+    reference = serializers.CharField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        default="",
+        help_text="Optional merchant-side reference / order number.",
+    )
+
+    def validate_value(self, value: float) -> float:
+        """Ensure the declared value is non-negative."""
+        if value < 0:
+            raise ServiceException(
+                status_code=400, message="Declared parcel value must be non-negative."
+            )
+        return value
+
+    def validate_weight(self, weight: float) -> float:
+        """Ensure the weight is non-negative."""
+        if weight < 0:
+            raise ServiceException(
+                status_code=400, message="Parcel weight must be non-negative."
+            )
+        return weight
+
+
+def _sp() -> SmartPercelIntegration:
+    """Return a shared SmartPercelIntegration instance."""
+    return SmartPercelIntegration()
+
+
+class SmartParcelStatesView(APIView):
+    """List all states where SmartParcel operates."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_states()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel states retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCitiesByStateView(APIView):
+    """List cities for a specific SmartParcel state."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, state_id: str, *args, **kwargs):
+        ok, data = _sp().list_cities_by_state(state_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel cities for state retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+
+
+class SmartParcelBoxesByCityView(APIView):
+    """List all SmartParcel boxes in a specific city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelBoxDetailView(APIView):
+    """Retrieve details of a single SmartParcel box."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, box_id: str, *args, **kwargs):
+        ok, data = _sp().get_box_details(box_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel box details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelAvailableBoxesView(APIView):
+    """List all SmartParcel boxes in a specific city (wrapper for business logic)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        city_id = request.query_params.get("city_id")
+        if not city_id:
+             raise ServiceException(status_code=400, message="city_id is required.")
+
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelLockerSizesView(APIView):
+    """List all locker sizes on the SmartParcel network."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_locker_sizes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel locker sizes retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCreateParcelView(APIView):
+    """Create a new SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        serializer = CreateParcelSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise ServiceException(
+                status_code=400,
+                message=str(serializer.errors),
+            )
+
+        # Map to V2 Business API keys
+        vd = serializer.validated_data
+        payload = {
+            "recipientname": vd["receiver_name"],
+            "recipientemail": vd.get("receiver_email", ""),
+            "recipientphone": vd["receiver_phone"],
+            "sendername": vd["sender_name"],
+            "senderemail": vd.get("sender_email", ""),
+            "senderphone": vd["sender_phone"],
+            "boxid": vd["box_id"],
+            "sizeid": vd["locker_size_id"],
+            "parcelname": vd.get("reference", "Parcel"),
+            "parceldescription": vd.get("description", ""),
+            "parcelvalue": vd["value"]
+        }
+
+        ok, data = _sp().create_parcel(payload)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel created successfully.",
+            data=data,
+            status_code=201,
+        )
+
+
+class SmartParcelParcelDetailView(APIView):
+    """Retrieve details of a SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().get_parcel_details(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+
+
+class SmartParcelCancelParcelView(APIView):
+    """Cancel an existing SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().cancel_parcel(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel cancelled successfully.",
+            data=data,
+            status_code=200,
         )

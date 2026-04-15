@@ -4,6 +4,25 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-15] — SmartParcel V2 Business API Overhaul
+
+### Changed
+- **Overhauled SmartPercelIntegration class** in `orders/services.py`: Corrected the integration to match the SmartParcel V2 Business requirements.
+    - All external requests now use the **POST method**.
+    - Authentication **apikey** is now sent within the JSON request body instead of headers.
+    - Updated endpoint paths: `/states/`, `/cities/state/`, `/boxes/city/`, `/boxes/info/`, `/sizes/`, `/parcels/create/`, `/parcels/info/all/`, `/parcels/cancel/`.
+- **Refactored `orders/views.py`**:
+    - Updated `SmartParcelCreateParcelView` to map internal snake_case fields to the external API's required field names (e.g., `recipientname`, `boxid`, `sizeid`).
+    - Consolidated several retrieval views and removed defunct endpoints (e.g., `SmartParcelCitiesView` and `SmartParcelBoxesView` which are not supported in the Business V2 spec).
+    - Updated `SmartParcelAvailableBoxesView` to require a `city_id` query parameter.
+- **Updated `orders/urls.py`**: Removed defunct URL patterns and updated view registrations to match the refined views.
+- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Simplified and corrected the documentation for the Locker Delivery Integration.
+
+### Removed
+- Defunct endpoints: `GET /cities/`, `GET /boxes/`, `GET /parcels/<tracking_number>/timeline/`.
+
+---
+
 ## [2026-04-10] — Dashboard & Weekly Reports
 - **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
     - Updated UI table with a new "Vertical Lead" column.

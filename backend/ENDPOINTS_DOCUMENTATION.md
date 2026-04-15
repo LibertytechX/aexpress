@@ -139,3 +139,136 @@
 **Endpoint:** `POST /conversations/<uuid:pk>/read/`  
 **Authentication:** Required (Agent)  
 **Description:** Marks all unread messages in the conversation as read and resets the unread count.
+
+---
+
+## SmartParcel Locker Delivery Integration
+
+> [!NOTE]
+> All SmartParcel endpoints are proxied to the SmartParcel V2 Business sandbox API.
+> In this version, all external requests use the `POST` method with the `apikey` sent in the request body.
+
+## Base URL
+```
+/api/orders/smart-parcel/
+```
+
+**Authentication:** Required (Bearer Token or Merchant API Key)
+
+---
+
+### Geography
+
+#### 1. List States
+**Endpoint:** `GET /states/`  
+**Description:** Returns all Nigerian states where SmartParcel currently operates.
+
+**Success Response (200 OK):**
+```json
+{ "status": "success", "message": "SmartParcel states retrieved successfully.", "data": [...] }
+```
+
+---
+
+#### 2. List Cities by State
+**Endpoint:** `GET /states/<state_id>/cities/`  
+**Description:** Returns cities within a specific state.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `state_id` | path `str` | SmartParcel state identifier |
+
+---
+
+### Boxes
+
+#### 3. List Boxes by City
+**Endpoint:** `GET /boxes/city/<city_id>/`  
+**Description:** Returns all boxes in a specific city.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `city_id` | path `str` | SmartParcel city identifier |
+
+---
+
+#### 4. Get Box Details
+**Endpoint:** `GET /boxes/<box_id>/`  
+**Description:** Returns full details of a single SmartParcel locker box.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `box_id` | path `str` | SmartParcel box identifier |
+
+---
+
+#### 5. List Available Boxes (Vacant Lockers)
+**Endpoint:** `GET /boxes/available/?city_id=<city_id>`  
+**Description:** Returns all boxes that currently have vacant lockers in a specific city.  
+
+| Query Param | Type | Description |
+|-------------|------|-------------|
+| `city_id` | `str` | **Required**. Filter by city |
+
+---
+
+### Locker Sizes
+
+#### 6. List Locker Sizes
+**Endpoint:** `GET /locker-sizes/`  
+**Description:** Returns all available locker size options on the SmartParcel network.
+
+---
+
+### Parcels
+
+#### 7. Create Parcel
+**Endpoint:** `POST /parcels/`  
+**Description:** Creates a new parcel on the SmartParcel network.
+
+**Request Body:**
+```json
+{
+  "sender_name": "John Doe",
+  "sender_phone": "08012345678",
+  "sender_email": "john@example.com",
+  "receiver_name": "Jane Doe",
+  "receiver_phone": "08087654321",
+  "receiver_email": "jane@example.com",
+  "box_id": "BOX-001",
+  "locker_size_id": "SIZE-S",
+  "description": "Mobile phone",
+  "value": 50000.00,
+  "reference": "AX-ORDER-12345"
+}
+```
+
+**Success Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "SmartParcel parcel created successfully.",
+  "data": { "tracking_number": "SP-XXXXXXXXXX", ... }
+}
+```
+
+---
+
+#### 8. Get Parcel Details
+**Endpoint:** `GET /parcels/<tracking_number>/`  
+**Description:** Returns details of a parcel by its tracking number.
+
+---
+
+#### 9. Cancel Parcel
+**Endpoint:** `POST /parcels/<tracking_number>/cancel/`  
+**Description:** Cancels an existing parcel on the SmartParcel network.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "SmartParcel parcel cancelled successfully.",
+  "data": {}
+}
+```
