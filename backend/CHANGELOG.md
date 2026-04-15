@@ -11,12 +11,14 @@ All notable changes to the AXpress backend are documented in this file.
     - All external requests now use the **POST method**.
     - Authentication **apikey** is now sent within the JSON request body instead of headers.
     - Updated endpoint paths: `/states/`, `/cities/state/`, `/boxes/city/`, `/boxes/info/`, `/sizes/`, `/parcels/create/`, `/parcels/info/all/`, `/parcels/cancel/`.
+    - Added `list_assigned_boxes()` — retrieve the list of boxes assigned to the merchant.
 - **Refactored `orders/views.py`**:
     - Updated `SmartParcelCreateParcelView` to map internal snake_case fields to the external API's required field names (e.g., `recipientname`, `boxid`, `sizeid`).
     - Consolidated several retrieval views and removed defunct endpoints (e.g., `SmartParcelCitiesView` and `SmartParcelBoxesView` which are not supported in the Business V2 spec).
     - Updated `SmartParcelAvailableBoxesView` to require a `city_id` query parameter.
-- **Updated `orders/urls.py`**: Removed defunct URL patterns and updated view registrations to match the refined views.
-- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Simplified and corrected the documentation for the Locker Delivery Integration.
+    - Added `SmartParcelAssignedBoxesByCityView` to fetch assigned boxes for a specific city.
+- **Updated `orders/urls.py`**: Added `SmartParcelAssignedBoxesByCityView` and removed defunct URL patterns.
+- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Simplified and corrected the documentation for the Locker Delivery Integration, including the new Assigned Boxes endpoint.
 
 ### Removed
 - Defunct endpoints: `GET /cities/`, `GET /boxes/`, `GET /parcels/<tracking_number>/timeline/`.

@@ -29,6 +29,7 @@ from .views import (
     SmartParcelStatesView,
     SmartParcelCitiesByStateView,
     SmartParcelBoxesByCityView,
+    SmartParcelAssignedBoxesByCityView,
     SmartParcelBoxDetailView,
     SmartParcelAvailableBoxesView,
     SmartParcelLockerSizesView,
@@ -134,6 +135,11 @@ urlpatterns = [
         "smart-parcel/boxes/city/<str:city_id>/",
         SmartParcelBoxesByCityView.as_view(),
         name="sp_boxes_by_city",
+    ),
+    path(
+        "smart-parcel/boxes/assigned/city/<str:city_id>/",
+        SmartParcelAssignedBoxesByCityView.as_view(),
+        name="sp_assigned_boxes_by_city",
     ),
     path(
         "smart-parcel/boxes/available/",

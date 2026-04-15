@@ -164,6 +164,10 @@ class SmartPercelIntegration:
         """Retrieve all available locker sizes (Uses Public Key)."""
         return self._post("sizes/", use_public_key=True)
 
+    def list_assigned_boxes(self) -> tuple[bool, Any]:
+        """Retrieve the list of boxes assigned to the merchant (Uses Public Key)."""
+        return self._post("boxes/assigned/", use_public_key=True)
+
     # ------------------------------------------------------------------
     # Parcels
     # ------------------------------------------------------------------

@@ -2448,6 +2448,37 @@ class SmartParcelBoxesByCityView(APIView):
         )
 
 
+class SmartParcelAssignedBoxesByCityView(APIView):
+    """List SmartParcel boxes assigned to the merchant, filtered by city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_assigned_boxes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        # SmartParcel API returns boxes in 'boxes' field for this endpoint
+        boxes = data.get("boxes", [])
+        if not isinstance(boxes, list):
+            # Fallback if the structure is different
+            boxes = data if isinstance(data, list) else []
+
+        # Filter by city_id
+        filtered_boxes = [
+            b for b in boxes if str(b.get("cityid")) == str(city_id)
+        ]
+
+        return service_response(
+            status="success",
+            message=f"SmartParcel assigned boxes for city {city_id} retrieved successfully.",
+            data=filtered_boxes,
+            status_code=200,
+        )
+
+
 class SmartParcelBoxDetailView(APIView):
     """Retrieve details of a single SmartParcel box."""
 

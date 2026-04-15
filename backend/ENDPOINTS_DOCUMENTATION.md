@@ -192,6 +192,16 @@
 
 ---
 
+#### 4. List Assigned Boxes by City
+**Endpoint:** `GET /boxes/assigned/city/<city_id>/`  
+**Description:** Returns all boxes assigned to the merchant in a specific city. Returns an empty list if no boxes are assigned.
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `city_id` | path `str` | SmartParcel city identifier |
+
+---
+
 #### 4. Get Box Details
 **Endpoint:** `GET /boxes/<box_id>/`  
 **Description:** Returns full details of a single SmartParcel locker box.
