@@ -282,3 +282,17 @@
   "data": {}
 }
 ```
+
+---
+
+## Quick Send SmartParcel Integration
+The `QuickSendView` supports automated SmartParcel locker workflows.
+
+**Fields**:
+- `is_pickup_percel` (bool): Pickup from locker.
+- `isdelivery_percel` (bool): Deliver to locker.
+- `collect_code` (str): Required for pickup.
+- `box_id` (str): Required for delivery.
+- `locker_size_id` (str): Required for delivery.
+
+**Storage**: Full parcel JSON is stored in `order.percel_info`.

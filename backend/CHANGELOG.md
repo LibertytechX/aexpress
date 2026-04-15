@@ -4,6 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [Unreleased] — SmartParcel Quick Send Integration
+- **SmartParcel Service**: Added `list_pending_pickups` to `SmartPercelIntegration` service using Public Key authentication.
+- **Order Model**: Added SmartParcel-specific fields: `is_percel_order`, `is_pickup_percel`, `isdelivery_percel`, and `percel_info` (JSONField).
+- **Quick Send Enhancement**: 
+    - **Locker Pickup**: Validates `collect_code` against pending shipments and automatically resolves the locker station address.
+    - **Locker Delivery**: Automatically generates a SmartParcel parcel after AXpress order creation.
+    - **Service Protection**: Blocks order creation if SmartParcel API is down/errors (`503 Service Unavailable`).
+- **Data Integrity**: Stores full SmartParcel parcel JSON details in the `percel_info` field for both pickup and delivery flows.
+
 ## [2026-04-15] — SmartParcel V2 Business API Overhaul
 
 ### Changed

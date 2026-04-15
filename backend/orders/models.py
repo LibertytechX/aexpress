@@ -375,6 +375,22 @@ class Order(models.Model):
         help_text="Where the order was created from",
     )
 
+    # SmartParcel locker delivery fields
+    is_percel_order = models.BooleanField(
+        default=False, help_text="True if this is a SmartParcel locker order"
+    )
+    is_pickup_percel = models.BooleanField(
+        default=False, help_text="True if pickup is from a SmartParcel box"
+    )
+    isdelivery_percel = models.BooleanField(
+        default=False, help_text="True if delivery is to a SmartParcel box"
+    )
+    percel_info = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Full JSON response/info from SmartParcel for this order",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     payment_info = models.JSONField(null=True, blank=True)
