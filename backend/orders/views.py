@@ -2621,6 +2621,47 @@ class SmartParcelLockerSizesView(APIView):
         )
 
 
+class SmartParcelResolveCollectCodeView(APIView):
+    """Resolve a SmartParcel collect code to a pending parcel detail."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, collect_code: str, *args, **kwargs):
+        ok, data = _sp().list_pending_pickups()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        parcels = data.get("parcels") or []
+        if not isinstance(parcels, list):
+            parcels = []
+
+        # Find the parcel with the matching collectcode (case-insensitive)
+        found_parcel = next(
+            (
+                p
+                for p in parcels
+                if str(p.get("collectcode")).strip().lower() == collect_code.strip().lower()
+            ),
+            None,
+        )
+
+        if not found_parcel:
+            return service_response(
+                status="error",
+                message=f"No pending parcel found for collect code '{collect_code}'.",
+                data={},
+                status_code=404,
+            )
+
+        return service_response(
+            status="success",
+            message="SmartParcel parcel resolved successfully.",
+            data=found_parcel,
+            status_code=200,
+        )
+
+
 class SmartParcelCreateParcelView(APIView):
     """Create a new SmartParcel parcel."""
 
