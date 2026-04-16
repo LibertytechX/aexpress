@@ -2992,6 +2992,59 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [notes, setNotes] = useState("");
   const [estimatedCost, setEstimatedCost] = useState(null);
 
+  // ─── SmartParcel integration ───
+  const [isPickupParcel, setIsPickupParcel] = useState(false);
+  const [collectCode, setCollectCode] = useState('');
+  const [isResolvingCode, setIsResolvingCode] = useState(false);
+  const [resolveError, setResolveError] = useState('');
+  const [resolvedParcel, setResolvedParcel] = useState<any>(null);
+
+  const [isDeliveryParcel, setIsDeliveryParcel] = useState(false);
+  const [spStates, setSpStates] = useState<any[]>([]);
+  const [spCities, setSpCities] = useState<any[]>([]);
+  const [spBoxes, setSpBoxes] = useState<any[]>([]);
+  const [spSizes, setSpSizes] = useState<any[]>([]);
+  const [selectedSpStateId, setSelectedSpStateId] = useState('');
+  const [selectedSpCityId, setSelectedSpCityId] = useState('');
+  const [selectedSpBoxId, setSelectedSpBoxId] = useState('');
+  const [selectedSpSizeId, setSelectedSpSizeId] = useState('');
+
+  // Load SP states & sizes once
+  useEffect(() => {
+    API.SmartParcel.listStates().then(r => { if (r.status === 'success') setSpStates(r.data || []); }).catch(() => {});
+    API.SmartParcel.listLockerSizes().then(r => { if (r.status === 'success') setSpSizes(r.data || []); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSpStateId) { setSpCities([]); return; }
+    API.SmartParcel.listCities(selectedSpStateId).then(r => { if (r.status === 'success') setSpCities(r.data || []); }).catch(() => {});
+  }, [selectedSpStateId]);
+
+  useEffect(() => {
+    if (!selectedSpCityId) { setSpBoxes([]); return; }
+    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { if (r.status === 'success') setSpBoxes(r.data?.boxes || r.data || []); }).catch(() => {});
+  }, [selectedSpCityId]);
+
+  const handleResolveCollectCode = async () => {
+    if (!collectCode) return;
+    setIsResolvingCode(true);
+    setResolveError('');
+    setResolvedParcel(null);
+    try {
+      const res = await API.SmartParcel.resolveCollectCode(collectCode);
+      if (res.status === 'success' && res.data) {
+        setResolvedParcel(res.data);
+        setPickupAddress(res.data.boxaddress);
+      } else {
+        setResolveError(res.message || 'Collect code not found.');
+      }
+    } catch (e: any) {
+      setResolveError(e.message || 'Failed to resolve collect code.');
+    } finally {
+      setIsResolvingCode(false);
+    }
+  };
+
   // Wrapper to log dropoff address changes
   const handleDropoffChange = (value) => {
     console.log('📍 Dropoff address changed:', value);
@@ -3453,7 +3506,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         notes: notes,
         // Include route information for pricing calculation
         distance_km: (mode === 'quick' || mode === 'grouped') && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
-        duration_minutes: (mode === 'quick' || mode === 'grouped') && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
+        duration_minutes: (mode === 'quick' || mode === 'grouped') && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0),
+
+        // SmartParcel fields
+        is_percel_order: isPickupParcel || isDeliveryParcel,
+        is_pickup_percel: isPickupParcel,
+        collect_code: isPickupParcel ? collectCode : undefined,
+        isdelivery_percel: isDeliveryParcel,
+        box_id: isDeliveryParcel ? selectedSpBoxId : undefined,
+        locker_size_id: isDeliveryParcel ? selectedSpSizeId : undefined,
       };
 
       // Debug: Log order data
@@ -3714,6 +3775,39 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={inputStyle} />
               <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={inputStyle} />
             </div>
+
+            {/* SmartParcel Pickup toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={isPickupParcel} onChange={e => { setIsPickupParcel(e.target.checked); setResolveError(''); setResolvedParcel(null); }} style={{ width: 14, height: 14, cursor: 'pointer' }} />
+              Pickup from a SmartParcel Locker
+            </label>
+            {isPickupParcel && (
+              <div style={{ marginTop: 10, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0' }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Enter Collect Code</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={collectCode}
+                    onChange={e => setCollectCode(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleResolveCollectCode()}
+                    placeholder="e.g. TBKJ"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    onClick={handleResolveCollectCode}
+                    disabled={isResolvingCode || !collectCode}
+                    style={{ padding: '0 18px', borderRadius: 10, border: 'none', background: '#1e293b', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: (isResolvingCode || !collectCode) ? 0.5 : 1 }}
+                  >
+                    {isResolvingCode ? 'Checking...' : 'Verify'}
+                  </button>
+                </div>
+                {resolveError && <div style={{ color: '#ef4444', fontSize: 11, marginTop: 6, fontWeight: 600 }}>{resolveError}</div>}
+                {resolvedParcel && (
+                  <div style={{ marginTop: 8, padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: '#166534' }}>
+                    ✅ <strong>{resolvedParcel.parcelrequesttype}</strong> — {resolvedParcel.boxname}, {resolvedParcel.boxaddress}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ═══ QUICK SEND MODE ═══ */}
@@ -3730,6 +3824,35 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: sameAddressError ? 0 : 10, border: sameAddressError ? '1.5px solid #ef4444' : inputStyle.border }}
               />
+
+              {/* SmartParcel Delivery toggle */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: sameAddressError ? 0 : 2, marginBottom: 10, fontSize: 12, fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={isDeliveryParcel} onChange={e => { setIsDeliveryParcel(e.target.checked); setSelectedSpStateId(''); setSelectedSpCityId(''); setSelectedSpBoxId(''); setSelectedSpSizeId(''); }} style={{ width: 14, height: 14, cursor: 'pointer' }} />
+                Deliver to a SmartParcel Locker
+              </label>
+              {isDeliveryParcel && (
+                <div style={{ marginBottom: 12, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Select Locker Station</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <select value={selectedSpStateId} onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(''); setSelectedSpBoxId(''); }} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
+                      <option value="">Select State</option>
+                      {spStates.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                    <select value={selectedSpCityId} onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(''); }} disabled={!selectedSpStateId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpStateId ? 0.5 : 1 }}>
+                      <option value="">Select City</option>
+                      {spCities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <select value={selectedSpBoxId} onChange={e => { const b = spBoxes.find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
+                    <option value="">Select Assigned Box</option>
+                    {spBoxes.map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                  </select>
+                  <select value={selectedSpSizeId} onChange={e => setSelectedSpSizeId(e.target.value)} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
+                    <option value="">Select Locker Size</option>
+                    {spSizes.map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
+                  </select>
+                </div>
+              )}
 
               {/* Same-address error banner */}
               {sameAddressError && (
