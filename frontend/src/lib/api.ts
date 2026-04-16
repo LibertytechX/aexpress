@@ -367,6 +367,14 @@ export const SubscriptionAPI = {
   getActivePostpaidSubscription: async () => apiRequest('/subscriptions/postpaid/active/', { method: 'GET' }),
 };
 
+export const SmartParcelAPI = {
+  listStates: async () => apiRequest('/orders/smart-parcel/states/', { method: 'GET' }),
+  listCities: async (stateId: string) => apiRequest(`/orders/smart-parcel/states/${stateId}/cities/`, { method: 'GET' }),
+  listAssignedBoxes: async (cityId: string) => apiRequest(`/orders/smart-parcel/boxes/assigned/city/${cityId}/`, { method: 'GET' }),
+  listLockerSizes: async () => apiRequest('/orders/smart-parcel/locker-sizes/', { method: 'GET' }),
+  resolveCollectCode: async (code: string) => apiRequest(`/orders/smart-parcel/parcels/resolve-collect-code/${code}/`, { method: 'GET' }),
+};
+
 // Default export matching original usage
 const API = {
   Auth: AuthAPI,
@@ -375,6 +383,7 @@ const API = {
   Token: TokenManager,
   Chats: ChatsAPI,
   Subscription: SubscriptionAPI,
+  SmartParcel: SmartParcelAPI,
 };
 
 export default API;
