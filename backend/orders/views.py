@@ -1311,6 +1311,7 @@ class CalculateFareView(APIView):
     ]
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         vehicle_name = request.data.get("vehicle")
         distance_km = request.data.get("distance_km")
@@ -1394,6 +1395,7 @@ class BulkCalculateFareView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         mode = request.data.get("mode", "quick")
         pickup = request.data.get("pickup")
@@ -1504,6 +1506,7 @@ class CancelOrderView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         """Cancel an order and process refund if needed"""
 
@@ -1512,7 +1515,7 @@ class CancelOrderView(APIView):
 
         # Get the order
         try:
-            order = Order.objects.select_for_update().get(
+            order = Order.objects.get(
                 order_number=order_number, user=request.user
             )
         except Order.DoesNotExist:
