@@ -3011,18 +3011,39 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // Load SP states & sizes once
   useEffect(() => {
-    API.SmartParcel.listStates().then(r => { if (r.status === 'success') setSpStates(r.data || []); }).catch(() => {});
-    API.SmartParcel.listLockerSizes().then(r => { if (r.status === 'success') setSpSizes(r.data || []); }).catch(() => {});
+    API.SmartParcel.listStates().then(r => { 
+      if (r.status === 'success') {
+        const data = r.data?.states || r.data || [];
+        setSpStates(Array.isArray(data) ? data : []); 
+      }
+    }).catch(() => {});
+    
+    API.SmartParcel.listLockerSizes().then(r => { 
+      if (r.status === 'success') {
+        const data = r.data?.sizes || r.data || [];
+        setSpSizes(Array.isArray(data) ? data : []); 
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!selectedSpStateId) { setSpCities([]); return; }
-    API.SmartParcel.listCities(selectedSpStateId).then(r => { if (r.status === 'success') setSpCities(r.data || []); }).catch(() => {});
+    API.SmartParcel.listCities(selectedSpStateId).then(r => { 
+      if (r.status === 'success') {
+        const data = r.data?.cities || r.data || [];
+        setSpCities(Array.isArray(data) ? data : []); 
+      }
+    }).catch(() => {});
   }, [selectedSpStateId]);
 
   useEffect(() => {
     if (!selectedSpCityId) { setSpBoxes([]); return; }
-    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { if (r.status === 'success') setSpBoxes(r.data?.boxes || r.data || []); }).catch(() => {});
+    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { 
+      if (r.status === 'success') {
+        const data = r.data?.boxes || r.data || [];
+        setSpBoxes(Array.isArray(data) ? data : []); 
+      }
+    }).catch(() => {});
   }, [selectedSpCityId]);
 
   const handleResolveCollectCode = async () => {
@@ -3836,20 +3857,20 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                     <select value={selectedSpStateId} onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(''); setSelectedSpBoxId(''); }} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
                       <option value="">Select State</option>
-                      {(spStates || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {(Array.isArray(spStates) ? spStates : []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                     <select value={selectedSpCityId} onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(''); }} disabled={!selectedSpStateId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpStateId ? 0.5 : 1 }}>
                       <option value="">Select City</option>
-                      {(spCities || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      {(Array.isArray(spCities) ? spCities : []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                     </select>
                   </div>
-                  <select value={selectedSpBoxId} onChange={e => { const b = (spBoxes || []).find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
+                  <select value={selectedSpBoxId} onChange={e => { const b = (Array.isArray(spBoxes) ? spBoxes : []).find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
                     <option value="">Select Assigned Box</option>
-                    {(spBoxes || []).map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                    {(Array.isArray(spBoxes) ? spBoxes : []).map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
                   </select>
                   <select value={selectedSpSizeId} onChange={e => setSelectedSpSizeId(e.target.value)} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
                     <option value="">Select Locker Size</option>
-                    {(spSizes || []).map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
+                    {(Array.isArray(spSizes) ? spSizes : []).map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
                   </select>
                 </div>
               )}
