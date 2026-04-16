@@ -7,6 +7,26 @@ from .models import Order, Delivery, Vehicle
 from authentication.serializers import UserSerializer
 
 
+class CreateParcelSerializer(serializers.Serializer):
+    """Validate the payload required to create a SmartParcel parcel."""
+
+    sender_name = serializers.CharField(max_length=120)
+    sender_phone = serializers.CharField(max_length=20)
+    sender_email = serializers.EmailField(required=False, allow_blank=True)
+    receiver_name = serializers.CharField(max_length=120)
+    receiver_phone = serializers.CharField(max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
+    box_id = serializers.CharField(
+        max_length=100, help_text="SmartParcel box / locker station identifier."
+    )
+    locker_size_id = serializers.CharField(
+        max_length=100, help_text="Chosen locker size identifier."
+    )
+    description = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+
+
 class VehicleSerializer(serializers.ModelSerializer):
     """Serializer for Vehicle model."""
 
@@ -192,6 +212,7 @@ class QuickSendSerializer(serializers.Serializer):
     dropoff_address = serializers.CharField(required=True)
     receiver_name = serializers.CharField(required=True, max_length=255)
     receiver_phone = serializers.CharField(required=True, max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
 
     # Order details
     vehicle = serializers.CharField(required=True)
@@ -218,13 +239,37 @@ class QuickSendSerializer(serializers.Serializer):
     )
     duration_minutes = serializers.IntegerField(required=True)
 
+    # SmartParcel specific fields
+    is_pickup_percel = serializers.BooleanField(required=False, default=False)
+    isdelivery_percel = serializers.BooleanField(required=False, default=False)
+    collect_code = serializers.CharField(required=False, allow_blank=True)
+    box_id = serializers.CharField(required=False, allow_blank=True)
+    locker_size_id = serializers.CharField(required=False, allow_blank=True)
+
     def validate(self, data):
+        # Existing COD validation
         if data.get("collect_on_delivery") and not data.get("cod_amount"):
             raise serializers.ValidationError(
                 {
                     "cod_amount": "cod_amount is required when collect_on_delivery is true."
                 }
             )
+
+        # SmartParcel Pickup validation
+        if data.get("is_pickup_percel") and not data.get("collect_code"):
+            raise serializers.ValidationError(
+                {"collect_code": "collect_code is required for parcel pickup."}
+            )
+
+        # SmartParcel Delivery validation
+        if data.get("isdelivery_percel"):
+            if not data.get("box_id") or not data.get("locker_size_id"):
+                raise serializers.ValidationError(
+                    {
+                        "box_id": "box_id and locker_size_id are required for parcel delivery."
+                    }
+                )
+
         return data
 
     def validate_vehicle(self, value):

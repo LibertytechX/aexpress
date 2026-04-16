@@ -26,6 +26,17 @@ from .views import (
     OrderStatusChangeView,
     OrderPayNowView,
     OrderEventAPIView,
+    SmartParcelStatesView,
+    SmartParcelCitiesByStateView,
+    SmartParcelBoxesByCityView,
+    SmartParcelAssignedBoxesByCityView,
+    SmartParcelBoxDetailView,
+    SmartParcelAvailableBoxesView,
+    SmartParcelLockerSizesView,
+    SmartParcelCreateParcelView,
+    SmartParcelParcelDetailView,
+    SmartParcelCancelParcelView,
+    SmartParcelResolveCollectCodeView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -109,4 +120,63 @@ urlpatterns = [
     path("<str:order_number>/pay-now/", OrderPayNowView.as_view(), name="order_pay_now"),
     # Generic order detail (must come last to avoid matching specific endpoints)
     path("<str:order_number>/", OrderDetailView.as_view(), name="order_detail"),
+
+    # ------------------------------------------------------------------
+    # SmartParcel Locker Delivery Integration
+    # ------------------------------------------------------------------
+    # Geography
+    path("smart-parcel/states/", SmartParcelStatesView.as_view(), name="sp_states"),
+    path(
+        "smart-parcel/states/<str:state_id>/cities/",
+        SmartParcelCitiesByStateView.as_view(),
+        name="sp_cities_by_state",
+    ),
+    # Boxes
+    path(
+        "smart-parcel/boxes/city/<str:city_id>/",
+        SmartParcelBoxesByCityView.as_view(),
+        name="sp_boxes_by_city",
+    ),
+    path(
+        "smart-parcel/boxes/assigned/city/<str:city_id>/",
+        SmartParcelAssignedBoxesByCityView.as_view(),
+        name="sp_assigned_boxes_by_city",
+    ),
+    path(
+        "smart-parcel/boxes/available/",
+        SmartParcelAvailableBoxesView.as_view(),
+        name="sp_available_boxes",
+    ),
+    path(
+        "smart-parcel/boxes/<str:box_id>/",
+        SmartParcelBoxDetailView.as_view(),
+        name="sp_box_detail",
+    ),
+    # Locker sizes
+    path(
+        "smart-parcel/locker-sizes/",
+        SmartParcelLockerSizesView.as_view(),
+        name="sp_locker_sizes",
+    ),
+    # Parcels
+    path(
+        "smart-parcel/parcels/",
+        SmartParcelCreateParcelView.as_view(),
+        name="sp_create_parcel",
+    ),
+    path(
+        "smart-parcel/parcels/resolve-collect-code/<str:collect_code>/",
+        SmartParcelResolveCollectCodeView.as_view(),
+        name="sp_resolve_collect_code",
+    ),
+    path(
+        "smart-parcel/parcels/<str:tracking_number>/",
+        SmartParcelParcelDetailView.as_view(),
+        name="sp_parcel_detail",
+    ),
+    path(
+        "smart-parcel/parcels/<str:tracking_number>/cancel/",
+        SmartParcelCancelParcelView.as_view(),
+        name="sp_cancel_parcel",
+    ),
 ]
