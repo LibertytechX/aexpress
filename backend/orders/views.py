@@ -1504,7 +1504,6 @@ class CancelOrderView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request, order_number):
         """Cancel an order and process refund if needed"""
 
@@ -2314,7 +2313,6 @@ class DeliveryCompleteView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
-    @transaction.atomic
     def post(self, request, delivery_id):
         try:
             delivery = Delivery.objects.select_for_update().get(id=delivery_id)
@@ -2428,7 +2426,6 @@ class MergeGroupedOrdersView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @exception_advice(model_object=ErrorLog)
-    @transaction.atomic
     def post(self, request):
         serializer = MergeGroupedOrdersSerializer(data=request.data)
         if not serializer.is_valid():
@@ -2564,9 +2561,7 @@ class SmartParcelAssignedBoxesByCityView(APIView):
             boxes = data if isinstance(data, list) else []
 
         # Filter by city_id
-        filtered_boxes = [
-            b for b in boxes if str(b.get("cityid")) == str(city_id)
-        ]
+        filtered_boxes = [b for b in boxes if str(b.get("cityid")) == str(city_id)]
 
         return service_response(
             status="success",
@@ -2656,7 +2651,8 @@ class SmartParcelResolveCollectCodeView(APIView):
             (
                 p
                 for p in parcels
-                if str(p.get("collectcode")).strip().lower() == collect_code.strip().lower()
+                if str(p.get("collectcode")).strip().lower()
+                == collect_code.strip().lower()
             ),
             None,
         )
