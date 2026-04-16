@@ -161,7 +161,9 @@ class QuickSendView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
+    # TODO Refactor to be less complex
+
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Create a Quick Send order with single delivery."""
         from django.utils import timezone
@@ -1515,9 +1517,7 @@ class CancelOrderView(APIView):
 
         # Get the order
         try:
-            order = Order.objects.get(
-                order_number=order_number, user=request.user
-            )
+            order = Order.objects.get(order_number=order_number, user=request.user)
         except Order.DoesNotExist:
             return Response(
                 {"error": f"Order {order_number} not found"},
