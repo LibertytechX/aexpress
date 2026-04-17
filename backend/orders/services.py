@@ -195,3 +195,43 @@ class SmartPercelIntegration:
             {"parceldetailid": tracking_number},
             use_public_key=False,
         )
+
+    # ------------------------------------------------------------------
+    # Simulation (Sandbox only)
+    # ------------------------------------------------------------------
+
+    def simulate_drop_parcel(self, parcel_detail_id: str) -> tuple[bool, Any]:
+        """Simulate dropping a parcel into a SmartParcel locker box.
+
+        This is a sandbox-only endpoint used to trigger the "dropped" state
+        transition so that downstream collect-code flows can be tested end-to-end.
+
+        Args:
+            parcel_detail_id: The numeric parcel detail ID to simulate dropping.
+
+        Returns:
+            Tuple of (success: bool, data: Any).
+        """
+        return self._post(
+            "parcels/simulate/drop/",
+            {"parceldetailid": parcel_detail_id},
+            use_public_key=False,
+        )
+
+    def simulate_collect_parcel(self, parcel_detail_id: str) -> tuple[bool, Any]:
+        """Simulate a recipient collecting a parcel from a SmartParcel locker.
+
+        This is a sandbox-only endpoint used to trigger the "collected" state
+        transition so that the full pickup workflow can be tested end-to-end.
+
+        Args:
+            parcel_detail_id: The numeric parcel detail ID to simulate collecting.
+
+        Returns:
+            Tuple of (success: bool, data: Any).
+        """
+        return self._post(
+            "parcels/simulate/collect/",
+            {"parceldetailid": parcel_detail_id},
+            use_public_key=False,
+        )

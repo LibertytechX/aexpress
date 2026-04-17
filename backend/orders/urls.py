@@ -37,6 +37,8 @@ from .views import (
     SmartParcelParcelDetailView,
     SmartParcelCancelParcelView,
     SmartParcelResolveCollectCodeView,
+    SmartParcelSimulateDropView,
+    SmartParcelSimulateCollectView,
 )
 from .escrow_views import (
     ReleaseEscrowView,
@@ -178,5 +180,16 @@ urlpatterns = [
         "smart-parcel/parcels/<str:tracking_number>/cancel/",
         SmartParcelCancelParcelView.as_view(),
         name="sp_cancel_parcel",
+    ),
+    # Simulation (sandbox only)
+    path(
+        "smart-parcel/parcels/<str:parcel_detail_id>/simulate/drop/",
+        SmartParcelSimulateDropView.as_view(),
+        name="sp_simulate_drop",
+    ),
+    path(
+        "smart-parcel/parcels/<str:parcel_detail_id>/simulate/collect/",
+        SmartParcelSimulateCollectView.as_view(),
+        name="sp_simulate_collect",
     ),
 ]

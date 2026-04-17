@@ -408,6 +408,7 @@ class Rider(models.Model):
     is_authorized = models.BooleanField(
         default=False, help_text="Controls whether driver can receive jobs"
     )
+    is_jumia_rider = models.BooleanField(default=False)
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
 
