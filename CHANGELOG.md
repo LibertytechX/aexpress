@@ -10,8 +10,29 @@ All notable changes to the AXpress project are documented in this file.
 #### Fixed
 - **SmartParcel Toggle**: Resolved a `TypeError` that occurred when toggling "Deliver to SmartParcel Locker" by ensuring that data fetched from the SmartParcel API is always treated as an array before mapping.
 - **Robust Data Fetching**: Updated `useEffect` hooks to correctly extract lists (states, cities, boxes, sizes) from backend responses and added defensive array checks in the render logic.
-
 ---
+
+## [2026-04-17] — SmartParcel Integration & Simulation
+
+### API
+#### Added
+- **SmartParcel Simulation**: Added `simulate/drop/` and `simulate/collect/` endpoints to simulate locker state transitions in sandbox mode for end-to-end testing of the locker workflow.
+- **SmartParcel Integration**: Implemented comprehensive suite of endpoints for SmartParcel locker integration:
+  - `GET smart-parcel/states/`
+  - `GET smart-parcel/states/{id}/cities/`
+  - `GET smart-parcel/boxes/city/{id}/`
+  - `GET smart-parcel/boxes/assigned/city/{id}/`
+  - `GET smart-parcel/locker-sizes/`
+  - `POST smart-parcel/parcels/`
+  - `GET smart-parcel/parcels/pending-pickups/`
+  - `GET smart-parcel/parcels/resolve-collect-code/{code}/`
+  - `GET smart-parcel/parcels/{tracking}/`
+  - `POST smart-parcel/parcels/{tracking}/cancel/`
+
+### Frontend
+#### Added
+- **SmartParcel Locker Workflow**: Integrated SmartParcel locker selection and collect code resolution directly into the Order Creation flow in the dashboard.
+- **Defensive guards**: Added defensive null guards for SmartParcel data arrays to prevent runtime crashes during API latency or failures.
 
 ## [2026-04-02] — Order Mode Redesign & Grouped Pricing Fix
 

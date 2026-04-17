@@ -39,6 +39,7 @@ DEVICE_FETCH_LIMIT = 500
 # API helpers
 # ---------------------------------------------------------------------------
 
+
 def _login() -> str:
     """
     Authenticate with Concept Nova and return the user_api_hash token.
@@ -99,7 +100,9 @@ def _fetch_devices(token: str) -> tuple[list, int, str]:
     try:
         data = response.json()
     except ValueError:
-        raise RuntimeError("get_devices response was not valid JSON. Snippet: %s" % snippet)
+        raise RuntimeError(
+            "get_devices response was not valid JSON. Snippet: %s" % snippet
+        )
 
     # API returns a list of group objects, each with an 'items' list
     devices = []
@@ -112,6 +115,7 @@ def _fetch_devices(token: str) -> tuple[list, int, str]:
 # ---------------------------------------------------------------------------
 # Data normalisation helpers
 # ---------------------------------------------------------------------------
+
 
 def _normalise_engine_status(raw) -> str:
     if raw is None:
@@ -140,6 +144,7 @@ def _normalise_moved_timestamp(raw):
         return None
     try:
         from datetime import datetime
+
         return datetime.fromtimestamp(float(raw), tz=dt_timezone.utc)
     except (TypeError, ValueError, OSError):
         return None
@@ -203,7 +208,9 @@ def _is_valid_coord_pair(lat: Decimal | None, lng: Decimal | None) -> bool:
     return True
 
 
-def _build_tracking_row(asset: VehicleAsset | None, device: dict) -> VehicleTracking | None:
+def _build_tracking_row(
+    asset: VehicleAsset | None, device: dict
+) -> VehicleTracking | None:
     """Create an unsaved VehicleTracking row from telemetry payload."""
     if asset is None:
         return None
@@ -230,6 +237,7 @@ def _build_tracking_row(asset: VehicleAsset | None, device: dict) -> VehicleTrac
 # ---------------------------------------------------------------------------
 # Core sync logic
 # ---------------------------------------------------------------------------
+
 
 def _upsert_device(
     device: dict, status_code: int, snippet: str, dry_run: bool
@@ -298,7 +306,9 @@ def _upsert_device(
     }
 
     if not dry_run:
-        created = VehicleAsset.objects.create(provider_id=provider_id, **create_defaults)
+        created = VehicleAsset.objects.create(
+            provider_id=provider_id, **create_defaults
+        )
     else:
         created = None
 
@@ -309,6 +319,7 @@ def _upsert_device(
 # ---------------------------------------------------------------------------
 # Command
 # ---------------------------------------------------------------------------
+
 
 class Command(BaseCommand):
     help = (
@@ -327,7 +338,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         dry_run = options["dry_run"]
         if dry_run:
-            self.stdout.write(self.style.WARNING("DRY RUN — no database writes will occur."))
+            self.stdout.write(
+                self.style.WARNING("DRY RUN — no database writes will occur.")
+            )
 
         # Validate env vars before hitting the network
         if not CONCEPT_NOVA_EMAIL or not CONCEPT_NOVA_PASSWORD:
@@ -367,7 +380,9 @@ class Command(BaseCommand):
         try:
             with transaction.atomic():
                 for device in devices:
-                    result, asset = _upsert_device(device, status_code, snippet, dry_run)
+                    result, asset = _upsert_device(
+                        device, status_code, snippet, dry_run
+                    )
                     counts[result] += 1
                     if not dry_run:
                         row = _build_tracking_row(asset, device)
@@ -379,7 +394,7 @@ class Command(BaseCommand):
                     VehicleTracking.objects.bulk_create(tracking_rows, batch_size=1000)
         except Exception as exc:
             logger.exception("sync_bike_telemetry: database error during upsert")
-            self.stderr.write(self.style.ERROR("Database error: %s" % exc))
+            self.stdout.write(self.style.ERROR("Database error: %s" % exc))
             return
 
         # ── Step 4: report ──────────────────────────────────────────
@@ -402,11 +417,14 @@ class Command(BaseCommand):
         """
         try:
             from django.conf import settings
+
             api_key = getattr(settings, "ABLY_API_KEY", "")
             if not api_key:
-                self.stdout.write(self.style.WARNING(
-                    "ABLY_API_KEY not configured — skipping real-time publish"
-                ))
+                self.stdout.write(
+                    self.style.WARNING(
+                        "ABLY_API_KEY not configured — skipping real-time publish"
+                    )
+                )
                 return
 
             import asyncio
@@ -422,13 +440,20 @@ class Command(BaseCommand):
                 await channel.publish("telemetry_update", payload)
 
             asyncio.run(_publish())
-            self.stdout.write(self.style.SUCCESS(
-                "Published %d vehicle(s) to Ably channel 'vehicle-telemetry'" % len(payload)
-            ))
-            logger.info("sync_bike_telemetry: published %d vehicles to Ably", len(payload))
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Published %d vehicle(s) to Ably channel 'vehicle-telemetry'"
+                    % len(payload)
+                )
+            )
+            logger.info(
+                "sync_bike_telemetry: published %d vehicles to Ably", len(payload)
+            )
         except Exception as exc:
             # Never let Ably failure break the sync
             logger.error("sync_bike_telemetry: Ably publish failed — %s", exc)
-            self.stderr.write(self.style.WARNING(
-                "Ably publish failed (sync still succeeded): %s" % exc
-            ))
+            self.stderr.write(
+                self.style.WARNING(
+                    "Ably publish failed (sync still succeeded): %s" % exc
+                )
+            )

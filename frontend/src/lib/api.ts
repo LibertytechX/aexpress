@@ -370,9 +370,31 @@ export const SubscriptionAPI = {
 export const SmartParcelAPI = {
   listStates: async () => apiRequest('/orders/smart-parcel/states/', { method: 'GET' }),
   listCities: async (stateId: string) => apiRequest(`/orders/smart-parcel/states/${stateId}/cities/`, { method: 'GET' }),
+  listBoxesByCity: async (cityId: string) => apiRequest(`/orders/smart-parcel/boxes/city/${cityId}/`, { method: 'GET' }),
   listAssignedBoxes: async (cityId: string) => apiRequest(`/orders/smart-parcel/boxes/assigned/city/${cityId}/`, { method: 'GET' }),
+  getBoxDetails: async (boxId: string) => apiRequest(`/orders/smart-parcel/boxes/${boxId}/`, { method: 'GET' }),
   listLockerSizes: async () => apiRequest('/orders/smart-parcel/locker-sizes/', { method: 'GET' }),
+  listPendingPickups: async () => apiRequest('/orders/smart-parcel/parcels/pending-pickups/', { method: 'GET' }),
+  createParcel: async (data: any) => 
+    apiRequest('/orders/smart-parcel/parcels/', { 
+      method: 'POST', 
+      body: JSON.stringify(data) 
+    }),
   resolveCollectCode: async (code: string) => apiRequest(`/orders/smart-parcel/parcels/resolve-collect-code/${code}/`, { method: 'GET' }),
+  getParcelDetails: async (tracking: string) => apiRequest(`/orders/smart-parcel/parcels/${tracking}/`, { method: 'GET' }),
+  cancelParcel: async (tracking: string) => apiRequest(`/orders/smart-parcel/parcels/${tracking}/cancel/`, { method: 'POST' }),
+  
+  // Sandbox Simulation
+  simulateDrop: async (boxId: string, unlockCode: string) => 
+    apiRequest('/orders/smart-parcel/locker/simulate/drop/', { 
+      method: 'POST',
+      body: JSON.stringify({ box_id: boxId, unlock_code: unlockCode })
+    }),
+  simulateCollect: async (boxId: string, unlockCode: string) => 
+    apiRequest('/orders/smart-parcel/locker/simulate/collect/', { 
+      method: 'POST',
+      body: JSON.stringify({ box_id: boxId, unlock_code: unlockCode })
+    }),
 };
 
 // Default export matching original usage
