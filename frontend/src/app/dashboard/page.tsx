@@ -3008,21 +3008,68 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [selectedSpCityId, setSelectedSpCityId] = useState('');
   const [selectedSpBoxId, setSelectedSpBoxId] = useState('');
   const [selectedSpSizeId, setSelectedSpSizeId] = useState('');
+  const [loadingSpCities, setLoadingSpCities] = useState(false);
+  const [loadingSpBoxes, setLoadingSpBoxes] = useState(false);
 
   // Load SP states & sizes once
   useEffect(() => {
-    API.SmartParcel.listStates().then(r => { if (r.status === 'success') setSpStates(r.data || []); }).catch(() => {});
-    API.SmartParcel.listLockerSizes().then(r => { if (r.status === 'success') setSpSizes(r.data || []); }).catch(() => {});
+    API.SmartParcel.listStates().then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.states && Array.isArray(raw.states)) arr = raw.states;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpStates(arr); 
+      }
+    }).catch(() => {});
+    
+    API.SmartParcel.listLockerSizes().then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.sizes && Array.isArray(raw.sizes)) arr = raw.sizes;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpSizes(arr); 
+      }
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!selectedSpStateId) { setSpCities([]); return; }
-    API.SmartParcel.listCities(selectedSpStateId).then(r => { if (r.status === 'success') setSpCities(r.data || []); }).catch(() => {});
+    setLoadingSpCities(true);
+    setSpCities([]);
+    API.SmartParcel.listCities(selectedSpStateId).then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.cities && Array.isArray(raw.cities)) arr = raw.cities;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpCities(arr); 
+      }
+    }).catch(() => {}).finally(() => setLoadingSpCities(false));
   }, [selectedSpStateId]);
 
   useEffect(() => {
     if (!selectedSpCityId) { setSpBoxes([]); return; }
-    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { if (r.status === 'success') setSpBoxes(r.data?.boxes || r.data || []); }).catch(() => {});
+    setLoadingSpBoxes(true);
+    setSpBoxes([]);
+    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.boxes && Array.isArray(raw.boxes)) arr = raw.boxes;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpBoxes(arr); 
+      }
+    }).catch(() => {}).finally(() => setLoadingSpBoxes(false));
   }, [selectedSpCityId]);
 
   const handleResolveCollectCode = async () => {
@@ -3832,24 +3879,60 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               </label>
               {isDeliveryParcel && (
                 <div style={{ marginBottom: 12, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Select Locker Station</div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Select Locker Station</div>
+
+                  {/* ── Row 1: State + City ── */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+
+                    {/* State */}
                     <select value={selectedSpStateId} onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(''); setSelectedSpBoxId(''); }} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
                       <option value="">Select State</option>
-                      {(spStates || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      {(Array.isArray(spStates) ? spStates : []).map(s => <option key={s.stateid} value={s.stateid}>{s.statename}</option>)}
                     </select>
-                    <select value={selectedSpCityId} onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(''); }} disabled={!selectedSpStateId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpStateId ? 0.5 : 1 }}>
-                      <option value="">Select City</option>
-                      {(spCities || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+
+                    {/* City — loading / empty / populated */}
+                    {loadingSpCities ? (
+                      <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, background: '#f1f5f9', color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                        <div style={{ width: 14, height: 14, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                        Loading cities…
+                      </div>
+                    ) : selectedSpStateId && spCities.length === 0 ? (
+                      <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 6, background: '#fef2f2', color: '#b91c1c', fontSize: 12, fontWeight: 600, border: '1.5px solid #fecaca' }}>
+                        ⚠️ No cities found for this state
+                      </div>
+                    ) : (
+                      <select value={selectedSpCityId} onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(''); }} disabled={!selectedSpStateId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpStateId ? 0.5 : 1 }}>
+                        <option value="">Select City</option>
+                        {(Array.isArray(spCities) ? spCities : []).map(c => <option key={c.cityid} value={c.cityid}>{c.cityname}</option>)}
+                      </select>
+                    )}
                   </div>
-                  <select value={selectedSpBoxId} onChange={e => { const b = (spBoxes || []).find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
-                    <option value="">Select Assigned Box</option>
-                    {(spBoxes || []).map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
-                  </select>
+
+                  {/* ── Row 2: Box (full width) — loading / empty / populated ── */}
+                  {loadingSpBoxes ? (
+                    <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, background: '#f1f5f9', color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                      <div style={{ width: 14, height: 14, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                      Loading locker stations…
+                    </div>
+                  ) : selectedSpCityId && spBoxes.length === 0 ? (
+                    <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1.5px dashed #cbd5e1', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>📭</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>No locker stations in this city</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Try a different city or use a regular delivery address.</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <select value={selectedSpBoxId} onChange={e => { const b = (Array.isArray(spBoxes) ? spBoxes : []).find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
+                      <option value="">Select Assigned Box</option>
+                      {(Array.isArray(spBoxes) ? spBoxes : []).map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                    </select>
+                  )}
+
+                  {/* ── Row 3: Locker Size ── */}
                   <select value={selectedSpSizeId} onChange={e => setSelectedSpSizeId(e.target.value)} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
                     <option value="">Select Locker Size</option>
-                    {(spSizes || []).map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
+                    {(Array.isArray(spSizes) ? spSizes : []).map(sz => <option key={sz.sizeid} value={sz.sizeid}>{sz.sizename}</option>)}
                   </select>
                 </div>
               )}
