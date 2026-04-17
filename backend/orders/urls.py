@@ -36,6 +36,7 @@ from .views import (
     SmartParcelCreateParcelView,
     SmartParcelParcelDetailView,
     SmartParcelCancelParcelView,
+    SmartParcelPendingPickupsView,
     SmartParcelResolveCollectCodeView,
     SmartParcelSimulateDropView,
     SmartParcelSimulateCollectView,
@@ -167,6 +168,11 @@ urlpatterns = [
         name="sp_create_parcel",
     ),
     path(
+        "smart-parcel/parcels/pending-pickups/",
+        SmartParcelPendingPickupsView.as_view(),
+        name="sp_pending_pickups",
+    ),
+    path(
         "smart-parcel/parcels/resolve-collect-code/<str:collect_code>/",
         SmartParcelResolveCollectCodeView.as_view(),
         name="sp_resolve_collect_code",
@@ -183,12 +189,12 @@ urlpatterns = [
     ),
     # Simulation (sandbox only)
     path(
-        "smart-parcel/parcels/<str:parcel_detail_id>/simulate/drop/",
+        "smart-parcel/locker/simulate/drop/",
         SmartParcelSimulateDropView.as_view(),
         name="sp_simulate_drop",
     ),
     path(
-        "smart-parcel/parcels/<str:parcel_detail_id>/simulate/collect/",
+        "smart-parcel/locker/simulate/collect/",
         SmartParcelSimulateCollectView.as_view(),
         name="sp_simulate_collect",
     ),

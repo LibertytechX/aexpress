@@ -200,38 +200,42 @@ class SmartPercelIntegration:
     # Simulation (Sandbox only)
     # ------------------------------------------------------------------
 
-    def simulate_drop_parcel(self, parcel_detail_id: str) -> tuple[bool, Any]:
+    def simulate_drop_parcel(self, box_id: str, unlock_code: str) -> tuple[bool, Any]:
         """Simulate dropping a parcel into a SmartParcel locker box.
 
         This is a sandbox-only endpoint used to trigger the "dropped" state
         transition so that downstream collect-code flows can be tested end-to-end.
 
         Args:
-            parcel_detail_id: The numeric parcel detail ID to simulate dropping.
+            box_id: The ID of the SmartParcel box.
+            unlock_code: The unlock code for dropping the parcel.
 
         Returns:
             Tuple of (success: bool, data: Any).
         """
         return self._post(
-            "parcels/simulate/drop/",
-            {"parceldetailid": parcel_detail_id},
-            use_public_key=False,
+            "locker/dropparcel/",
+            {"boxid": box_id, "unlockcode": unlock_code},
+            use_public_key=True,
         )
 
-    def simulate_collect_parcel(self, parcel_detail_id: str) -> tuple[bool, Any]:
+    def simulate_collect_parcel(
+        self, box_id: str, unlock_code: str
+    ) -> tuple[bool, Any]:
         """Simulate a recipient collecting a parcel from a SmartParcel locker.
 
         This is a sandbox-only endpoint used to trigger the "collected" state
         transition so that the full pickup workflow can be tested end-to-end.
 
         Args:
-            parcel_detail_id: The numeric parcel detail ID to simulate collecting.
+            box_id: The ID of the SmartParcel box.
+            unlock_code: The unlock code for collecting the parcel.
 
         Returns:
             Tuple of (success: bool, data: Any).
         """
         return self._post(
-            "parcels/simulate/collect/",
-            {"parceldetailid": parcel_detail_id},
-            use_public_key=False,
+            "locker/collectparcel/",
+            {"boxid": box_id, "unlockcode": unlock_code},
+            use_public_key=True,
         )

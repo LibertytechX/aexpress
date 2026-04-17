@@ -797,37 +797,54 @@ Description: Create a new SmartParcel parcel for locker pickup/delivery.
 Authentication: Required (Merchant)
 ```
 
-### 8. Resolve Collect Code
+### 8. List Pending Pickups
+```
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves all pending parcels ready for pickup from the SmartParcel network.
+Authentication: Required (Merchant)
+```
+
+### 9. Resolve Collect Code
 ```
 GET /api/orders/smart-parcel/parcels/resolve-collect-code/{collect_code}/
 Description: Resolves a collect code to a pending parcel for pickup.
 Authentication: Required (Merchant)
 ```
 
-### 9. Get Parcel Details
+### 10. Get Parcel Details
 ```
 GET /api/orders/smart-parcel/parcels/{tracking_number}/
 Description: Retrieves full details for a SmartParcel parcel.
 Authentication: Required (Merchant)
 ```
 
-### 10. Cancel Parcel
+### 11. Cancel Parcel
 ```
 POST /api/orders/smart-parcel/parcels/{tracking_number}/cancel/
 Description: Cancels an existing SmartParcel parcel.
 Authentication: Required (Merchant)
 ```
 
-### 11. Simulate Drop Parcel (Sandbox Only)
+### 12. Simulate Drop Parcel (Sandbox Only)
 ```
-POST /api/orders/smart-parcel/parcels/{parcel_detail_id}/simulate/drop/
+POST /api/orders/smart-parcel/locker/simulate/drop/
 Description: Triggers a simulated "dropped" state for a parcel in sandbox mode.
 Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "CJ95"
+  }
 ```
 
-### 12. Simulate Collect Parcel (Sandbox Only)
+### 13. Simulate Collect Parcel (Sandbox Only)
 ```
-POST /api/orders/smart-parcel/parcels/{parcel_detail_id}/simulate/collect/
+POST /api/orders/smart-parcel/locker/simulate/collect/
 Description: Triggers a simulated "collected" state for a parcel in sandbox mode.
 Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "J6E7"
+  }
 ```

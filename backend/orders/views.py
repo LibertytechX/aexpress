@@ -2634,6 +2634,24 @@ class SmartParcelLockerSizesView(APIView):
         )
 
 
+class SmartParcelPendingPickupsView(APIView):
+    """List all pending parcels ready for pickup on the SmartParcel network."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_pending_pickups()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel pending pickups retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
 class SmartParcelResolveCollectCodeView(APIView):
     """Resolve a SmartParcel collect code to a pending parcel detail."""
 
@@ -2761,8 +2779,15 @@ class SmartParcelSimulateDropView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @exception_advice(model_object=ErrorLog)
-    def post(self, request, parcel_detail_id: str, *args, **kwargs):
-        ok, data = _sp().simulate_drop_parcel(parcel_detail_id)
+    def post(self, request, *args, **kwargs):
+        box_id = request.data.get("box_id")
+        unlock_code = request.data.get("unlock_code")
+        if not box_id or not unlock_code:
+            raise ServiceException(
+                status_code=400, message="box_id and unlock_code are required."
+            )
+
+        ok, data = _sp().simulate_drop_parcel(box_id, unlock_code)
         if not ok:
             raise ServiceException(status_code=502, message=data)
         return service_response(
@@ -2783,8 +2808,15 @@ class SmartParcelSimulateCollectView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @exception_advice(model_object=ErrorLog)
-    def post(self, request, parcel_detail_id: str, *args, **kwargs):
-        ok, data = _sp().simulate_collect_parcel(parcel_detail_id)
+    def post(self, request, *args, **kwargs):
+        box_id = request.data.get("box_id")
+        unlock_code = request.data.get("unlock_code")
+        if not box_id or not unlock_code:
+            raise ServiceException(
+                status_code=400, message="box_id and unlock_code are required."
+            )
+
+        ok, data = _sp().simulate_collect_parcel(box_id, unlock_code)
         if not ok:
             raise ServiceException(status_code=502, message=data)
         return service_response(

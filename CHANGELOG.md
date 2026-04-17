@@ -15,6 +15,7 @@ All notable changes to the AXpress project are documented in this file.
   - `GET smart-parcel/boxes/assigned/city/{id}/`
   - `GET smart-parcel/locker-sizes/`
   - `POST smart-parcel/parcels/`
+  - `GET smart-parcel/parcels/pending-pickups/`
   - `GET smart-parcel/parcels/resolve-collect-code/{code}/`
   - `GET smart-parcel/parcels/{tracking}/`
   - `POST smart-parcel/parcels/{tracking}/cancel/`

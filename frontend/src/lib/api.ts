@@ -374,6 +374,7 @@ export const SmartParcelAPI = {
   listAssignedBoxes: async (cityId: string) => apiRequest(`/orders/smart-parcel/boxes/assigned/city/${cityId}/`, { method: 'GET' }),
   getBoxDetails: async (boxId: string) => apiRequest(`/orders/smart-parcel/boxes/${boxId}/`, { method: 'GET' }),
   listLockerSizes: async () => apiRequest('/orders/smart-parcel/locker-sizes/', { method: 'GET' }),
+  listPendingPickups: async () => apiRequest('/orders/smart-parcel/parcels/pending-pickups/', { method: 'GET' }),
   createParcel: async (data: any) => 
     apiRequest('/orders/smart-parcel/parcels/', { 
       method: 'POST', 
@@ -384,8 +385,16 @@ export const SmartParcelAPI = {
   cancelParcel: async (tracking: string) => apiRequest(`/orders/smart-parcel/parcels/${tracking}/cancel/`, { method: 'POST' }),
   
   // Sandbox Simulation
-  simulateDrop: async (parcelId: string) => apiRequest(`/orders/smart-parcel/parcels/${parcelId}/simulate/drop/`, { method: 'POST' }),
-  simulateCollect: async (parcelId: string) => apiRequest(`/orders/smart-parcel/parcels/${parcelId}/simulate/collect/`, { method: 'POST' }),
+  simulateDrop: async (boxId: string, unlockCode: string) => 
+    apiRequest('/orders/smart-parcel/locker/simulate/drop/', { 
+      method: 'POST',
+      body: JSON.stringify({ box_id: boxId, unlock_code: unlockCode })
+    }),
+  simulateCollect: async (boxId: string, unlockCode: string) => 
+    apiRequest('/orders/smart-parcel/locker/simulate/collect/', { 
+      method: 'POST',
+      body: JSON.stringify({ box_id: boxId, unlock_code: unlockCode })
+    }),
 };
 
 // Default export matching original usage
