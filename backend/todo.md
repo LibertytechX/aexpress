@@ -22,7 +22,7 @@
 - [x] Rider metrics for rider's daily orders, weekly and monthly and distance covered all time and overall orders completed.
 - [] Rider to own for riders, weekly and daily update
 - [] implement simulate drop and collect smartpercel
-- [] Add distinguishing feature for jumia riders
+- [x] Add distinguishing feature for jumia riders
 - [x] Document refresh token endpoint
 - [] Add weekly and daily filter for rider earnings
 

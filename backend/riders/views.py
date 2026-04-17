@@ -658,6 +658,7 @@ class RiderEarningsView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         try:
             rider = getattr(request.user, "rider_profile", None)
@@ -731,6 +732,7 @@ class RiderTodayTripsView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         try:
             rider = getattr(request.user, "rider_profile", None)

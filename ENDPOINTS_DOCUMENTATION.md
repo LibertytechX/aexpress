@@ -16,6 +16,7 @@
 7. [Wallet Endpoints](#wallet-endpoints)
 8. [Auth & Signup Endpoints](#auth--signup-endpoints)
 9. [Subscription Endpoints](#subscription-endpoints)
+10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
 
 ---
 
@@ -740,3 +741,93 @@ To test webhook integration:
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.
+
+---
+
+## SMARTPARCEL LOCKER INTEGRATION
+
+This suite of endpoints manages integration with the SmartParcel locker network.
+
+### 1. List States
+```
+GET /api/orders/smart-parcel/states/
+Description: Retrieves all states where SmartParcel operates.
+Authentication: Required (Merchant)
+```
+
+### 2. List Cities by State
+```
+GET /api/orders/smart-parcel/states/{state_id}/cities/
+Description: Retrieves all cities for a specific SmartParcel state.
+Authentication: Required (Merchant)
+```
+
+### 3. List Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/city/{city_id}/
+Description: Retrieves all available SmartParcel boxes in a city.
+Authentication: Required (Merchant)
+```
+
+### 4. List Assigned Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/assigned/city/{city_id}/
+Description: Retrieves SmartParcel boxes assigned to the merchant in a city.
+Authentication: Required (Merchant)
+```
+
+### 5. Get Box Details
+```
+GET /api/orders/smart-parcel/boxes/{box_id}/
+Description: Retrieves details for a specific SmartParcel box.
+Authentication: Required (Merchant)
+```
+
+### 6. List Locker Sizes
+```
+GET /api/orders/smart-parcel/locker-sizes/
+Description: Retrieves all available locker sizes on the network.
+Authentication: Required (Merchant)
+```
+
+### 7. Create Parcel
+```
+POST /api/orders/smart-parcel/parcels/
+Description: Create a new SmartParcel parcel for locker pickup/delivery.
+Authentication: Required (Merchant)
+```
+
+### 8. Resolve Collect Code
+```
+GET /api/orders/smart-parcel/parcels/resolve-collect-code/{collect_code}/
+Description: Resolves a collect code to a pending parcel for pickup.
+Authentication: Required (Merchant)
+```
+
+### 9. Get Parcel Details
+```
+GET /api/orders/smart-parcel/parcels/{tracking_number}/
+Description: Retrieves full details for a SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 10. Cancel Parcel
+```
+POST /api/orders/smart-parcel/parcels/{tracking_number}/cancel/
+Description: Cancels an existing SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 11. Simulate Drop Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/parcels/{parcel_detail_id}/simulate/drop/
+Description: Triggers a simulated "dropped" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+```
+
+### 12. Simulate Collect Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/parcels/{parcel_detail_id}/simulate/collect/
+Description: Triggers a simulated "collected" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+```

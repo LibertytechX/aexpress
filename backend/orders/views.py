@@ -2749,3 +2749,47 @@ class SmartParcelCancelParcelView(APIView):
             data=data,
             status_code=200,
         )
+
+
+class SmartParcelSimulateDropView(APIView):
+    """[Sandbox] Simulate dropping a parcel into a locker box.
+
+    Triggers the 'dropped' state transition on a parcel so the collect-code
+    flow can be tested end-to-end without physical hardware.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, parcel_detail_id: str, *args, **kwargs):
+        ok, data = _sp().simulate_drop_parcel(parcel_detail_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel drop simulated successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelSimulateCollectView(APIView):
+    """[Sandbox] Simulate a recipient collecting a parcel from a locker.
+
+    Triggers the 'collected' state transition on a parcel so the full
+    pickup workflow can be tested end-to-end without physical hardware.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, parcel_detail_id: str, *args, **kwargs):
+        ok, data = _sp().simulate_collect_parcel(parcel_detail_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel collect simulated successfully.",
+            data=data,
+            status_code=200,
+        )
