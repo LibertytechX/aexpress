@@ -236,6 +236,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "total_deliveries",
         "is_active",
         "completed_today",
+        "is_jumia_rider",
         "completed_this_week",
         "completed_this_month",
         "overall_completed",
@@ -247,6 +248,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "hub__zone",
         "vehicle_type",
         "vehicle_asset__vehicle_type",
+        "is_jumia_rider",
         "is_active",
     )
     search_fields = (
@@ -257,7 +259,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "user__phone",
     )
     autocomplete_fields = ("vehicle_asset", "hub")
-    actions = ["assign_zone", "soft_delete_riders"]
+    actions = ["assign_zone", "soft_delete_riders", "mark_as_jumia_riders"]
 
     @admin.action(description="Soft delete selected riders")
     def soft_delete_riders(self, request, queryset):
@@ -267,6 +269,17 @@ class RiderAdmin(ImportExportModelAdmin):
         self.message_user(
             request,
             f"Successfully soft deleted {updated_count} riders.",
+            level=messages.SUCCESS,
+        )
+
+    @admin.action(description="Mark selected riders as jumia riders")
+    def mark_as_jumia_riders(self, request, queryset):
+        from django.contrib import messages
+
+        updated_count = queryset.update(is_jumia_rider=True)
+        self.message_user(
+            request,
+            f"Successfully marked {updated_count} riders as jumia riders.",
             level=messages.SUCCESS,
         )
 
