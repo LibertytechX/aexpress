@@ -24,7 +24,7 @@
 - [] implement simulate drop and collect smartpercel
 - [x] Add distinguishing feature for jumia riders
 - [x] Document refresh token endpoint
-- [] Add weekly and daily filter for rider earnings
+- [x] Add weekly and daily filter for rider earnings
 
 
 
