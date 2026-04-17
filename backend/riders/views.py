@@ -727,7 +727,7 @@ class RiderEarningsView(APIView):
 class RiderTodayTripsView(APIView):
     """
     API endpoint for the 'Today's Trips' list.
-    Returns completed orders for today.
+    Supports period filtering: today (default), week, month.
     """
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
@@ -745,13 +745,22 @@ class RiderTodayTripsView(APIView):
             return Response(
                 {"success": False, "message": "Rider profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
-            )
+              )
 
-        # now = timezone.now()
-        # start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        period = request.query_params.get("period", "today").lower()
+        now = timezone.now()
+
+        if period == "today":
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            start_date = now - timedelta(days=7)
+        elif period == "month":
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         orders = (
-            Order.objects.filter(rider=rider, status="Done")
+            Order.objects.filter(rider=rider, status="Done", completed_at__gte=start_date)
             .prefetch_related("deliveries")
             .order_by("-completed_at")
         )
@@ -760,6 +769,7 @@ class RiderTodayTripsView(APIView):
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
         )
+
 
 
 class RiderWalletInfoView(APIView):

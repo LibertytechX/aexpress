@@ -1,5 +1,58 @@
 # API Documentation
 
+---
+
+## Rider Facing Endpoints
+**Base URL:** `/api/riders/`
+
+### 1. Today's Trips (Orders)
+**Endpoint:** `GET /orders-today/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Returns a list of completed orders for the authenticated rider. Supports period filtering.
+
+**Query Parameters:**
+- `period` (optional): Filter by date range. Options: `today` (default), `week` (last 7 days), `month` (last 30 days).
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "order_number": "AX-123456",
+      "completed_at": "2026-04-17T09:00:00Z",
+      "status": "Done",
+      "total_amount": "1500.00",
+      "deliveries": [...]
+    }
+  ]
+}
+```
+
+---
+
+### 2. Rider Earnings Stats
+**Endpoint:** `GET /earnings/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Returns aggregated earnings, trip counts, and COD collection stats for the authenticated rider.
+
+**Query Parameters:**
+- `period` (optional): Filter by date range. Options: `today` (default), `week` (last 7 days), `month` (last 30 days).
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "total_earnings": 5000.00,
+    "trips_completed": 10,
+    "cod_collected": 15000.00
+  }
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/

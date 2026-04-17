@@ -13,6 +13,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-17] — Rider Trips Period Filtering
+
+### Changed
+- **Updated `RiderTodayTripsView`** in `riders/views.py`: Added support for period filtering (`today`, `week`, `month`) via the `period` query parameter, matching the logic in the Earnings view.
+- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Documented the period filtering for Today's Trips.
+
+---
+
 ## [2026-04-15] — SmartParcel V2 Business API Overhaul
 
 ### Changed
