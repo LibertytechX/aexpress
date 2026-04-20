@@ -10,6 +10,8 @@ from typing import Any, Optional
 
 import requests
 from django.conf import settings
+from abc import ABC, abstractmethod
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -239,3 +241,110 @@ class SmartPercelIntegration:
             {"boxid": box_id, "unlockcode": unlock_code},
             use_public_key=True,
         )
+
+
+# order service contracts/interface
+
+
+class OrderService(ABC):
+    """
+    Order Service contracts for all order service implementations
+    """
+
+    @abstractmethod
+    def process_percel_delivery(
+        self,
+        is_pickup: bool,
+        is_delivery: bool,
+        request_data: dict,
+        percel_payload: dict = None,
+    ) -> Tuple[bool, Any]:
+        """
+        Process a parcel delivery.
+
+        Args:
+            is_pickup: Whether the parcel is for pickup.
+            is_delivery: Whether the parcel is for delivery.
+            is_percel_order: Whether the parcel is for delivery.
+            percel_payload: The payload for the parcel.
+
+        Returns:
+            Tuple of (success: bool, data: Any).
+        """
+        pass
+
+
+class IOrderService(OrderService):
+    """
+    Implementation of the order service contracts
+    """
+
+    def process_percel_delivery(
+        self,
+        is_pickup: bool,
+        is_delivery: bool,
+        request_data: dict,
+        percel_payload: dict = None,
+    ) -> Tuple[bool, Any]:
+        """
+        The process percel deliver abstract method implementation
+
+        Args:
+            is_pickup (bool): _description_
+            is_delivery (bool): _description_
+            is_percel_order (bool): _description_
+            percel_payload (dict, optional): _description_. Defaults to None.
+
+        Returns:
+            Tuple[bool, Any]
+        """
+        response = {"message": "", "status_code": 400}
+        smartpercel_service = SmartPercelIntegration()
+        if is_pickup:
+            ok, list_response = smartpercel_service.list_pending_pickups()
+            if not ok:
+                return False, response
+        parcels = list_response.get("parcels", [])
+        box_number = request_data.get("box_number", None)
+        if not box_number:
+            response["message"] = "Box number is required"
+            return False, response
+        found_parcel = next(
+            (p for p in parcels if p["boxlockernumber"] == box_number), None
+        )
+        if not found_parcel:
+            response["message"] = "Parcel not found"
+            response["status_code"] = 404
+            return False, response
+
+        response["percel_info"] = found_parcel
+        request_data["pickup_address"] = found_parcel.get(
+            "boxaddress", request_data["pickup_address"]
+        )
+
+        if is_delivery:
+            ok, delivery_response = smartpercel_service.get_box_details(
+                request_data.get("box_id", None)
+            )
+            if not ok:
+                response["message"] = "Percel order service not available"
+                response["status_code"] = 503
+                return False, response
+            box_data = delivery_response.get("data") or delivery_response
+            request_data["dropoff_address"] = (
+                box_data.get("boxaddress")
+                or box_data.get("address")
+                or request_data["dropoff_address"]
+            )
+            # is delivery create a new percel
+            ok, create_response = smartpercel_service.create_parcel(percel_payload)
+            if not ok:
+                response["message"] = "Failed to create parcel"
+                response["status_code"] = 503
+                return False, response
+            response["percel_info"] = create_response
+        return True, response
+
+
+def get_order_service() -> OrderService:
+    return IOrderService()
