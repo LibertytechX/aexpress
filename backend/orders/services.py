@@ -5,11 +5,14 @@ This module contains third-party logistics integrations used within the orders
 application. Currently includes the SmartPercel locker-delivery integration.
 """
 
+from devs.utils.advice import log_exception_advice
 import logging
 from typing import Any, Optional
 
 import requests
 from django.conf import settings
+from abc import ABC, abstractmethod
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -239,3 +242,134 @@ class SmartPercelIntegration:
             {"boxid": box_id, "unlockcode": unlock_code},
             use_public_key=True,
         )
+
+
+# order service contracts/interface
+
+
+class OrderService(ABC):
+    """
+    Order Service contracts for all order service implementations
+    """
+
+    @abstractmethod
+    def process_parcel_delivery(
+        self,
+        is_pickup: bool,
+        is_delivery: bool,
+        request_data: dict,
+        parcel_payload: dict = None,
+    ) -> Tuple[bool, Any]:
+        """
+        Process a parcel delivery.
+
+        Args:
+            is_pickup: Whether the parcel is for pickup from a locker.
+            is_delivery: Whether the parcel is for delivery to a locker.
+            request_data: The original order request data.
+            parcel_payload: The payload for creating a new parcel (if is_delivery).
+
+        Returns:
+            Tuple of (success: bool, response_dict: dict).
+            The response_dict contains:
+                - message: Error message if success is False.
+                - status_code: HTTP status code.
+                - parcel_info: Dictionary containing parcel/tracking information.
+                - pickup_address: Updated pickup address from locker details.
+                - dropoff_address: Updated dropoff address from locker details.
+        """
+        pass
+
+
+class IOrderService(OrderService):
+    """
+    Implementation of the order service contracts
+    """
+
+    @log_exception_advice(app_name="create_percel_order")
+    def process_parcel_delivery(
+        self,
+        is_pickup: bool,
+        is_delivery: bool,
+        request_data: dict,
+        parcel_payload: dict = None,
+    ) -> Tuple[bool, Any]:
+        """
+        Implementation of the parcel delivery processing.
+
+        Args:
+            is_pickup (bool): True if picking up from a SmartParcel locker.
+            is_delivery (bool): True if delivering to a SmartParcel locker.
+            request_data (dict): Validated request data from the view.
+            parcel_payload (dict, optional): Payload for creating a new parcel. Defaults to None.
+
+        Returns:
+            Tuple[bool, Any]: (Success, Response dictionary)
+        """
+        response = {
+            "message": "",
+            "status_code": 400,
+            "parcel_info": None,
+            "pickup_address": request_data.get("pickup_address"),
+            "dropoff_address": request_data.get("dropoff_address"),
+        }
+        smartparcel_service = SmartPercelIntegration()
+
+        if is_pickup:
+            ok, list_response = smartparcel_service.list_pending_pickups()
+            if not ok:
+                response["message"] = str(list_response)
+                return False, response
+
+            parcels = list_response.get("parcels", [])
+            box_number = request_data.get("collect_code")
+            if not box_number:
+                response["message"] = "Box number is required for parcel pickup"
+                return False, response
+
+            found_parcel = next(
+                (p for p in parcels if p["boxlockernumber"] == box_number), None
+            )
+            if not found_parcel:
+                response["message"] = f"Parcel not found for box number: {box_number}"
+                response["status_code"] = 404
+                return False, response
+
+            response["parcel_info"] = found_parcel
+            response["pickup_address"] = found_parcel.get(
+                "boxaddress", response["pickup_address"]
+            )
+
+        if is_delivery:
+            box_id = request_data.get("box_id")
+            ok, delivery_response = smartparcel_service.get_box_details(box_id)
+            if not ok:
+                response["message"] = "Parcel order service not available"
+                response["status_code"] = 503
+                return False, response
+
+            box_data = delivery_response.get("data") or delivery_response
+            response["dropoff_address"] = (
+                box_data.get("boxaddress")
+                or box_data.get("address")
+                or response["dropoff_address"]
+            )
+
+            # Create a new parcel integration record
+            ok, create_response = smartparcel_service.create_parcel(parcel_payload)
+            if not ok:
+                response["message"] = (
+                    create_response
+                    if isinstance(create_response, str)
+                    else "Failed to create parcel"
+                )
+                response["status_code"] = 503
+                return False, response
+
+            response["parcel_info"] = create_response
+
+        return True, response
+
+
+def get_order_service() -> OrderService:
+    return IOrderService()

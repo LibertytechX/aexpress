@@ -4,6 +4,21 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-20] — Parcel Service Refactor & Bug Fixes
+
+### Changed
+- **Refactored `OrderService`** in `orders/services.py`:
+    - Renamed `process_percel_delivery` to `process_parcel_delivery` (fixed typo).
+    - Fixed a critical **`NameError`** where `list_response` was used before definition when `is_pickup` was False.
+    - Improved logic to safely separate pickup and delivery workflows.
+    - **Removed unsafe side-effects**: The service no longer mutates the `request_data` dictionary. Instead, it returns updated `pickup_address` and `dropoff_address` in the response dictionary.
+- **Updated `QuickSendView`** in `orders/views.py`:
+    - Updated call to the renamed `process_parcel_delivery` method.
+    - **Fixed logic bug**: `is_percel_order` flag is now correctly calculated as `is_pickup_percel or isdelivery_percel` instead of being hardcoded to `False`.
+    - Explicitly update validated data with addresses returned from the service.
+
+---
+
 ## [2026-04-09] — AI Agent Context & UUID Validation
 - **AI Agent Fix**: Resolved an issue where the AI Support Agent would hallucinate a placeholder `user_1234` ID when calling tools.
     - **Injected Context**: Explicitly prepending `[SYSTEM CONTEXT: User ID = ...]` to user messages in `get_ai_response`.
