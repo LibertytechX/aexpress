@@ -210,14 +210,14 @@ class QuickSendView(APIView):
         is_percel_order = is_pickup_percel or isdelivery_percel
         percel_info = None
         percel_payload = {
-            "sendername": data["sender_name"],
-            "senderphone": data["sender_phone"],
+            "sendername": data.get("sender_name", ""),
+            "senderphone": data.get("sender _phone", ""),
             "senderemail": request.user.email,
-            "recipientname": data["receiver_name"],
-            "recipientphone": data["receiver_phone"],
+            "recipientname": data.get("receiver_name", ""),
+            "recipientphone": data.get("receiver_phone", ""),
             "recipientemail": data.get("receiver_email", ""),
-            "boxid": data["box_id"],
-            "sizeid": data["locker_size_id"],
+            "boxid": data.get("box_id", ""),
+            "sizeid": data.get("locker_size_id", ""),
             "parceldescription": data.get("notes", "Parcel Delivery"),
             "parcelvalue": 0,  # default placeholder
         }
