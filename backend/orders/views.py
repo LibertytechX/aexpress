@@ -2264,6 +2264,7 @@ class DeliveryStartView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, delivery_id):
         try:
             delivery = Delivery.objects.get(id=delivery_id)
