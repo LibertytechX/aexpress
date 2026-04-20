@@ -361,3 +361,4 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 - `locker_size_id` (str): Required for delivery.
 
 **Storage**: Full parcel JSON is stored in `order.percel_info`.
+*(Note: Model fields currently retain the "percel" spelling to maintain database compatibility.)*

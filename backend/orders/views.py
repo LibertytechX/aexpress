@@ -205,9 +205,9 @@ class QuickSendView(APIView):
         # ------------------------------------------------------------------
         # SmartParcel Integration (Pre-Creation)
         # ------------------------------------------------------------------
-        is_percel_order = False
         is_pickup_percel = data.get("is_pickup_percel", False)
         isdelivery_percel = data.get("isdelivery_percel", False)
+        is_percel_order = is_pickup_percel or isdelivery_percel
         percel_info = None
         percel_payload = {
             "sendername": data["sender_name"],
@@ -221,7 +221,7 @@ class QuickSendView(APIView):
             "parceldescription": data.get("notes", "Parcel Delivery"),
             "parcelvalue": 0,  # default placeholder
         }
-        ok, response = order_service.process_percel_delivery(
+        ok, response = order_service.process_parcel_delivery(
             is_pickup_percel, isdelivery_percel, data, percel_payload
         )
 
@@ -229,7 +229,11 @@ class QuickSendView(APIView):
             raise ServiceException(
                 status_code=response.get("status_code"), message=response.get("message")
             )
-        percel_info = response.get("percel_info")
+
+        # Explicitly update addresses from response
+        data["pickup_address"] = response.get("pickup_address", data["pickup_address"])
+        data["dropoff_address"] = response.get("dropoff_address", data["dropoff_address"])
+        percel_info = response.get("parcel_info")
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
