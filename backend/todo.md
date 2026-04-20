@@ -25,6 +25,7 @@
 - [x] Add distinguishing feature for jumia riders
 - [x] Document refresh token endpoint
 - [x] Add weekly and daily filter for rider earnings
+## Data - 2026-04-20
 - [] change collectcode to boxlockernumber for smartpercel pending pickups
 - [] Document Merchant API endpoints
 - [] Refactor quick send api endpoint to reduce complexity
