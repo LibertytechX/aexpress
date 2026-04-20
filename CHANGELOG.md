@@ -1,6 +1,15 @@
 # Changelog
 
 All notable changes to the AXpress project are documented in this file.
+
+---
+
+## [2026-04-16] — SmartParcel Toggle Fix
+
+### Frontend
+#### Fixed
+- **SmartParcel Toggle**: Resolved a `TypeError` that occurred when toggling "Deliver to SmartParcel Locker" by ensuring that data fetched from the SmartParcel API is always treated as an array before mapping.
+- **Robust Data Fetching**: Updated `useEffect` hooks to correctly extract lists (states, cities, boxes, sizes) from backend responses and added defensive array checks in the render logic.
 ---
 
 ## [2026-04-17] — SmartParcel Integration & Simulation
@@ -15,6 +24,7 @@ All notable changes to the AXpress project are documented in this file.
   - `GET smart-parcel/boxes/assigned/city/{id}/`
   - `GET smart-parcel/locker-sizes/`
   - `POST smart-parcel/parcels/`
+  - `GET smart-parcel/parcels/pending-pickups/`
   - `GET smart-parcel/parcels/resolve-collect-code/{code}/`
   - `GET smart-parcel/parcels/{tracking}/`
   - `POST smart-parcel/parcels/{tracking}/cancel/`
@@ -25,6 +35,7 @@ All notable changes to the AXpress project are documented in this file.
 - **Defensive guards**: Added defensive null guards for SmartParcel data arrays to prevent runtime crashes during API latency or failures.
 
 ## [2026-04-02] — Order Mode Redesign & Grouped Pricing Fix
+
 
 ### Frontend
 #### Changed

@@ -50,7 +50,7 @@ class CryptoPaymentSerializer(serializers.Serializer):
                 "text": "Changed Named",
                 "userType": "AI",
                 "timestamp": datetime.now().isoformat(),
-                "username": "GetLinkedAI",
+                "username": "Somename",
             }
         )
         return service_response(

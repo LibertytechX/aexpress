@@ -397,7 +397,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   const calcFareForVehicle = (vName: string, distanceKm: number | null, durationMin: number | null) => {
     const pricing = vehiclePricing[vName];
     if (!pricing) return 0;
-    
+
     // 1. Manual pricing list
     if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
       const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
@@ -571,15 +571,15 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
               {["quick", "multi", "bulk"].map(m => {
                 const isActive = (m === 'quick') ? (mode === 'quick' || mode === 'grouped') : (mode === m);
                 return (
-                  <button key={m} onClick={() => { 
+                  <button key={m} onClick={() => {
                     if (m === 'quick') {
                       // Don't reset to 'quick' if already on 'grouped'
                       if (mode !== 'quick' && mode !== 'grouped') setMode('quick');
                     } else {
-                      setMode(m); 
+                      setMode(m);
                     }
-                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]); 
-                    setBulkRows([]); 
+                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+                    setBulkRows([]);
                   }}
                     style={{
                       flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
@@ -598,7 +598,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
             {/* Quick vs Grouped selection (Exclusive to Quick Send flow) */}
             {(mode === 'quick' || mode === 'grouped') && (
               <div style={{ display: "flex", gap: 12 }}>
-                <button 
+                <button
                   onClick={() => setMode('quick')}
                   style={{
                     flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'quick' ? S.navy : '#e2e8f0'}`,
@@ -608,7 +608,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 >
                   Quick Send (Single)
                 </button>
-                <button 
+                <button
                   onClick={() => setMode('grouped')}
                   style={{
                     flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'grouped' ? S.navy : '#e2e8f0'}`,
@@ -638,7 +638,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
               {isPickupParcel && (
                 <div style={{ marginTop: 10, background: "#f8fafc", padding: 14, borderRadius: 12, border: "1.5px solid #e2e8f0" }}>
-                  <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, marginBottom: 8, textTransform: "uppercase" as const }}>Enter Parcel Collect Code</div>
+                  <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, marginBottom: 8, textTransform: "uppercase" as const }}>Enter Percel Box Locker Number</div>
                   <div style={{ display: "flex", gap: 10 }}>
                     <input
                       value={collectCode}

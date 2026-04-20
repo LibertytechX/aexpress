@@ -745,7 +745,7 @@ class RiderTodayTripsView(APIView):
             return Response(
                 {"success": False, "message": "Rider profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
-              )
+            )
 
         period = request.query_params.get("period", "today").lower()
         now = timezone.now()
@@ -760,7 +760,9 @@ class RiderTodayTripsView(APIView):
             start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         orders = (
-            Order.objects.filter(rider=rider, status="Done", completed_at__gte=start_date)
+            Order.objects.filter(
+                rider=rider, status="Done", completed_at__gte=start_date
+            )
             .prefetch_related("deliveries")
             .order_by("-completed_at")
         )
@@ -769,7 +771,6 @@ class RiderTodayTripsView(APIView):
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
         )
-
 
 
 class RiderWalletInfoView(APIView):
@@ -1079,7 +1080,7 @@ class RiderAssignmentActionView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
-    @exception_advice()
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         action = request.data.get("action")
         if action not in ["accept", "reject"]:
