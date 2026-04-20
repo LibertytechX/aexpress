@@ -232,7 +232,9 @@ class QuickSendView(APIView):
 
         # Explicitly update addresses from response
         data["pickup_address"] = response.get("pickup_address", data["pickup_address"])
-        data["dropoff_address"] = response.get("dropoff_address", data["dropoff_address"])
+        data["dropoff_address"] = response.get(
+            "dropoff_address", data["dropoff_address"]
+        )
         percel_info = response.get("parcel_info")
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
@@ -2630,7 +2632,7 @@ class SmartParcelResolveCollectCodeView(APIView):
             (
                 p
                 for p in parcels
-                if str(p.get("collectcode")).strip().lower()
+                if str(p.get("boxlockernumber")).strip().lower()
                 == collect_code.strip().lower()
             ),
             None,

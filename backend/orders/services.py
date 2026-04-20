@@ -322,7 +322,7 @@ class IOrderService(OrderService):
                 return False, response
 
             parcels = list_response.get("parcels", [])
-            box_number = request_data.get("box_number")
+            box_number = request_data.get("collect_code")
             if not box_number:
                 response["message"] = "Box number is required for parcel pickup"
                 return False, response
