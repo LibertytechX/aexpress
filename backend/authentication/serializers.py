@@ -141,11 +141,12 @@ class LoginSerializer(serializers.Serializer):
             phone_2 = "+234" + phone
             phone_numbers.append(phone_2)
             phone_numbers.append(phone_3)
-        elif len(phone) == 13 and phone.startswith("+234"):
+        elif phone.startswith("+234"):
             phone_2 = phone[3:]
             phone_3 = "0" + phone_2
             phone_numbers.append(phone_2)
             phone_numbers.append(phone_3)
+        print("Let's see the phone numbers: ", phone_numbers)
         user = User.objects.filter(phone__in=phone_numbers)
         if user.count() == 0:
             raise ServiceException(
