@@ -142,7 +142,7 @@ class LoginSerializer(serializers.Serializer):
             phone_numbers.append(phone_2)
             phone_numbers.append(phone_3)
         elif phone.startswith("+234"):
-            phone_2 = phone[3:]
+            phone_2 = phone[4:]
             phone_3 = "0" + phone_2
             phone_numbers.append(phone_2)
             phone_numbers.append(phone_3)
