@@ -23,6 +23,8 @@ from .views import (
     MerchantNotificationMarkReadView,
     MerchantNotificationMarkAllReadView,
     MerchantNotificationSettingsView,
+    MerchantNotificationDeleteView,
+    MerchantNotificationDeleteAllView,
 )
 
 app_name = "authentication"
@@ -109,5 +111,15 @@ urlpatterns = [
         "notifications/<uuid:pk>/read/",
         MerchantNotificationMarkReadView.as_view(),
         name="merchant_notification_mark_read",
+    ),
+    path(
+        "notifications/delete-all/",
+        MerchantNotificationDeleteAllView.as_view(),
+        name="merchant_notification_delete_all",
+    ),
+    path(
+        "notifications/<uuid:pk>/",
+        MerchantNotificationDeleteView.as_view(),
+        name="merchant_notification_delete",
     ),
 ]

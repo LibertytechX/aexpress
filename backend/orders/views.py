@@ -1855,18 +1855,20 @@ class OrderStartView(APIView):
         response = _advance_order(request, order_number, "Started", "Order Started")
 
         # Push notification — fire-and-forget, don't block the response
-        try:
-            rider = getattr(request.user, "rider_profile", None)
-            if rider:
-                notify_rider(
-                    rider=rider,
-                    title="Trip Started 🚀",
-                    body=f"You're on your way to pick up order #{order_number}.",
-                    data={"order_number": order_number, "status": "Started"},
-                )
-        except Exception as exc:
-            logger.warning(f"Start notification failed: {exc}")
-            pass
+        rider = getattr(request.user, "rider_profile", None)
+        if rider:
+            def _notify_rider_start():
+                try:
+                    notify_rider(
+                        rider=rider,
+                        title="Trip Started 🚀",
+                        body=f"You're on your way to pick up order #{order_number}.",
+                        data={"order_number": order_number, "status": "Started"},
+                    )
+                except Exception as exc:
+                    logger.warning(f"Start notification failed: {exc}")
+
+            threading.Thread(target=_notify_rider_start, daemon=True).start()
 
         return response
 
@@ -1919,17 +1921,20 @@ class OrderStatusChangeView(APIView):
 
         if action == "start":
             response = _advance_order(request, order_number, "Started", "Order Started")
-            try:
-                rider = getattr(request.user, "rider_profile", None)
-                if rider:
-                    notify_rider(
-                        rider=rider,
-                        title="Trip Started 🚀",
-                        body=f"You're on your way to pick up order #{order_number}.",
-                        data={"order_number": order_number, "status": "Started"},
-                    )
-            except Exception as exc:
-                logger.warning(f"Start notification failed: {exc}")
+            rider = getattr(request.user, "rider_profile", None)
+            if rider:
+                def _notify_rider_start_alt():
+                    try:
+                        notify_rider(
+                            rider=rider,
+                            title="Trip Started 🚀",
+                            body=f"You're on your way to pick up order #{order_number}.",
+                            data={"order_number": order_number, "status": "Started"},
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Start notification failed: {exc}")
+
+                threading.Thread(target=_notify_rider_start_alt, daemon=True).start()
             return response
 
         elif action == "pickup":
@@ -2090,21 +2095,23 @@ class OrderCompleteView(APIView):
             d.save(update_fields=["status", "delivered_at"])
 
         # ── Step 5: Push notification ─────────────────────────────────────────
-        try:
-            notify_rider(
-                rider=rider,
-                title="Order Completed 🎉",
-                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
-                data={
-                    "order_number": order_number,
-                    "net_earning": str(net_earning),
-                },
-            )
-        except Exception as exc:
-            logger.warning(
-                f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
-            )
-            pass
+        def _notify_order_done():
+            try:
+                notify_rider(
+                    rider=rider,
+                    title="Order Completed 🎉",
+                    body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                    data={
+                        "order_number": order_number,
+                        "net_earning": str(net_earning),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
+                )
+
+        threading.Thread(target=_notify_order_done, daemon=True).start()
 
         # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
         # but we can rely on `_advance_order` to handle it cleanly.

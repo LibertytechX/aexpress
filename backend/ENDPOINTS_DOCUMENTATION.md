@@ -362,3 +362,32 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 
 **Storage**: Full parcel JSON is stored in `order.percel_info`.
 *(Note: Model fields currently retain the "percel" spelling to maintain database compatibility.)*
+
+---
+
+## Merchant Notifications
+**Base URL:** `/api/auth/notifications/`
+
+### 1. List Notifications
+**Endpoint:** `GET /`  
+**Description:** Returns all notifications for the authenticated merchant, newest first.
+
+### 2. Mark as Read
+**Endpoint:** `POST /<uuid:pk>/read/`  
+**Description:** Marks a specific notification as read.
+
+### 3. Mark All as Read
+**Endpoint:** `POST /read-all/`  
+**Description:** Marks all unread notifications as read.
+
+### 4. Delete Notification
+**Endpoint:** `DELETE /<uuid:pk>/`  
+**Description:** Deletes a specific notification.
+
+### 5. Clear All Notifications
+**Endpoint:** `DELETE /delete-all/`  
+**Description:** Deletes all notifications for the merchant.
+
+### 6. Notification Settings
+**Endpoint:** `GET/PATCH /settings/`  
+**Description:** Retrieve or update notification toggle preferences (push_enabled, order_assigned, etc.).
