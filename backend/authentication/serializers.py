@@ -129,17 +129,23 @@ class LoginSerializer(serializers.Serializer):
 
         # Try to get the user
         # should try phone number combos
-        phone_1, phone_2, phone_3 = "", "", ""
+        phone_2, phone_3 = "", ""
         phone_numbers = [phone]
         if phone.startswith("0"):
             phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
             phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
         elif len(phone) == 10:
             phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
             phone_numbers.append(phone_3)
         elif len(phone) == 13 and phone.startswith("+234"):
-            phone_1 = phone[3:]
-            phone_numbers.append(phone_1)
+            phone_2 = phone[3:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
         user = User.objects.filter(phone__in=phone_numbers)
         if user.count() == 0:
             raise ServiceException(
