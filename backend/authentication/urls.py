@@ -103,12 +103,12 @@ urlpatterns = [
         name="merchant_notification_settings",
     ),
     path(
-        "notifications/<uuid:pk>/",
+        "notifications/<int:pk>/",
         MerchantNotificationDetailView.as_view(),
         name="merchant_notification_detail",
     ),
     path(
-        "notifications/<uuid:pk>/read/",
+        "notifications/<int:pk>/read/",
         MerchantNotificationMarkReadView.as_view(),
         name="merchant_notification_mark_read",
     ),
@@ -118,7 +118,7 @@ urlpatterns = [
         name="merchant_notification_delete_all",
     ),
     path(
-        "notifications/<uuid:pk>/",
+        "notifications/<int:pk>/delete/",
         MerchantNotificationDeleteView.as_view(),
         name="merchant_notification_delete",
     ),
