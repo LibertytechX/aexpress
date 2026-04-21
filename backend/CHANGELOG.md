@@ -4,6 +4,16 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-21] — Merchant Notification Management
+
+### Added
+- **Delete Merchant Notification**: Implemented endpoints for merchants to delete notifications.
+    - `DELETE /api/auth/notifications/<uuid:pk>/`: Delete a single notification.
+    - `DELETE /api/auth/notifications/delete-all/`: Clear all notifications for the merchant.
+- **Improved Logging**: Integrated `@exception_advice` with `ErrorLog` for consistent error tracking in notification views.
+
+---
+
 ## [2026-04-20] — Parcel Service Refactor & Bug Fixes
 
 ### Changed
@@ -16,6 +26,15 @@ All notable changes to the AXpress backend are documented in this file.
     - Updated call to the renamed `process_parcel_delivery` method.
     - **Fixed logic bug**: `is_percel_order` flag is now correctly calculated as `is_pickup_percel or isdelivery_percel` instead of being hardcoded to `False`.
     - Explicitly update validated data with addresses returned from the service.
+
+---
+
+## [2026-04-20] — Performance Optimization: Notification Backgrounding
+
+### Changed
+- **Optimized Rider Notifications** in `orders/views.py`:
+    - Moved real-time push notifications into background threads to reduce API latency and prevent external service delays from blocking the request-response cycle.
+    - Affected views: `OrderStartView`, `OrderStatusChangeView` (for the "start" action), and `OrderCompleteView`.
 
 ---
 

@@ -81,9 +81,7 @@ class SignupSerializer(serializers.ModelSerializer):
     def validate(self, data):
         """Validate that passwords match."""
         if data.get("password") != data.get("confirm_password"):
-            raise ServiceException(
-                status_code=400, message="Passwords do not match."
-            )
+            raise ServiceException(status_code=400, message="Passwords do not match.")
 
         return data
 
@@ -130,22 +128,40 @@ class LoginSerializer(serializers.Serializer):
             )
 
         # Try to get the user
-        try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
+        # should try phone number combos
+        phone_2, phone_3 = "", ""
+        phone_numbers = [phone]
+        if phone.startswith("0"):
+            phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 10:
+            phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 13 and phone.startswith("+234"):
+            phone_2 = phone[3:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        user = User.objects.filter(phone__in=phone_numbers)
+        if user.count() == 0:
             raise ServiceException(
                 status_code=400, message="Invalid phone number or password."
             )
 
-        # Check if user is active
-        if not user.is_active:
-            raise ServiceException(
-                status_code=400, message="This account has been deactivated."
-            )
-
-        # Authenticate user
-        user = authenticate(username=phone, password=password)
-
+        user = None
+        # try authentication for phone with the given password
+        for phone_number in phone_numbers:
+            user = authenticate(username=phone_number, password=password)
+            if user:
+                if not user.is_active:
+                    raise ServiceException(
+                        status_code=400, message="This account has been deactivated."
+                    )
+                break
         if not user:
             raise ServiceException(
                 status_code=400, message="Invalid phone number or password."
@@ -201,7 +217,8 @@ class AddressSerializer(serializers.ModelSerializer):
                 query = query.exclude(id=self.instance.id)
             if query.exists():
                 raise ServiceException(
-                    status_code=400, message="You already have an address with this label."
+                    status_code=400,
+                    message="You already have an address with this label.",
                 )
 
         return data
@@ -228,18 +245,31 @@ class AddressSerializer(serializers.ModelSerializer):
 # Merchant Notifications
 # ---------------------------------------------------------------------------
 
-from dispatcher.models import MerchantNotification, MerchantNotificationSettings  # noqa: E402
+from dispatcher.models import (
+    MerchantNotification,
+    MerchantNotificationSettings,
+)  # noqa: E402
 
 
 class MerchantDeviceSerializer(serializers.Serializer):
     """Validates device registration input for merchant mobile apps."""
 
     device_id = serializers.CharField(max_length=255)
-    fcm_token = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
-    platform = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
-    model_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
-    os_version = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
-    app_version = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    fcm_token = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+    platform = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
+    model_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default=""
+    )
+    os_version = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
+    app_version = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
 
 
 class MerchantNotificationSerializer(serializers.ModelSerializer):
