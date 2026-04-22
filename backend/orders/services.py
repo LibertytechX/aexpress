@@ -5,14 +5,22 @@ This module contains third-party logistics integrations used within the orders
 application. Currently includes the SmartPercel locker-delivery integration.
 """
 
+from orders.models import Order
 from devs.utils.advice import log_exception_advice
 import logging
 from typing import Any, Optional
+from wallet.models import Charge, Wallet
+from wallet.escrow import EscrowManager
 
 import requests
 from django.conf import settings
 from abc import ABC, abstractmethod
 from typing import Tuple
+from subscriptions.services import (
+    get_active_postpaid_subscription,
+    process_order_subscription,
+    accumulate_postpaid_order,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +288,16 @@ class OrderService(ABC):
         """
         pass
 
+    @abstractmethod
+    def process_non_cash_payment(
+        self, payment_method: str, request_user: any, order: Order
+    ) -> Tuple[bool, Any]:
+        """
+        Process non-cash payment for an order.
+        such as subscription payment, wallet payment, and postpaid payment, escow charge
+        """
+        pass
+
 
 class IOrderService(OrderService):
     """
@@ -369,6 +387,95 @@ class IOrderService(OrderService):
             response["parcel_info"] = create_response
 
         return True, response
+
+    @log_exception_advice(app_name="non_cash_payment")
+    def process_non_cash_payment(
+        self, payment_method: str, request_user: any, order: Order
+    ) -> Tuple[bool, Any]:
+        """
+        Process non-cash payment for an order.
+        such as subscription payment, wallet payment, and postpaid payment, escow charge
+        """
+        response = {"message": "", "status_code": 200}
+        match payment_method:
+            case "subscription":
+                subscription = process_order_subscription(order)
+                if not subscription:
+                    response["message"] = "Failed to process subscription payment"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+
+                return True, {}
+            case "wallet":
+                charges = Charge.objects.filter(
+                    user=request_user, status="pending", is_active=True
+                )
+                if charges.exists():
+                    order.delete()
+                    response["message"] = (
+                        "Failed to process wallet payment, you have pending charges 🔥"
+                    )
+                    response["status_code"] = 400
+                    return False, response
+                wallet = Wallet.objects.filter(user=request_user)
+                if wallet.count() == 0:
+                    # create the wallet
+                    wallet = Wallet.objects.create(user=request_user)
+                    order.delete()
+                    response["message"] = "Wallet not found"
+                    response["status_code"] = 404
+                    return False, response
+                wallet = wallet.first()
+                try:
+                    EscrowManager.hold_funds(
+                        wallet=wallet,
+                        amount=order.total_amount,
+                        order_number=order.order_number,
+                        description=f"Escrow hold for Quick Send order #{order.order_number}",
+                    )
+                    order.escrow_held = True
+                    order.save()
+                except ValueError as e:
+                    response["message"] = str(e)
+                    response["status_code"] = 400
+                    order.delete()
+                    return False, response
+                return True, response
+            case "postpaid":
+                merchant_profile = getattr(request_user, "merchant_profile", None)
+                if not merchant_profile:
+                    response["message"] = "Merchant profile not found"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+                if not postpaid_sub:
+                    response["message"] = "Postpaid subscription not found"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                if postpaid_sub.status == "blocked":
+                    response["message"] = "Postpaid subscription is blocked"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                accumulated = accumulate_postpaid_order(postpaid_sub, order)
+                if not accumulated:
+                    response["message"] = "Failed to accumulate postpaid order"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                return True, response
+            case (
+                _
+            ):  # payment method not any of the cases above such as cash_on_delivery and receivers pay
+                return True, {}
 
 
 def get_order_service() -> OrderService:
