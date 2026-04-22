@@ -414,6 +414,7 @@ class QuickSendView(APIView):
                     user=request.user, status="pending", is_active=True
                 )
                 if charges.exists():
+                    order.delete()
                     return Response(
                         {
                             "success": False,
