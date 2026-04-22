@@ -4,6 +4,15 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+## [2026-04-22] — ClickUp Task Logging Automation
+
+### Chore
+- **ClickUp Logger**: Implemented a Python script `scripts/clickup_logger.py` to automate task logging to ClickUp.
+- **Session Tracking**: Added `.claude/session_log.json` to track and batch-log development tasks.
+- **Auto-routing**: Implemented keyword-based routing to automatically assign tasks to the correct ClickUp Lists.
+
+---
+
 ## [2026-04-16] — SmartParcel Toggle Fix
 
 ### Frontend

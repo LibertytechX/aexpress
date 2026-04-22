@@ -132,6 +132,28 @@
 **Fields Added:**
 - `vertical_lead_name`: The name of the lead responsible for the order's vertical.
 
+### 2. Create Order
+**Endpoint:** `POST /orders/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Creates a new order. Support for partner orders and manual price overrides.
+
+**Request Body (Partial):**
+```json
+{
+  "pickup": "...",
+  "dropoff": "...",
+  "senderName": "...",
+  "senderPhone": "...",
+  "receiverName": "...",
+  "receiverPhone": "...",
+  "vehicle": "Bike",
+  "packageType": "Box",
+  "is_partner_order": true,
+  "partner_order_count": 50,
+  "file_uploaded_url": "https://..."
+}
+```
+
 ---
 
 ## Rider Management
