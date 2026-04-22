@@ -644,14 +644,14 @@ class OrderPriceUpdateSerializer(serializers.Serializer):
 
 class OrderCreateSerializer(serializers.ModelSerializer):
     # Input fields from Frontend
-    pickup = serializers.CharField(write_only=True)
-    dropoff = serializers.CharField(write_only=True)
-    senderName = serializers.CharField(write_only=True)
-    senderPhone = serializers.CharField(write_only=True)
-    receiverName = serializers.CharField(write_only=True)
-    receiverPhone = serializers.CharField(write_only=True)
-    vehicle = serializers.CharField(write_only=True)  # "Bike", "Car", etc.
-    packageType = serializers.CharField(write_only=True)
+    pickup = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    dropoff = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    senderName = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    senderPhone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    receiverName = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    receiverPhone = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    vehicle = serializers.CharField(write_only=True, required=False, allow_blank=True)  # "Bike", "Car", etc.
+    packageType = serializers.CharField(write_only=True, required=False, allow_blank=True)
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
     )

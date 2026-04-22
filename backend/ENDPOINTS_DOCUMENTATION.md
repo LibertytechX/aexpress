@@ -137,6 +137,11 @@
 **Authentication:** Required (Dispatcher Admin)  
 **Description:** Creates a new order. Support for partner orders and manual price overrides.
 
+**Partner Orders**:
+- If `is_partner_order` is `true`, the merchant must have `is_partner=True` in their profile.
+- `total_amount` is calculated as `partner_base_price * partner_order_count`.
+- Pickup, dropoff, and receiver fields are optional for partner orders and will use defaults if omitted.
+
 **Request Body (Partial):**
 ```json
 {

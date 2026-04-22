@@ -10,6 +10,10 @@ All notable changes to the AXpress backend are documented in this file.
  - **Partner Order Support**: Added ability for dispatchers to create orders for partners.
      - New fields in `OrderCreateSerializer`: `is_partner_order`, `partner_order_count`, `file_uploaded_url`.
      - These fields are persisted to the `Order` model when `is_partner_order` is True.
+- **Partner Order Constraints**:
+    - Validates that the merchant is a partner before processing.
+    - Automatically calculates `total_amount` as `partner_base_price * partner_order_count`.
+    - Allows skipping of pickup/delivery details, providing sensible defaults when omitted.
  
  ### Changed
  - **Refactored Order Creation**: Moved core order creation logic from `OrderCreateSerializer` to `IOrderService.create_dispatcher_order` to reduce complexity and improve maintainability.

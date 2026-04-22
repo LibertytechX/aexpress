@@ -24,6 +24,8 @@ from subscriptions.services import (
 from decimal import Decimal
 import uuid
 
+from sparky_utils.exceptions import ServiceException
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -503,7 +505,7 @@ class IOrderService(OrderService):
         from orders.utils import geocode_address
         from orders.pricing import calculate_effective_fare
 
-        # Extract non-model fields
+        # Extract fields
         pickup = validated_data.get("pickup")
         dropoff = validated_data.get("dropoff")
         pickup_lat = validated_data.get("pickup_lat")
@@ -523,27 +525,85 @@ class IOrderService(OrderService):
         merchant_id = (validated_data.get("merchantId", "") or "").strip()
         distance_km = validated_data.get("distance_km")
         duration_minutes = validated_data.get("duration_minutes")
+        is_partner_order = validated_data.get("is_partner_order", False)
+        partner_order_count = validated_data.get("partner_order_count")
 
-        def _coords_missing(lat, lng):
-            return lat is None or lng is None
-
-        # Best-effort geocoding fallback
-        if _coords_missing(pickup_lat, pickup_lng) and pickup:
-            geo = geocode_address(pickup)
-            if geo:
-                pickup_lat = geo.get("lat")
-                pickup_lng = geo.get("lng")
-
-        if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
-            geo = geocode_address(dropoff)
-            if geo:
-                dropoff_lat = geo.get("lat")
-                dropoff_lng = geo.get("lng")
+        # Resolve User (Merchant or Request User)
+        order_user = request_user
+        merchant_profile = None
+        if merchant_id:
+            merchant_profile = MerchantProfile.objects.filter(merchant_id=merchant_id).first()
+            if merchant_profile:
+                order_user = merchant_profile.user
+        else:
+            merchant_profile = getattr(order_user, "merchant_profile", None)
 
         # Resolve Vehicle
         vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
         if not vehicle_obj:
             vehicle_obj = Vehicle.objects.first()
+
+        # Partner Constraints & Price Calculation
+        if is_partner_order:
+            if not merchant_profile or not merchant_profile.is_partner:
+                raise ServiceException(
+                    status_code=400, message="Merchant is not a partner"
+                )
+            
+            if not merchant_profile.partner_base_price:
+                raise ServiceException(
+                    status_code=400, message="Partner base price is not set for this merchant"
+                )
+            
+            if not partner_order_count:
+                raise ServiceException(
+                    status_code=400, message="partner_order_count is required for partner orders"
+                )
+            
+            total_amount = merchant_profile.partner_base_price * partner_order_count
+            
+            # Default values for missing data
+            pickup = pickup or "Partner Pickup"
+            dropoff = dropoff or "Partner Delivery"
+            sender_name = sender_name or (getattr(order_user, "business_name", "") or order_user.contact_name or order_user.phone)
+            sender_phone = sender_phone or order_user.phone
+            receiver_name = receiver_name or "Partner Receiver"
+            receiver_phone = receiver_phone or "0000000000"
+            distance_km = distance_km or 0
+            duration_minutes = duration_minutes or 0
+            package_type = package_type or "Box"
+        else:
+            # Calculate Price for regular orders
+            if manual_price and price is not None:
+                total_amount = price
+            else:
+                total_amount = calculate_effective_fare(
+                    order_user,
+                    vehicle_obj,
+                    distance_km or 0,
+                    duration_minutes or 0,
+                )
+
+            def _coords_missing(lat, lng):
+                return lat is None or lng is None
+
+            # Best-effort geocoding fallback
+            if _coords_missing(pickup_lat, pickup_lng) and pickup:
+                geo = geocode_address(pickup)
+                if geo:
+                    pickup_lat = geo.get("lat")
+                    pickup_lng = geo.get("lng")
+
+            if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
+                geo = geocode_address(dropoff)
+                if geo:
+                    dropoff_lat = geo.get("lat")
+                    dropoff_lng = geo.get("lng")
+
+        try:
+            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
 
         # Resolve Rider
         rider_obj = None
@@ -561,29 +621,6 @@ class IOrderService(OrderService):
                     rider_obj = Rider.objects.filter(rider_id=rider_id).first()
             else:
                 rider_obj = Rider.objects.filter(rider_id=rider_id).first()
-
-        # Resolve User (Merchant or Request User)
-        order_user = request_user
-        if merchant_id:
-            profile = MerchantProfile.objects.filter(merchant_id=merchant_id).first()
-            if profile:
-                order_user = profile.user
-
-        # Calculate Price
-        if manual_price and price is not None:
-            total_amount = price
-        else:
-            total_amount = calculate_effective_fare(
-                order_user,
-                vehicle_obj,
-                distance_km or 0,
-                duration_minutes or 0,
-            )
-
-        try:
-            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
-        except Exception:
-            pass
 
         # Create Order
         order = Order.objects.create(
