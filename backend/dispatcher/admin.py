@@ -523,10 +523,11 @@ class MerchantAdmin(ImportExportModelAdmin):
         "acquisition_source",
         "merchant_type",
         "created_at",
+        "is_partner",
         "get_last_login",
         "can_group_orders",
     )
-    list_filter = ("activity_status", "zone", "acquisition_source")
+    list_filter = ("activity_status", "zone", "acquisition_source", "is_partner")
     search_fields = (
         "user__first_name",
         "user__last_name",

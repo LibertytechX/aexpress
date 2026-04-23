@@ -848,6 +848,8 @@ class MerchantSerializer(serializers.ModelSerializer):
     walletBalance = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     joined = serializers.DateTimeField(source="created_at", read_only=True)
+    isPartner = serializers.BooleanField(source="merchant_profile.is_partner", read_only=True)
+    partnerBasePrice = serializers.DecimalField(source="merchant_profile.partner_base_price", max_digits=10, decimal_places=2, read_only=True)
 
     class Meta:
         model = User
@@ -863,6 +865,8 @@ class MerchantSerializer(serializers.ModelSerializer):
             "walletBalance",
             "status",
             "joined",
+            "isPartner",
+            "partnerBasePrice",
         ]
 
     def get_name(self, obj):
