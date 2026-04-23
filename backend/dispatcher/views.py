@@ -949,9 +949,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     @exception_advice(model_object=ErrorLog)
-    @transaction.atomic
+    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     def merge_grouped_orders(self, request):
         """Bulk merge multiple grouped orders into a parent order (Dispatcher Action)."""
         serializer = MergeGroupedOrdersSerializer(data=request.data)
@@ -1445,6 +1444,11 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+    
+    def get_permissions(self):
+        if self.action == "list":
+            return [IsDispatcher()]
+        return super().get_permissions()
 
     @exception_advice(model_object=ErrorLog)
     def destroy(self, request, *args, **kwargs):

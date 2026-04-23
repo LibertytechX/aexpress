@@ -84,6 +84,15 @@ class TransactionAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
     list_filter = ["type", "status", "created_at", "wallet"]
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if "delete_selected" in actions:
+            del actions["delete_selected"]
+        return actions
+
     fieldsets = (
         (
             "Transaction Information",
@@ -214,6 +223,15 @@ class ChargeAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "created_at", "updated_at"]
     ordering = ["-created_at"]
     actions = ["debit_and_complete_charge", "soft_delete_charges"]
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if "delete_selected" in actions:
+            del actions["delete_selected"]
+        return actions
 
     fieldsets = (
         (

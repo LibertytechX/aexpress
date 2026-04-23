@@ -1,3 +1,4 @@
+from dispatcher.utils import generate_notification_id
 from email.policy import default
 import hashlib
 import math
@@ -9,6 +10,7 @@ from django.dispatch import receiver
 import uuid
 import random
 import string
+from django.utils import timezone
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +377,31 @@ class VehicleTracking(models.Model):
 # ---------------------------------------------------------------------------
 
 
+class SoftDeleteQuerySet(models.QuerySet):
+    def delete(self):
+        return super().update(is_deleted=True, updated_at=timezone.now())
+
+    def hard_delete(self):
+        return super().delete()
+
+    def alive(self):
+        return self.filter(is_deleted=False)
+
+    def dead(self):
+        return self.filter(is_deleted=True)
+
+
+class SoftDeleteManager(models.Manager):
+    def get_queryset(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).alive()
+
+    def all_with_deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db)
+
+    def deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).dead()
+
+
 class Rider(models.Model):
     class Status(models.TextChoices):
         ONLINE = "online", "Online"
@@ -411,6 +438,7 @@ class Rider(models.Model):
     is_jumia_rider = models.BooleanField(default=False)
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
@@ -519,6 +547,8 @@ class Rider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = SoftDeleteManager()
+
     class Meta:
         db_table = "riders"
 
@@ -527,7 +557,11 @@ class Rider(models.Model):
             # Generate unique 6-digit ID
             while True:
                 new_id = "".join(random.choices(string.digits, k=6))
-                if not Rider.objects.filter(rider_id=new_id).exists():
+                if (
+                    not Rider.objects.all_with_deleted()
+                    .filter(rider_id=new_id)
+                    .exists()
+                ):
                     self.rider_id = new_id
                     break
 
@@ -548,6 +582,13 @@ class Rider(models.Model):
             self.referral_code = f"AX-RIDER-{initials}{self.rider_id}"
 
         super().save(*args, **kwargs)
+
+    def delete(self, using=None, keep_parents=False):
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted", "updated_at"])
+
+    def hard_delete(self, using=None, keep_parents=False):
+        super().delete(using=using, keep_parents=keep_parents)
 
     def go_online(self):
         self.status = self.Status.ONLINE
@@ -731,7 +772,9 @@ class Merchant(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_partner = models.BooleanField(default=False)
-    partner_base_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    partner_base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
 
     class Meta:
         db_table = "merchants"
