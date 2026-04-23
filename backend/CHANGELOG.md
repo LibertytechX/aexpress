@@ -3,6 +3,19 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+
+## [2026-04-23] — Data Integrity & Record Protection
+
+### Added
+- **Rider Soft Delete**: Implemented a robust soft-delete mechanism for the `Rider` model.
+    - Added `is_deleted` field and `SoftDeleteManager`/`SoftDeleteQuerySet`.
+    - `Rider.objects.all()` now automatically excludes soft-deleted riders.
+    - Overridden `Rider.delete()` to perform soft deletion instead of database removal.
+- **Record Protection (Admin)**: Disabled Django Admin deletion for mission-critical models to prevent accidental data loss.
+    - Affected models: `Rider`, `VehicleAsset`, `Transaction`, `Charge`.
+    - Removed the "Delete" button from individual record views and the "Delete selected" bulk action from list views.
+
+---
  
  ## [2026-04-22] — Partner Orders & Order Creation Refactor
  

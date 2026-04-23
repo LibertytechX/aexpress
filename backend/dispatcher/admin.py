@@ -43,6 +43,15 @@ class VehicleAssetAdmin(admin.ModelAdmin):
     search_fields = ("asset_id", "plate_number", "vin", "make", "model")
     readonly_fields = ("id", "asset_id", "created_at", "updated_at")
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if "delete_selected" in actions:
+            del actions["delete_selected"]
+        return actions
+
 
 class RiderResource(resources.ModelResource):
     rider_name = fields.Field(column_name="Rider Name")
@@ -235,6 +244,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "rating",
         "total_deliveries",
         "is_active",
+        "is_deleted",
         "completed_today",
         "is_jumia_rider",
         "completed_this_week",
@@ -250,6 +260,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "vehicle_asset__vehicle_type",
         "is_jumia_rider",
         "is_active",
+        "is_deleted",
     )
     search_fields = (
         "user__first_name",
@@ -261,11 +272,20 @@ class RiderAdmin(ImportExportModelAdmin):
     autocomplete_fields = ("vehicle_asset", "hub")
     actions = ["assign_zone", "soft_delete_riders", "mark_as_jumia_riders"]
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if "delete_selected" in actions:
+            del actions["delete_selected"]
+        return actions
+
     @admin.action(description="Soft delete selected riders")
     def soft_delete_riders(self, request, queryset):
         from django.contrib import messages
 
-        updated_count = queryset.update(is_active=False)
+        updated_count = queryset.update(is_deleted=True, is_active=False)
         self.message_user(
             request,
             f"Successfully soft deleted {updated_count} riders.",
@@ -332,7 +352,7 @@ class RiderAdmin(ImportExportModelAdmin):
         return render(request, "admin/assign_zone_intermediate.html", context)
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
+        qs = Rider.objects.all_with_deleted()
         from django.utils import timezone
         from datetime import timedelta
         from django.db.models import Count, Sum, Q
