@@ -17,6 +17,7 @@
 8. [Auth & Signup Endpoints](#auth--signup-endpoints)
 9. [Subscription Endpoints](#subscription-endpoints)
 10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
+11. [Dispatcher Orders](#dispatcher-orders)
 
 ---
 
@@ -798,6 +799,26 @@ Authentication: Required (Merchant)
 ```
 
 ### 8. List Pending Pickups
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves SmartParcel parcels awaiting pickup.
+Authentication: Required (Merchant)
+
+---
+
+## DISPATCHER ORDERS
+
+### 1. Update Partner Stats
+```
+PATCH /dispatch/orders/{order_number}/update-partner-stats/
+Description: Updates processing metrics for a partner bulk order.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "rider_completed_count": 50,
+    "day_returned_count": 2
+  }
+Response: Updated Order object.
+```
 ```
 GET /api/orders/smart-parcel/parcels/pending-pickups/
 Description: Retrieves all pending parcels ready for pickup from the SmartParcel network.

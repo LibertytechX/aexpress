@@ -2403,11 +2403,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const handleMergeGrouped = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length < 2) return;
-    
+
     // Validate all selected orders are "grouped" and "Pending"
     const selectedOrders = filtered.filter(o => selectedIds.has(o.id));
     const nonGrouped = selectedOrders.filter(o => o.mode !== 'grouped' || o.status !== 'Pending');
-    
+
     if (nonGrouped.length > 0) {
       alert("Only 'Pending' orders in 'Grouped' mode can be merged.");
       return;
@@ -2444,9 +2444,9 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
       <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button') && e.target.tagName !== 'INPUT') onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
         <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
           {!isChild && (
-            <input 
-              type="checkbox" 
-              checked={selectedIds.has(rowOrder.id)} 
+            <input
+              type="checkbox"
+              checked={selectedIds.has(rowOrder.id)}
               onChange={(e) => handleToggleSelect(e, rowOrder.id)}
               style={{ cursor: "pointer", width: 16, height: 16, accentColor: S.gold }}
             />
@@ -2597,21 +2597,21 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
 
         {selectedIds.size > 0 && (
-          <button 
-            onClick={handleMergeGrouped} 
+          <button
+            onClick={handleMergeGrouped}
             disabled={merging || selectedIds.size < 2}
-            style={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: 6, 
-              padding: "0 16px", 
-              borderRadius: 10, 
-              border: "none", 
-              background: selectedIds.size < 2 ? S.borderLight : S.gold, 
-              color: "#fff", 
-              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer", 
-              fontSize: 12, 
-              fontWeight: 700, 
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 16px",
+              borderRadius: 10,
+              border: "none",
+              background: selectedIds.size < 2 ? S.borderLight : S.gold,
+              color: "#fff",
+              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: 700,
               fontFamily: "inherit",
               boxShadow: selectedIds.size < 2 ? "none" : "0 4px 12px rgba(232,168,56,0.25)",
               transition: "all 0.2s ease"
@@ -2641,8 +2641,8 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           <div style={{ minWidth: 1500 }}>
             <div style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   checked={selectedIds.size > 0 && selectedIds.size === filtered.filter(o => !o.parentOrderNumber).length}
                   onChange={handleSelectAll}
                   style={{ cursor: "pointer", width: 14, height: 14, accentColor: S.gold }}
@@ -2749,6 +2749,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [codData, setCodData] = useState(null);
   const [codError, setCodError] = useState("");
 
+  const [editPartnerStats, setEditPartnerStats] = useState(false);
+  const [riderCompletedVal, setRiderCompletedVal] = useState(order.riderCompletedCount || 0);
+  const [dayReturnedVal, setDayReturnedVal] = useState(order.dayReturnedCount || 0);
+  const [partnerStatsSaving, setPartnerStatsSaving] = useState(false);
+
+  useEffect(() => {
+    setRiderCompletedVal(order.riderCompletedCount || 0);
+    setDayReturnedVal(order.dayReturnedCount || 0);
+    setEditPartnerStats(false);
+  }, [order.id]);
+
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
 
@@ -2841,6 +2852,23 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       alert(e?.error || e?.message || "Failed to assign leg rider");
     } finally {
       setAssigningLegLoading(false);
+    }
+  };
+
+  const savePartnerStats = async () => {
+    setPartnerStatsSaving(true);
+    try {
+      const updated = await OrdersAPI.updatePartnerStats(order.id, {
+        rider_completed_count: riderCompletedVal,
+        day_returned_count: dayReturnedVal
+      });
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Partner stats updated: Completed=${riderCompletedVal}, Returned=${dayReturnedVal}`, "Dispatch", "edit");
+      setEditPartnerStats(false);
+    } catch (e) {
+      alert(e?.message || e?.error || "Failed to update partner stats");
+    } finally {
+      setPartnerStatsSaving(false);
     }
   };
 
@@ -2966,6 +2994,60 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.goldPale, color: S.gold, fontWeight: 700 }}>VERIFIED</span>
             </div>
           </div>
+
+          {/* PARTNER DETAILS SECTION */}
+          {order.isPartnerOrder && (
+            <div style={{ background: S.goldPale, borderRadius: 14, border: `1px solid ${S.gold}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#B8860B", textTransform: "uppercase", letterSpacing: "0.5px" }}>🤝 Partner Details</span>
+                {!isTerminal && !editPartnerStats && <button onClick={() => setEditPartnerStats(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit Stats</button>}
+              </div>
+              
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>TOTAL EXPECTED</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{order.partnerOrderCount || 0}</div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RIDER COMPLETED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={riderCompletedVal} onChange={e => setRiderCompletedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.green }}>{order.riderCompletedCount || 0}</div>
+                  )}
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RETURNED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={dayReturnedVal} onChange={e => setDayReturnedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.red }}>{order.dayReturnedCount || 0}</div>
+                  )}
+                </div>
+              </div>
+
+              {editPartnerStats && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <button onClick={savePartnerStats} disabled={partnerStatsSaving} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: partnerStatsSaving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    {partnerStatsSaving ? "Saving..." : "Save Stats"}
+                  </button>
+                  <button onClick={() => { setEditPartnerStats(false); setRiderCompletedVal(order.riderCompletedCount); setDayReturnedVal(order.dayReturnedCount); }} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                </div>
+              )}
+
+              {order.fileUploadedUrl && (
+                <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Document</div>
+                  <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff" }}>
+                    <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                      Click to view full size
+                    </div>
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ADDRESSES — EDITABLE */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
@@ -5134,12 +5216,12 @@ function MessagingScreen() {
 
   const ridersCount = conversations.filter(c => c.type === 'riders').reduce((s, c) => s + (c.unread_count || 0), 0);
   const customersCount = conversations.filter(c => c.type === 'customers').reduce((s, c) => s + (c.unread_count || 0), 0);
-  
-  const filteredList = conversations.filter(c => 
-    c.type === tab && 
+
+  const filteredList = conversations.filter(c =>
+    c.type === tab &&
     (c.participant?.name || c.participant?.phone || "").toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
+
   const activeChat = conversations.find(c => c.id === activeId) || null;
 
   return (
@@ -5159,15 +5241,15 @@ function MessagingScreen() {
             ))}
           </div>
           <div style={{ position: "relative" }}>
-             <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted, lineHeight: 0 }}>{I.search}</span>
-             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search conversations..." 
-               style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 12, border: `1.5px solid ${S.border}`, fontSize: 13, outline: "none", background: "#f8fafc", fontFamily: "inherit", transition: "border-color 0.2s" }} 
-               onFocus={e => e.target.style.borderColor = S.gold}
-               onBlur={e => e.target.style.borderColor = S.border}
-             />
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted, lineHeight: 0 }}>{I.search}</span>
+            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search conversations..."
+              style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 12, border: `1.5px solid ${S.border}`, fontSize: 13, outline: "none", background: "#f8fafc", fontFamily: "inherit", transition: "border-color 0.2s" }}
+              onFocus={e => e.target.style.borderColor = S.gold}
+              onBlur={e => e.target.style.borderColor = S.border}
+            />
           </div>
         </div>
-        
+
         <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
           {loadingConvos ? (
             <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
@@ -5239,15 +5321,15 @@ function MessagingScreen() {
               const isAgent = m.sender_type === 'agent';
               return (
                 <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start", animation: "fadeIn 0.2s ease-out" }}>
-                  <div style={{ 
-                    maxWidth: "75%", 
-                    padding: "12px 18px", 
-                    borderRadius: 18, 
-                    borderBottomRightRadius: isAgent ? 4 : 18, 
-                    borderBottomLeftRadius: isAgent ? 18 : 4, 
-                    background: isAgent ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#fff", 
+                  <div style={{
+                    maxWidth: "75%",
+                    padding: "12px 18px",
+                    borderRadius: 18,
+                    borderBottomRightRadius: isAgent ? 4 : 18,
+                    borderBottomLeftRadius: isAgent ? 18 : 4,
+                    background: isAgent ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#fff",
                     color: isAgent ? S.navy : S.text,
-                    fontSize: 13, 
+                    fontSize: 13,
                     lineHeight: 1.5,
                     boxShadow: isAgent ? "0 4px 12px rgba(232,168,56,0.2)" : "0 2px 8px rgba(0,0,0,0.05)",
                     border: isAgent ? "none" : `1px solid ${S.borderLight}`
@@ -5279,7 +5361,7 @@ function MessagingScreen() {
                 <textarea
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
                   placeholder="Your message..."
                   rows={Math.min(4, input.split('\n').length)}
                   style={{ width: "100%", background: "#f1f5f9", border: `1.5px solid ${S.border}`, borderRadius: 16, padding: "12px 48px 12px 16px", color: S.text, fontSize: 14, fontFamily: "inherit", outline: "none", resize: "none", transition: "border-color 0.2s" }}
@@ -6511,6 +6593,41 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [routeDistance, setRouteDistance] = useState(null);
   const [routeDuration, setRouteDuration] = useState(null);
   const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [isPartnerOrder, setIsPartnerOrder] = useState(false);
+  const [partnerOrderCount, setPartnerOrderCount] = useState(1);
+  const [fileUploadedUrl, setFileUploadedUrl] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+
+  const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
+  const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
+        method: 'POST',
+        headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
+        body: formData
+      });
+      const data = await res.json();
+      console.log("Upload Response:", data);
+      const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+      
+      if (res.ok && fileUrl) {
+        setFileUploadedUrl(fileUrl);
+      } else {
+        setError("File upload failed: " + (data.message || "Invalid response structure"));
+      }
+    } catch (err) {
+      setError("File upload error");
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -6592,7 +6709,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     return Math.round(p.base_fare);
   };
 
-  const displayPrice = priceOverride ? parseInt(priceOverride) : calcPrice(vehicle);
+  const displayPrice = isPartnerOrder
+    ? (selectedMerchant?.partnerBasePrice || 0) * partnerOrderCount
+    : (priceOverride ? parseInt(priceOverride) : calcPrice(vehicle));
 
   // Local helpers for reliable coordinate capture
   const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
@@ -6630,10 +6749,15 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   const handleSubmit = async () => {
     setError(null);
-    if (!pickup) { setError("Pickup address is required"); return; }
-    if (!dropoff) { setError("Dropoff address is required"); return; }
-    if (!senderName) { setError("Sender name is required"); return; }
-    if (!receiverName) { setError("Receiver name is required"); return; }
+    if (!isPartnerOrder) {
+      if (!pickup) { setError("Pickup address is required"); return; }
+      if (!dropoff) { setError("Dropoff address is required"); return; }
+      if (!senderName) { setError("Sender name is required"); return; }
+      if (!receiverName) { setError("Receiver name is required"); return; }
+    } else {
+      if (!merchantId) { setError("Merchant is required for partner orders"); return; }
+      if (!fileUploadedUrl) { setError("Proof/File upload is required for partner orders"); return; }
+    }
     setSubmitting(true);
     try {
       // Ensure relay orders always have coordinates (either from Places selection or fallback geocode)
@@ -6684,6 +6808,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         pickup_lng: finalPickupLng,
         dropoff_lat: finalDropoffLat,
         dropoff_lng: finalDropoffLng,
+        is_partner_order: isPartnerOrder,
+        partner_order_count: partnerOrderCount,
+        file_uploaded_url: fileUploadedUrl,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -6708,52 +6835,113 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
         </div>
         <div style={{ padding: "20px 24px" }}>
+          {/* Mode Selector */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(false)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: !isPartnerOrder ? `2px solid ${S.primary}` : `1px solid ${S.border}`,
+                background: !isPartnerOrder ? `${S.primary}10` : "transparent",
+                color: !isPartnerOrder ? S.primary : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🚀 Standard Order
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(true)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: isPartnerOrder ? `2px solid ${S.gold}` : `1px solid ${S.border}`,
+                background: isPartnerOrder ? S.goldPale : "transparent",
+                color: isPartnerOrder ? "#B8860B" : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🤝 Partner Bulk
+            </button>
+          </div>
+
           {/* Merchant */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Merchant</label>
             <select value={merchantId} onChange={e => setMerchantId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Select merchant...</option>
-              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {m.contact}</option>)}
+              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} {m.isPartner ? "⭐" : ""} — {m.contact}</option>)}
             </select>
+            {isPartnerOrder && !isSelectedMerchantPartner && merchantId && (
+              <div style={{ fontSize: 10, color: S.red, marginTop: 4 }}>⚠️ This merchant is not configured as a Partner.</div>
+            )}
           </div>
 
-          {/* Sender */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Sender</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
-              <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+          {isPartnerOrder ? (
+            <div style={{ padding: "20px", background: S.goldPale, borderRadius: 12, border: `1px solid ${S.gold}`, marginBottom: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Number of Orders</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={partnerOrderCount}
+                  onChange={e => setPartnerOrderCount(parseInt(e.target.value) || 1)}
+                  style={{ ...iSt, fontSize: 16, fontWeight: 700 }}
+                />
+              </div>
+              <div>
+                <label style={lSt}>Upload Partner Proof / File {isUploading && "(Uploading...)"}</label>
+                <div style={{ position: "relative" }}>
+                  <input type="file" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
+                  {fileUploadedUrl && (
+                    <div style={{ position: "absolute", right: 10, top: 10, color: S.green, fontSize: 12 }}>
+                      ✓ Uploaded
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Sender */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Sender</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
+                  <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+                </div>
+              </div>
 
-          {/* Pickup */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
-              if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
-              setPickupLat(p.lat); setPickupLng(p.lng);
-            }} placeholder="Enter pickup address..." style={iSt} />
-          </div>
+              {/* Pickup */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Pickup Address</label>
+                <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
+                  setPickupLat(p.lat); setPickupLng(p.lng);
+                }} placeholder="Enter pickup address..." style={iSt} />
+              </div>
 
-          {/* Dropoff */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
-              if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
-              setDropoffLat(p.lat); setDropoffLng(p.lng);
-            }} placeholder="Enter delivery address..." style={iSt} />
-          </div>
+              {/* Dropoff */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Dropoff Address</label>
+                <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
+                  setDropoffLat(p.lat); setDropoffLng(p.lng);
+                }} placeholder="Enter delivery address..." style={iSt} />
+              </div>
 
-          {/* Receiver */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Receiver</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
-              <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
-            </div>
-          </div>
+              {/* Receiver */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Receiver</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
+                  <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Route info */}
           {(calculatingRoute || routeDistance) && (

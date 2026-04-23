@@ -4,6 +4,39 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-23] — Data Integrity & Record Protection
+
+### Added
+- **Rider Soft Delete**: Implemented a robust soft-delete mechanism for the `Rider` model.
+    - Added `is_deleted` field and `SoftDeleteManager`/`SoftDeleteQuerySet`.
+    - `Rider.objects.all()` now automatically excludes soft-deleted riders.
+    - Overridden `Rider.delete()` to perform soft deletion instead of database removal.
+- **Record Protection (Admin)**: Disabled Django Admin deletion for mission-critical models to prevent accidental data loss.
+    - Affected models: `Rider`, `VehicleAsset`, `Transaction`, `Charge`.
+    - Removed the "Delete" button from individual record views and the "Delete selected" bulk action from list views.
+
+---
+ 
+ ## [2026-04-22] — Partner Orders & Order Creation Refactor
+ 
+ ### Added
+ - **Partner Order Support**: Added ability for dispatchers to create orders for partners.
+     - New fields in `OrderCreateSerializer`: `is_partner_order`, `partner_order_count`, `file_uploaded_url`.
+     - These fields are persisted to the `Order` model when `is_partner_order` is True.
+- **Partner Order Constraints**:
+    - Validates that the merchant is a partner before processing.
+    - Automatically calculates `total_amount` as `partner_base_price * partner_order_count`.
+    - Allows skipping of pickup/delivery details, providing sensible defaults when omitted.
+ 
+ ### Changed
+ - **Refactored Order Creation**: Moved core order creation logic from `OrderCreateSerializer` to `IOrderService.create_dispatcher_order` to reduce complexity and improve maintainability.
+ - **Service Layer Enhancements**:
+     - Added `create_dispatcher_order` to `OrderService` interface and implementation.
+     - Added `process_partners_order` to handle partner-specific logic within the service layer.
+ 
+ ---
+ 
+
 ## [2026-04-21] — Merchant Notification Management
 
 ### Added
