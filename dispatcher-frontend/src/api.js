@@ -278,6 +278,11 @@ const normalizeOrder = (o) => ({
     paymentInfo: o.payment_info || null,
     payment_status: o.payment_status || null,
     charge: o.charge || null,
+    isPartnerOrder: o.is_partner_order || false,
+    partnerOrderCount: o.partner_order_count || null,
+    dayReturnedCount: o.day_returned_count || 0,
+    riderCompletedCount: o.rider_completed_count || 0,
+    fileUploadedUrl: o.file_uploaded_url || null,
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
@@ -366,6 +371,17 @@ export const OrdersAPI = {
         let data;
         try { data = await res.json(); } catch (_) { data = null; }
         if (!res.ok) throw (data || new Error('Failed to update price'));
+        return normalizeOrder(data);
+    },
+
+    async updatePartnerStats(orderNumber, partnerData) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-partner-stats/`, {
+            method: 'PATCH',
+            body: JSON.stringify(partnerData)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update partner stats'));
         return normalizeOrder(data);
     },
 

@@ -2749,6 +2749,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [codData, setCodData] = useState(null);
   const [codError, setCodError] = useState("");
 
+  const [editPartnerStats, setEditPartnerStats] = useState(false);
+  const [riderCompletedVal, setRiderCompletedVal] = useState(order.riderCompletedCount || 0);
+  const [dayReturnedVal, setDayReturnedVal] = useState(order.dayReturnedCount || 0);
+  const [partnerStatsSaving, setPartnerStatsSaving] = useState(false);
+
+  useEffect(() => {
+    setRiderCompletedVal(order.riderCompletedCount || 0);
+    setDayReturnedVal(order.dayReturnedCount || 0);
+    setEditPartnerStats(false);
+  }, [order.id]);
+
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
 
@@ -2841,6 +2852,23 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
       alert(e?.error || e?.message || "Failed to assign leg rider");
     } finally {
       setAssigningLegLoading(false);
+    }
+  };
+
+  const savePartnerStats = async () => {
+    setPartnerStatsSaving(true);
+    try {
+      const updated = await OrdersAPI.updatePartnerStats(order.id, {
+        rider_completed_count: riderCompletedVal,
+        day_returned_count: dayReturnedVal
+      });
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Partner stats updated: Completed=${riderCompletedVal}, Returned=${dayReturnedVal}`, "Dispatch", "edit");
+      setEditPartnerStats(false);
+    } catch (e) {
+      alert(e?.message || e?.error || "Failed to update partner stats");
+    } finally {
+      setPartnerStatsSaving(false);
     }
   };
 
@@ -2966,6 +2994,60 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.goldPale, color: S.gold, fontWeight: 700 }}>VERIFIED</span>
             </div>
           </div>
+
+          {/* PARTNER DETAILS SECTION */}
+          {order.isPartnerOrder && (
+            <div style={{ background: S.goldPale, borderRadius: 14, border: `1px solid ${S.gold}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#B8860B", textTransform: "uppercase", letterSpacing: "0.5px" }}>🤝 Partner Details</span>
+                {!isTerminal && !editPartnerStats && <button onClick={() => setEditPartnerStats(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit Stats</button>}
+              </div>
+              
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>TOTAL EXPECTED</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{order.partnerOrderCount || 0}</div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RIDER COMPLETED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={riderCompletedVal} onChange={e => setRiderCompletedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.green }}>{order.riderCompletedCount || 0}</div>
+                  )}
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RETURNED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={dayReturnedVal} onChange={e => setDayReturnedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.red }}>{order.dayReturnedCount || 0}</div>
+                  )}
+                </div>
+              </div>
+
+              {editPartnerStats && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <button onClick={savePartnerStats} disabled={partnerStatsSaving} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: partnerStatsSaving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    {partnerStatsSaving ? "Saving..." : "Save Stats"}
+                  </button>
+                  <button onClick={() => { setEditPartnerStats(false); setRiderCompletedVal(order.riderCompletedCount); setDayReturnedVal(order.dayReturnedCount); }} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                </div>
+              )}
+
+              {order.fileUploadedUrl && (
+                <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Document</div>
+                  <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff" }}>
+                    <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                      Click to view full size
+                    </div>
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ADDRESSES — EDITABLE */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
@@ -6532,10 +6614,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         body: formData
       });
       const data = await res.json();
-      if (res.ok && data.url) {
-        setFileUploadedUrl(data.url);
+      console.log("Upload Response:", data);
+      const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+      
+      if (res.ok && fileUrl) {
+        setFileUploadedUrl(fileUrl);
       } else {
-        setError("File upload failed");
+        setError("File upload failed: " + (data.message || "Invalid response structure"));
       }
     } catch (err) {
       setError("File upload error");

@@ -4,6 +4,22 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+## [2026-04-23] — Partner Order Tracking & Management
+
+### Frontend
+#### Added
+- **Partner Details View**: Integrated a premium partner information card in the Order Detail modal.
+- **Document Preview**: Added high-fidelity preview for uploaded proof/waybill documents with full-size viewing support.
+- **Processing Metrics Editing**: Enabled inline editing for `Rider Completed` and `Returned` counts for partner bulk orders.
+- **Real-time Synchronization**: Added `useEffect` hooks to ensure partner metrics are correctly loaded and reset during order navigation.
+
+### API
+#### Added
+- **Order Stats Update**: Added `PATCH /dispatch/orders/{order_number}/update-partner-stats/` to update partner processing counts.
+- **Serializer Expansion**: Updated `OrderSerializer` to include `is_partner_order`, `partner_order_count`, `day_returned_count`, `rider_completed_count`, and `file_uploaded_url`.
+
+---
+
 ## [2026-04-22] — ClickUp Task Logging Automation
 
 ### Chore
