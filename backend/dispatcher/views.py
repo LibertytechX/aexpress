@@ -644,6 +644,27 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data)
 
+    @action(detail=True, methods=["patch"], url_path="update-partner-stats")
+    def update_partner_stats(self, request, order_number=None):
+        """Update partner-specific order stats (rider_completed_count, day_returned_count)."""
+        order = self.get_object()
+        
+        rider_completed_count = request.data.get("rider_completed_count")
+        day_returned_count = request.data.get("day_returned_count")
+        
+        update_fields = []
+        if rider_completed_count is not None:
+            order.rider_completed_count = int(rider_completed_count)
+            update_fields.append("rider_completed_count")
+        if day_returned_count is not None:
+            order.day_returned_count = int(day_returned_count)
+            update_fields.append("day_returned_count")
+            
+        if update_fields:
+            order.save(update_fields=update_fields)
+            
+        return Response(self.get_serializer(order).data)
+
     @exception_advice()
     @action(detail=True, methods=["get"], url_path="events")
     def events(self, request, order_number=None):
