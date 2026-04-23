@@ -949,9 +949,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     @exception_advice(model_object=ErrorLog)
-    @transaction.atomic
+    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     def merge_grouped_orders(self, request):
         """Bulk merge multiple grouped orders into a parent order (Dispatcher Action)."""
         serializer = MergeGroupedOrdersSerializer(data=request.data)
