@@ -8,15 +8,8 @@ from pydantic import BaseModel, Field
 from asgiref.sync import sync_to_async
 from django.db.models import Q
 from .models import Conversation, Message
-from google.adk.agents import LlmAgent
-from google.adk.planners import BuiltInPlanner
-from google.adk.tools import FunctionTool
-from google.adk.memory import BaseMemoryService
-from google.adk.memory.base_memory_service import SearchMemoryResponse
-from google.adk.memory.memory_entry import MemoryEntry
-from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.genai import types
+
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -35,44 +28,55 @@ class SupportResponse(BaseModel):
     )
 
 
-class DjangoMemoryService(BaseMemoryService):
-    """
-    Custom ADK MemoryService that uses Django models for persistence.
-    """
+def get_django_memory_service() -> any:
+    from google.adk.memory.base_memory_service import SearchMemoryResponse
+    from google.adk.memory.memory_entry import MemoryEntry
+    from google.adk.memory.base_memory_service import BaseMemoryService
+    from google.adk.sessions import InMemorySessionService
+    from google.genai import types
 
-    async def add_session_to_memory(self, session):
-        pass
-
-    async def search_memory(
-        self, *, app_name: str, user_id: str, query: str
-    ) -> SearchMemoryResponse:
+    class DjangoMemoryService(BaseMemoryService):
         """
-        Search for past messages relevant to the current user.
+        Custom ADK MemoryService that uses Django models for persistence.
         """
 
-        # Wrap Django QuerySet in sync_to_async to avoid SynchronousOnlyOperation
-        @sync_to_async
-        def get_messages():
-            messages = Message.objects.filter(
-                conversation__user_id_id=user_id
-            ).order_by("-timestamp")[:5]
-            return [f"{msg.sender_type}: {msg.content}" for msg in reversed(messages)]
+        async def add_session_to_memory(self, session):
+            pass
 
-        history_lines = await get_messages()
+        async def search_memory(
+            self, *, app_name: str, user_id: str, query: str
+        ) -> SearchMemoryResponse:
+            """
+            Search for past messages relevant to the current user.
+            """
 
-        # Proper ADK Memory Response format
-        memories = []
-        for line in history_lines:
-            memories.append(
-                MemoryEntry(
-                    content=types.Content(
-                        role="model",  # or "user", but history is contextual
-                        parts=[types.Part(text=line)],
+            # Wrap Django QuerySet in sync_to_async to avoid SynchronousOnlyOperation
+            @sync_to_async
+            def get_messages():
+                messages = Message.objects.filter(
+                    conversation__user_id_id=user_id
+                ).order_by("-timestamp")[:5]
+                return [
+                    f"{msg.sender_type}: {msg.content}" for msg in reversed(messages)
+                ]
+
+            history_lines = await get_messages()
+
+            # Proper ADK Memory Response format
+            memories = []
+            for line in history_lines:
+                memories.append(
+                    MemoryEntry(
+                        content=types.Content(
+                            role="model",  # or "user", but history is contextual
+                            parts=[types.Part(text=line)],
+                        )
                     )
                 )
-            )
 
-        return SearchMemoryResponse(memories=memories)
+            return SearchMemoryResponse(memories=memories)
+
+    return DjangoMemoryService()
 
 
 @sync_to_async
@@ -167,112 +171,123 @@ def check_order_status(order_id: str) -> dict:
         }
 
 
-# Specialized Support Agent: Orders
-order_support_agent = LlmAgent(
-    name="OrderSupportAgent",
-    model="gemini-3-flash-preview",
-    instruction="""
-    # IDENTITY
-    You are the Order Specialist for AExpress. You have expert knowledge of delivery logistics and order tracking.
+def build_agent() -> any:
+    from google.adk.agents import LlmAgent
+    from google.adk.planners import BuiltInPlanner
+    from google.adk.tools import FunctionTool
 
-    # MISSION
-    Help users track their packages and resolve delivery delays.
+    from google.adk.memory.base_memory_service import SearchMemoryResponse
+    from google.adk.memory.memory_entry import MemoryEntry
+    from google.genai import types
 
-    # METHODOLOGY
-    1. Always use 'check_order_status' to get real-time info.
-    2. If an order is not found, explain the correct format (6158XXX).
-    3. Be empathetic about delays.
+    # Specialized Support Agent: Orders
+    order_support_agent = LlmAgent(
+        name="OrderSupportAgent",
+        model="gemini-3-flash-preview",
+        instruction="""
+        # IDENTITY
+        You are the Order Specialist for AExpress. You have expert knowledge of delivery logistics and order tracking.
 
-    # BOUNDARIES
-    - NEVER promise a specific delivery time if not specified in the tool data.
-    - NEVER share internal warehouse locations.
+        # MISSION
+        Help users track their packages and resolve delivery delays.
 
-    # EXAMPLES
-    Input: "Where is 999123?" 
-    Output: "I've checked your order 999123, it is currently in transit and should arrive in 2 days."
-    """,
-    tools=[FunctionTool(func=check_order_status)],
-    planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True, thinking_budget=1024
-        )
-    ),
-)
+        # METHODOLOGY
+        1. Always use 'check_order_status' to get real-time info.
+        2. If an order is not found, explain the correct format (6158XXX).
+        3. Be empathetic about delays.
 
-# Specialized Support Agent: Technical
-technical_support_agent = LlmAgent(
-    name="TechnicalSupportAgent",
-    model="gemini-3-flash-preview",
-    instruction="""
-    # IDENTITY
-    You are the Technical Support Guru for AExpress.
+        # BOUNDARIES
+        - NEVER promise a specific delivery time if not specified in the tool data.
+        - NEVER share internal warehouse locations.
 
-    # MISSION
-    Solve app glitches, login issues, and technical errors reported by customers and riders.
-
-    # METHODOLOGY
-    1. Ask for screenshots or error codes if not provided.
-    2. Provide step-by-step troubleshooting (clear cache, restart app).
-    
-    # BOUNDARIES
-    - NEVER ask for user passwords.
-    - NEVER promise an immediate fix for server-side bugs.
-
-    # EXAMPLES
-    Input: "My app keeps crashing."
-    Output: "I'm sorry to hear that. Could you please try clearing your app cache and restarting your phone?"
-    """,
-    tools=[],
-)
-
-# Coordinator Agent
-support_coordinator = LlmAgent(
-    name="SupportCoordinator",
-    model="gemini-3-flash-preview",
-    description="Primary entry point for user support. Routes to Order or Tech agents.",
-    instruction="""
-    # IDENTITY
-    You are the AExpress Support Coordinator. You are the 'brain' of the customer service system.
-
-    # MISSION
-    Greet users and route them to the specialized OrderSupportAgent or TechnicalSupportAgent.
-
-    # METHODOLOGY
-    1. First, look for the 'User ID' in the [SYSTEM CONTEXT] provided in the message.
-    2. Use 'get_user_profile(user_id)' with that ID to know who you are talking to.
-    3. Analyze the user query.
-    4. Delegate to the correct specialized agent using their respective tools.
-    5. Summarize the resolution clearly using the SupportResponse schema.
-
-    # BOUNDARIES
-    - ALWAYS greet the user by name if 'get_user_profile' succeeds.
-    - NEVER respond to non-support queries (e.g., jokes, general chat).
-
-    # EXAMPLES
-    Input: "I can't see my order."
-    Process: 
-      - get_user_profile(user_id) -> username="John" (from full_name)
-      - Delegate to OrderSupportAgent
-    Output: "Hi John, I've asked our order specialist to help. They found that your order..."
-    """,
-    sub_agents=[order_support_agent, technical_support_agent],
-    tools=[FunctionTool(func=get_user_profile)],
-    output_schema=SupportResponse,
-    planner=BuiltInPlanner(
-        thinking_config=types.ThinkingConfig(
-            include_thoughts=True, thinking_budget=1024
-        )
-    ),
-    generate_content_config=types.GenerateContentConfig(
-        temperature=0.5,
-        safety_settings=[
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+        # EXAMPLES
+        Input: "Where is 999123?" 
+        Output: "I've checked your order 999123, it is currently in transit and should arrive in 2 days."
+        """,
+        tools=[FunctionTool(func=check_order_status)],
+        planner=BuiltInPlanner(
+            thinking_config=types.ThinkingConfig(
+                include_thoughts=True, thinking_budget=1024
             )
-        ],
-    ),
-)
+        ),
+    )
+
+    # Specialized Support Agent: Technical
+    technical_support_agent = LlmAgent(
+        name="TechnicalSupportAgent",
+        model="gemini-3-flash-preview",
+        instruction="""
+        # IDENTITY
+        You are the Technical Support Guru for AExpress.
+
+        # MISSION
+        Solve app glitches, login issues, and technical errors reported by customers and riders.
+
+        # METHODOLOGY
+        1. Ask for screenshots or error codes if not provided.
+        2. Provide step-by-step troubleshooting (clear cache, restart app).
+        
+        # BOUNDARIES
+        - NEVER ask for user passwords.
+        - NEVER promise an immediate fix for server-side bugs.
+
+        # EXAMPLES
+        Input: "My app keeps crashing."
+        Output: "I'm sorry to hear that. Could you please try clearing your app cache and restarting your phone?"
+        """,
+        tools=[],
+    )
+
+    # Coordinator Agent
+    support_coordinator = LlmAgent(
+        name="SupportCoordinator",
+        model="gemini-3-flash-preview",
+        description="Primary entry point for user support. Routes to Order or Tech agents.",
+        instruction="""
+        # IDENTITY
+        You are the AExpress Support Coordinator. You are the 'brain' of the customer service system.
+
+        # MISSION
+        Greet users and route them to the specialized OrderSupportAgent or TechnicalSupportAgent.
+
+        # METHODOLOGY
+        1. First, look for the 'User ID' in the [SYSTEM CONTEXT] provided in the message.
+        2. Use 'get_user_profile(user_id)' with that ID to know who you are talking to.
+        3. Analyze the user query.
+        4. Delegate to the correct specialized agent using their respective tools.
+        5. Summarize the resolution clearly using the SupportResponse schema.
+
+        # BOUNDARIES
+        - ALWAYS greet the user by name if 'get_user_profile' succeeds.
+        - NEVER respond to non-support queries (e.g., jokes, general chat).
+
+        # EXAMPLES
+        Input: "I can't see my order."
+        Process: 
+        - get_user_profile(user_id) -> username="John" (from full_name)
+        - Delegate to OrderSupportAgent
+        Output: "Hi John, I've asked our order specialist to help. They found that your order..."
+        """,
+        sub_agents=[order_support_agent, technical_support_agent],
+        tools=[FunctionTool(func=get_user_profile)],
+        output_schema=SupportResponse,
+        planner=BuiltInPlanner(
+            thinking_config=types.ThinkingConfig(
+                include_thoughts=True, thinking_budget=1024
+            )
+        ),
+        generate_content_config=types.GenerateContentConfig(
+            temperature=0.5,
+            safety_settings=[
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                )
+            ],
+        ),
+    )
+
+    return support_coordinator
 
 
 async def get_ai_response(
@@ -282,8 +297,15 @@ async def get_ai_response(
     Programmatic entry point for getting AI responses.
     """
     print("The user ID: ", user_id)
-    memory_service = DjangoMemoryService()
+    from google.adk.runners import Runner
+    from google.genai import types
+
+    from google.adk.sessions import InMemorySessionService
+
+    memory_service = get_django_memory_service()
     session_service = InMemorySessionService()
+
+    support_coordinator = build_agent()
 
     runner = Runner(
         app_name="aexpress_support",
