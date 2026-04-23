@@ -66,19 +66,6 @@ class RiderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # user = self.request.user
-        # role = user.dispatcher_profile.role
-        # if the dispatcher role is zone_lead
-        # if role == "zone_lead":
-        #     try:
-        #         zone_lead = VerticalLead.objects.get(user=user)
-        #         zones = zone_lead.area_zones.all()
-        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
-        #         return Rider.objects.filter(hub__in=relay_nodes).select_related(
-        #             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
-        #         )
-        #     except VerticalLead.DoesNotExist:
-        #         pass
         return Rider.objects.all().select_related(
             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
@@ -97,29 +84,72 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.user.save(update_fields=["password"])
         return Response({"success": True, "message": "Password updated successfully."})
 
-    @action(detail=True, methods=["post"], url_path="assign_vehicle")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="assign_vehicle",
+        permission_classes=[IsDispatcherAdmin],
+    )
     def assign_vehicle(self, request, pk=None):
         """Assign or unassign a vehicle asset to a rider."""
         rider = self.get_object()
         vehicle_asset_id = request.data.get("vehicle_asset_id")
 
-        if vehicle_asset_id:
-            from .models import VehicleAsset
+        from .models import VehicleAsset, VehicleReassignment, Rider
 
+        old_vehicle = rider.vehicle_asset
+        new_vehicle = None
+        from_rider = None
+        to_rider = None
+
+        if vehicle_asset_id:
             try:
-                vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
+                new_vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
             except VehicleAsset.DoesNotExist:
                 return Response(
                     {"error": "Vehicle asset not found."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            rider.vehicle_asset = vehicle
+
+            # If the vehicle was already with someone else, they are the from_rider
+            from_rider = Rider.objects.filter(vehicle_asset=new_vehicle).first()
+            to_rider = rider
+
+            # If the rider was already with another vehicle, record that unassignment too
+            if old_vehicle and old_vehicle != new_vehicle:
+                VehicleReassignment.objects.create(
+                    from_rider=rider,
+                    to_rider=None,
+                    vehicle_asset=old_vehicle,
+                    admin=request.user,
+                )
+
+            # If from_rider exists and is different from to_rider, clear their vehicle
+            if from_rider and from_rider != to_rider:
+                from_rider.vehicle_asset = None
+                from_rider.save(update_fields=["vehicle_asset"])
+
+            rider.vehicle_asset = new_vehicle
         else:
+            # Unassigning current rider from their current vehicle
+            from_rider = rider
+            to_rider = None
+            new_vehicle = old_vehicle
             rider.vehicle_asset = None
 
         rider.save(update_fields=["vehicle_asset"])
+
+        # Create reassignment history record for the target vehicle
+        VehicleReassignment.objects.create(
+            from_rider=from_rider,
+            to_rider=to_rider,
+            vehicle_asset=new_vehicle,
+            admin=request.user,
+        )
+
         serializer = self.get_serializer(rider)
         return Response(serializer.data)
+
 
     @action(detail=True, methods=["post"], url_path="toggle_duty")
     def toggle_duty(self, request, pk=None):

@@ -869,3 +869,27 @@ Request Body:
     "unlock_code": "J6E7"
   }
 ```
+
+---
+
+## DISPATCHER MERCHANTS
+
+### 1. List Merchants
+```
+GET /merchants/
+Description: Retrieves a list of all merchants.
+Authentication: Required (Dispatcher)
+Response: Paginated list of Merchant objects.
+```
+
+### 2. Deactivate Merchant
+```
+DELETE /merchants/{id}/
+Description: Soft-deactivates a merchant account.
+Authentication: Required (Dispatcher Admin)
+Response:
+  {
+    "status": "success",
+    "message": "Merchant deactivated successfully."
+  }
+```

@@ -24,6 +24,7 @@ from .models import (
     MerchantDevice,
     MerchantNotification,
     MerchantNotificationSettings,
+    VehicleReassignment,
 )
 
 
@@ -229,6 +230,36 @@ class VehicleTrackingAdmin(admin.ModelAdmin):
     autocomplete_fields = ("vehicle_asset",)
     readonly_fields = ("id", "created_at")
     ordering = ("-created_at",)
+
+
+@admin.register(VehicleReassignment)
+class VehicleReassignmentAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "vehicle_asset", "from_rider", "to_rider", "admin")
+    list_filter = ("created_at", "admin")
+    search_fields = (
+        "from_rider__rider_id",
+        "to_rider__rider_id",
+        "vehicle_asset__plate_number",
+        "admin__username",
+    )
+    readonly_fields = (
+        "id",
+        "from_rider",
+        "to_rider",
+        "vehicle_asset",
+        "admin",
+        "created_at",
+    )
+    ordering = ("-created_at",)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        if "delete_selected" in actions:
+            del actions["delete_selected"]
+        return actions
 
 
 @admin.register(Rider)

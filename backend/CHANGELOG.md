@@ -1,4 +1,7 @@
-# Changelog
+### [2026-04-23]
+- **Rider**: Implemented vehicle reassignment history tracking with `from_rider` and `to_rider` fields.
+- **Rider**: Restricted `assign_vehicle` endpoint to `dispatcheradmin` role.
+- **Rider**: Audit trail for vehicle assignments now includes the admin who initiated the request.
 
 All notable changes to the AXpress backend are documented in this file.
 
