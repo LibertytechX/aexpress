@@ -556,7 +556,11 @@ class Rider(models.Model):
             # Generate unique 6-digit ID
             while True:
                 new_id = "".join(random.choices(string.digits, k=6))
-                if not Rider.objects.all_with_deleted().filter(rider_id=new_id).exists():
+                if (
+                    not Rider.objects.all_with_deleted()
+                    .filter(rider_id=new_id)
+                    .exists()
+                ):
                     self.rider_id = new_id
                     break
 
@@ -767,7 +771,9 @@ class Merchant(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     is_partner = models.BooleanField(default=False)
-    partner_base_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    partner_base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
 
     class Meta:
         db_table = "merchants"
@@ -1208,6 +1214,7 @@ class MerchantNotification(models.Model):
     Allows for in-app 'Notification Center' / inbox functionality.
     """
 
+    id = models.BigAutoField(primary_key=True)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="notifications"
     )
