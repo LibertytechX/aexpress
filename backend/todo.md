@@ -26,12 +26,16 @@
 - [x] Document refresh token endpoint
 - [x] Add weekly and daily filter for rider earnings
 ## Data - 2026-04-20
-- [] change collectcode to boxlockernumber for smartpercel pending pickups
+- [x] change collectcode to boxlockernumber for smartpercel pending pickups
 - [] Document Merchant API endpoints
-- [] Refactor quick send api endpoint to reduce complexity
-- [] 
-
-
-
+- [x] Refactor quick send api endpoint to reduce complexity
+- [X] Fix hpmr send sms bug
+- [X] Fix hpmr log customer contact bug
+- [] profile slow endpoints and SLOs for all endpoints
+- [x] fix slow rider start order endpoint in orders/views.py
+- [] add soft delete for riders and merchants
+- [] add bike reassignment history for riders
+- [] also restrict permission to reassign vehicle assets to riders on dispatcher panel and also add admin who initiated the request
+- [] add support is jumia order creation
 
 

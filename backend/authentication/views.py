@@ -1093,3 +1093,42 @@ class MerchantNotificationSettingsView(APIView):
             data=serializer.data,
             status_code=status.HTTP_200_OK,
         )
+
+
+class MerchantNotificationDeleteView(APIView):
+    """
+    DELETE /api/auth/notifications/<uuid:pk>/
+    Deletes a single notification belonging to the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        notification.delete()
+        return service_response(
+            status="success",
+            message="Notification deleted successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationDeleteAllView(APIView):
+    """
+    DELETE /api/auth/notifications/delete-all/
+    Deletes all notifications for the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request):
+        merchant = request.user.merchant_profile
+        count, _ = MerchantNotification.objects.filter(merchant=merchant).delete()
+        return service_response(
+            status="success",
+            message=f"{count} notification(s) deleted successfully.",
+            status_code=status.HTTP_200_OK,
+        )

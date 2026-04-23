@@ -3,6 +3,36 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+ 
+ ## [2026-04-22] — Partner Orders & Order Creation Refactor
+ 
+ ### Added
+ - **Partner Order Support**: Added ability for dispatchers to create orders for partners.
+     - New fields in `OrderCreateSerializer`: `is_partner_order`, `partner_order_count`, `file_uploaded_url`.
+     - These fields are persisted to the `Order` model when `is_partner_order` is True.
+- **Partner Order Constraints**:
+    - Validates that the merchant is a partner before processing.
+    - Automatically calculates `total_amount` as `partner_base_price * partner_order_count`.
+    - Allows skipping of pickup/delivery details, providing sensible defaults when omitted.
+ 
+ ### Changed
+ - **Refactored Order Creation**: Moved core order creation logic from `OrderCreateSerializer` to `IOrderService.create_dispatcher_order` to reduce complexity and improve maintainability.
+ - **Service Layer Enhancements**:
+     - Added `create_dispatcher_order` to `OrderService` interface and implementation.
+     - Added `process_partners_order` to handle partner-specific logic within the service layer.
+ 
+ ---
+ 
+
+## [2026-04-21] — Merchant Notification Management
+
+### Added
+- **Delete Merchant Notification**: Implemented endpoints for merchants to delete notifications.
+    - `DELETE /api/auth/notifications/<uuid:pk>/`: Delete a single notification.
+    - `DELETE /api/auth/notifications/delete-all/`: Clear all notifications for the merchant.
+- **Improved Logging**: Integrated `@exception_advice` with `ErrorLog` for consistent error tracking in notification views.
+
+---
 
 ## [2026-04-20] — Parcel Service Refactor & Bug Fixes
 
@@ -16,6 +46,15 @@ All notable changes to the AXpress backend are documented in this file.
     - Updated call to the renamed `process_parcel_delivery` method.
     - **Fixed logic bug**: `is_percel_order` flag is now correctly calculated as `is_pickup_percel or isdelivery_percel` instead of being hardcoded to `False`.
     - Explicitly update validated data with addresses returned from the service.
+
+---
+
+## [2026-04-20] — Performance Optimization: Notification Backgrounding
+
+### Changed
+- **Optimized Rider Notifications** in `orders/views.py`:
+    - Moved real-time push notifications into background threads to reduce API latency and prevent external service delays from blocking the request-response cycle.
+    - Affected views: `OrderStartView`, `OrderStatusChangeView` (for the "start" action), and `OrderCompleteView`.
 
 ---
 

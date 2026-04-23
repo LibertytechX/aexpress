@@ -5,14 +5,26 @@ This module contains third-party logistics integrations used within the orders
 application. Currently includes the SmartPercel locker-delivery integration.
 """
 
+from orders.models import Order
 from devs.utils.advice import log_exception_advice
 import logging
 from typing import Any, Optional
+from wallet.models import Charge, Wallet
+from wallet.escrow import EscrowManager
 
 import requests
 from django.conf import settings
 from abc import ABC, abstractmethod
 from typing import Tuple
+from subscriptions.services import (
+    get_active_postpaid_subscription,
+    process_order_subscription,
+    accumulate_postpaid_order,
+)
+from decimal import Decimal
+import uuid
+
+from sparky_utils.exceptions import ServiceException
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +292,30 @@ class OrderService(ABC):
         """
         pass
 
+    @abstractmethod
+    def process_non_cash_payment(
+        self, payment_method: str, request_user: any, order: Order
+    ) -> Tuple[bool, Any]:
+        """
+        Process non-cash payment for an order.
+        such as subscription payment, wallet payment, and postpaid payment, escow charge
+        """
+        pass
+
+    @abstractmethod
+    def create_dispatcher_order(self, request_user: any, validated_data: dict) -> Order:
+        """
+        Create an order from the dispatcher dashboard.
+        """
+        pass
+
+    @abstractmethod
+    def process_partners_order(self, order: Order, data: dict) -> Order:
+        """
+        Process partner-specific order fields.
+        """
+        pass
+
 
 class IOrderService(OrderService):
     """
@@ -369,6 +405,286 @@ class IOrderService(OrderService):
             response["parcel_info"] = create_response
 
         return True, response
+
+    @log_exception_advice(app_name="non_cash_payment")
+    def process_non_cash_payment(
+        self, payment_method: str, request_user: any, order: Order
+    ) -> Tuple[bool, Any]:
+        """
+        Process non-cash payment for an order.
+        such as subscription payment, wallet payment, and postpaid payment, escow charge
+        """
+        response = {"message": "", "status_code": 200}
+        match payment_method:
+            case "subscription":
+                subscription = process_order_subscription(order)
+                if not subscription:
+                    response["message"] = "Failed to process subscription payment"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+
+                return True, {}
+            case "wallet":
+                charges = Charge.objects.filter(
+                    user=request_user, status="pending", is_active=True
+                )
+                if charges.exists():
+                    order.delete()
+                    response["message"] = (
+                        "Failed to process wallet payment, you have pending charges 🔥"
+                    )
+                    response["status_code"] = 400
+                    return False, response
+                wallet = Wallet.objects.filter(user=request_user)
+                if wallet.count() == 0:
+                    # create the wallet
+                    wallet = Wallet.objects.create(user=request_user)
+                    order.delete()
+                    response["message"] = "Wallet not found"
+                    response["status_code"] = 404
+                    return False, response
+                wallet = wallet.first()
+                try:
+                    EscrowManager.hold_funds(
+                        wallet=wallet,
+                        amount=order.total_amount,
+                        order_number=order.order_number,
+                        description=f"Escrow hold for Quick Send order #{order.order_number}",
+                    )
+                    order.escrow_held = True
+                    order.save()
+                except ValueError as e:
+                    response["message"] = str(e)
+                    response["status_code"] = 400
+                    order.delete()
+                    return False, response
+                return True, response
+            case "postpaid":
+                merchant_profile = getattr(request_user, "merchant_profile", None)
+                if not merchant_profile:
+                    response["message"] = "Merchant profile not found"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                postpaid_sub = get_active_postpaid_subscription(merchant_profile)
+                if not postpaid_sub:
+                    response["message"] = "Postpaid subscription not found"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                if postpaid_sub.status == "blocked":
+                    response["message"] = "Postpaid subscription is blocked"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                accumulated = accumulate_postpaid_order(postpaid_sub, order)
+                if not accumulated:
+                    response["message"] = "Failed to accumulate postpaid order"
+                    response["status_code"] = 400
+                    # clear the order
+                    order.delete()
+                    return False, response
+                return True, response
+            case (
+                _
+            ):  # payment method not any of the cases above such as cash_on_delivery and receivers pay
+                return True, {}
+
+    @log_exception_advice(app_name="create_dispatcher_order")
+    def create_dispatcher_order(self, request_user: any, validated_data: dict) -> Order:
+        """
+        Implementation of dispatcher order creation.
+        """
+        from orders.models import Delivery, Vehicle
+        from dispatcher.models import Rider, Merchant as MerchantProfile
+        from orders.utils import geocode_address
+        from orders.pricing import calculate_effective_fare
+
+        # Extract fields
+        pickup = validated_data.get("pickup")
+        dropoff = validated_data.get("dropoff")
+        pickup_lat = validated_data.get("pickup_lat")
+        pickup_lng = validated_data.get("pickup_lng")
+        dropoff_lat = validated_data.get("dropoff_lat")
+        dropoff_lng = validated_data.get("dropoff_lng")
+        is_relay_order = validated_data.get("is_relay_order", False)
+        sender_name = validated_data.get("senderName")
+        sender_phone = validated_data.get("senderPhone")
+        receiver_name = validated_data.get("receiverName")
+        receiver_phone = validated_data.get("receiverPhone")
+        vehicle_name = validated_data.get("vehicle")
+        package_type = validated_data.get("packageType")
+        price = validated_data.get("price")
+        manual_price = bool(validated_data.get("manual_price"))
+        rider_id = (validated_data.get("riderId", "") or "").strip()
+        merchant_id = (validated_data.get("merchantId", "") or "").strip()
+        distance_km = validated_data.get("distance_km")
+        duration_minutes = validated_data.get("duration_minutes")
+        is_partner_order = validated_data.get("is_partner_order", False)
+        partner_order_count = validated_data.get("partner_order_count")
+
+        # Resolve User (Merchant or Request User)
+        order_user = request_user
+        merchant_profile = None
+        if merchant_id:
+            merchant_profile = MerchantProfile.objects.filter(merchant_id=merchant_id).first()
+            if merchant_profile:
+                order_user = merchant_profile.user
+        else:
+            merchant_profile = getattr(order_user, "merchant_profile", None)
+
+        # Resolve Vehicle
+        vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
+        if not vehicle_obj:
+            vehicle_obj = Vehicle.objects.first()
+
+        # Partner Constraints & Price Calculation
+        if is_partner_order:
+            if not merchant_profile or not merchant_profile.is_partner:
+                raise ServiceException(
+                    status_code=400, message="Merchant is not a partner"
+                )
+            
+            if not merchant_profile.partner_base_price:
+                raise ServiceException(
+                    status_code=400, message="Partner base price is not set for this merchant"
+                )
+            
+            if not partner_order_count:
+                raise ServiceException(
+                    status_code=400, message="partner_order_count is required for partner orders"
+                )
+            
+            total_amount = merchant_profile.partner_base_price * partner_order_count
+            
+            # Default values for missing data
+            pickup = pickup or "Partner Pickup"
+            dropoff = dropoff or "Partner Delivery"
+            sender_name = sender_name or (getattr(order_user, "business_name", "") or order_user.contact_name or order_user.phone)
+            sender_phone = sender_phone or order_user.phone
+            receiver_name = receiver_name or "Partner Receiver"
+            receiver_phone = receiver_phone or "0000000000"
+            distance_km = distance_km or 0
+            duration_minutes = duration_minutes or 0
+            package_type = package_type or "Box"
+        else:
+            # Calculate Price for regular orders
+            if manual_price and price is not None:
+                total_amount = price
+            else:
+                total_amount = calculate_effective_fare(
+                    order_user,
+                    vehicle_obj,
+                    distance_km or 0,
+                    duration_minutes or 0,
+                )
+
+            def _coords_missing(lat, lng):
+                return lat is None or lng is None
+
+            # Best-effort geocoding fallback
+            if _coords_missing(pickup_lat, pickup_lng) and pickup:
+                geo = geocode_address(pickup)
+                if geo:
+                    pickup_lat = geo.get("lat")
+                    pickup_lng = geo.get("lng")
+
+            if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
+                geo = geocode_address(dropoff)
+                if geo:
+                    dropoff_lat = geo.get("lat")
+                    dropoff_lng = geo.get("lng")
+
+        try:
+            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
+        except Exception:
+            pass
+
+        # Resolve Rider
+        rider_obj = None
+        if rider_id:
+            def _is_uuid(val: str) -> bool:
+                try:
+                    uuid.UUID(str(val))
+                    return True
+                except (ValueError, AttributeError, TypeError):
+                    return False
+
+            if _is_uuid(rider_id):
+                rider_obj = Rider.objects.filter(id=rider_id).first()
+                if not rider_obj:
+                    rider_obj = Rider.objects.filter(rider_id=rider_id).first()
+            else:
+                rider_obj = Rider.objects.filter(rider_id=rider_id).first()
+
+        # Create Order
+        order = Order.objects.create(
+            user=order_user,
+            pickup_address=pickup,
+            pickup_latitude=pickup_lat,
+            pickup_longitude=pickup_lng,
+            sender_name=sender_name,
+            sender_phone=sender_phone,
+            vehicle=vehicle_obj,
+            total_amount=total_amount,
+            rider=rider_obj,
+            dispatcher_assigned=True if rider_obj else False,
+            source="dispatcher_web",
+            status="Assigned" if rider_obj else "Pending",
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
+            is_relay_order=is_relay_order,
+            routing_status=(
+                Order.RoutingStatus.PENDING
+                if is_relay_order
+                else Order.RoutingStatus.READY
+            ),
+        )
+
+        # Create Delivery
+        Delivery.objects.create(
+            order=order,
+            pickup_address=pickup,
+            pickup_latitude=pickup_lat,
+            pickup_longitude=pickup_lng,
+            sender_name=sender_name,
+            sender_phone=sender_phone,
+            dropoff_address=dropoff,
+            dropoff_latitude=dropoff_lat,
+            dropoff_longitude=dropoff_lng,
+            receiver_name=receiver_name,
+            receiver_phone=receiver_phone,
+            package_type=package_type,
+            distance_km=distance_km,
+            duration_minutes=duration_minutes,
+        )
+
+        # Partner processing
+        if validated_data.get("is_partner_order"):
+            self.process_partners_order(order, validated_data)
+
+        # Post-creation tasks
+        payment_method = validated_data.get("payment_method")
+        if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
+            from orders.tasks import create_order_charge
+            create_order_charge.delay(order.id)
+
+        return order
+
+    def process_partners_order(self, order: Order, data: dict) -> Order:
+        """
+        Process partner-specific order fields.
+        """
+        order.is_partner_order = True
+        order.partner_order_count = data.get("partner_order_count")
+        order.file_uploaded_url = data.get("file_uploaded_url")
+        order.save()
+        return order
 
 
 def get_order_service() -> OrderService:

@@ -289,76 +289,19 @@ class QuickSendView(APIView):
             isdelivery_percel=isdelivery_percel,
             percel_info=percel_info,
         )
+        payment_method = data.get("payment_method", "wallet")
+        ok, response = order_service.process_non_cash_payment(
+            payment_method, request.user, order
+        )
 
-        if data.get("payment_method") == "subscription":
-
-            subscription = process_order_subscription(order)
-            if not subscription:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to process subscription payment. User has no active subscription."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if data.get("payment_method") == "postpaid":
-            # Postpaid processing
-            merchant_profile = getattr(request.user, "merchant_profile", None)
-            if not merchant_profile:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {"payment_method": ["User is not a merchant."]},
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
-            if not postpaid_sub:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "You do not have an active postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if postpaid_sub.status == "blocked":
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Your postpaid plan is blocked due to unpaid invoice."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Accumulate amount
-            accumulated = accumulate_postpaid_order(order)
-            if not accumulated:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to accumulate order amount to postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"non_field_errors": [response.get("message")]},
+                },
+                status=response.get("status_code", status.HTTP_400_BAD_REQUEST),
+            )
 
         # Create single delivery
         Delivery.objects.create(
@@ -405,64 +348,6 @@ class QuickSendView(APIView):
             },
             daemon=True,
         ).start()
-
-        # Hold funds in escrow if payment method is wallet
-        if data["payment_method"] == "wallet":
-            try:
-                # check if this user has pending charges
-                charges = Charge.objects.filter(
-                    user=request.user, status="pending", is_active=True
-                )
-                if charges.exists():
-                    return Response(
-                        {
-                            "success": False,
-                            "errors": {
-                                "wallet": [
-                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
-                                ]
-                            },
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                wallet = Wallet.objects.get(user=request.user)
-
-                # Hold funds in escrow
-                try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
-                        amount=total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Quick Send order #{order.order_number}",
-                    )
-
-                    # Mark order as having escrow held
-                    order.escrow_held = True
-                    order.save()
-
-                except ValueError as e:
-                    # Insufficient balance - rollback order
-                    order.delete()
-                    return Response(
-                        {"success": False, "errors": {"wallet": [str(e)]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            except Wallet.DoesNotExist:
-                # Create wallet if it doesn't exist
-                wallet = Wallet.objects.create(user=request.user)
-                order.delete()
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "wallet": [
-                                "Insufficient wallet balance. Please fund your wallet first."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         # Notify all online riders about the new order (fire-and-forget in background)
         def _notify_riders():
@@ -1855,18 +1740,21 @@ class OrderStartView(APIView):
         response = _advance_order(request, order_number, "Started", "Order Started")
 
         # Push notification — fire-and-forget, don't block the response
-        try:
-            rider = getattr(request.user, "rider_profile", None)
-            if rider:
-                notify_rider(
-                    rider=rider,
-                    title="Trip Started 🚀",
-                    body=f"You're on your way to pick up order #{order_number}.",
-                    data={"order_number": order_number, "status": "Started"},
-                )
-        except Exception as exc:
-            logger.warning(f"Start notification failed: {exc}")
-            pass
+        rider = getattr(request.user, "rider_profile", None)
+        if rider:
+
+            def _notify_rider_start():
+                try:
+                    notify_rider(
+                        rider=rider,
+                        title="Trip Started 🚀",
+                        body=f"You're on your way to pick up order #{order_number}.",
+                        data={"order_number": order_number, "status": "Started"},
+                    )
+                except Exception as exc:
+                    logger.warning(f"Start notification failed: {exc}")
+
+            threading.Thread(target=_notify_rider_start, daemon=True).start()
 
         return response
 
@@ -1919,17 +1807,21 @@ class OrderStatusChangeView(APIView):
 
         if action == "start":
             response = _advance_order(request, order_number, "Started", "Order Started")
-            try:
-                rider = getattr(request.user, "rider_profile", None)
-                if rider:
-                    notify_rider(
-                        rider=rider,
-                        title="Trip Started 🚀",
-                        body=f"You're on your way to pick up order #{order_number}.",
-                        data={"order_number": order_number, "status": "Started"},
-                    )
-            except Exception as exc:
-                logger.warning(f"Start notification failed: {exc}")
+            rider = getattr(request.user, "rider_profile", None)
+            if rider:
+
+                def _notify_rider_start_alt():
+                    try:
+                        notify_rider(
+                            rider=rider,
+                            title="Trip Started 🚀",
+                            body=f"You're on your way to pick up order #{order_number}.",
+                            data={"order_number": order_number, "status": "Started"},
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Start notification failed: {exc}")
+
+                threading.Thread(target=_notify_rider_start_alt, daemon=True).start()
             return response
 
         elif action == "pickup":
@@ -2090,21 +1982,23 @@ class OrderCompleteView(APIView):
             d.save(update_fields=["status", "delivered_at"])
 
         # ── Step 5: Push notification ─────────────────────────────────────────
-        try:
-            notify_rider(
-                rider=rider,
-                title="Order Completed 🎉",
-                body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
-                data={
-                    "order_number": order_number,
-                    "net_earning": str(net_earning),
-                },
-            )
-        except Exception as exc:
-            logger.warning(
-                f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
-            )
-            pass
+        def _notify_order_done():
+            try:
+                notify_rider(
+                    rider=rider,
+                    title="Order Completed 🎉",
+                    body=f"Order #{order_number} completed. ₦{net_earning} credited to your wallet.",
+                    data={
+                        "order_number": order_number,
+                        "net_earning": str(net_earning),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
+                )
+
+        threading.Thread(target=_notify_order_done, daemon=True).start()
 
         # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
         # but we can rely on `_advance_order` to handle it cleanly.

@@ -483,7 +483,9 @@ export const MerchantsAPI = {
             monthOrders: m.monthOrders || 0,
             walletBalance: parseFloat(m.walletBalance) || 0,
             status: m.status || 'Active',
-            joined: m.joined || 'N/A'
+            joined: m.joined || 'N/A',
+            isPartner: m.isPartner || false,
+            partnerBasePrice: parseFloat(m.partnerBasePrice) || 0
         }));
     }
 };

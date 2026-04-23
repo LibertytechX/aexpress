@@ -730,6 +730,8 @@ class Merchant(models.Model):
     has_price_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_partner = models.BooleanField(default=False)
+    partner_base_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         db_table = "merchants"

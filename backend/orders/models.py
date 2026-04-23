@@ -251,7 +251,14 @@ class Order(models.Model):
     vehicle = models.ForeignKey(
         Vehicle, on_delete=models.PROTECT, related_name="orders"
     )
-
+    partner = models.CharField(
+        max_length=20, null=True, blank=True
+    )
+    is_partner_order = models.BooleanField(default=False)
+    partner_order_count = models.PositiveIntegerField(null=True, blank=True)
+    day_returned_count = models.PositiveIntegerField(null=True, blank=True)
+    rider_completed_count = models.PositiveIntegerField(null=True, blank=True)
+    file_uploaded_url = models.URLField(null=True, blank=True)
     # Pickup information
     pickup_address = models.TextField()
     pickup_latitude = models.FloatField(null=True, blank=True)
