@@ -1444,6 +1444,11 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+    
+    def get_permissions(self):
+        if self.action == "list":
+            return [IsDispatcher()]
+        return super().get_permissions()
 
     @exception_advice(model_object=ErrorLog)
     def destroy(self, request, *args, **kwargs):
