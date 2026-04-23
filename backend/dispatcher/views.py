@@ -7,7 +7,7 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
-
+from orders.models import Order
 from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.pagination import PageNumberPagination
@@ -150,7 +150,6 @@ class RiderViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(rider)
         return Response(serializer.data)
 
-
     @action(detail=True, methods=["post"], url_path="toggle_duty")
     def toggle_duty(self, request, pk=None):
         """Toggle a rider's duty status (online/offline)."""
@@ -234,11 +233,10 @@ class OrderPagination(PageNumberPagination):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    from orders.models import Order
 
     queryset = (
         Order.objects.all()
-        .select_related("user", "rider", "rider__user")
+        .select_related("user", "rider", "rider__user", "vehicle")
         .prefetch_related("deliveries")
     )
     from .serializers import (
@@ -678,10 +676,10 @@ class OrderViewSet(viewsets.ModelViewSet):
     def update_partner_stats(self, request, order_number=None):
         """Update partner-specific order stats (rider_completed_count, day_returned_count)."""
         order = self.get_object()
-        
+
         rider_completed_count = request.data.get("rider_completed_count")
         day_returned_count = request.data.get("day_returned_count")
-        
+
         update_fields = []
         if rider_completed_count is not None:
             order.rider_completed_count = int(rider_completed_count)
@@ -689,10 +687,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         if day_returned_count is not None:
             order.day_returned_count = int(day_returned_count)
             update_fields.append("day_returned_count")
-            
+
         if update_fields:
             order.save(update_fields=update_fields)
-            
+
         return Response(self.get_serializer(order).data)
 
     @exception_advice()
@@ -843,7 +841,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
                 # Notify the merchant that a rider was assigned to a relay leg
                 try:
-                    merchant_profile = getattr(sub_order.merchant, "merchant_profile", None)
+                    merchant_profile = getattr(
+                        sub_order.merchant, "merchant_profile", None
+                    )
                     if merchant_profile:
                         send_merchant_notification.delay(
                             merchant_id=str(merchant_profile.id),
@@ -1474,7 +1474,7 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
-    
+
     def get_permissions(self):
         if self.action == "list":
             return [IsDispatcher()]
