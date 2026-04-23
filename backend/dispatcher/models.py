@@ -1,3 +1,4 @@
+from dispatcher.utils import generate_notification_id
 from email.policy import default
 import hashlib
 import math
@@ -1214,7 +1215,7 @@ class MerchantNotification(models.Model):
     Allows for in-app 'Notification Center' / inbox functionality.
     """
 
-    id = models.BigAutoField(primary_key=True)
+    id = models.BigAutoField(primary_key=True, default=generate_notification_id)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="notifications"
     )

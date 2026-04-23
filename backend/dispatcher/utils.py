@@ -2,6 +2,7 @@ import requests
 import logging
 from django.conf import settings
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,3 +225,10 @@ def find_closest_zone(lat, lng):
             f"find_closest_zone: Found closest zone '{closest.name}' via Haversine (dist: {min_dist:.2f}km)"
         )
     return closest
+
+
+def generate_notification_id() -> int:
+    from .models import MerchantNotification
+
+    count = MerchantNotification.objects.all().count() + 1
+    return count
