@@ -17,6 +17,7 @@ All notable changes to the AXpress project are documented in this file.
 #### Added
 - **Order Stats Update**: Added `PATCH /dispatch/orders/{order_number}/update-partner-stats/` to update partner processing counts.
 - **Serializer Expansion**: Updated `OrderSerializer` to include `is_partner_order`, `partner_order_count`, `day_returned_count`, `rider_completed_count`, and `file_uploaded_url`.
+- **Merchant Access Control**: Restricted `MerchantViewSet` list action to `IsDispatcher` permission and other actions to `IsDispatcherAdmin`.
 
 ---
 

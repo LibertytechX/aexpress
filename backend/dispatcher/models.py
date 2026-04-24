@@ -689,6 +689,53 @@ class Rider(models.Model):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 
 
+class VehicleReassignment(models.Model):
+    """Tracks history of vehicle asset assignments to riders."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    from_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_from",
+    )
+    to_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_to",
+    )
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reassignments",
+        help_text="The vehicle asset assigned (null if unassigned)",
+    )
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_initiated",
+        help_text="The admin who performed this assignment",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicle_reassignments"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        v_plate = self.vehicle_asset.plate_number if self.vehicle_asset else "None"
+        f_rider = self.from_rider.rider_id if self.from_rider else "None"
+        t_rider = self.to_rider.rider_id if self.to_rider else "None"
+        return f"Reassignment: {v_plate} ({f_rider} -> {t_rider}) by {self.admin}"
+
+
 class DispatcherProfile(models.Model):
     class Role(models.TextChoices):
         ZONE_LEAD = "zone_lead", "Zone Lead"

@@ -4,9 +4,12 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-04-23] — Data Integrity & Record Protection
+## [2026-04-23] — Data Integrity, Reassignment Tracking & Record Protection
 
 ### Added
+- **Vehicle Reassignment History**: Implemented comprehensive tracking of vehicle movements between riders.
+    - Added `VehicleReassignment` model with `from_rider`, `to_rider`, and `admin` tracking.
+    - Records are automatically created during every `assign_vehicle` action.
 - **Rider Soft Delete**: Implemented a robust soft-delete mechanism for the `Rider` model.
     - Added `is_deleted` field and `SoftDeleteManager`/`SoftDeleteQuerySet`.
     - `Rider.objects.all()` now automatically excludes soft-deleted riders.
@@ -14,6 +17,9 @@ All notable changes to the AXpress backend are documented in this file.
 - **Record Protection (Admin)**: Disabled Django Admin deletion for mission-critical models to prevent accidental data loss.
     - Affected models: `Rider`, `VehicleAsset`, `Transaction`, `Charge`.
     - Removed the "Delete" button from individual record views and the "Delete selected" bulk action from list views.
+
+### Changed
+- **Vehicle Assignment Restriction**: Restricted the `assign_vehicle` endpoint to users with the `admin` dispatcher role.
 
 ---
  

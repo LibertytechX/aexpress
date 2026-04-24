@@ -402,7 +402,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "partner_order_count",
             "day_returned_count",
             "rider_completed_count",
-            "file_uploaded_url",
+            "file_uploaded_urls",
             "customerPhone",
             "vehicle",
             "payment_status",
@@ -476,7 +476,11 @@ class OrderSerializer(serializers.ModelSerializer):
         return first.receiver_phone if first else ""
 
     def get_vehicle(self, obj):
-        return obj.vehicle.name if obj.vehicle else "Bike"
+        vehicle = getattr(obj, "vehicle", None)
+        try:
+            return vehicle.name if vehicle else "Bike"
+        except Exception:
+            return "Bike"
 
     def get_pkg(self, obj):
         first = obj.deliveries.first()
@@ -651,12 +655,24 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     # Input fields from Frontend
     pickup = serializers.CharField(write_only=True, required=False, allow_blank=True)
     dropoff = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    senderName = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    senderPhone = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    receiverName = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    receiverPhone = serializers.CharField(write_only=True, required=False, allow_blank=True)
-    vehicle = serializers.CharField(write_only=True, required=False, allow_blank=True)  # "Bike", "Car", etc.
-    packageType = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    senderName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    senderPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    vehicle = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )  # "Bike", "Car", etc.
+    packageType = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
     )
@@ -698,7 +714,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         write_only=True, required=False, default=False
     )
     partner_order_count = serializers.IntegerField(write_only=True, required=False)
-    file_uploaded_url = serializers.URLField(write_only=True, required=False)
+    file_uploaded_urls = serializers.ListField(
+        child=serializers.URLField(), required=False, default=list
+    )
 
     class Meta:
         from orders.models import Order
@@ -728,7 +746,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "is_relay_order",
             "is_partner_order",
             "partner_order_count",
-            "file_uploaded_url",
+            "file_uploaded_urls",
             "payment_method",
         ]
 
@@ -853,8 +871,15 @@ class MerchantSerializer(serializers.ModelSerializer):
     walletBalance = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     joined = serializers.DateTimeField(source="created_at", read_only=True)
-    isPartner = serializers.BooleanField(source="merchant_profile.is_partner", read_only=True)
-    partnerBasePrice = serializers.DecimalField(source="merchant_profile.partner_base_price", max_digits=10, decimal_places=2, read_only=True)
+    isPartner = serializers.BooleanField(
+        source="merchant_profile.is_partner", read_only=True
+    )
+    partnerBasePrice = serializers.DecimalField(
+        source="merchant_profile.partner_base_price",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
 
     class Meta:
         model = User

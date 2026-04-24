@@ -166,6 +166,30 @@
 ### 1. List Riders
 **Endpoint:** `GET /riders/`
 
+### 2. Assign Vehicle
+**Endpoint:** `POST /riders/{id}/assign_vehicle/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Assigns or unassigns a vehicle asset to a rider.
+
+**Permissions**: Restricted to `dispatcheradmin` only.
+
+**Request Body**:
+```json
+{
+  "vehicle_asset_id": "uuid" // or null to unassign
+}
+```
+
+**Response**:
+Returns the updated rider object.
+
+**History Tracking**:
+Every assignment/unassignment creates a `VehicleReassignment` record:
+- If a vehicle is assigned to Rider A from Rider B: `from_rider=Rider B`, `to_rider=Rider A`.
+- If a rider's vehicle is unassigned: `from_rider=Rider`, `to_rider=null`.
+- If a rider moves from Vehicle Y to Vehicle X: Records unassignment of Y and assignment of X.
+- The record captures the `admin` user who initiated the request.
+
 ---
 
 ## Chat System API Documentation

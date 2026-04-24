@@ -7,7 +7,7 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
-
+from orders.models import Order
 from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.pagination import PageNumberPagination
@@ -66,19 +66,6 @@ class RiderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # user = self.request.user
-        # role = user.dispatcher_profile.role
-        # if the dispatcher role is zone_lead
-        # if role == "zone_lead":
-        #     try:
-        #         zone_lead = VerticalLead.objects.get(user=user)
-        #         zones = zone_lead.area_zones.all()
-        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
-        #         return Rider.objects.filter(hub__in=relay_nodes).select_related(
-        #             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
-        #         )
-        #     except VerticalLead.DoesNotExist:
-        #         pass
         return Rider.objects.all().select_related(
             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
@@ -97,27 +84,69 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.user.save(update_fields=["password"])
         return Response({"success": True, "message": "Password updated successfully."})
 
-    @action(detail=True, methods=["post"], url_path="assign_vehicle")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="assign_vehicle",
+        permission_classes=[IsDispatcherAdmin],
+    )
     def assign_vehicle(self, request, pk=None):
         """Assign or unassign a vehicle asset to a rider."""
         rider = self.get_object()
         vehicle_asset_id = request.data.get("vehicle_asset_id")
 
-        if vehicle_asset_id:
-            from .models import VehicleAsset
+        from .models import VehicleAsset, VehicleReassignment, Rider
 
+        old_vehicle = rider.vehicle_asset
+        new_vehicle = None
+        from_rider = None
+        to_rider = None
+
+        if vehicle_asset_id:
             try:
-                vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
+                new_vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
             except VehicleAsset.DoesNotExist:
                 return Response(
                     {"error": "Vehicle asset not found."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            rider.vehicle_asset = vehicle
+
+            # If the vehicle was already with someone else, they are the from_rider
+            from_rider = Rider.objects.filter(vehicle_asset=new_vehicle).first()
+            to_rider = rider
+
+            # If the rider was already with another vehicle, record that unassignment too
+            if old_vehicle and old_vehicle != new_vehicle:
+                VehicleReassignment.objects.create(
+                    from_rider=rider,
+                    to_rider=None,
+                    vehicle_asset=old_vehicle,
+                    admin=request.user,
+                )
+
+            # If from_rider exists and is different from to_rider, clear their vehicle
+            if from_rider and from_rider != to_rider:
+                from_rider.vehicle_asset = None
+                from_rider.save(update_fields=["vehicle_asset"])
+
+            rider.vehicle_asset = new_vehicle
         else:
+            # Unassigning current rider from their current vehicle
+            from_rider = rider
+            to_rider = None
+            new_vehicle = old_vehicle
             rider.vehicle_asset = None
 
         rider.save(update_fields=["vehicle_asset"])
+
+        # Create reassignment history record for the target vehicle
+        VehicleReassignment.objects.create(
+            from_rider=from_rider,
+            to_rider=to_rider,
+            vehicle_asset=new_vehicle,
+            admin=request.user,
+        )
+
         serializer = self.get_serializer(rider)
         return Response(serializer.data)
 
@@ -204,11 +233,10 @@ class OrderPagination(PageNumberPagination):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    from orders.models import Order
 
     queryset = (
         Order.objects.all()
-        .select_related("user", "rider", "rider__user")
+        .select_related("user", "rider", "rider__user", "vehicle")
         .prefetch_related("deliveries")
     )
     from .serializers import (
@@ -648,10 +676,10 @@ class OrderViewSet(viewsets.ModelViewSet):
     def update_partner_stats(self, request, order_number=None):
         """Update partner-specific order stats (rider_completed_count, day_returned_count)."""
         order = self.get_object()
-        
+
         rider_completed_count = request.data.get("rider_completed_count")
         day_returned_count = request.data.get("day_returned_count")
-        
+
         update_fields = []
         if rider_completed_count is not None:
             order.rider_completed_count = int(rider_completed_count)
@@ -659,10 +687,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         if day_returned_count is not None:
             order.day_returned_count = int(day_returned_count)
             update_fields.append("day_returned_count")
-            
+
         if update_fields:
             order.save(update_fields=update_fields)
-            
+
         return Response(self.get_serializer(order).data)
 
     @exception_advice()
@@ -813,7 +841,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
                 # Notify the merchant that a rider was assigned to a relay leg
                 try:
-                    merchant_profile = getattr(sub_order.merchant, "merchant_profile", None)
+                    merchant_profile = getattr(
+                        sub_order.merchant, "merchant_profile", None
+                    )
                     if merchant_profile:
                         send_merchant_notification.delay(
                             merchant_id=str(merchant_profile.id),
@@ -1444,6 +1474,11 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [IsDispatcher()]
+        return super().get_permissions()
 
     @exception_advice(model_object=ErrorLog)
     def destroy(self, request, *args, **kwargs):
