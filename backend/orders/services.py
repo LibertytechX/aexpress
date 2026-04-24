@@ -682,7 +682,7 @@ class IOrderService(OrderService):
         """
         order.is_partner_order = True
         order.partner_order_count = data.get("partner_order_count")
-        order.file_uploaded_url = data.get("file_uploaded_url")
+        order.file_uploaded_urls = data.get("file_uploaded_urls", [])
         order.save()
         return order
 

@@ -258,7 +258,7 @@ class Order(models.Model):
     partner_order_count = models.PositiveIntegerField(null=True, blank=True)
     day_returned_count = models.PositiveIntegerField(null=True, blank=True)
     rider_completed_count = models.PositiveIntegerField(null=True, blank=True)
-    file_uploaded_url = models.URLField(null=True, blank=True)
+    file_uploaded_urls = models.JSONField(null=True, blank=True, default=list)
     # Pickup information
     pickup_address = models.TextField()
     pickup_latitude = models.FloatField(null=True, blank=True)
