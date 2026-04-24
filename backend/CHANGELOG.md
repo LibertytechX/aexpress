@@ -4,6 +4,13 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-04-24] — Vehicle Tracking Tools
+
+### Added
+- **Vehicle History Command**: Created `get_vehicle_history` management command to retrieve historical telemetry for a specific plate number within a date range.
+
+---
+
 ## [2026-04-23] — Data Integrity, Reassignment Tracking & Record Protection
 
 ### Added
