@@ -4,18 +4,18 @@ import logging
 from datetime import datetime
 from django.core.management.base import BaseCommand
 from django.utils import timezone
-from dispatcher.models import VehicleAsset, VehicleTracking
+from dispatcher.models import VehicleAsset, VehicleTracking, Rider
 from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = "Get vehicle tracking history for a particular plate number within a date range."
+    help = "Get vehicle tracking history for a particular rider (by riderID) within a date range."
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "plate_number", type=str, help="The vehicle plate number to search for."
+            "rider_id", type=str, help="The rider ID (e.g. AX-1234) to search for."
         )
         parser.add_argument(
             "--start",
@@ -35,7 +35,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        plate_number = options["plate_number"]
+        rider_id = options["rider_id"]
         start_str = options["start"]
         end_str = options["end"]
         limit = options["limit"]
@@ -80,26 +80,41 @@ class Command(BaseCommand):
         else:
             end_dt = now
 
-        self.stdout.write(f"Searching for tracking history for plate: {plate_number}")
+        self.stdout.write(f"Searching for tracking history for rider: {rider_id}")
         self.stdout.write(f"Period: {start_dt} to {end_dt}")
 
-        # 2. Find VehicleAsset
-        asset = VehicleAsset.objects.filter(plate_number__iexact=plate_number).first()
+        # 2. Find Rider
+        rider = Rider.objects.filter(rider_id__iexact=rider_id).first()
+        if not rider:
+            self.stderr.write(
+                self.style.ERROR(f"No Rider found with ID: {rider_id}")
+            )
+            return
+
+        self.stdout.write(self.style.SUCCESS(f"Found Rider: {rider.user.contact_name or rider.user.phone}"))
+
+        # 3. Find VehicleAsset
+        asset = rider.vehicle_asset
+        if not asset:
+            # Fallback to plate number string on rider model
+            plate = rider.vehicle_plate_number
+            if plate and plate != "TEMP_PLATE":
+                self.stdout.write(f"Rider has no asset linked, trying fallback plate: {plate}")
+                asset = VehicleAsset.objects.filter(plate_number__iexact=plate).first()
+        
         if not asset:
             self.stderr.write(
-                self.style.ERROR(
-                    f"No VehicleAsset found with plate number: {plate_number}"
-                )
+                self.style.ERROR(f"No active VehicleAsset found for rider: {rider_id}")
             )
             return
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Found Asset: {asset.asset_id} ({asset.get_vehicle_type_display()})"
+                f"Found Asset: {asset.asset_id} (Plate: {asset.plate_number})"
             )
         )
 
-        # 3. Query history
+        # 4. Query history
         history = VehicleTracking.objects.filter(
             vehicle_asset=asset, created_at__gte=start_dt, created_at__lte=end_dt
         ).order_by("-created_at")[:limit]
@@ -115,7 +130,7 @@ class Command(BaseCommand):
             self.style.SUCCESS(f"Retrieved {count} records (limited to {limit}):")
         )
 
-        # 4. Format output
+        # 5. Format output
         header = f"{'Timestamp':<25} | {'Latitude':<12} | {'Longitude':<12} | {'Travelled':<12}"
         self.stdout.write(header)
         self.stdout.write("-" * len(header))
