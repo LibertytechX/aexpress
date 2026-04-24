@@ -402,7 +402,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "partner_order_count",
             "day_returned_count",
             "rider_completed_count",
-            "file_uploaded_url",
+            "file_uploaded_urls",
             "customerPhone",
             "vehicle",
             "payment_status",
@@ -714,7 +714,9 @@ class OrderCreateSerializer(serializers.ModelSerializer):
         write_only=True, required=False, default=False
     )
     partner_order_count = serializers.IntegerField(write_only=True, required=False)
-    file_uploaded_url = serializers.URLField(write_only=True, required=False)
+    file_uploaded_urls = serializers.ListField(
+        child=serializers.URLField(), required=False, default=list
+    )
 
     class Meta:
         from orders.models import Order
@@ -744,7 +746,7 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "is_relay_order",
             "is_partner_order",
             "partner_order_count",
-            "file_uploaded_url",
+            "file_uploaded_urls",
             "payment_method",
         ]
 
