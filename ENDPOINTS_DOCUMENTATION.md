@@ -807,7 +807,36 @@ Authentication: Required (Merchant)
 
 ## DISPATCHER ORDERS
 
-### 1. Update Partner Stats
+### 1. Create Order
+```
+POST /dispatch/orders/
+Description: Creates a new order manually from the dispatcher portal.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "pickup": "Pickup Address",
+    "dropoff": "Dropoff Address",
+    "senderName": "Sender Name",
+    "senderPhone": "08012345678",
+    "receiverName": "Receiver Name",
+    "receiverPhone": "08087654321",
+    "vehicle": "Bike",
+    "packageType": "Box",
+    "price": 2500.00,
+    "cod": 0.00,
+    "riderId": "RIDER_UUID",
+    "merchantId": "MERCHANT_UUID",
+    "is_partner_order": true,
+    "partner_order_count": 10,
+    "file_uploaded_urls": [
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
+    ]
+  }
+Response: Created Order object.
+```
+
+### 2. Update Partner Stats
 ```
 PATCH /dispatch/orders/{order_number}/update-partner-stats/
 Description: Updates processing metrics for a partner bulk order.

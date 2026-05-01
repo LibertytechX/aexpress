@@ -3035,15 +3035,28 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 </div>
               )}
 
-              {order.fileUploadedUrl && (
+              {((order.fileUploadedUrls && order.fileUploadedUrls.length > 0) || order.fileUploadedUrl) && (
                 <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Document</div>
-                  <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff" }}>
-                    <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
-                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
-                      Click to view full size
-                    </div>
-                  </a>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Documents</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {order.fileUploadedUrls && order.fileUploadedUrls.length > 0 ? (
+                      order.fileUploadedUrls.map((url, index) => (
+                        <a key={index} href={url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "calc(50% - 4px)" }}>
+                          <img src={url} alt={`Order document ${index}`} style={{ width: "100%", maxHeight: 120, objectFit: "contain" }} />
+                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 6px", fontSize: 8, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                            Click to view
+                          </div>
+                        </a>
+                      ))
+                    ) : (
+                      <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "100%" }}>
+                        <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                          Click to view full size
+                        </div>
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -6595,37 +6608,62 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [isPartnerOrder, setIsPartnerOrder] = useState(false);
   const [partnerOrderCount, setPartnerOrderCount] = useState(1);
-  const [fileUploadedUrl, setFileUploadedUrl] = useState("");
+  const [fileUploadedUrls, setFileUploadedUrls] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
 
   const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
   const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const inputElement = e.target;
+    const files = Array.from(inputElement.files);
+    if (files.length === 0) return;
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
+    
     try {
-      const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
-        method: 'POST',
-        headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
-        body: formData
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
+          method: 'POST',
+          headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
+          body: formData
+        });
+        const data = await res.json();
+        console.log("Upload Response:", data);
+        const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+        
+        if (res.ok && fileUrl) {
+          return fileUrl;
+        } else {
+          throw new Error(data.message || "Invalid response structure");
+        }
       });
-      const data = await res.json();
-      console.log("Upload Response:", data);
-      const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
-      
-      if (res.ok && fileUrl) {
-        setFileUploadedUrl(fileUrl);
-      } else {
-        setError("File upload failed: " + (data.message || "Invalid response structure"));
+
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUrls = [];
+      let hasError = false;
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successfulUrls.push(result.value);
+        } else {
+          hasError = true;
+          console.error("File upload failed:", result.reason);
+        }
+      });
+
+      if (hasError) {
+        setError("Some files failed to upload.");
       }
+
+      setFileUploadedUrls(prev => [...prev, ...successfulUrls]);
     } catch (err) {
       setError("File upload error");
     } finally {
       setIsUploading(false);
+      // Clear the input value so the same files can be selected again if needed
+      if (inputElement) inputElement.value = '';
     }
   };
 
@@ -6756,7 +6794,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
       if (!receiverName) { setError("Receiver name is required"); return; }
     } else {
       if (!merchantId) { setError("Merchant is required for partner orders"); return; }
-      if (!fileUploadedUrl) { setError("Proof/File upload is required for partner orders"); return; }
+      if (fileUploadedUrls.length === 0) { setError("Proof/File upload is required for partner orders"); return; }
     }
     setSubmitting(true);
     try {
@@ -6810,7 +6848,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         dropoff_lng: finalDropoffLng,
         is_partner_order: isPartnerOrder,
         partner_order_count: partnerOrderCount,
-        file_uploaded_url: fileUploadedUrl,
+        file_uploaded_urls: fileUploadedUrls,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -6892,10 +6930,21 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
               <div>
                 <label style={lSt}>Upload Partner Proof / File {isUploading && "(Uploading...)"}</label>
                 <div style={{ position: "relative" }}>
-                  <input type="file" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
-                  {fileUploadedUrl && (
-                    <div style={{ position: "absolute", right: 10, top: 10, color: S.green, fontSize: 12 }}>
-                      ✓ Uploaded
+                  <input type="file" multiple accept="image/*" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
+                  {fileUploadedUrls.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {fileUploadedUrls.map((url, index) => (
+                        <div key={index} style={{ position: "relative", width: 60, height: 60, borderRadius: 8, overflow: "hidden", border: `1px solid ${S.border}` }}>
+                          <img src={url} alt={`Upload ${index}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <button
+                            type="button"
+                            onClick={() => setFileUploadedUrls(fileUploadedUrls.filter((_, i) => i !== index))}
+                            style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 16, height: 16, fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
