@@ -323,6 +323,7 @@ const normalizeOrder = (o) => ({
     mode: o.mode || 'quick',
     dispatcher_assigned: o.dispatcher_assigned || false,
     verticalLeadName: o.vertical_lead_name || null,
+    cancellation_reason: o.cancellation_reason || '',
 });
 
 export const OrdersAPI = {
