@@ -430,6 +430,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "sub_orders",
             "dispatcher_assigned",
             "source",
+            "cancellation_reason",
         ]
 
     def get_pickup_lat(self, obj):

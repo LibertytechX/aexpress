@@ -1543,7 +1543,10 @@ export default function AXDispatchPortal() {
       if (["Picked Up", "In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "Package picked up", by: o.rider, type: "pickup" });
       if (["In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "In transit to dropoff", by: "GPS", type: "transit" });
       if (o.status === "Delivered") { b.push({ time: "auto", event: "Delivered — confirmed", by: o.rider, type: "delivered" }); if (o.cod > 0) b.push({ time: "auto", event: `COD settled: ₦${(o.cod - o.codFee).toLocaleString()}`, by: "System", type: "settlement" }); }
-      if (o.status === "Cancelled") b.push({ time: "auto", event: "Order cancelled", by: "Dispatch", type: "cancel" });
+      if (o.status === "Cancelled") {
+        const cancelText = o.cancellation_reason ? `Order cancelled (${o.cancellation_reason})` : "Order cancelled";
+        b.push({ time: "auto", event: cancelText, by: "Dispatch", type: "cancel" });
+      }
       if (o.status === "Failed") b.push({ time: "auto", event: "Delivery failed", by: o.rider || "System", type: "fail" });
       logs[o.id] = b;
     });
@@ -1853,7 +1856,11 @@ export default function AXDispatchPortal() {
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
+        updateOrder(oid, { 
+          status: ns, 
+          ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}),
+          ...(ns === "Cancelled" ? { cancellation_reason: reason } : {})
+        });
         addLog(oid, `Status → ${ns}${reason ? ` (${reason})` : ""}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
         // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
@@ -3017,6 +3024,16 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           {!isTerminal && <button onClick={() => onCancelRequest(order)} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
         </div>
       </div>
+
+      {order.status === "Cancelled" && order.cancellation_reason && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: `1.5px solid ${S.red}44`, borderRadius: 12, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, animation: "fadeIn 0.3s ease" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: S.red, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>!</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: S.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{order.cancellation_reason}</div>
+          </div>
+        </div>
+      )}
 
       {/* STATUS PROGRESSION BAR */}
       {!isTerminal && (
