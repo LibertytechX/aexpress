@@ -282,7 +282,8 @@ const normalizeOrder = (o) => ({
     partnerOrderCount: o.partner_order_count || null,
     dayReturnedCount: o.day_returned_count || 0,
     riderCompletedCount: o.rider_completed_count || 0,
-    fileUploadedUrl: o.file_uploaded_url || null,
+    fileUploadedUrl: o.file_uploaded_urls && o.file_uploaded_urls.length > 0 ? o.file_uploaded_urls[0] : (o.file_uploaded_url || null),
+    fileUploadedUrls: o.file_uploaded_urls || [],
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',

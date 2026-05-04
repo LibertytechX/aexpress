@@ -302,6 +302,10 @@ MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "")
 MAILGUN_FROM_EMAIL = os.getenv("MAILGUN_FROM_EMAIL", f"mailgun@{MAILGUN_DOMAIN}")
 
+# MailNow Configuration
+MAILNOW_API_URL = os.getenv("MAILNOW_API_URL", "http://127.0.0.1:3200/v1/email/send")
+MAILNOW_API_KEY = os.getenv("MAILNOW_API_KEY", "mn_live_7e59df7ce4a14545b443837804ec9722")
+
 # AWS S3 Configuration
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")

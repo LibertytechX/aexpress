@@ -4,6 +4,17 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+## [2026-04-29] — Multiple Image Upload in Dispatcher Portal
+
+### Frontend
+#### Added
+- **Multiple Image Selection**: Enhanced the "Create Order" modal to support selecting and uploading multiple images simultaneously.
+- **Image Previews**: Added a grid view for uploaded images with the ability to remove individual files before submission.
+- **Improved Order Details**: Updated the Order Details view to display all uploaded documents.
+
+#### Changed
+- **API Payload**: Updated the dispatcher create order payload to send `file_uploaded_urls` as a list of strings.
+
 ## [2026-04-23] — Partner Order Tracking & Management
 
 ### Frontend
