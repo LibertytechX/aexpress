@@ -340,22 +340,27 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCancelOrder = async (orderNumber) => {
+  const handleCancelOrder = async (orderNumber, reason) => {
     setLoading(true);
     try {
-      const response = await API.Orders.cancelOrder(orderNumber);
-      if (response.success) {
+      const response = await API.Orders.cancelOrder(orderNumber, reason);
+      // Handle both {success: true} and {status: 'success'}
+      if (response.success || response.status === 'success') {
         showNotif(response.message, 'success');
-        if (response.refund && response.refund.processed) {
-          showNotif(`₦${response.refund.amount.toLocaleString()} refunded to wallet`, 'success');
+        
+        // Extract refund info from top-level or data object
+        const refund = response.refund || response.data?.refund;
+        if (refund && refund.processed) {
+          showNotif(`₦${refund.amount.toLocaleString()} refunded to wallet`, 'success');
         }
+        
         await loadOrders();
         await loadWalletBalance();
         await loadTransactions();
         setOrderDetailId(null); // Go back to orders list
         return { success: true };
       } else {
-        const errorMsg = response.error || response.detail || 'Failed to cancel order';
+        const errorMsg = response.error || response.message || response.detail || 'Failed to cancel order';
         showNotif(errorMsg, 'error');
         return { success: false, error: errorMsg };
       }
@@ -4685,6 +4690,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   // Pay-now modal state
   const [payNowOrder, setPayNowOrder] = useState<any>(null);   // the order being paid
@@ -5095,6 +5101,33 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     💡 Your wallet will be <strong style={{ color: S.gold }}>refunded automatically</strong>.
                   </div>
                 )}
+
+                <div style={{ marginTop: 20, textAlign: "left" }}>
+                  <label style={{ fontSize: 12, fontWeight: 700, color: S.navy, display: "block", marginBottom: 6, marginLeft: 4 }}>
+                    Reason for cancellation
+                  </label>
+                  <textarea
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="e.g. Changed my mind, Ordered wrong item..."
+                    style={{
+                      width: "100%", height: 80, padding: "12px", borderRadius: 12,
+                      border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13,
+                      color: S.navy, fontFamily: "inherit", resize: "none", outline: "none",
+                      transition: "all 0.2s"
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = S.gold;
+                      e.currentTarget.style.background = "#fff";
+                      e.currentTarget.style.boxShadow = "0 0 0 4px rgba(232,168,56,0.1)";
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = "#e2e8f0";
+                      e.currentTarget.style.background = "#f8fafc";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  />
+                </div>
               </div>
 
               {cancelError && (
@@ -5114,6 +5147,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     if (!isCanceling) {
                       setCancelModalOrder(null);
                       setCancelError(null);
+                      setCancelReason("");
                     }
                   }}
                   disabled={isCanceling}
@@ -5132,11 +5166,12 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     if (isCanceling) return;
                     setIsCanceling(true);
                     setCancelError(null);
-                    const result = await onCancelOrder(cancelModalOrder.order_number);
+                    const result = await onCancelOrder(cancelModalOrder.order_number, cancelReason || "Order canceled by merchant");
                     console.log(result, "result")
                     setIsCanceling(false);
                     if (result?.success) {
                       setCancelModalOrder(null);
+                      setCancelReason("");
                     } else {
                       setCancelError(result?.error || "Failed to cancel order.");
                     }

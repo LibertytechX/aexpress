@@ -805,6 +805,41 @@ Authentication: Required (Merchant)
 
 ---
 
+## MERCHANT ORDERS
+
+### 1. Cancel Order
+```
+POST /api/orders/cancel/{order_number}/
+Description: Cancels an active order and processes refunds if applicable.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "reason": "Customer requested cancellation" (Optional)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order 6158001 has been canceled",
+    "data": {
+      "order": {
+        "order_number": "6158001",
+        "old_status": "Pending",
+        "new_status": "CustomerCanceled",
+        "payment_method": "wallet",
+        "total_amount": 2500.00,
+        "canceled_at": "2026-05-04T15:00:00Z"
+      },
+      "refund": {
+        "processed": true,
+        "amount": 2500.00,
+        "reason": "Customer requested cancellation"
+      }
+    }
+  }
+```
+
+---
+
 ## DISPATCHER ORDERS
 
 ### 1. Create Order
