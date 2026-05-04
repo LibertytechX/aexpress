@@ -4,6 +4,19 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+# [2026-05-04] — Cancellation Reason Modal in Dispatcher Portal
+
+### Frontend
+#### Added
+- **Cancellation Reason Modal**: Added a modal popup to capture the reason for cancellation before sending the request to the backend.
+- **Improved Logging**: Updated activity logs to include the cancellation reason.
+
+### API
+#### Changed
+- **Update Status Endpoint**: Updated the `POST /dispatch/orders/{order_number}/update_status/` endpoint to accept an optional `reason` parameter.
+
+---
+
 ## [2026-04-29] — Multiple Image Upload in Dispatcher Portal
 
 ### Frontend

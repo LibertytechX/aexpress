@@ -412,10 +412,10 @@ export const OrdersAPI = {
         return await res.json();
     },
 
-    async updateStatus(orderNumber, newStatus) {
+    async updateStatus(orderNumber, newStatus, reason = null) {
         const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify({ status: newStatus, reason })
         });
         if (!res.ok) throw new Error('Failed to update status');
         return await res.json();
