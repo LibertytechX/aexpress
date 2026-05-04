@@ -1424,6 +1424,8 @@ class CancelOrderView(APIView):
         # Update order status
         old_status = order.status
         order.status = "CustomerCanceled"
+        order.cancellation_reason = reason
+        order.canceled_at = timezone.now()
         order.updated_at = timezone.now()
         order.save()
 
