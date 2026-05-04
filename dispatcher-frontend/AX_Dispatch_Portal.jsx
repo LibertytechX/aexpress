@@ -1473,6 +1473,8 @@ export default function AXDispatchPortal() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState(null);
   const [orders, setOrders] = useState([]);
   const [totalOrdersCount, setTotalOrdersCount] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -1541,7 +1543,10 @@ export default function AXDispatchPortal() {
       if (["Picked Up", "In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "Package picked up", by: o.rider, type: "pickup" });
       if (["In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "In transit to dropoff", by: "GPS", type: "transit" });
       if (o.status === "Delivered") { b.push({ time: "auto", event: "Delivered — confirmed", by: o.rider, type: "delivered" }); if (o.cod > 0) b.push({ time: "auto", event: `COD settled: ₦${(o.cod - o.codFee).toLocaleString()}`, by: "System", type: "settlement" }); }
-      if (o.status === "Cancelled") b.push({ time: "auto", event: "Order cancelled", by: "Dispatch", type: "cancel" });
+      if (o.status === "Cancelled") {
+        const cancelText = o.cancellation_reason ? `Order cancelled (${o.cancellation_reason})` : "Order cancelled";
+        b.push({ time: "auto", event: cancelText, by: "Dispatch", type: "cancel" });
+      }
       if (o.status === "Failed") b.push({ time: "auto", event: "Delivery failed", by: o.rider || "System", type: "fail" });
       logs[o.id] = b;
     });
@@ -1841,18 +1846,22 @@ export default function AXDispatchPortal() {
     }
   };
 
-  const changeStatus = async (oid, ns) => {
+  const changeStatus = async (oid, ns, reason = null) => {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
-      await OrdersAPI.updateStatus(oid, ns);
+      await OrdersAPI.updateStatus(oid, ns, reason);
       // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
       if (ns === "Picked Up") {
         await OrdersAPI.updateStatus(oid, "In Transit");
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
-        addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        updateOrder(oid, { 
+          status: ns, 
+          ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}),
+          ...(ns === "Cancelled" ? { cancellation_reason: reason } : {})
+        });
+        addLog(oid, `Status → ${ns}${reason ? ` (${reason})` : ""}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
         // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
         if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
@@ -1881,6 +1890,11 @@ export default function AXDispatchPortal() {
     { id: "teams", label: "Teams", icon: I.teams, count: dispatchers.length || 0 },
     { id: "settings", label: "Settings", icon: I.settings },
   ];
+
+  const handleCancelRequest = (order) => {
+    setOrderToCancel(order);
+    setShowCancelModal(true);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", color: S.text, overflow: "hidden" }}>
@@ -1920,7 +1934,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1954,6 +1968,18 @@ export default function AXDispatchPortal() {
           staleOrders={staleOrders}
           onClose={() => setShowStaleModal(false)}
           onViewOrder={(id) => navTo("orders", id)}
+        />
+      )}
+
+      {showCancelModal && (
+        <CancellationModal
+          order={orderToCancel}
+          onClose={() => { setShowCancelModal(false); setOrderToCancel(null); }}
+          onConfirm={(reason) => {
+            changeStatus(orderToCancel.id, "Cancelled", reason);
+            setShowCancelModal(false);
+            setOrderToCancel(null);
+          }}
         />
       )}
 
@@ -2214,8 +2240,88 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
   );
 }
 
+// ─── CANCELLATION REASON MODAL ──────────────────────────────────────
+function CancellationModal({ order, onClose, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const reasons = [
+    "Customer changed their mind",
+    "Duplicate order",
+    "Rider unavailable",
+    "Incorrect address",
+    "Merchant closed",
+    "Other"
+  ];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column", animation: "fadeIn 0.2s ease" }}>
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.navy }}>Cancel Order {order?.id}</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 4 }}>{I.x}</button>
+        </div>
+        <div style={{ padding: "24px" }}>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 8, color: S.textDim }}>Reason for cancellation</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+            {reasons.map(r => (
+              <button
+                key={r}
+                onClick={() => setReason(r)}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: `1.5px solid ${reason === r ? S.gold : S.border}`,
+                  background: reason === r ? `rgba(232,168,56,0.08)` : "#fff",
+                  color: reason === r ? S.gold : S.text,
+                  fontSize: 13,
+                  fontWeight: reason === r ? 700 : 500,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  transition: "all 0.15s"
+                }}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          {reason === "Other" && (
+            <textarea
+              value={reason === "Other" ? (reason.startsWith("Other") ? "" : reason) : ""}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Type reason here..."
+              style={{ width: "100%", height: 80, border: `1.5px solid ${S.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", resize: "none", marginBottom: 16 }}
+            />
+          )}
+          
+          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: "12px", borderRadius: 10, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Go Back</button>
+            <button
+              onClick={() => onConfirm(reason)}
+              disabled={!reason}
+              style={{
+                flex: 1,
+                padding: "12px",
+                borderRadius: 10,
+                border: "none",
+                background: !reason ? S.border : S.red,
+                color: "#fff",
+                fontWeight: 700,
+                cursor: !reason ? "not-allowed" : "pointer",
+                fontFamily: "inherit",
+                boxShadow: !reason ? "none" : "0 4px 12px rgba(239,68,68,0.2)"
+              }}
+            >
+              Confirm Cancellation
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [expandedRows, setExpandedRows] = useState({});
@@ -2256,7 +2362,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
     return (
       <>
-        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
+        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onCancelRequest={onCancelRequest} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
         {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
       </>
     );
@@ -2726,7 +2832,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -2915,9 +3021,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
-          {!isTerminal && <button onClick={() => onChangeStatus(order.id, "Cancelled")} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
+          {!isTerminal && <button onClick={() => onCancelRequest(order)} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
         </div>
       </div>
+
+      {order.status === "Cancelled" && order.cancellation_reason && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: `1.5px solid ${S.red}44`, borderRadius: 12, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, animation: "fadeIn 0.3s ease" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: S.red, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>!</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: S.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{order.cancellation_reason}</div>
+          </div>
+        </div>
+      )}
 
       {/* STATUS PROGRESSION BAR */}
       {!isTerminal && (
@@ -2929,7 +3045,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               {showStatusMenu && (
                 <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: S.card, border: `1px solid ${S.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
                   {nextStatuses().map(ns => (
-                    <button key={ns} onClick={() => { onChangeStatus(order.id, ns); setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <button key={ns} onClick={() => { if (ns === "Cancelled") { onCancelRequest(order); } else { onChangeStatus(order.id, ns); } setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       → {ns}
                     </button>
                   ))}

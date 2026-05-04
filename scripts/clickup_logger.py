@@ -28,27 +28,15 @@ def infer_list_id(title, env_vars):
     title_lower = title.lower()
 
     mapping = {
-        "CLICKUP_LIST_RECRUITER_VIEW": [
-            "dashboard",
-            "team invites",
-            "calendar integration",
-            "maya bot",
-            "profile",
-            "integrations",
-        ],
-        "CLICKUP_LIST_JOBS": [
-            "job posting",
-            "job config page",
-            "job creation flow",
-            "job",
-        ],
+        "CLICKUP_LIST_MERCHANT_WEB": ["merchant web", "merchant dashboard", "merchant portal"],
+        "CLICKUP_LIST_MERCHANT_APP": ["merchant app", "merchant mobile"],
+        "CLICKUP_LIST_RIDER_APP": ["rider app", "rider mobile"],
+        "CLICKUP_LIST_OPERATION_DASHBOARD": ["ops", "operations", "admin tools"],
+        "CLICKUP_LIST_DISPATCHER": ["dispatcher", "dispatch"],
+        "CLICKUP_LIST_RECRUITER_VIEW": ["dashboard", "team invites", "calendar integration", "maya bot", "profile", "integrations"],
+        "CLICKUP_LIST_JOBS": ["job posting", "job config page", "job creation flow", "job"],
         "CLICKUP_LIST_INTERVIEW": ["interview booking", "scheduling", "interview room"],
-        "CLICKUP_LIST_ASSESSMENT": [
-            "assessment creation",
-            "proctoring",
-            "invites",
-            "results",
-        ],
+        "CLICKUP_LIST_ASSESSMENT": ["assessment creation", "proctoring", "invites", "results"],
         "CLICKUP_LIST_CV_REVIEW": ["cv parsing", "scoring", "matching"],
         "CLICKUP_LIST_TALENT_VIEW": ["apply flow", "talent profile"],
     }
@@ -57,6 +45,10 @@ def infer_list_id(title, env_vars):
         for keyword in keywords:
             if keyword in title_lower:
                 return env_vars.get(env_key)
+
+    # Default to DISPATCHER if it's a dispatcher task but doesn't match
+    if "dispatcher" in title_lower:
+        return env_vars.get("CLICKUP_LIST_DISPATCHER")
 
     # Default to RECRUITER_VIEW if no match
     return env_vars.get("CLICKUP_LIST_RECRUITER_VIEW")

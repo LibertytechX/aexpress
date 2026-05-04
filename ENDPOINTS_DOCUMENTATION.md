@@ -848,6 +848,19 @@ Request Body:
   }
 Response: Updated Order object.
 ```
+
+### 3. Update Order Status
+```
+POST /dispatch/orders/{order_number}/update_status/
+Description: Updates the status of an order (e.g., In Transit, Delivered, Cancelled).
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "status": "Cancelled",
+    "reason": "Customer changed their mind" (Optional, used for cancellation)
+  }
+Response: Updated Order object.
+```
 ```
 GET /api/orders/smart-parcel/parcels/pending-pickups/
 Description: Retrieves all pending parcels ready for pickup from the SmartParcel network.
