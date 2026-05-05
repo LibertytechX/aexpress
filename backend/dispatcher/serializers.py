@@ -782,6 +782,8 @@ class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Remove default UniqueTogetherValidator to allow POST upsert (update_or_create)
+        validators = []
 
     def create(self, validated_data):
         from orders.models import MerchantPricingOverride

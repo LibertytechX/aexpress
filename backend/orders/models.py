@@ -172,7 +172,7 @@ class MerchantPricingOverride(models.Model):
 
     class Meta:
         db_table = "merchant_pricing_overrides"
-        unique_together = [("merchant", "vehicle")]
+        # unique_together = [("merchant", "vehicle")]
         indexes = [
             models.Index(fields=["merchant", "vehicle"]),
             models.Index(fields=["merchant", "-created_at"]),

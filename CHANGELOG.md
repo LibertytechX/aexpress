@@ -4,6 +4,14 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+# [2026-05-05] — Merchant Pricing Override Fix
+
+### API
+#### Fixed
+- **Merchant Pricing Overrides**: Enabled "upsert" (update or create) behavior for the pricing overrides endpoint by removing the default DRF `UniqueTogetherValidator`, allowing `POST` requests to update existing overrides as originally intended.
+
+---
+
 # [2026-05-04] — Merchant & Dispatcher Cancellation Reason Support
 
 ### Frontend (Merchant Dashboard)
