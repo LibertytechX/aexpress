@@ -980,3 +980,30 @@ Response:
     "message": "Merchant deactivated successfully."
   }
 ```
+
+### 3. Merchant Pricing Overrides
+```
+POST /merchant-pricing-overrides/
+Description: Create or update (upsert) a pricing override for a specific merchant and vehicle type.
+Authentication: Required (Dispatcher Admin)
+Request Body:
+  {
+    "merchant": "USER_UUID",
+    "vehicle": VEHICLE_ID,
+    "flat_fee": 1500.00, (Optional)
+    "pricing_tiers": { ... }, (Optional)
+    "is_active": true
+  }
+Response: The created or updated Pricing Override object.
+```
+
+```
+GET /merchant-pricing-overrides/
+Description: List all merchant pricing overrides. Supports filtering.
+Authentication: Required (Dispatcher Admin)
+Query Parameters:
+  - merchant: USER_UUID
+  - vehicle: VEHICLE_ID
+  - active: true|false
+Response: Paginated list of Pricing Override objects.
+```
