@@ -1292,7 +1292,7 @@ class BulkCalculateFareView(APIView):
                     if idx == 0:
                         origin = pickup
                     else:
-                        origin = drop
+                        origin = deliveries[idx - 1]
                     route_data = calculate_route(origin=origin, destinations=[drop])
                     if not route_data:
                         continue
