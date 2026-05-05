@@ -1363,38 +1363,31 @@ class CancelOrderView(APIView):
         try:
             order = Order.objects.get(order_number=order_number, user=request.user)
         except Order.DoesNotExist:
-            return Response(
-                {"error": f"Order {order_number} not found"},
-                status=status.HTTP_404_NOT_FOUND,
+            raise ServiceException(
+                status_code=404, message=f"Order {order_number} not found"
             )
 
         # Check if order can be canceled
         if order.status in ["Canceled", "CustomerCanceled"]:
-            return Response(
-                {"error": "Order is already canceled"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ServiceException(status_code=400, message="Order is already canceled")
 
         if order.status == "Delivered":
-            return Response(
-                {"error": "Cannot cancel a delivered order"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400, message="Cannot cancel a delivered order"
             )
 
         # Once the package has been picked up, cancellation is not allowed
         if order.status in ["PickedUp", "Started"]:
-            return Response(
-                {"error": "Cannot cancel an order that has already been picked up"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel an order that has already been picked up",
             )
 
         # Check if escrow was released (delivery completed)
         if order.escrow_held and order.escrow_released:
-            return Response(
-                {
-                    "error": "Cannot cancel order - delivery already completed and funds released"
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel order - delivery already completed and funds released",
             )
 
         # Process escrow refund if applicable
@@ -1416,9 +1409,8 @@ class CancelOrderView(APIView):
                 refund_amount = float(refund_transaction.amount)
 
             except ValueError as e:
-                return Response(
-                    {"error": f"Failed to process refund: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ServiceException(
+                    status_code=400, message=f"Failed to process refund: {str(e)}"
                 )
 
         # Update order status
@@ -1487,8 +1479,6 @@ class CancelOrderView(APIView):
 
         # Prepare response
         response_data = {
-            "success": True,
-            "message": f"Order {order_number} has been canceled",
             "order": {
                 "order_number": order.order_number,
                 "old_status": old_status,
@@ -1504,7 +1494,12 @@ class CancelOrderView(APIView):
             },
         }
 
-        return Response(response_data, status=status.HTTP_200_OK)
+        return service_response(
+            status="success",
+            message=f"Order {order_number} has been canceled",
+            data=response_data,
+            status_code=200,
+        )
 
 
 class CancelableOrdersView(APIView):
