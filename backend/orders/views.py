@@ -1288,7 +1288,7 @@ class BulkCalculateFareView(APIView):
                 drop_fares = {v.name: 0 for v in vehicles}
                 drop_details = []
 
-                for drop, idx in enumerate(deliveries):
+                for idx, drop in enumerate(deliveries):
                     if idx == 0:
                         origin = pickup
                     else:
