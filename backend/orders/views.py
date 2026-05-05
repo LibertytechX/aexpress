@@ -404,7 +404,6 @@ class MultiDropView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request):
         """Create a Multi-Drop order with multiple deliveries."""
         from django.utils import timezone
@@ -446,7 +445,7 @@ class MultiDropView(APIView):
         unit_fare = calculate_effective_fare(
             request.user, vehicle, distance_km, duration_minutes
         )
-        total_amount = unit_fare * num_deliveries
+        total_amount = unit_fare
 
         # Create order
         order = Order.objects.create(
@@ -469,7 +468,6 @@ class MultiDropView(APIView):
         if data.get("payment_method") == "pay_with_subscription":
 
             # [NEW] Subscription processing
-            from subscriptions.services import process_order_subscription
 
             subscription = process_order_subscription(order)
             if not subscription:
@@ -1302,13 +1300,21 @@ class BulkCalculateFareView(APIView):
                         "duration_minutes": dur_mins,
                         "fares": {},
                     }
-                    for vehicle in vehicles:
-                        fare = calculate_effective_fare(
-                            request.user, vehicle, dist_km, dur_mins
-                        )
-                        drop_fares[vehicle.name] += fare
-                        drop_info["fares"][vehicle.name] = fare
+                    # fix this
+                    # for vehicle in vehicles:
+                    #     fare = calculate_effective_fare(
+                    #         request.user, vehicle, dist_km, dur_mins
+                    #     )
+                    #     drop_fares[vehicle.name] += fare
+                    #     drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
+                for vehicle in vehicles:
+                    fare = calculate_effective_fare(
+                        request.user, vehicle, total_distances, total_durations
+                    )
+                    drop_fares[vehicle.name] = fare
+                    # drop_info["fares"][vehicle.name] = fare
+                # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
