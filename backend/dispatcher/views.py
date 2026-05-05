@@ -466,26 +466,24 @@ class OrderViewSet(viewsets.ModelViewSet):
                 {"error": "Rider not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
+    @exception_advice(model_object=ErrorLog)
     @action(detail=True, methods=["post"])
     def update_status(self, request, order_number=None):
-        """Update Order.status and emit an activity event.
-
-        Accepts both internal names (Started, Done, CustomerCanceled) and
-        the display names the frontend uses (In Transit, Delivered, Cancelled,
-        Picked Up).
-        """
+        """Update Order.status and emit an activity event."""
         order = self.get_object()
         new_status = request.data.get("status")
-        user = request.user
+
+        if not new_status:
+            raise ServiceException(status_code=400, message="Status is required")
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
             "Assignment Accepted": "AssignmentAccepted",
             "In Transit": "Started",
-            "At Dropoff": "Arrived",  # rider is at the dropoff location
+            "At Dropoff": "Arrived",
             "Delivered": "Done",
             "Cancelled": "CustomerCanceled",
-            "Picked Up": "PickedUp",  # distinct stage; rider app uses this too
+            "Picked Up": "PickedUp",
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
@@ -504,9 +502,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         }
 
         if new_status not in STATUS_MAP:
-            return Response(
-                {"error": f"Invalid status. Choose from: {list(STATUS_MAP.keys())}"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message=f"Invalid status. Choose from: {list(STATUS_MAP.keys())}",
             )
 
         old_status = order.status
@@ -518,16 +516,16 @@ class OrderViewSet(viewsets.ModelViewSet):
         if new_status == "CustomerCanceled":
             reason = request.data.get("reason")
             order.cancellation_reason = reason
-            order.canceled_at = timezone.now()
+            order.canceled_at = now
             order.payment_status = "Cancelled"
-            update_fields.append("cancellation_reason")
-            update_fields.append("canceled_at")
+            update_fields.extend(["cancellation_reason", "canceled_at"])
+
             # cancel the order charge as well
             charge = order.charges.all().first()
             if charge:
                 if charge.status == "completed":
                     # refund the user wallet
-                    wallet = user.wallet
+                    wallet = order.user.wallet
                     wallet.credit(
                         charge.amount,
                         f"Refund for order #{order.order_number}",
@@ -537,9 +535,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 charge.save()
 
         if new_status == "Assigned":
-            return Response(
-                {"error": f"Please go assign a rider first biko! 😡"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400, message="Please go assign a rider first biko! 😡"
             )
 
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
@@ -550,22 +547,20 @@ class OrderViewSet(viewsets.ModelViewSet):
             update_fields.append("arrived_at")
         if new_status == "Done" and not getattr(order, "completed_at", None):
             if not order.rider:
-                return Response(
-                    {
-                        "error": f"You can't complete an order that has rider assigned! 😡"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ServiceException(
+                    status_code=400,
+                    message="You can't complete an order that has no rider assigned! 😡",
                 )
             order.completed_at = now
             update_fields.append("completed_at")
 
         order.save(update_fields=update_fields)
 
-        # Keep Delivery records in sync so the serializer fallback stays consistent.
+        # Keep Delivery records in sync
         ORDER_TO_DELIVERY_STATUS = {
-            "PickedUp": "InTransit",  # rider has picked up → delivery in transit
+            "PickedUp": "InTransit",
             "Started": "InTransit",
-            "Arrived": "InTransit",  # rider at dropoff; delivery still in progress
+            "Arrived": "InTransit",
             "Done": "Delivered",
             "CustomerCanceled": "Canceled",
             "RiderCanceled": "Canceled",
@@ -595,10 +590,11 @@ class OrderViewSet(viewsets.ModelViewSet):
             "Assigned": "assigned",
         }
         label = status_labels.get(new_status, new_status.lower())
-        if rider_name and new_status == "Started":
-            text = f"{order.order_number} {label} — {rider_name} heading out"
-        else:
-            text = f"{order.order_number} {label}"
+        text = (
+            f"{order.order_number} {label} — {rider_name} heading out"
+            if rider_name and new_status == "Started"
+            else f"{order.order_number} {label}"
+        )
 
         emit_activity(
             event_type=event_type,
@@ -612,7 +608,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             },
         )
 
-        return Response(self.get_serializer(order).data)
+        serializer = self.get_serializer(order)
+        return service_response(
+            status="success",
+            message=f"Order status updated to {new_status}",
+            data=serializer.data,
+            status_code=200,
+        )
 
     @action(detail=True, methods=["patch"], url_path="update-price")
     def update_price(self, request, order_number=None):

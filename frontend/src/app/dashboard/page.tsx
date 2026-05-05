@@ -5077,8 +5077,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
             padding: 24, animation: "fadeIn 0.2s ease"
           }}>
             <div style={{
-              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 360,
-              overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 420,
+              overflow: "visible", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
               animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
             }}>
               <div style={{ padding: "24px 24px 0", textAlign: "center" }}>
@@ -5093,17 +5093,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                 <p style={{ fontSize: 14, color: S.gray, margin: 0, lineHeight: 1.5 }}>
                   Are you sure you want to cancel order <strong style={{ color: S.navy }}>#{cancelModalOrder.id}</strong>?
                 </p>
-                {cancelModalOrder.payment_method === 'wallet' && (
-                  <div style={{
-                    marginTop: 12, padding: "8px 12px", background: "#f8fafc",
-                    borderRadius: 8, fontSize: 12, color: S.gray, border: "1px solid #e2e8f0"
-                  }}>
-                    💡 Your wallet will be <strong style={{ color: S.gold }}>refunded automatically</strong>.
-                  </div>
-                )}
-
-                <div style={{ marginTop: 20, textAlign: "left" }}>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: S.navy, display: "block", marginBottom: 6, marginLeft: 4 }}>
+                <div style={{ marginTop: 24, textAlign: "left" }}>
+                  <label style={{ fontSize: 12, fontWeight: 800, color: S.navy, display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
                     Reason for cancellation
                   </label>
                   <textarea
@@ -5111,23 +5102,34 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     onChange={(e) => setCancelReason(e.target.value)}
                     placeholder="e.g. Changed my mind, Ordered wrong item..."
                     style={{
-                      width: "100%", height: 80, padding: "12px", borderRadius: 12,
-                      border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13,
+                      width: "100%", height: 100, padding: "14px", borderRadius: 14,
+                      border: `1.5px solid ${S.border}`, background: "#f8fafc", fontSize: 14,
                       color: S.navy, fontFamily: "inherit", resize: "none", outline: "none",
-                      transition: "all 0.2s"
+                      transition: "all 0.2s", display: "block"
                     }}
                     onFocus={(e) => {
                       e.currentTarget.style.borderColor = S.gold;
                       e.currentTarget.style.background = "#fff";
-                      e.currentTarget.style.boxShadow = "0 0 0 4px rgba(232,168,56,0.1)";
+                      e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
                     }}
                     onBlur={(e) => {
-                      e.currentTarget.style.borderColor = "#e2e8f0";
+                      e.currentTarget.style.borderColor = S.border;
                       e.currentTarget.style.background = "#f8fafc";
                       e.currentTarget.style.boxShadow = "none";
                     }}
                   />
                 </div>
+
+                {cancelModalOrder.payment_method === 'wallet' && (
+                  <div style={{
+                    marginTop: 16, padding: "12px 16px", background: "#f0fdf4",
+                    borderRadius: 12, fontSize: 12, color: "#166534", border: "1px solid #bbf7d0",
+                    textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start"
+                  }}>
+                    <span style={{ fontSize: 16 }}>💰</span>
+                    <span>Your wallet will be <strong>refunded automatically</strong> for this order.</span>
+                  </div>
+                )}
               </div>
 
               {cancelError && (

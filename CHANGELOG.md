@@ -7,18 +7,16 @@ All notable changes to the AXpress project are documented in this file.
 # [2026-05-04] — Merchant & Dispatcher Cancellation Reason Support
 
 ### Frontend (Merchant Dashboard)
-#### Added
-- **Merchant Cancellation Reason**: Added a dedicated input field in the "Cancel Order" modal to allow merchants to provide a reason for cancellation.
+#### Fixed
+- **Cancellation Reason Visibility**: Fixed an issue where the cancellation reason textarea was not appearing. Optimized modal layout and increased width to prevent clipping.
 
 ### Frontend (Dispatcher Portal)
 #### Added
-- **Cancellation Reason Modal**: Added a modal popup to capture the reason for cancellation before sending the request to the backend.
-- **Improved Logging**: Updated activity logs to include the cancellation reason.
+- **Enhanced Cancellation Modal**: Redesigned the cancellation modal to always show the reason input field and added "Suggested Reasons" for faster processing.
 
 ### API
 #### Changed
-- **Refactor CancelOrderView**: Refactored the merchant cancellation endpoint (`POST /api/orders/cancel/{order_number}/`) to use `service_response` and `ServiceException` for standardized error handling.
-- **Status Update Endpoint**: Updated the dispatcher `POST /dispatch/orders/{order_number}/update_status/` endpoint to accept an optional `reason` parameter.
+- **Standardized Responses**: Refactored both Merchant and Dispatcher cancellation endpoints to use `service_response` and `ServiceException` for consistent API behavior.
 
 ---
 

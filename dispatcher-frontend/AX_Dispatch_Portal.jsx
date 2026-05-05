@@ -2243,72 +2243,100 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
 // ─── CANCELLATION REASON MODAL ──────────────────────────────────────
 function CancellationModal({ order, onClose, onConfirm }) {
   const [reason, setReason] = useState("");
-  const reasons = [
+  const [typedReason, setTypedReason] = useState("");
+  
+  const suggestedReasons = [
     "Customer changed their mind",
     "Duplicate order",
     "Rider unavailable",
     "Incorrect address",
     "Merchant closed",
-    "Other"
+    "Service area mismatch"
   ];
 
+  const handleConfirm = () => {
+    const finalReason = typedReason.trim() || reason || "Order canceled by dispatcher";
+    onConfirm(finalReason);
+  };
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div style={{ background: S.card, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column", animation: "fadeIn 0.2s ease" }}>
-        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.navy }}>Cancel Order {order?.id}</h3>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 4 }}>{I.x}</button>
-        </div>
-        <div style={{ padding: "24px" }}>
-          <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 8, color: S.textDim }}>Reason for cancellation</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-            {reasons.map(r => (
-              <button
-                key={r}
-                onClick={() => setReason(r)}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: `1.5px solid ${reason === r ? S.gold : S.border}`,
-                  background: reason === r ? `rgba(232,168,56,0.08)` : "#fff",
-                  color: reason === r ? S.gold : S.text,
-                  fontSize: 13,
-                  fontWeight: reason === r ? 700 : 500,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  transition: "all 0.15s"
-                }}
-              >
-                {r}
-              </button>
-            ))}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 24, width: 480, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)", overflow: "hidden", animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}>
+        <div style={{ padding: "24px", borderBottom: `1px solid ${S.border}`, background: `linear-gradient(to right, ${S.card}, ${S.bg})` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: S.redBg, color: S.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>⚠️</div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: S.navy }}>Cancel Order</h3>
+                <div style={{ fontSize: 12, color: S.textMuted, fontFamily: "'Space Mono', monospace" }}>ID: #{order?.id}</div>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: S.bg, border: "none", cursor: "pointer", color: S.textMuted, width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
           </div>
-          {reason === "Other" && (
+        </div>
+
+        <div style={{ padding: "24px" }}>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</label>
             <textarea
-              value={reason === "Other" ? (reason.startsWith("Other") ? "" : reason) : ""}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Type reason here..."
-              style={{ width: "100%", height: 80, border: `1.5px solid ${S.border}`, borderRadius: 10, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", resize: "none", marginBottom: 16 }}
-            />
-          )}
-          
-          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-            <button onClick={onClose} style={{ flex: 1, padding: "12px", borderRadius: 10, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Go Back</button>
-            <button
-              onClick={() => onConfirm(reason)}
-              disabled={!reason}
+              value={typedReason}
+              onChange={(e) => setTypedReason(e.target.value)}
+              placeholder="Explain why this order is being canceled..."
               style={{
-                flex: 1,
-                padding: "12px",
-                borderRadius: 10,
+                width: "100%", height: 120, padding: "14px", borderRadius: 16,
+                border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 14,
+                color: S.text, fontFamily: "inherit", resize: "none", outline: "none",
+                transition: "all 0.2s"
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = S.gold;
+                e.currentTarget.style.background = S.card;
+                e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = S.border;
+                e.currentTarget.style.background = S.bg;
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Suggested Reasons</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {suggestedReasons.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setTypedReason(r)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 20, border: `1px solid ${typedReason === r ? S.gold : S.border}`,
+                    background: typedReason === r ? S.goldPale : S.card,
+                    color: typedReason === r ? S.gold : S.textDim,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+            <button onClick={onClose} style={{ padding: "14px", borderRadius: 14, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Keep Order</button>
+            <button
+              onClick={handleConfirm}
+              style={{
+                padding: "14px",
+                borderRadius: 14,
                 border: "none",
-                background: !reason ? S.border : S.red,
+                background: `linear-gradient(135deg, ${S.red}, #c1121f)`,
                 color: "#fff",
-                fontWeight: 700,
-                cursor: !reason ? "not-allowed" : "pointer",
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: "pointer",
                 fontFamily: "inherit",
-                boxShadow: !reason ? "none" : "0 4px 12px rgba(239,68,68,0.2)"
+                boxShadow: "0 8px 20px rgba(239,68,68,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8
               }}
             >
               Confirm Cancellation
@@ -2316,6 +2344,7 @@ function CancellationModal({ order, onClose, onConfirm }) {
           </div>
         </div>
       </div>
+      <style>{`@keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
     </div>
   );
 }

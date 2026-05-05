@@ -894,7 +894,17 @@ Request Body:
     "status": "Cancelled",
     "reason": "Customer changed their mind" (Optional, used for cancellation)
   }
-Response: Updated Order object.
+Response:
+  {
+    "status": "success",
+    "message": "Order status updated to CustomerCanceled",
+    "data": {
+      "id": "6158001",
+      "status": "CustomerCanceled",
+      "cancellation_reason": "Customer changed their mind",
+      ...
+    }
+  }
 ```
 ```
 GET /api/orders/smart-parcel/parcels/pending-pickups/
