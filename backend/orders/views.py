@@ -404,10 +404,13 @@ class MultiDropView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Create a Multi-Drop order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
+
+        # whitelist = ["https://send.axpress.net/", "https://move.axpress.net/"]
 
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
@@ -1285,8 +1288,12 @@ class BulkCalculateFareView(APIView):
                 drop_fares = {v.name: 0 for v in vehicles}
                 drop_details = []
 
-                for drop in deliveries:
-                    route_data = calculate_route(origin=pickup, destinations=[drop])
+                for drop, idx in enumerate(deliveries):
+                    if idx == 0:
+                        origin = pickup
+                    else:
+                        origin = deliveries[idx]
+                    route_data = calculate_route(origin=origin, destinations=[drop])
                     if not route_data:
                         continue
 
@@ -1301,20 +1308,20 @@ class BulkCalculateFareView(APIView):
                         "fares": {},
                     }
                     # fix this
-                    # for vehicle in vehicles:
-                    #     fare = calculate_effective_fare(
-                    #         request.user, vehicle, dist_km, dur_mins
-                    #     )
-                    #     drop_fares[vehicle.name] += fare
-                    #     drop_info["fares"][vehicle.name] = fare
+                    for vehicle in vehicles:
+                        fare = calculate_effective_fare(
+                            request.user, vehicle, dist_km, dur_mins
+                        )
+                        drop_fares[vehicle.name] += fare
+                        drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
-                for vehicle in vehicles:
-                    fare = calculate_effective_fare(
-                        request.user, vehicle, total_distances, total_durations
-                    )
-                    drop_fares[vehicle.name] = fare
-                    # drop_info["fares"][vehicle.name] = fare
-                # drop_details.append(drop_info)
+                # for vehicle in vehicles:
+                #     fare = calculate_effective_fare(
+                #         request.user, vehicle, total_distances, total_durations
+                #     )
+                #     drop_fares[vehicle.name] = fare
+                #     # drop_info["fares"][vehicle.name] = fare
+                # # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
