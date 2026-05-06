@@ -553,8 +553,9 @@ def corebanking_webhook(request):
             )
             return Response({"success": True})
 
-        req_reference = data.get("request_reference", "").strip()
+        req_reference = data.get("request_reference", "")
         recipient_name = data.get("recipient_account_name", "").strip()
+        req_reference = req_reference.strip() if req_reference else ""
         # process for amortization payment
         if recipient_name.endswith("AXHP"):  # Amortization Account
             # get the amort account and wallet
