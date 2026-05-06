@@ -454,12 +454,14 @@ class AmortizationWallet(models.Model):
         decimal_places=2,
         default=Decimal("0.00"),
         help_text="Immutable balance",
+        editable=False,
     )
     total_paid_to_date = models.DecimalField(
         max_digits=12,
         decimal_places=2,
         default=Decimal("0.00"),
         help_text="This is the total paid to date locked",
+        editable=False,
     )
     cost = models.DecimalField(
         max_digits=12,
@@ -543,11 +545,29 @@ class AmortizationTransaction(models.Model):
     amortization_wallet = models.ForeignKey(
         AmortizationWallet, on_delete=models.CASCADE, related_name="ledger_entries"
     )
-    entry_type = models.CharField(max_length=10, choices=ENTRY_TYPES, default="credit")
-    amount = models.DecimalField(max_digits=12, decimal_places=2)
-    balance_before = models.DecimalField(max_digits=12, decimal_places=2)
-    balance_after = models.DecimalField(max_digits=12, decimal_places=2)
-    reference = models.CharField(max_length=255, unique=True)
+    entry_type = models.CharField(
+        max_length=10, choices=ENTRY_TYPES, default="credit", editable=False
+    )
+    amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        editable=False,
+    )
+    balance_before = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        editable=False,
+    )
+    balance_after = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        editable=False,
+    )
+    reference = models.CharField(
+        max_length=255,
+        unique=True,
+        editable=False,
+    )
     description = models.TextField(null=True, blank=True)
     status = models.CharField(
         max_length=50,
