@@ -41,6 +41,70 @@ Response:
 
 ---
 
+### 2. Get Amortization Wallet Info
+```
+GET /wallet/amortization-wallet/
+Description: Retrieves bike hire-purchase progress for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "status": "success",
+    "message": "Amortization wallet info retrieved successfully",
+    "data": {
+      "balance": "5000.00",
+      "total_paid_to_date": "150000.00",
+      "cost": "1200000.00",
+      "expected_daily_payment": "1700.00",
+      "ownership_percentage": 12.5,
+      "is_active": true,
+      "virtual_account": {
+        "account_number": "1234567890",
+        "account_name": "AX-AMORT-JOHN",
+        "bank_name": "Wema Bank",
+        "bank_code": "000017",
+        "is_active": true
+      },
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  }
+```
+
+---
+
+### 3. Get Amortization Wallet Transactions
+```
+GET /wallet/amortization-transactions/
+Description: Retrieves paginated transaction history for the rider's amortization wallet.
+Authentication: Required (Rider)
+Query Parameters:
+  - page: Page number (default: 1)
+  - page_size: Items per page (default: 20)
+Response:
+  {
+    "count": 45,
+    "next": "...",
+    "previous": null,
+    "results": [
+      {
+        "id": "uuid",
+        "type": "credit",
+        "amount": "1700.00",
+        "description": "Daily bike payment",
+        "reference": "REF-123",
+        "balance_before": "5000.00",
+        "balance_after": "6700.00",
+        "status": "success",
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      ...
+    ]
+  }
+```
+
+---
+
 ## AUTH & SIGNUP ENDPOINTS
 
 ### 1. Merchant Signup

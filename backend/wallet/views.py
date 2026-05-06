@@ -12,16 +12,32 @@ import hmac
 import logging
 from decimal import Decimal
 import uuid as uuid_module
+from rest_framework.views import APIView
 
-from .models import Wallet, Transaction, VirtualAccount, WebhookLog
+from .models import (
+    Wallet,
+    Transaction,
+    VirtualAccount,
+    WebhookLog,
+    AmortizationWallet,
+    AmortizationVirtualAccount,
+    AmortizationTransaction,
+)
 from .serializers import (
     WalletSerializer,
     TransactionSerializer,
     FundWalletSerializer,
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
+    AmortizationWalletSerializer,
+    AmortizationTransactionSerializer,
 )
 from dispatcher.tasks import send_merchant_notification
+from orders.permissions import IsRider
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -537,16 +553,70 @@ def corebanking_webhook(request):
             )
             return Response({"success": True})
 
+        req_reference = data.get("request_reference", "").strip()
+        # process for amortization payment
+        if req_reference.startswith("AMORT-"):
+            # get the amort account and wallet
+            amort_account = AmortizationVirtualAccount.objects.filter(
+                account_number=recipient_account_number
+            ).first()
+            if not amort_account:
+                logger.error(
+                    f"CoreBanking webhook skipped - amort account not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed("Amortization account not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Amortization account not found"},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            wallet = amort_account.user.amortization_wallet
+            if not wallet:
+                logger.error(
+                    f"CoreBanking webhook skipped - wallet not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed("Wallet not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Wallet not found"},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            webhook_metadata = {
+                "source": "corebanking_webhook",
+                "webhook_log_id": str(webhook_log.id),
+                "webhook_payload": data,
+                "transaction_type": data.get("transaction_type"),
+                "settlement_status": data.get("settlement_status"),
+                "payer_account_name": payer_name,
+                "payer_account_number": data.get("payer_account_number"),
+                "recipient_account_number": recipient_account_number,
+                "transaction_date": data.get("transaction_date"),
+                "settlement_date": data.get("settlement_date"),
+            }
+            # credit the amortization wallet
+            wallet.credit(
+                amount=data.get("amount"),
+                ref=transaction_reference,
+                meta=webhook_metadata,
+            )
+
         # Check if it's a COD Remission
-        if transaction_reference.startswith("COD-"):
+        if req_reference.startswith("COD-"):
             from riders.models import RiderCodRecord
             from django.utils import timezone
-            
+
             try:
-                cod_record = RiderCodRecord.objects.get(payment_ref=transaction_reference)
-                
+                cod_record = RiderCodRecord.objects.get(payment_ref=req_reference)
+
                 # If already remitted/verified, skip
-                if cod_record.status in [RiderCodRecord.Status.REMITTED, RiderCodRecord.Status.VERIFIED]:
+                if cod_record.status in [
+                    RiderCodRecord.Status.REMITTED,
+                    RiderCodRecord.Status.VERIFIED,
+                ]:
                     logger.info(
                         f"CoreBanking webhook skipped - COD transaction {transaction_reference} already remitted - Log ID: {webhook_log.id}"
                     )
@@ -554,10 +624,10 @@ def corebanking_webhook(request):
                         f"COD Transaction {transaction_reference} already remitted"
                     )
                     return Response({"success": True})
-                    
+
                 merchant_user = cod_record.order.user
                 wallet, _ = Wallet.objects.get_or_create(user=merchant_user)
-                
+
                 webhook_metadata = {
                     "source": "corebanking_webhook",
                     "webhook_log_id": str(webhook_log.id),
@@ -571,7 +641,7 @@ def corebanking_webhook(request):
                     "settlement_date": data.get("settlement_date"),
                     "is_cod_remission": True,
                 }
-                
+
                 with db_transaction.atomic():
                     wallet.credit(
                         amount=Decimal(str(amount)),
@@ -579,26 +649,26 @@ def corebanking_webhook(request):
                         reference=transaction_reference,
                         metadata=webhook_metadata,
                     )
-                    
+
                     cod_record.status = RiderCodRecord.Status.REMITTED
                     cod_record.remitted_at = timezone.now()
                     cod_record.save(update_fields=["status", "remitted_at"])
-                    
-                    transaction = Transaction.objects.get(reference=transaction_reference)
+
+                    transaction = Transaction.objects.get(
+                        reference=transaction_reference
+                    )
                     webhook_log.mark_processed(transaction=transaction)
-                    
+
                 logger.info(
                     f"CoreBanking webhook processed COD successfully - ₦{amount} credited to {merchant_user.business_name} - Log ID: {webhook_log.id}"
                 )
                 return Response({"success": True})
-                
+
             except RiderCodRecord.DoesNotExist:
                 logger.error(
                     f"CoreBanking webhook - COD record {transaction_reference} not found - Log ID: {webhook_log.id}"
                 )
-                webhook_log.mark_failed(
-                    f"COD record {transaction_reference} not found"
-                )
+                webhook_log.mark_failed(f"COD record {transaction_reference} not found")
                 return Response(
                     {
                         "success": False,
@@ -608,13 +678,11 @@ def corebanking_webhook(request):
                 )
 
         # Check if it's a Subscription Invoice
-        if transaction_reference.startswith("SUB-INV-"):
+        if req_reference.startswith("SUB-INV-"):
             from subscriptions.models import SubscriptionInvoice
 
             try:
-                invoice = SubscriptionInvoice.objects.get(
-                    payment_ref=transaction_reference
-                )
+                invoice = SubscriptionInvoice.objects.get(payment_ref=req_reference)
 
                 # If already paid, skip
                 if invoice.status == "paid":
@@ -710,9 +778,7 @@ def corebanking_webhook(request):
 
         # Notify the merchant their wallet was credited
         try:
-            merchant_profile = getattr(
-                virtual_account.user, "merchant_profile", None
-            )
+            merchant_profile = getattr(virtual_account.user, "merchant_profile", None)
             if merchant_profile:
                 send_merchant_notification.delay(
                     merchant_id=str(merchant_profile.id),
@@ -814,4 +880,73 @@ def paystack_webhook(request):
         return Response(
             {"success": False, "errors": {"detail": str(e)}},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+class AmortizationWalletView(APIView):
+    """
+    API endpoint for getting amortization wallet info for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet info for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        serializer = AmortizationWalletSerializer(amort_wallet)
+        return service_response(
+            status="success",
+            message="Amortization wallet info retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class AmortizationTransactionListView(APIView):
+    """
+    API endpoint for getting amortization wallet transaction records for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+    pagination_class = TransactionPagination
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet transactions for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        transactions = AmortizationTransaction.objects.filter(amortization_wallet=amort_wallet)
+
+        # Apply pagination
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(transactions, request)
+
+        if page is not None:
+            serializer = AmortizationTransactionSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = AmortizationTransactionSerializer(transactions, many=True)
+        return service_response(
+            status="success",
+            message="Amortization transactions retrieved successfully",
+            data=serializer.data,
+            status_code=200,
         )

@@ -2,6 +2,12 @@
 
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-06] — Amortization Wallet & Transactions
+### API
+#### Added
+- **Amortization Wallet**: Implemented `GET /wallet/amortization-wallet/` for riders to view bike hire-purchase progress.
+- **Amortization Transactions**: Added `GET /wallet/amortization-transactions/` to retrieve paginated transaction history for the amortization wallet.
+
 ---
 
 # [2026-05-05] — Merchant Pricing Override Fix

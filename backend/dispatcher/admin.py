@@ -301,7 +301,12 @@ class RiderAdmin(ImportExportModelAdmin):
         "user__phone",
     )
     autocomplete_fields = ("vehicle_asset", "hub")
-    actions = ["assign_zone", "soft_delete_riders", "mark_as_jumia_riders"]
+    actions = [
+        "assign_zone",
+        "soft_delete_riders",
+        "mark_as_jumia_riders",
+        "create_amortization_wallet",
+    ]
 
     def has_delete_permission(self, request, obj=None):
         return False
@@ -333,6 +338,33 @@ class RiderAdmin(ImportExportModelAdmin):
             f"Successfully marked {updated_count} riders as jumia riders.",
             level=messages.SUCCESS,
         )
+
+    @admin.action(description="Create amortization wallet for selected riders")
+    def create_amortization_wallet(self, request, queryset):
+        from wallet.models import AmortizationWallet
+        from django.contrib import messages
+
+        success_count = 0
+        error_count = 0
+
+        for rider in queryset:
+            try:
+                AmortizationWallet.create_one(user=rider.user)
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+                self.message_user(
+                    request,
+                    f"Error creating wallet for {rider.rider_id}: {str(e)}",
+                    level=messages.ERROR,
+                )
+
+        if success_count > 0:
+            self.message_user(
+                request,
+                f"Successfully created {success_count} amortization wallets.",
+                level=messages.SUCCESS,
+            )
 
     @admin.action(description="Assign selected riders to a hub")
     def assign_zone(self, request, queryset):
