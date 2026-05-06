@@ -21,6 +21,7 @@ from .models import (
     WebhookLog,
     AmortizationWallet,
     AmortizationVirtualAccount,
+    AmortizationTransaction,
 )
 from .serializers import (
     WalletSerializer,
@@ -29,6 +30,7 @@ from .serializers import (
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
     AmortizationWalletSerializer,
+    AmortizationTransactionSerializer,
 )
 from dispatcher.tasks import send_merchant_notification
 from orders.permissions import IsRider
@@ -905,6 +907,46 @@ class AmortizationWalletView(APIView):
         return service_response(
             status="success",
             message="Amortization wallet info retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class AmortizationTransactionListView(APIView):
+    """
+    API endpoint for getting amortization wallet transaction records for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+    pagination_class = TransactionPagination
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet transactions for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        transactions = AmortizationTransaction.objects.filter(amortization_wallet=amort_wallet)
+
+        # Apply pagination
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(transactions, request)
+
+        if page is not None:
+            serializer = AmortizationTransactionSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = AmortizationTransactionSerializer(transactions, many=True)
+        return service_response(
+            status="success",
+            message="Amortization transactions retrieved successfully",
             data=serializer.data,
             status_code=200,
         )

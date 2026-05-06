@@ -72,6 +72,39 @@ Response:
 
 ---
 
+### 3. Get Amortization Wallet Transactions
+```
+GET /wallet/amortization-transactions/
+Description: Retrieves paginated transaction history for the rider's amortization wallet.
+Authentication: Required (Rider)
+Query Parameters:
+  - page: Page number (default: 1)
+  - page_size: Items per page (default: 20)
+Response:
+  {
+    "count": 45,
+    "next": "...",
+    "previous": null,
+    "results": [
+      {
+        "id": "uuid",
+        "type": "credit",
+        "amount": "1700.00",
+        "description": "Daily bike payment",
+        "reference": "REF-123",
+        "balance_before": "5000.00",
+        "balance_after": "6700.00",
+        "status": "success",
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      ...
+    ]
+  }
+```
+
+---
+
 ## AUTH & SIGNUP ENDPOINTS
 
 ### 1. Merchant Signup

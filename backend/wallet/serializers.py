@@ -5,6 +5,7 @@ from .models import (
     VirtualAccount,
     AmortizationWallet,
     AmortizationVirtualAccount,
+    AmortizationTransaction,
 )
 from decimal import Decimal
 
@@ -144,5 +145,27 @@ class AmortizationWalletSerializer(serializers.ModelSerializer):
             return AmortizationVirtualAccountSerializer(va).data
         except AmortizationVirtualAccount.DoesNotExist:
             return None
+
+
+class AmortizationTransactionSerializer(serializers.ModelSerializer):
+    """Serializer for AmortizationTransaction model"""
+
+    class Meta:
+        model = AmortizationTransaction
+        fields = [
+            "id",
+            "amortization_wallet",
+            "entry_type",
+            "amount",
+            "description",
+            "reference",
+            "balance_before",
+            "balance_after",
+            "status",
+            "metadata",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 

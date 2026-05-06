@@ -29,5 +29,7 @@ urlpatterns = [
 
     # Amortization wallet info
     path('amortization-wallet/', views.AmortizationWalletView.as_view(), name='amortization-wallet'),
+    # Amortization wallet transactions
+    path('amortization-transactions/', views.AmortizationTransactionListView.as_view(), name='amortization-transactions'),
 ]
 
