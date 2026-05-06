@@ -1,5 +1,14 @@
 from django.contrib import admin
-from .models import Wallet, Transaction, VirtualAccount, WebhookLog, Charge
+from .models import (
+    Wallet,
+    Transaction,
+    VirtualAccount,
+    WebhookLog,
+    Charge,
+    AmortizationWallet,
+    AmortizationTransaction,
+    AmortizationVirtualAccount,
+)
 
 
 @admin.register(Wallet)
@@ -313,3 +322,98 @@ class ChargeAdmin(admin.ModelAdmin):
                 f"Successfully debited and completed {success_count} charges.",
                 level=messages.SUCCESS,
             )
+
+
+@admin.register(AmortizationWallet)
+class AmortizationWalletAdmin(admin.ModelAdmin):
+    list_display = [
+        "user",
+        "balance",
+        "total_paid_to_date",
+        "cost",
+        "expected_daily_payment",
+        "created_at",
+        "is_active",
+    ]
+    search_fields = ["user__full_name", "user__phone", "user__email"]
+    readonly_fields = ["created_at", "updated_at"]
+    list_filter = ["created_at", "is_active"]
+
+    fieldsets = (
+        (
+            "Wallet Information",
+            {"fields": ("user", "balance", "total_paid_to_date", "cost")},
+        ),
+        ("Payment Details", {"fields": ("expected_daily_payment",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(AmortizationTransaction)
+class AmortizationTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        "reference",
+        "amortization_wallet",
+        "entry_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "status",
+        "created_at",
+    ]
+    search_fields = ["reference", "description", "amortization_wallet__user__full_name"]
+    readonly_fields = ["created_at", "updated_at"]
+    list_filter = ["entry_type", "status", "created_at", "amortization_wallet"]
+
+    fieldsets = (
+        (
+            "Transaction Information",
+            {
+                "fields": (
+                    "amortization_wallet",
+                    "entry_type",
+                    "amount",
+                    "description",
+                    "reference",
+                )
+            },
+        ),
+        ("Balance Tracking", {"fields": ("balance_before", "balance_after")}),
+        ("Status", {"fields": ("status",)}),
+        ("Metadata", {"fields": ("metadata",)}),
+        ("Timestamps", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(AmortizationVirtualAccount)
+class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
+    list_display = [
+        "user",
+        "account_number",
+        "account_name",
+        "bank_name",
+        "is_active",
+        "created_at",
+    ]
+    search_fields = [
+        "user__full_name",
+        "user__phone",
+        "user__email",
+        "account_number",
+        "account_name",
+    ]
+    readonly_fields = ["account_number", "corebanking_account_id", "created_at"]
+    list_filter = ["is_active", "bank_name", "created_at"]
+
+    fieldsets = (
+        ("User Information", {"fields": ("user",)}),
+        (
+            "Account Details",
+            {"fields": ("account_number", "account_name", "bank_name", "bank_code")},
+        ),
+        (
+            "CoreBanking Integration",
+            {"fields": ("corebanking_account_id", "is_active")},
+        ),
+        ("Timestamps", {"fields": ("created_at",)}),
+    )

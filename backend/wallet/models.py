@@ -1,3 +1,4 @@
+from decimal import Decimal
 import traceback
 from django.db import models
 from django.conf import settings
@@ -435,3 +436,162 @@ class Charge(models.Model):
         return (
             f"Charge {self.amount} for Order {self.order.order_number} ({self.status})"
         )
+
+
+class AmortizationWallet(models.Model):
+    """
+    Locked wallet for Bike Hire Purchase / Amortization.
+    Funds here can ONLY be moved to the Main Wallet.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="amortization_wallet",
+    )
+    balance = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Immutable balance",
+    )
+    total_paid_to_date = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="This is the total paid to date locked",
+    )
+    cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="The cost of the amortized asset e.g Bike",
+    )
+    expected_daily_payment = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0.00,
+        help_text="Expected daily payment amount!",
+    )
+
+    is_active = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "amortization_wallets"
+        verbose_name = "Amortization Wallet"
+        verbose_name_plural = "Amortization Wallets"
+
+    def __str__(self) -> str:
+        return f"{self.user.full_name} Amort Wallet"
+
+    @property
+    def ownership_percentage(self):
+        if self.cost <= 0:
+            return 0
+        return (float(self.total_paid_to_date) / float(self.cost)) * 100
+
+    @classmethod
+    def create_one(cls, user: any) -> any:
+        """Create one Amortization Wallet for a user"""
+        if cls.objects.filter(user=user).exists():
+            raise ValueError("Amortization wallet already exists for this user")
+        daily_target = 8500  # 8500 per day for each rider
+        cost = 470 * daily_target  # 8500 daily for 18 months excluding sundays
+        return cls.objects.create(
+            user=user, cost=cost, expected_daily_payment=daily_target
+        )
+
+    @db_transaction.atomic
+    def credit(self, amount, ref, meta=None):
+        wallet = AmortizationWallet.objects.select_for_update().get(id=self.id)
+        prev_balance = self.balance
+        new_balance = prev_balance + amount
+        wallet.balance += amount
+        wallet.total_paid_to_date += amount
+        wallet.save()
+        description = "Bike Hire Purchase payment"
+
+        transaction = AmortizationTransaction.objects.create(
+            amortization_wallet=wallet,
+            entry_type="credit",
+            amount=amount,
+            balance_before=prev_balance,
+            balance_after=new_balance,
+            reference=ref,
+            description=description,
+            metadata=meta,
+        )
+        return transaction
+
+
+class AmortizationTransaction(models.Model):
+    """
+    Dedicated ledger for Bike Hire Purchase payments. Immutable credit entry
+    """
+
+    ENTRY_TYPES = (("credit", "Credit"),)
+    # Status
+    STATUS_CHOICES = [
+        ("pending", "Pending"),
+        ("success", "Success"),
+        ("failed", "Failed"),
+    ]
+
+    amortization_wallet = models.ForeignKey(
+        AmortizationWallet, on_delete=models.CASCADE, related_name="ledger_entries"
+    )
+    entry_type = models.CharField(max_length=10, choices=ENTRY_TYPES, default="credit")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    balance_before = models.DecimalField(max_digits=12, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=12, decimal_places=2)
+    reference = models.CharField(max_length=255, unique=True)
+    description = models.TextField(null=True, blank=True)
+    status = models.CharField(
+        max_length=50,
+        choices=STATUS_CHOICES,
+        default="success",
+        help_text="Payment status from gateway",
+    )
+
+    # Webhook verification
+    metadata = models.JSONField(null=True, blank=True)
+    webhook_received_at = models.DateTimeField(null=True, blank=True)
+    webhook_verified_at = models.DateTimeField(null=True, blank=True)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "amortization_transactions"
+        ordering = ["-created_at"]
+        verbose_name = "Amortization Ledger Entry"
+        verbose_name_plural = "Amortization Ledger Entries"
+
+
+class AmortizationVirtualAccount(models.Model):
+    """
+    Represents a virtual bank account assigned to a rider amort wallet
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="amort_virtual_account",
+    )
+    account_number = models.CharField(max_length=20, unique=True, db_index=True)
+    account_name = models.CharField(max_length=255)
+    bank_name = models.CharField(max_length=100, default="Wema Bank")
+    bank_code = models.CharField(max_length=10, default="000017")
+    # ID returned by CoreBanking API for this virtual account
+    corebanking_account_id = models.CharField(
+        max_length=100, unique=True, db_index=True
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.full_name} Amort Virtual Account"

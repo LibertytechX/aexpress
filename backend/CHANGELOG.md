@@ -3,6 +3,19 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+## [2026-05-06] — Bike Amortization System (Phase 1)
+
+### Added
+- **Amortization Models**: Implemented core models for tracking bike hire-purchase payments.
+    - `AmortizationWallet`: Dedicated locked wallet for riders to track their progress towards bike ownership.
+    - `AmortizationTransaction`: Ledger for recording payments and balance changes within the amortization wallet.
+    - `AmortizationVirtualAccount`: Support for assigned virtual bank accounts dedicated to amortization payments.
+- **Admin Management**: Registered all amortization models in the Django Admin interface with custom list views, search, and filters.
+
+### Fixed
+- **AmortizationWallet Typo**: Corrected a typo in the `ownership_percentage` property calculation.
+
+---
 
 ## [2026-05-04] — Email Service Resilience & Fallback
 
