@@ -554,8 +554,9 @@ def corebanking_webhook(request):
             return Response({"success": True})
 
         req_reference = data.get("request_reference", "").strip()
+        recipient_name = data.get("recipient_account_name", "").strip()
         # process for amortization payment
-        if req_reference.startswith("AMORT-"):
+        if recipient_name.endswith("AXHP"):  # Amortization Account
             # get the amort account and wallet
             amort_account = AmortizationVirtualAccount.objects.filter(
                 account_number=recipient_account_number
@@ -605,7 +606,7 @@ def corebanking_webhook(request):
             )
 
         # Check if it's a COD Remission
-        if req_reference.startswith("COD-"):
+        if req_reference and req_reference.startswith("COD-"):
             from riders.models import RiderCodRecord
             from django.utils import timezone
 
@@ -678,7 +679,7 @@ def corebanking_webhook(request):
                 )
 
         # Check if it's a Subscription Invoice
-        if req_reference.startswith("SUB-INV-"):
+        if req_reference and req_reference.startswith("SUB-INV-"):
             from subscriptions.models import SubscriptionInvoice
 
             try:
@@ -933,7 +934,9 @@ class AmortizationTransactionListView(APIView):
                 status_code=404, message="Rider does not have an amortization wallet"
             )
 
-        transactions = AmortizationTransaction.objects.filter(amortization_wallet=amort_wallet)
+        transactions = AmortizationTransaction.objects.filter(
+            amortization_wallet=amort_wallet
+        )
 
         # Apply pagination
         paginator = self.pagination_class()
