@@ -2,6 +2,11 @@
 
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-06] — Amortization Wallet Endpoint
+### API
+#### Added
+- **Amortization Wallet**: Implemented a new endpoint `GET /wallet/amortization-wallet/` for riders to view their bike hire-purchase progress, including balance, total paid, cost, and ownership percentage. Uses `IsRider` permission and `ServiceException` for error handling.
+
 ---
 
 # [2026-05-05] — Merchant Pricing Override Fix

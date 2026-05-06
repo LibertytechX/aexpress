@@ -335,11 +335,14 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         "created_at",
         "is_active",
     ]
-    search_fields = ["user__full_name", "user__phone", "user__email"]
+    search_fields = [
+        "user__full_name",
+        "user__phone",
+        "user__email",
+    ]
     readonly_fields = ["created_at", "updated_at"]
     list_filter = ["created_at", "is_active"]
     actions = ["activate_wallets", "deactivate_wallets"]
-
 
     fieldsets = (
         (
@@ -371,7 +374,6 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
             f"Successfully deactivated {updated} amortization wallets.",
             level=messages.SUCCESS,
         )
-
 
 
 @admin.register(AmortizationTransaction)
@@ -417,6 +419,7 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         "account_number",
         "account_name",
         "bank_name",
+        "request_ref",
         "is_active",
         "created_at",
     ]
@@ -428,7 +431,7 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         "account_name",
     ]
     readonly_fields = ["account_number", "corebanking_account_id", "created_at"]
-    list_filter = ["is_active", "bank_name", "created_at"]
+    list_filter = ["is_active", "bank_name", "created_at", "request_ref"]
 
     fieldsets = (
         ("User Information", {"fields": ("user",)}),

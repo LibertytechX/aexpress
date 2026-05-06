@@ -1,16 +1,32 @@
 from rest_framework import serializers
-from .models import Wallet, Transaction, VirtualAccount
+from .models import (
+    Wallet,
+    Transaction,
+    VirtualAccount,
+    AmortizationWallet,
+    AmortizationVirtualAccount,
+)
 from decimal import Decimal
+
 
 class WalletSerializer(serializers.ModelSerializer):
     """Serializer for Wallet model"""
-    user_business_name = serializers.CharField(source='user.business_name', read_only=True)
-    user_phone = serializers.CharField(source='user.phone', read_only=True)
+
+    user_business_name = serializers.CharField(source="user.business_name", read_only=True)
+    user_phone = serializers.CharField(source="user.phone", read_only=True)
 
     class Meta:
         model = Wallet
-        fields = ['id', 'user', 'user_business_name', 'user_phone', 'balance', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'user', 'balance', 'created_at', 'updated_at']
+        fields = [
+            "id",
+            "user",
+            "user_business_name",
+            "user_phone",
+            "balance",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user", "balance", "created_at", "updated_at"]
 
 
 class TransactionSerializer(serializers.ModelSerializer):
@@ -19,29 +35,49 @@ class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
         fields = [
-            'id', 'wallet', 'type', 'amount', 'description', 'reference',
-            'balance_before', 'balance_after', 'status', 'paystack_reference',
-            'paystack_status', 'metadata', 'created_at', 'updated_at'
+            "id",
+            "wallet",
+            "type",
+            "amount",
+            "description",
+            "reference",
+            "balance_before",
+            "balance_after",
+            "status",
+            "paystack_reference",
+            "paystack_status",
+            "metadata",
+            "created_at",
+            "updated_at",
         ]
         read_only_fields = [
-            'id', 'wallet', 'balance_before', 'balance_after', 'reference',
-            'created_at', 'updated_at'
+            "id",
+            "wallet",
+            "balance_before",
+            "balance_after",
+            "reference",
+            "created_at",
+            "updated_at",
         ]
 
 
 class FundWalletSerializer(serializers.Serializer):
     """Serializer for wallet funding request"""
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('100.00'))
+
+    amount = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("100.00")
+    )
 
     def validate_amount(self, value):
         """Validate amount is at least ₦100"""
-        if value < Decimal('100.00'):
+        if value < Decimal("100.00"):
             raise serializers.ValidationError("Minimum funding amount is ₦100")
         return value
 
 
 class VerifyPaymentSerializer(serializers.Serializer):
     """Serializer for payment verification"""
+
     reference = serializers.CharField(max_length=100)
 
     def validate_reference(self, value):
@@ -57,8 +93,56 @@ class VirtualAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = VirtualAccount
         fields = [
-            'id', 'account_number', 'account_name',
-            'bank_name', 'bank_code', 'is_active', 'created_at',
+            "id",
+            "account_number",
+            "account_name",
+            "bank_name",
+            "bank_code",
+            "is_active",
+            "created_at",
         ]
         read_only_fields = fields
+
+
+class AmortizationVirtualAccountSerializer(serializers.ModelSerializer):
+    """Serializer for AmortizationVirtualAccount model"""
+
+    class Meta:
+        model = AmortizationVirtualAccount
+        fields = [
+            "account_number",
+            "account_name",
+            "bank_name",
+            "bank_code",
+            "is_active",
+        ]
+
+
+class AmortizationWalletSerializer(serializers.ModelSerializer):
+    """Serializer for AmortizationWallet model"""
+
+    virtual_account = serializers.SerializerMethodField()
+    ownership_percentage = serializers.FloatField(read_only=True)
+
+    class Meta:
+        model = AmortizationWallet
+        fields = [
+            "balance",
+            "total_paid_to_date",
+            "cost",
+            "expected_daily_payment",
+            "ownership_percentage",
+            "is_active",
+            "virtual_account",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_virtual_account(self, obj):
+        try:
+            va = AmortizationVirtualAccount.objects.get(user=obj.user)
+            return AmortizationVirtualAccountSerializer(va).data
+        except AmortizationVirtualAccount.DoesNotExist:
+            return None
+
 

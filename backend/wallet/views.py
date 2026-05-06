@@ -12,12 +12,14 @@ import hmac
 import logging
 from decimal import Decimal
 import uuid as uuid_module
+from rest_framework.views import APIView
 
 from .models import (
     Wallet,
     Transaction,
     VirtualAccount,
     WebhookLog,
+    AmortizationWallet,
     AmortizationVirtualAccount,
 )
 from .serializers import (
@@ -26,8 +28,14 @@ from .serializers import (
     FundWalletSerializer,
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
+    AmortizationWalletSerializer,
 )
 from dispatcher.tasks import send_merchant_notification
+from orders.permissions import IsRider
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -870,4 +878,33 @@ def paystack_webhook(request):
         return Response(
             {"success": False, "errors": {"detail": str(e)}},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+class AmortizationWalletView(APIView):
+    """
+    API endpoint for getting amortization wallet info for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet info for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        serializer = AmortizationWalletSerializer(amort_wallet)
+        return service_response(
+            status="success",
+            message="Amortization wallet info retrieved successfully",
+            data=serializer.data,
+            status_code=200,
         )
