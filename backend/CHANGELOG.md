@@ -3,6 +3,41 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+## [2026-05-06] — Bike Amortization System (Phase 1)
+
+### Added
+- **Amortization Models**: Implemented core models for tracking bike hire-purchase payments.
+    - `AmortizationWallet`: Dedicated locked wallet for riders to track their progress towards bike ownership.
+    - `AmortizationTransaction`: Ledger for recording payments and balance changes within the amortization wallet.
+    - `AmortizationVirtualAccount`: Support for assigned virtual bank accounts dedicated to amortization payments.
+- **Admin Management**: Registered all amortization models in the Django Admin interface with custom list views, search, and filters.
+- **Rider Admin Action**: Added "Create amortization wallet for selected riders" action to the Rider admin to allow bulk wallet initialization.
+- **Wallet Admin Actions**: Added "Activate" and "Deactivate" actions to the Amortization Wallet admin for status management.
+
+
+
+### Fixed
+- **AmortizationWallet Typo**: Corrected a typo in the `ownership_percentage` property calculation.
+
+---
+
+## [2026-05-04] — Email Service Resilience & Fallback
+
+### Added
+- **MailNow Service Integration**: Implemented `MailNowService` in `dispatcher/utils.py` to provide a secondary email dispatch channel via a local MailNow API service (port 3200).
+- **Email Fallback Mechanism**: Integrated automatic fallback logic into `MailgunEmailService`.
+    - If a Mailgun dispatch fails (e.g., due to API errors, timeouts, or invalid credentials), the system automatically retries the request using `MailNowService`.
+    - Supports both standard onboarding emails and CSV attachments with base64 encoding.
+- **MailNow Configuration**: Added `MAILNOW_API_URL` and `MAILNOW_API_KEY` settings to support the new service.
+
+---
+
+## [2026-04-24] — Vehicle Tracking Tools
+
+### Added
+- **Vehicle History Command**: Created `get_vehicle_history` management command to retrieve historical telemetry for a specific rider (by riderID) within a date range.
+
+---
 
 ## [2026-04-23] — Data Integrity, Reassignment Tracking & Record Protection
 

@@ -26,5 +26,10 @@ urlpatterns = [
 
     # CoreBanking webhook (receives transfer notifications)
     path('corebanking-webhook/', views.corebanking_webhook, name='corebanking-webhook'),
+
+    # Amortization wallet info
+    path('amortization-wallet/', views.AmortizationWalletView.as_view(), name='amortization-wallet'),
+    # Amortization wallet transactions
+    path('amortization-transactions/', views.AmortizationTransactionListView.as_view(), name='amortization-transactions'),
 ]
 

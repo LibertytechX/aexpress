@@ -430,6 +430,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "sub_orders",
             "dispatcher_assigned",
             "source",
+            "cancellation_reason",
         ]
 
     def get_pickup_lat(self, obj):
@@ -781,6 +782,8 @@ class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Remove default UniqueTogetherValidator to allow POST upsert (update_or_create)
+        validators = []
 
     def create(self, validated_data):
         from orders.models import MerchantPricingOverride

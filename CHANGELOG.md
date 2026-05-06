@@ -2,7 +2,48 @@
 
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-06] — Amortization Wallet & Transactions
+### API
+#### Added
+- **Amortization Wallet**: Implemented `GET /wallet/amortization-wallet/` for riders to view bike hire-purchase progress.
+- **Amortization Transactions**: Added `GET /wallet/amortization-transactions/` to retrieve paginated transaction history for the amortization wallet.
+
 ---
+
+# [2026-05-05] — Merchant Pricing Override Fix
+
+### API
+#### Fixed
+- **Merchant Pricing Overrides**: Enabled "upsert" (update or create) behavior for the pricing overrides endpoint by removing the default DRF `UniqueTogetherValidator`, allowing `POST` requests to update existing overrides as originally intended.
+
+---
+
+# [2026-05-04] — Merchant & Dispatcher Cancellation Reason Support
+
+### Frontend (Merchant Dashboard)
+#### Fixed
+- **Cancellation Reason Visibility**: Fixed an issue where the cancellation reason textarea was not appearing. Optimized modal layout and increased width to prevent clipping.
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Enhanced Cancellation Modal**: Redesigned the cancellation modal to always show the reason input field and added "Suggested Reasons" for faster processing.
+
+### API
+#### Changed
+- **Standardized Responses**: Refactored both Merchant and Dispatcher cancellation endpoints to use `service_response` and `ServiceException` for consistent API behavior.
+
+---
+
+## [2026-04-29] — Multiple Image Upload in Dispatcher Portal
+
+### Frontend
+#### Added
+- **Multiple Image Selection**: Enhanced the "Create Order" modal to support selecting and uploading multiple images simultaneously.
+- **Image Previews**: Added a grid view for uploaded images with the ability to remove individual files before submission.
+- **Improved Order Details**: Updated the Order Details view to display all uploaded documents.
+
+#### Changed
+- **API Payload**: Updated the dispatcher create order payload to send `file_uploaded_urls` as a list of strings.
 
 ## [2026-04-23] — Partner Order Tracking & Management
 

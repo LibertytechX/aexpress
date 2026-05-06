@@ -41,6 +41,70 @@ Response:
 
 ---
 
+### 2. Get Amortization Wallet Info
+```
+GET /wallet/amortization-wallet/
+Description: Retrieves bike hire-purchase progress for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "status": "success",
+    "message": "Amortization wallet info retrieved successfully",
+    "data": {
+      "balance": "5000.00",
+      "total_paid_to_date": "150000.00",
+      "cost": "1200000.00",
+      "expected_daily_payment": "1700.00",
+      "ownership_percentage": 12.5,
+      "is_active": true,
+      "virtual_account": {
+        "account_number": "1234567890",
+        "account_name": "AX-AMORT-JOHN",
+        "bank_name": "Wema Bank",
+        "bank_code": "000017",
+        "is_active": true
+      },
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  }
+```
+
+---
+
+### 3. Get Amortization Wallet Transactions
+```
+GET /wallet/amortization-transactions/
+Description: Retrieves paginated transaction history for the rider's amortization wallet.
+Authentication: Required (Rider)
+Query Parameters:
+  - page: Page number (default: 1)
+  - page_size: Items per page (default: 20)
+Response:
+  {
+    "count": 45,
+    "next": "...",
+    "previous": null,
+    "results": [
+      {
+        "id": "uuid",
+        "type": "credit",
+        "amount": "1700.00",
+        "description": "Daily bike payment",
+        "reference": "REF-123",
+        "balance_before": "5000.00",
+        "balance_after": "6700.00",
+        "status": "success",
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      ...
+    ]
+  }
+```
+
+---
+
 ## AUTH & SIGNUP ENDPOINTS
 
 ### 1. Merchant Signup
@@ -805,9 +869,73 @@ Authentication: Required (Merchant)
 
 ---
 
+## MERCHANT ORDERS
+
+### 1. Cancel Order
+```
+POST /api/orders/cancel/{order_number}/
+Description: Cancels an active order and processes refunds if applicable.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "reason": "Customer requested cancellation" (Optional)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order 6158001 has been canceled",
+    "data": {
+      "order": {
+        "order_number": "6158001",
+        "old_status": "Pending",
+        "new_status": "CustomerCanceled",
+        "payment_method": "wallet",
+        "total_amount": 2500.00,
+        "canceled_at": "2026-05-04T15:00:00Z"
+      },
+      "refund": {
+        "processed": true,
+        "amount": 2500.00,
+        "reason": "Customer requested cancellation"
+      }
+    }
+  }
+```
+
+---
+
 ## DISPATCHER ORDERS
 
-### 1. Update Partner Stats
+### 1. Create Order
+```
+POST /dispatch/orders/
+Description: Creates a new order manually from the dispatcher portal.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "pickup": "Pickup Address",
+    "dropoff": "Dropoff Address",
+    "senderName": "Sender Name",
+    "senderPhone": "08012345678",
+    "receiverName": "Receiver Name",
+    "receiverPhone": "08087654321",
+    "vehicle": "Bike",
+    "packageType": "Box",
+    "price": 2500.00,
+    "cod": 0.00,
+    "riderId": "RIDER_UUID",
+    "merchantId": "MERCHANT_UUID",
+    "is_partner_order": true,
+    "partner_order_count": 10,
+    "file_uploaded_urls": [
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
+    ]
+  }
+Response: Created Order object.
+```
+
+### 2. Update Partner Stats
 ```
 PATCH /dispatch/orders/{order_number}/update-partner-stats/
 Description: Updates processing metrics for a partner bulk order.
@@ -818,6 +946,29 @@ Request Body:
     "day_returned_count": 2
   }
 Response: Updated Order object.
+```
+
+### 3. Update Order Status
+```
+POST /dispatch/orders/{order_number}/update_status/
+Description: Updates the status of an order (e.g., In Transit, Delivered, Cancelled).
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "status": "Cancelled",
+    "reason": "Customer changed their mind" (Optional, used for cancellation)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order status updated to CustomerCanceled",
+    "data": {
+      "id": "6158001",
+      "status": "CustomerCanceled",
+      "cancellation_reason": "Customer changed their mind",
+      ...
+    }
+  }
 ```
 ```
 GET /api/orders/smart-parcel/parcels/pending-pickups/
@@ -892,4 +1043,31 @@ Response:
     "status": "success",
     "message": "Merchant deactivated successfully."
   }
+```
+
+### 3. Merchant Pricing Overrides
+```
+POST /merchant-pricing-overrides/
+Description: Create or update (upsert) a pricing override for a specific merchant and vehicle type.
+Authentication: Required (Dispatcher Admin)
+Request Body:
+  {
+    "merchant": "USER_UUID",
+    "vehicle": VEHICLE_ID,
+    "flat_fee": 1500.00, (Optional)
+    "pricing_tiers": { ... }, (Optional)
+    "is_active": true
+  }
+Response: The created or updated Pricing Override object.
+```
+
+```
+GET /merchant-pricing-overrides/
+Description: List all merchant pricing overrides. Supports filtering.
+Authentication: Required (Dispatcher Admin)
+Query Parameters:
+  - merchant: USER_UUID
+  - vehicle: VEHICLE_ID
+  - active: true|false
+Response: Paginated list of Pricing Override objects.
 ```

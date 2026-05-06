@@ -172,7 +172,7 @@ class MerchantPricingOverride(models.Model):
 
     class Meta:
         db_table = "merchant_pricing_overrides"
-        unique_together = [("merchant", "vehicle")]
+        # unique_together = [("merchant", "vehicle")]
         indexes = [
             models.Index(fields=["merchant", "vehicle"]),
             models.Index(fields=["merchant", "-created_at"]),
@@ -251,9 +251,7 @@ class Order(models.Model):
     vehicle = models.ForeignKey(
         Vehicle, on_delete=models.PROTECT, related_name="orders"
     )
-    partner = models.CharField(
-        max_length=20, null=True, blank=True
-    )
+    partner = models.CharField(max_length=20, null=True, blank=True)
     is_partner_order = models.BooleanField(default=False)
     partner_order_count = models.PositiveIntegerField(null=True, blank=True)
     day_returned_count = models.PositiveIntegerField(null=True, blank=True)
@@ -418,9 +416,9 @@ class Order(models.Model):
     @property
     def vertical_lead_name(self) -> str | None:
         """Get the name of the vertical lead for this order."""
-        if self.rider and self.rider.hub and self.rider.hub.zone:
-            return self.rider.hub.zone.zone_lead.user.full_name
-        return None
+        if not (self.rider and self.rider.hub and self.rider.hub.zone_id):
+            return None
+        return self.rider.hub.zone.zone_lead.user.full_name
 
     def save(self, *args, **kwargs):
         """Generate order number if not exists."""

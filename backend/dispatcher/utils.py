@@ -1,5 +1,7 @@
 import requests
 import logging
+import base64
+import json
 from django.conf import settings
 
 
@@ -116,10 +118,19 @@ class MailgunEmailService:
             logger.info(f"Onboarding email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send onboarding email to {email}: {str(e)}")
+            logger.error(f"Failed to send onboarding email to {email} via Mailgun: {str(e)}")
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
-            return False
+            
+            # Fallback to MailNow
+            logger.info(f"Attempting fallback to MailNow for {email}")
+            return MailNowService.send_email(
+                from_email=f"Assured Express <mailgun@{settings.MAILGUN_DOMAIN}>",
+                to_email=email,
+                subject=subject,
+                text=None,
+                html=html_body
+            )
 
     @staticmethod
     def send_csv_attachment_email(email, csv_content, filename, subject, body):
@@ -150,9 +161,71 @@ class MailgunEmailService:
             logger.info(f"CSV export email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send CSV export email to {email}: {str(e)}")
+            logger.error(f"Failed to send CSV export email to {email} via Mailgun: {str(e)}")
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
+            
+            # Fallback to MailNow
+            logger.info(f"Attempting fallback to MailNow for {email}")
+            attachments = [
+                {
+                    "filename": filename,
+                    "content": base64.b64encode(csv_content.encode() if isinstance(csv_content, str) else csv_content).decode('utf-8'),
+                    "content_type": "text/csv"
+                }
+            ]
+            return MailNowService.send_email(
+                from_email=f"Assured Express <mailgun@{settings.MAILGUN_DOMAIN}>",
+                to_email=email,
+                subject=subject,
+                text=body,
+                attachments=attachments
+            )
+
+
+class MailNowService:
+    """
+    Utility service to send emails via MailNow API.
+    Used as a fallback for Mailgun.
+    """
+
+    @staticmethod
+    def send_email(from_email, to_email, subject, text, html=None, attachments=None):
+        """
+        Sends an email using the MailNow API.
+        """
+        if not all([settings.MAILNOW_API_URL, settings.MAILNOW_API_KEY]):
+            logger.error("MailNow settings are not fully configured.")
+            return False
+
+        payload = {
+            "from": from_email,
+            "to": to_email,
+            "subject": subject,
+            "text": text,
+        }
+        if html:
+            payload["html"] = html
+        if attachments:
+            payload["attachments"] = attachments
+
+        try:
+            response = requests.post(
+                settings.MAILNOW_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MAILNOW_API_KEY,
+                },
+                json=payload,
+                timeout=30,
+            )
+            response.raise_for_status()
+            logger.info(f"Email sent successfully to {to_email} via MailNow")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send email to {to_email} via MailNow: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"MailNow response: {e.response.text}")
             return False
 
 

@@ -404,11 +404,13 @@ class MultiDropView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Create a Multi-Drop order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
+
+        # whitelist = ["https://send.axpress.net/", "https://move.axpress.net/"]
 
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
@@ -446,7 +448,7 @@ class MultiDropView(APIView):
         unit_fare = calculate_effective_fare(
             request.user, vehicle, distance_km, duration_minutes
         )
-        total_amount = unit_fare * num_deliveries
+        total_amount = unit_fare
 
         # Create order
         order = Order.objects.create(
@@ -469,7 +471,6 @@ class MultiDropView(APIView):
         if data.get("payment_method") == "pay_with_subscription":
 
             # [NEW] Subscription processing
-            from subscriptions.services import process_order_subscription
 
             subscription = process_order_subscription(order)
             if not subscription:
@@ -1287,8 +1288,12 @@ class BulkCalculateFareView(APIView):
                 drop_fares = {v.name: 0 for v in vehicles}
                 drop_details = []
 
-                for drop in deliveries:
-                    route_data = calculate_route(origin=pickup, destinations=[drop])
+                for idx, drop in enumerate(deliveries):
+                    if idx == 0:
+                        origin = pickup
+                    else:
+                        origin = deliveries[idx - 1]
+                    route_data = calculate_route(origin=origin, destinations=[drop])
                     if not route_data:
                         continue
 
@@ -1302,6 +1307,7 @@ class BulkCalculateFareView(APIView):
                         "duration_minutes": dur_mins,
                         "fares": {},
                     }
+                    # fix this
                     for vehicle in vehicles:
                         fare = calculate_effective_fare(
                             request.user, vehicle, dist_km, dur_mins
@@ -1309,6 +1315,13 @@ class BulkCalculateFareView(APIView):
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
+                # for vehicle in vehicles:
+                #     fare = calculate_effective_fare(
+                #         request.user, vehicle, total_distances, total_durations
+                #     )
+                #     drop_fares[vehicle.name] = fare
+                #     # drop_info["fares"][vehicle.name] = fare
+                # # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
@@ -1363,38 +1376,31 @@ class CancelOrderView(APIView):
         try:
             order = Order.objects.get(order_number=order_number, user=request.user)
         except Order.DoesNotExist:
-            return Response(
-                {"error": f"Order {order_number} not found"},
-                status=status.HTTP_404_NOT_FOUND,
+            raise ServiceException(
+                status_code=404, message=f"Order {order_number} not found"
             )
 
         # Check if order can be canceled
         if order.status in ["Canceled", "CustomerCanceled"]:
-            return Response(
-                {"error": "Order is already canceled"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ServiceException(status_code=400, message="Order is already canceled")
 
         if order.status == "Delivered":
-            return Response(
-                {"error": "Cannot cancel a delivered order"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400, message="Cannot cancel a delivered order"
             )
 
         # Once the package has been picked up, cancellation is not allowed
         if order.status in ["PickedUp", "Started"]:
-            return Response(
-                {"error": "Cannot cancel an order that has already been picked up"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel an order that has already been picked up",
             )
 
         # Check if escrow was released (delivery completed)
         if order.escrow_held and order.escrow_released:
-            return Response(
-                {
-                    "error": "Cannot cancel order - delivery already completed and funds released"
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel order - delivery already completed and funds released",
             )
 
         # Process escrow refund if applicable
@@ -1416,14 +1422,15 @@ class CancelOrderView(APIView):
                 refund_amount = float(refund_transaction.amount)
 
             except ValueError as e:
-                return Response(
-                    {"error": f"Failed to process refund: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ServiceException(
+                    status_code=400, message=f"Failed to process refund: {str(e)}"
                 )
 
         # Update order status
         old_status = order.status
         order.status = "CustomerCanceled"
+        order.cancellation_reason = reason
+        order.canceled_at = timezone.now()
         order.updated_at = timezone.now()
         order.save()
 
@@ -1485,8 +1492,6 @@ class CancelOrderView(APIView):
 
         # Prepare response
         response_data = {
-            "success": True,
-            "message": f"Order {order_number} has been canceled",
             "order": {
                 "order_number": order.order_number,
                 "old_status": old_status,
@@ -1502,7 +1507,12 @@ class CancelOrderView(APIView):
             },
         }
 
-        return Response(response_data, status=status.HTTP_200_OK)
+        return service_response(
+            status="success",
+            message=f"Order {order_number} has been canceled",
+            data=response_data,
+            status_code=200,
+        )
 
 
 class CancelableOrdersView(APIView):

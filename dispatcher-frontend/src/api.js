@@ -282,7 +282,8 @@ const normalizeOrder = (o) => ({
     partnerOrderCount: o.partner_order_count || null,
     dayReturnedCount: o.day_returned_count || 0,
     riderCompletedCount: o.rider_completed_count || 0,
-    fileUploadedUrl: o.file_uploaded_url || null,
+    fileUploadedUrl: o.file_uploaded_urls && o.file_uploaded_urls.length > 0 ? o.file_uploaded_urls[0] : (o.file_uploaded_url || null),
+    fileUploadedUrls: o.file_uploaded_urls || [],
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
@@ -322,6 +323,7 @@ const normalizeOrder = (o) => ({
     mode: o.mode || 'quick',
     dispatcher_assigned: o.dispatcher_assigned || false,
     verticalLeadName: o.vertical_lead_name || null,
+    cancellation_reason: o.cancellation_reason || '',
 });
 
 export const OrdersAPI = {
@@ -411,10 +413,10 @@ export const OrdersAPI = {
         return await res.json();
     },
 
-    async updateStatus(orderNumber, newStatus) {
+    async updateStatus(orderNumber, newStatus, reason = null) {
         const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify({ status: newStatus, reason })
         });
         if (!res.ok) throw new Error('Failed to update status');
         return await res.json();

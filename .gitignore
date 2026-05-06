@@ -6,6 +6,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 *.docx
+clickup.env
 
 # Local documentation (Claude instructions)
 CLAUDE.md

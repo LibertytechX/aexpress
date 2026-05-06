@@ -1473,6 +1473,8 @@ export default function AXDispatchPortal() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState(null);
   const [orders, setOrders] = useState([]);
   const [totalOrdersCount, setTotalOrdersCount] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -1541,7 +1543,10 @@ export default function AXDispatchPortal() {
       if (["Picked Up", "In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "Package picked up", by: o.rider, type: "pickup" });
       if (["In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "In transit to dropoff", by: "GPS", type: "transit" });
       if (o.status === "Delivered") { b.push({ time: "auto", event: "Delivered — confirmed", by: o.rider, type: "delivered" }); if (o.cod > 0) b.push({ time: "auto", event: `COD settled: ₦${(o.cod - o.codFee).toLocaleString()}`, by: "System", type: "settlement" }); }
-      if (o.status === "Cancelled") b.push({ time: "auto", event: "Order cancelled", by: "Dispatch", type: "cancel" });
+      if (o.status === "Cancelled") {
+        const cancelText = o.cancellation_reason ? `Order cancelled (${o.cancellation_reason})` : "Order cancelled";
+        b.push({ time: "auto", event: cancelText, by: "Dispatch", type: "cancel" });
+      }
       if (o.status === "Failed") b.push({ time: "auto", event: "Delivery failed", by: o.rider || "System", type: "fail" });
       logs[o.id] = b;
     });
@@ -1841,18 +1846,22 @@ export default function AXDispatchPortal() {
     }
   };
 
-  const changeStatus = async (oid, ns) => {
+  const changeStatus = async (oid, ns, reason = null) => {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
-      await OrdersAPI.updateStatus(oid, ns);
+      await OrdersAPI.updateStatus(oid, ns, reason);
       // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
       if (ns === "Picked Up") {
         await OrdersAPI.updateStatus(oid, "In Transit");
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
-        addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        updateOrder(oid, { 
+          status: ns, 
+          ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}),
+          ...(ns === "Cancelled" ? { cancellation_reason: reason } : {})
+        });
+        addLog(oid, `Status → ${ns}${reason ? ` (${reason})` : ""}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
         // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
         if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
@@ -1881,6 +1890,11 @@ export default function AXDispatchPortal() {
     { id: "teams", label: "Teams", icon: I.teams, count: dispatchers.length || 0 },
     { id: "settings", label: "Settings", icon: I.settings },
   ];
+
+  const handleCancelRequest = (order) => {
+    setOrderToCancel(order);
+    setShowCancelModal(true);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", color: S.text, overflow: "hidden" }}>
@@ -1920,7 +1934,7 @@ export default function AXDispatchPortal() {
         </header>
         <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1954,6 +1968,18 @@ export default function AXDispatchPortal() {
           staleOrders={staleOrders}
           onClose={() => setShowStaleModal(false)}
           onViewOrder={(id) => navTo("orders", id)}
+        />
+      )}
+
+      {showCancelModal && (
+        <CancellationModal
+          order={orderToCancel}
+          onClose={() => { setShowCancelModal(false); setOrderToCancel(null); }}
+          onConfirm={(reason) => {
+            changeStatus(orderToCancel.id, "Cancelled", reason);
+            setShowCancelModal(false);
+            setOrderToCancel(null);
+          }}
         />
       )}
 
@@ -2214,8 +2240,117 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
   );
 }
 
+// ─── CANCELLATION REASON MODAL ──────────────────────────────────────
+function CancellationModal({ order, onClose, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const [typedReason, setTypedReason] = useState("");
+  
+  const suggestedReasons = [
+    "Customer changed their mind",
+    "Duplicate order",
+    "Rider unavailable",
+    "Incorrect address",
+    "Merchant closed",
+    "Service area mismatch"
+  ];
+
+  const handleConfirm = () => {
+    const finalReason = typedReason.trim() || reason || "Order canceled by dispatcher";
+    onConfirm(finalReason);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 24, width: 480, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)", overflow: "hidden", animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}>
+        <div style={{ padding: "24px", borderBottom: `1px solid ${S.border}`, background: `linear-gradient(to right, ${S.card}, ${S.bg})` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: S.redBg, color: S.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>⚠️</div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: S.navy }}>Cancel Order</h3>
+                <div style={{ fontSize: 12, color: S.textMuted, fontFamily: "'Space Mono', monospace" }}>ID: #{order?.id}</div>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: S.bg, border: "none", cursor: "pointer", color: S.textMuted, width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ padding: "24px" }}>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</label>
+            <textarea
+              value={typedReason}
+              onChange={(e) => setTypedReason(e.target.value)}
+              placeholder="Explain why this order is being canceled..."
+              style={{
+                width: "100%", height: 120, padding: "14px", borderRadius: 16,
+                border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 14,
+                color: S.text, fontFamily: "inherit", resize: "none", outline: "none",
+                transition: "all 0.2s"
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = S.gold;
+                e.currentTarget.style.background = S.card;
+                e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = S.border;
+                e.currentTarget.style.background = S.bg;
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Suggested Reasons</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {suggestedReasons.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setTypedReason(r)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 20, border: `1px solid ${typedReason === r ? S.gold : S.border}`,
+                    background: typedReason === r ? S.goldPale : S.card,
+                    color: typedReason === r ? S.gold : S.textDim,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+            <button onClick={onClose} style={{ padding: "14px", borderRadius: 14, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Keep Order</button>
+            <button
+              onClick={handleConfirm}
+              style={{
+                padding: "14px",
+                borderRadius: 14,
+                border: "none",
+                background: `linear-gradient(135deg, ${S.red}, #c1121f)`,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: "0 8px 20px rgba(239,68,68,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+              }}
+            >
+              Confirm Cancellation
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [expandedRows, setExpandedRows] = useState({});
@@ -2256,7 +2391,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
     return (
       <>
-        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
+        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onCancelRequest={onCancelRequest} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
         {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
       </>
     );
@@ -2726,7 +2861,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -2915,9 +3050,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
-          {!isTerminal && <button onClick={() => onChangeStatus(order.id, "Cancelled")} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
+          {!isTerminal && <button onClick={() => onCancelRequest(order)} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
         </div>
       </div>
+
+      {order.status === "Cancelled" && order.cancellation_reason && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: `1.5px solid ${S.red}44`, borderRadius: 12, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, animation: "fadeIn 0.3s ease" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: S.red, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>!</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: S.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{order.cancellation_reason}</div>
+          </div>
+        </div>
+      )}
 
       {/* STATUS PROGRESSION BAR */}
       {!isTerminal && (
@@ -2929,7 +3074,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               {showStatusMenu && (
                 <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: S.card, border: `1px solid ${S.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
                   {nextStatuses().map(ns => (
-                    <button key={ns} onClick={() => { onChangeStatus(order.id, ns); setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <button key={ns} onClick={() => { if (ns === "Cancelled") { onCancelRequest(order); } else { onChangeStatus(order.id, ns); } setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       → {ns}
                     </button>
                   ))}
@@ -3035,15 +3180,28 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 </div>
               )}
 
-              {order.fileUploadedUrl && (
+              {((order.fileUploadedUrls && order.fileUploadedUrls.length > 0) || order.fileUploadedUrl) && (
                 <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Document</div>
-                  <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff" }}>
-                    <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
-                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
-                      Click to view full size
-                    </div>
-                  </a>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Documents</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {order.fileUploadedUrls && order.fileUploadedUrls.length > 0 ? (
+                      order.fileUploadedUrls.map((url, index) => (
+                        <a key={index} href={url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "calc(50% - 4px)" }}>
+                          <img src={url} alt={`Order document ${index}`} style={{ width: "100%", maxHeight: 120, objectFit: "contain" }} />
+                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 6px", fontSize: 8, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                            Click to view
+                          </div>
+                        </a>
+                      ))
+                    ) : (
+                      <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "100%" }}>
+                        <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                          Click to view full size
+                        </div>
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -6595,37 +6753,62 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [isPartnerOrder, setIsPartnerOrder] = useState(false);
   const [partnerOrderCount, setPartnerOrderCount] = useState(1);
-  const [fileUploadedUrl, setFileUploadedUrl] = useState("");
+  const [fileUploadedUrls, setFileUploadedUrls] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
 
   const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
   const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const inputElement = e.target;
+    const files = Array.from(inputElement.files);
+    if (files.length === 0) return;
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
+    
     try {
-      const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
-        method: 'POST',
-        headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
-        body: formData
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
+          method: 'POST',
+          headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
+          body: formData
+        });
+        const data = await res.json();
+        console.log("Upload Response:", data);
+        const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+        
+        if (res.ok && fileUrl) {
+          return fileUrl;
+        } else {
+          throw new Error(data.message || "Invalid response structure");
+        }
       });
-      const data = await res.json();
-      console.log("Upload Response:", data);
-      const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
-      
-      if (res.ok && fileUrl) {
-        setFileUploadedUrl(fileUrl);
-      } else {
-        setError("File upload failed: " + (data.message || "Invalid response structure"));
+
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUrls = [];
+      let hasError = false;
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successfulUrls.push(result.value);
+        } else {
+          hasError = true;
+          console.error("File upload failed:", result.reason);
+        }
+      });
+
+      if (hasError) {
+        setError("Some files failed to upload.");
       }
+
+      setFileUploadedUrls(prev => [...prev, ...successfulUrls]);
     } catch (err) {
       setError("File upload error");
     } finally {
       setIsUploading(false);
+      // Clear the input value so the same files can be selected again if needed
+      if (inputElement) inputElement.value = '';
     }
   };
 
@@ -6756,7 +6939,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
       if (!receiverName) { setError("Receiver name is required"); return; }
     } else {
       if (!merchantId) { setError("Merchant is required for partner orders"); return; }
-      if (!fileUploadedUrl) { setError("Proof/File upload is required for partner orders"); return; }
+      if (fileUploadedUrls.length === 0) { setError("Proof/File upload is required for partner orders"); return; }
     }
     setSubmitting(true);
     try {
@@ -6810,7 +6993,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         dropoff_lng: finalDropoffLng,
         is_partner_order: isPartnerOrder,
         partner_order_count: partnerOrderCount,
-        file_uploaded_url: fileUploadedUrl,
+        file_uploaded_urls: fileUploadedUrls,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -6892,10 +7075,21 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
               <div>
                 <label style={lSt}>Upload Partner Proof / File {isUploading && "(Uploading...)"}</label>
                 <div style={{ position: "relative" }}>
-                  <input type="file" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
-                  {fileUploadedUrl && (
-                    <div style={{ position: "absolute", right: 10, top: 10, color: S.green, fontSize: 12 }}>
-                      ✓ Uploaded
+                  <input type="file" multiple accept="image/*" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
+                  {fileUploadedUrls.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {fileUploadedUrls.map((url, index) => (
+                        <div key={index} style={{ position: "relative", width: 60, height: 60, borderRadius: 8, overflow: "hidden", border: `1px solid ${S.border}` }}>
+                          <img src={url} alt={`Upload ${index}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <button
+                            type="button"
+                            onClick={() => setFileUploadedUrls(fileUploadedUrls.filter((_, i) => i !== index))}
+                            style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 16, height: 16, fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

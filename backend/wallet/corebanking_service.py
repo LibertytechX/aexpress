@@ -69,7 +69,7 @@ def _do_create_virtual_account(base_url, access_token, payload):
     )
 
 
-def create_virtual_account(user):
+def create_virtual_account(user, is_amort=False):
     """
     Get or create a Wema Bank virtual account for the given merchant user.
 
@@ -78,13 +78,23 @@ def create_virtual_account(user):
     - Account name format: "{first_name} {last_name} AXPRESS"
     - Persists the virtual account in the VirtualAccount model
     """
-    from .models import VirtualAccount  # avoid circular import at module level
+    from .models import (
+        VirtualAccount,
+        AmortizationVirtualAccount,
+    )  # avoid circular import at module level
+    import uuid
 
     # Return existing account if already created
-    try:
-        return VirtualAccount.objects.get(user=user)
-    except VirtualAccount.DoesNotExist:
-        pass
+    if is_amort:
+        try:
+            return AmortizationVirtualAccount.objects.get(user=user)
+        except AmortizationVirtualAccount.DoesNotExist:
+            pass
+    else:
+        try:
+            return VirtualAccount.objects.get(user=user)
+        except VirtualAccount.DoesNotExist:
+            pass
 
     # Parse name
     parts = (user.contact_name or "").strip().split()
@@ -127,6 +137,10 @@ def create_virtual_account(user):
         "phone": phone,
         "date_of_birth": date_of_birth,
     }
+    if is_amort:
+        request_ref = f"AMORT-{uuid.uuid4().hex[:12].upper()}"
+        payload["request_reference"] = request_ref
+        payload["last_name"] = f"{last_name} AXHP"
 
     base_url = settings.COREBANKING_BASE_URL
     access_token = login()
@@ -141,17 +155,29 @@ def create_virtual_account(user):
             access_token = login()
             response = _do_create_virtual_account(base_url, access_token, payload)
             response_data = response.json()
+            print(response_data)
 
         if response.status_code == 201 and response_data.get("status") == "success":
             account_details = response_data["data"]["account_details"]
-            virtual_account = VirtualAccount.objects.create(
-                user=user,
-                account_number=account_details["account_number"],
-                account_name=account_name,
-                bank_name="Wema Bank",
-                bank_code="000017",
-                corebanking_account_id=account_details["id"],
-            )
+            if is_amort:
+                virtual_account = AmortizationVirtualAccount.objects.create(
+                    user=user,
+                    account_number=account_details["account_number"],
+                    account_name=account_name,
+                    bank_name="Wema Bank",
+                    bank_code="000017",
+                    request_ref=request_ref,
+                    corebanking_account_id=account_details["id"],
+                )
+            else:
+                virtual_account = VirtualAccount.objects.create(
+                    user=user,
+                    account_number=account_details["account_number"],
+                    account_name=account_name,
+                    bank_name="Wema Bank",
+                    bank_code="000017",
+                    corebanking_account_id=account_details["id"],
+                )
             return virtual_account
 
         logger.error("CoreBanking virtual account creation failed: %s", response_data)
