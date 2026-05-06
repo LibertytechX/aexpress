@@ -340,7 +340,7 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         "user__phone",
         "user__email",
     ]
-    readonly_fields = ["created_at", "updated_at"]
+    readonly_fields = ["balance", "total_paid_to_date", "created_at", "updated_at"]
     list_filter = ["created_at", "is_active"]
     actions = ["activate_wallets", "deactivate_wallets"]
 
@@ -389,7 +389,15 @@ class AmortizationTransactionAdmin(admin.ModelAdmin):
         "created_at",
     ]
     search_fields = ["reference", "description", "amortization_wallet__user__full_name"]
-    readonly_fields = ["created_at", "updated_at"]
+    readonly_fields = [
+        "entry_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "reference",
+        "created_at",
+        "updated_at",
+    ]
     list_filter = ["entry_type", "status", "created_at", "amortization_wallet"]
 
     fieldsets = (
