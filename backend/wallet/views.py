@@ -558,6 +558,17 @@ def corebanking_webhook(request):
         req_reference = req_reference.strip() if req_reference else ""
         # process for amortization payment
         if recipient_name.endswith("AXHP"):  # Amortization Account
+            # check for idempotency for AmortizationTransaction
+            if AmortizationTransaction.objects.filter(
+                reference=transaction_reference
+            ).exists():
+                logger.info(
+                    f"Amortization webhook skipped - transaction {transaction_reference} already processed - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_skipped(
+                    f"Transaction {transaction_reference} already processed"
+                )
+                return Response({"success": True})
             # get the amort account and wallet
             amort_account = AmortizationVirtualAccount.objects.filter(
                 account_number=recipient_account_number
@@ -605,6 +616,9 @@ def corebanking_webhook(request):
                 ref=transaction_reference,
                 meta=webhook_metadata,
             )
+            # mark log as processed
+            webhook_log.mark_processed()
+            return Response({"success": True})
 
         # Check if it's a COD Remission
         if req_reference and req_reference.startswith("COD-"):
