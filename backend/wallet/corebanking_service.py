@@ -78,8 +78,12 @@ def create_virtual_account(user, is_amort=False):
     - Account name format: "{first_name} {last_name} AXPRESS"
     - Persists the virtual account in the VirtualAccount model
     """
-    from .models import VirtualAccount, AmortizationVirtualAccount  # avoid circular import at module level
+    from .models import (
+        VirtualAccount,
+        AmortizationVirtualAccount,
+    )  # avoid circular import at module level
     import uuid
+
     # Return existing account if already created
     if is_amort:
         try:
@@ -162,6 +166,7 @@ def create_virtual_account(user, is_amort=False):
                     account_name=account_name,
                     bank_name="Wema Bank",
                     bank_code="000017",
+                    request_ref=request_ref,
                     corebanking_account_id=account_details["id"],
                 )
             else:

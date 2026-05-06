@@ -338,6 +338,8 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
     search_fields = ["user__full_name", "user__phone", "user__email"]
     readonly_fields = ["created_at", "updated_at"]
     list_filter = ["created_at", "is_active"]
+    actions = ["activate_wallets", "deactivate_wallets"]
+
 
     fieldsets = (
         (
@@ -347,6 +349,29 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         ("Payment Details", {"fields": ("expected_daily_payment",)}),
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
+
+    @admin.action(description="Activate selected amortization wallets")
+    def activate_wallets(self, request, queryset):
+        from django.contrib import messages
+
+        updated = queryset.update(is_active=True)
+        self.message_user(
+            request,
+            f"Successfully activated {updated} amortization wallets.",
+            level=messages.SUCCESS,
+        )
+
+    @admin.action(description="Deactivate selected amortization wallets")
+    def deactivate_wallets(self, request, queryset):
+        from django.contrib import messages
+
+        updated = queryset.update(is_active=False)
+        self.message_user(
+            request,
+            f"Successfully deactivated {updated} amortization wallets.",
+            level=messages.SUCCESS,
+        )
+
 
 
 @admin.register(AmortizationTransaction)

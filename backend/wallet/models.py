@@ -610,6 +610,12 @@ class AmortizationVirtualAccount(models.Model):
     corebanking_account_id = models.CharField(
         max_length=100, unique=True, db_index=True
     )
+    request_ref = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Request reference for virtual account creation",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

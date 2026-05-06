@@ -12,6 +12,8 @@ All notable changes to the AXpress backend are documented in this file.
     - `AmortizationVirtualAccount`: Support for assigned virtual bank accounts dedicated to amortization payments.
 - **Admin Management**: Registered all amortization models in the Django Admin interface with custom list views, search, and filters.
 - **Rider Admin Action**: Added "Create amortization wallet for selected riders" action to the Rider admin to allow bulk wallet initialization.
+- **Wallet Admin Actions**: Added "Activate" and "Deactivate" actions to the Amortization Wallet admin for status management.
+
 
 
 ### Fixed
