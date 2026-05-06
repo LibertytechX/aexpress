@@ -601,7 +601,7 @@ def corebanking_webhook(request):
             }
             # credit the amortization wallet
             wallet.credit(
-                amount=data.get("amount"),
+                amount=Decimal(str(amount)),
                 ref=transaction_reference,
                 meta=webhook_metadata,
             )
