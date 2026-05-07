@@ -33,9 +33,15 @@
 - [X] Fix hpmr log customer contact bug
 - [] profile slow endpoints and SLOs for all endpoints
 - [x] fix slow rider start order endpoint in orders/views.py
-- [] add soft delete for riders and merchants
-- [] add bike reassignment history for riders
+- [x] add soft delete for riders and merchants
+- [xx] add bike reassignment history for riders
 - [] also restrict permission to reassign vehicle assets to riders on dispatcher panel and also add admin who initiated the request
-- [] add support is jumia order creation
+- [x] add support is jumia order creation
 
+routing functions to update for backend to use osrm
+- calculate_route
+- find_closest_zone
+
+
+routing functions for the frontend
 
