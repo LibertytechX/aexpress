@@ -36,6 +36,7 @@ class SignupView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Register a new merchant user."""
         serializer = SignupSerializer(data=request.data)
@@ -922,7 +923,11 @@ class MobileResetPasswordView(APIView):
 # ---------------------------------------------------------------------------
 
 from dispatcher.permissions import IsMerchant  # noqa: E402
-from dispatcher.models import MerchantDevice, MerchantNotification, MerchantNotificationSettings  # noqa: E402
+from dispatcher.models import (
+    MerchantDevice,
+    MerchantNotification,
+    MerchantNotificationSettings,
+)  # noqa: E402
 from .serializers import (  # noqa: E402
     MerchantDeviceSerializer,
     MerchantNotificationSerializer,
@@ -1042,9 +1047,9 @@ class MerchantNotificationMarkAllReadView(APIView):
 
     def post(self, request):
         merchant = request.user.merchant_profile
-        updated = MerchantNotification.objects.filter(merchant=merchant, is_read=False).update(
-            is_read=True
-        )
+        updated = MerchantNotification.objects.filter(
+            merchant=merchant, is_read=False
+        ).update(is_read=True)
         return service_response(
             status="success",
             message=f"{updated} notification(s) marked as read.",

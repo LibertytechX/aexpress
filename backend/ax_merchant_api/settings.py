@@ -401,6 +401,12 @@ MESSENGER360_API_KEY = os.getenv("MESSENGER360_API_KEY", "")
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
+# Routing Service Configuration
+ROUTING_SERVICE_URL = os.getenv("ROUTING_SERVICE_URL", "http://localhost:8071/api/v1/directions")
+ROUTING_SERVICE_API_KEY = os.getenv("ROUTING_SERVICE_API_KEY", "")
+ROUTING_PROVIDER = os.getenv("ROUTING_PROVIDER", "google")  # 'google' or 'custom'
+
+
 SMARTPARCEL_BASE_URL = os.getenv("SMARTPARCEL_BASE_URL", "")
 SMARTPARCEL_API_KEY = os.getenv("SMARTPARCEL_API_KEY", "")
 SMARTPARCEL_SECRET_KEY = os.getenv("SMARTPARCEL_SECRET_KEY", "")

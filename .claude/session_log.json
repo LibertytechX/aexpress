@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "title": "Backend: Integrate custom routing service for Dispatcher & Merchant Dashboard",
+    "description": "Implemented a feature flag to switch between Google Maps and a custom Go-based routing service for distance and duration calculations. Configured environment variables and coordinate swapping for OSRM compatibility.",
+    "status": "in qa"
+  },
+  {
+    "title": "Backend: Dockerize Go routing service",
+    "description": "Created a multi-stage Dockerfile using golang:alpine for building and alpine for runtime to minimize image size. Added a docker-compose.yml file to orchestrate the service with environment variable support.",
+    "status": "in qa"
+  },
+  {
+    "title": "Backend: Implement OSRM Table API and integrate into find_closest_zone",
+    "description": "Extended the Go routing service with support for the OSRM Distance Table API. Integrated this into the Python backend's find_closest_zone function with a feature flag, enabling more efficient road-distance based zone identification without relying on Google Maps.",
+    "status": "in qa"
+  }
+]
+

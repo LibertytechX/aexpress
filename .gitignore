@@ -11,6 +11,7 @@ clickup.env
 # Local documentation (Claude instructions)
 CLAUDE.md
 GEMINI.md
+tmp/
 
 # Package manager lock files (optional - uncomment if needed)
 # package-lock.json
