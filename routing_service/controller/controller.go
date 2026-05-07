@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"routing_service/middleware"
 	service "routing_service/services"
 	"routing_service/utils"
 	"strings"
@@ -24,7 +25,7 @@ func NewController(routingService service.RoutingService) *Controller {
 
 // register routes
 func (c *Controller) RegisterRoutes(router *gin.RouterGroup) {
-	router.GET("/directions", c.GetDirections)
+	router.GET("/directions", middleware.AuthMiddleware(), c.GetDirections)
 }
 
 func (c *Controller) GetDirections(ctx *gin.Context) {
