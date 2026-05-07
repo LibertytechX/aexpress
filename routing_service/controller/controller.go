@@ -6,6 +6,7 @@ import (
 	"net/http"
 	service "routing_service/services"
 	"routing_service/utils"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -30,16 +31,20 @@ func (c *Controller) GetDirections(ctx *gin.Context) {
 	log.Println("Received request for directions 🚗🚗")
 	// get the query params for origin and destinations
 	origin := ctx.Query("origin")
-	destinations := ctx.Query("destinations")
+	destinations := ctx.QueryArray("destinations")
 	log.Println("Origin:", origin)
 	log.Println("Destinations:", destinations)
-	if origin == "" || destinations == "" {
+	if origin == "" || len(destinations) == 0 {
 		ctx.JSON(http.StatusBadRequest, utils.Response(http.StatusBadRequest, nil, "Origin and destinations are required"))
 		return
 	}
+
+	// shadow the destinations from list to string
+	destinationsStr := strings.Join(destinations, ";")
+	log.Println("Destinations (updated):", destinationsStr)
 	bgCtx := context.Background()
 	// send to service layer to process
-	response, err := c.service.Directions(bgCtx, origin, destinations)
+	response, err := c.service.Directions(bgCtx, origin, destinationsStr)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, utils.Response(http.StatusInternalServerError, nil, "Failed to get directions"))
 		return

@@ -11,6 +11,8 @@ All notable changes to the AXpress project are documented in this file.
 
 #### Fixed
 - **Development Tooling**: Resolved "no such tool 'air'" error by properly registering `air` as a Go tool in `go.mod` and adding a `.air.toml` configuration.
+- **Multiple Destinations**: Updated the directions endpoint to support multiple destinations via repeated query parameters (`?destinations=p1&destinations=p2`), bypassing semicolon parsing issues in Go 1.17+.
+
 
 ---
 
