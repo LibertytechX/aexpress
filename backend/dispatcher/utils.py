@@ -369,20 +369,6 @@ def _find_closest_zone_google(lat, lng, zones):
 
     return None
 
-    closest = None
-    min_dist = float("inf")
-    for zone in zones:
-        dist = Zone.haversine_distance(lat, lng, zone.center_lat, zone.center_lng)
-        if dist < min_dist:
-            min_dist = dist
-            closest = zone
-
-    if closest:
-        logger.info(
-            f"find_closest_zone: Found closest zone '{closest.name}' via Haversine (dist: {min_dist:.2f}km)"
-        )
-    return closest
-
 
 def generate_notification_id() -> int:
     from .models import MerchantNotification
