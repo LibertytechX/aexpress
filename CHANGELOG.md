@@ -2,7 +2,20 @@
 
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-07] — Routing Service Development Environment & Types
+
+### Backend (Routing Service)
+#### Added
+- **Live Reloading**: Configured `air` for hot-reloading during development.
+- **OSRM Types**: Defined `OSRMResponse` and related structs in `types/types.go` for handling map service responses.
+
+#### Fixed
+- **Development Tooling**: Resolved "no such tool 'air'" error by properly registering `air` as a Go tool in `go.mod` and adding a `.air.toml` configuration.
+
+---
+
 # [2026-05-06] — Amortization Wallet & Transactions
+
 ### API
 #### Added
 - **Amortization Wallet**: Implemented `GET /wallet/amortization-wallet/` for riders to view bike hire-purchase progress.

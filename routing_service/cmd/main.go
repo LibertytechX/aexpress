@@ -4,6 +4,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"routing_service/controller"
+	service "routing_service/services"
 	"routing_service/utils"
 
 	"github.com/gin-contrib/cors"
@@ -51,11 +53,17 @@ func main() {
 		})
 	})
 
+	// set up group
+	v1 := router.Group("/api/v1")
+	// service setup
+	service := service.NewRoutingService(osrmURL)
+	ctrl := controller.NewController(service)
+	ctrl.RegisterRoutes(v1)
+
+	log.Println("🚀🚀 Server running on 🚀🚀", addr)
 	if err := router.Run(addr); err != nil {
 		log.Fatal("Server failed to start ❌❌: ", err)
 	}
-
-	log.Println("🚀🚀 Server running on 🚀🚀", addr)
 
 	// Implement routing logic here...
 }

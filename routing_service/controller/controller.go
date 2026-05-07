@@ -1,1 +1,51 @@
 package controller
+
+import (
+	"context"
+	"log"
+	"net/http"
+	service "routing_service/services"
+	"routing_service/utils"
+
+	"github.com/gin-gonic/gin"
+)
+
+type Controller struct {
+	// depend on services
+	service service.RoutingService
+}
+
+func NewController(routingService service.RoutingService) *Controller {
+	return &Controller{
+		service: routingService,
+	}
+}
+
+// register routes
+func (c *Controller) RegisterRoutes(router *gin.RouterGroup) {
+	router.GET("/directions", c.GetDirections)
+}
+
+func (c *Controller) GetDirections(ctx *gin.Context) {
+	log.Println("Received request for directions 🚗🚗")
+	// get the query params for origin and destinations
+	origin := ctx.Query("origin")
+	destinations := ctx.Query("destinations")
+	log.Println("Origin:", origin)
+	log.Println("Destinations:", destinations)
+	if origin == "" || destinations == "" {
+		ctx.JSON(http.StatusBadRequest, utils.Response(http.StatusBadRequest, nil, "Origin and destinations are required"))
+		return
+	}
+	bgCtx := context.Background()
+	// send to service layer to process
+	response, err := c.service.Directions(bgCtx, origin, destinations)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, utils.Response(http.StatusInternalServerError, nil, "Failed to get directions"))
+		return
+	}
+	routeData := response.Routes
+
+	ctx.JSON(http.StatusOK, utils.Response(http.StatusOK, routeData, "Directions fetched successfully 🔥🔥"))
+
+}
