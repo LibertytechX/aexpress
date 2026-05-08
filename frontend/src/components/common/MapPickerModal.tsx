@@ -25,8 +25,8 @@ Math.abs(previous.lat - next.lat) > REVERSE_GEOCODE_MIN_DELTA ||
   Math.abs(previous.lng - next.lng) > REVERSE_GEOCODE_MIN_DELTA;
 
 interface MapPickerModalProps {
-  /** Called when user confirms a location. Receives the resolved address string. */
-  onConfirm: (address: string) => void;
+  /** Called when user confirms a location. Receives the resolved address string and coordinates. */
+  onConfirm: (address: string, lat: number, lng: number) => void;
   /** Called when the user dismisses without picking. */
   onClose: () => void;
 }
@@ -186,7 +186,12 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
   const handleConfirm = () => {
     if (!resolvedAddress || outsideLagos) return;
-    onConfirm(resolvedAddress);
+    const center = mapInstanceRef.current.getCenter();
+    if (center) {
+      onConfirm(resolvedAddress, center.lat(), center.lng());
+    } else {
+      onConfirm(resolvedAddress, 0, 0); // Should not happen
+    }
   };
 
   const handleSearchInput = (e: React.ChangeEvent<HTMLInputElement>) => {

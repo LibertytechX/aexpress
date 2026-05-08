@@ -230,52 +230,38 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
     setCalculatingRoute(true);
 
     const calculateEarlyRoute = async () => {
-      try {
-        if (typeof window === 'undefined' || !(window as any).google || !(window as any).google.maps) {
-          setRouteError('Maps not loaded');
-          setCalculatingRoute(false);
-          return;
-        }
+      console.log('🔄 Starting early route calculation (Backend)...', { pickupAddress, dropoffAddress });
+      setRouteError(null);
 
-        const directionsService = new (window as any).google.maps.DirectionsService();
-        const request = {
-          origin: pickupAddress,
-          destination: dropoffAddress,
-          travelMode: (window as any).google.maps.TravelMode.DRIVING,
-          drivingOptions: {
-            departureTime: new Date(),
-            trafficModel: (window as any).google.maps.TrafficModel.BEST_GUESS
-          }
+      try {
+        const payload = {
+          mode: mode === 'grouped' ? 'quick' : mode,
+          pickup: pickupAddress,
+          deliveries: [dropoffAddress]
         };
 
-        directionsService.route(request, (result: any, status: any) => {
-          if (status === (window as any).google.maps.DirectionsStatus.OK && result.routes[0]) {
-            const route = result.routes[0];
-            let totalDistance = 0;
-            let totalDuration = 0;
-
-            route.legs.forEach((leg: any) => {
-              totalDistance += leg.distance.value;
-              totalDuration += leg.duration_in_traffic?.value || leg.duration.value;
-            });
-
-            const distanceKm = (totalDistance / 1000).toFixed(1);
-            const durationMin = Math.ceil(totalDuration / 60);
-
-            setEarlyRouteDistance(parseFloat(distanceKm));
-            setEarlyRouteDuration(durationMin);
-            setCalculatingRoute(false);
-          } else {
-            setRouteError('Unable to calculate route');
-            setCalculatingRoute(false);
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // In this component, we don't have multiFares state yet, 
+          // let's see if we should add it or just update earlyRouteDistance/Duration.
+          const vehicleData = res.vehicles[vehicle];
+          if (vehicleData) {
+            setEarlyRouteDistance(vehicleData.distance_km);
+            setEarlyRouteDuration(vehicleData.duration_minutes);
+            // We might want to store the full result if we want to bypass frontend pricing
           }
-        });
-      } catch (error) {
-        console.error('Error calculating route:', error);
-        setRouteError('Error calculating route');
+          setCalculatingRoute(false);
+        } else {
+          setRouteError('Unable to calculate route via backend');
+          setCalculatingRoute(false);
+        }
+      } catch (error: any) {
+        console.error('❌ Error calculating route via backend:', error);
+        setRouteError(error.message || 'Error calculating route');
         setCalculatingRoute(false);
       }
     };
+
 
     const timeoutId = setTimeout(calculateEarlyRoute, 1000);
     return () => clearTimeout(timeoutId);
