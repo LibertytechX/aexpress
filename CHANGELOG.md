@@ -2,6 +2,16 @@
 
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-08] — Unified Coordinate-Based Routing
+
+### Frontend
+#### Added
+- **Coordinate Capture**: Enhanced `AddressAutocompleteInput` to capture and return `lat`/`lng` coordinates alongside formatted addresses.
+- **Precise Routing**: Integrated coordinate-based inputs into the `bulk-calculate-fare` API calls for Quick, Multi-drop, and Bulk order modes, improving pricing and ETA accuracy.
+- **State Management**: Updated `dashboard/page.tsx` to store and manage coordinate data for all delivery stops.
+
+---
+
 # [2026-05-07] — Routing Service Development Environment & Types
 
 ### Backend (Routing Service)

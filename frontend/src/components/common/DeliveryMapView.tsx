@@ -10,7 +10,29 @@ declare global {
   }
 }
 
-export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, totalCost, onRouteCalculated }) {
+interface DeliveryMapViewProps {
+  pickupAddress: string;
+  dropoffs: any[];
+  vehicle: string;
+  totalDeliveries: number;
+  totalCost: number;
+  onRouteCalculated?: (distance: number, duration: number) => void;
+  polyline?: string;
+  distance?: number;
+  duration?: number;
+}
+
+export default function DeliveryMapView({ 
+  pickupAddress, 
+  dropoffs, 
+  vehicle, 
+  totalDeliveries, 
+  totalCost, 
+  onRouteCalculated, 
+  polyline, 
+  distance, 
+  duration 
+}: DeliveryMapViewProps) {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
@@ -150,9 +172,6 @@ export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, tota
       markersRef.current = [];
 
       // Geocode pickup address
-      // Appends ', Lagos, Nigeria' only when the address doesn't already contain
-      // location context — mirrors the Stack Overflow fix for the Distance Matrix /
-      // Geocoding API not resolving bare street names without state/country.
       const geocodeAddress = (address: string) => {
         return new Promise((resolve) => {
           const lower = address.toLowerCase();
@@ -200,7 +219,6 @@ export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, tota
 
         // Geocode dropoffs
         const dropoffLocations = [];
-        // Ensure dropoffs is an array and filter valid ones
         const validDropoffs = Array.isArray(dropoffs) ? dropoffs.filter(d => d.address) : [];
 
         for (let i = 0; i < validDropoffs.length; i++) {
@@ -210,7 +228,6 @@ export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, tota
           if (location) {
             dropoffLocations.push({ location, dropoff, index: i });
 
-            // Add numbered gold marker for each dropoff
             const dropoffMarker = new window.google.maps.Marker({
               position: location,
               map: map,
@@ -236,108 +253,73 @@ export default function DeliveryMapView({ pickupAddress, dropoffs, vehicle, tota
 
         // Draw route if we have pickup and at least one dropoff
         if (pickupLocation && dropoffLocations.length > 0 && directionsRendererRef.current) {
-          const directionsService = new window.google.maps.DirectionsService();
+          if (polyline && window.google.maps.geometry && window.google.maps.geometry.encoding) {
+            const path = window.google.maps.geometry.encoding.decodePath(polyline);
+            directionsRendererRef.current.setDirections({
+              routes: [{
+                overview_path: path,
+                legs: [],
+                bounds: new window.google.maps.LatLngBounds(),
+                copyrights: '',
+                warnings: [],
+                waypoint_order: []
+              }]
+            });
+            
+            // Apply polyline options with icons
+            const polylineOptions = {
+              strokeColor: '#E8A838',
+              strokeWeight: 4,
+              strokeOpacity: 0.7,
+              icons: [{
+                icon: {
+                  path: window.google.maps.SymbolPath.CIRCLE,
+                  scale: 4,
+                  fillColor: '#ffffff',
+                  fillOpacity: 0.8,
+                  strokeColor: '#ffffff',
+                  strokeWeight: 2,
+                  strokeOpacity: 0.6
+                },
+                offset: '0%',
+                repeat: '100px'
+              }]
+            };
+            directionsRendererRef.current.setOptions({ polylineOptions });
+            
+            startPulseAnimation();
+          } else {
+            // Fallback to DirectionsService (deprecated)
+            console.warn('⚠️ Falling back to DirectionsService.');
+            const directionsService = new window.google.maps.DirectionsService();
+            const waypoints = dropoffLocations.slice(0, -1).map(d => ({
+              location: d.location,
+              stopover: true
+            }));
 
-          // Prepare waypoints for multi-stop route
-          const waypoints = dropoffLocations.slice(0, -1).map(d => ({
-            location: d.location,
-            stopover: true
-          }));
+            const request = {
+              origin: pickupLocation,
+              destination: dropoffLocations[dropoffLocations.length - 1].location,
+              waypoints: waypoints,
+              travelMode: window.google.maps.TravelMode.DRIVING,
+              optimizeWaypoints: true
+            };
 
-          const request = {
-            origin: pickupLocation,
-            destination: dropoffLocations[dropoffLocations.length - 1].location,
-            waypoints: waypoints,
-            travelMode: window.google.maps.TravelMode.DRIVING,
-            optimizeWaypoints: true
-          };
-
-          directionsService.route(request, (result, status) => {
-            if (status === 'OK') {
-              directionsRendererRef.current.setDirections(result);
-
-              // Extract distance and duration from route
-              if (result.routes && result.routes[0] && result.routes[0].legs) {
-                let totalDistanceMeters = 0;
-                let totalDurationSeconds = 0;
-                let totalDurationInTrafficSeconds = 0;
-                let hasTrafficData = false;
-
-                // Sum up all legs (for multi-stop routes)
-                result.routes[0].legs.forEach(leg => {
-                  if (leg.distance && leg.distance.value) {
-                    totalDistanceMeters += leg.distance.value;
-                  }
-                  if (leg.duration && leg.duration.value) {
-                    totalDurationSeconds += leg.duration.value;
-                  }
-                  if (leg.duration_in_traffic && leg.duration_in_traffic.value) {
-                    totalDurationInTrafficSeconds += leg.duration_in_traffic.value;
-                    hasTrafficData = true;
-                  }
-                });
-
-                // Convert to user-friendly units
-                const distanceKm = (totalDistanceMeters / 1000).toFixed(1); // kilometers with 1 decimal
-                const durationMin = Math.round(totalDurationSeconds / 60); // minutes
-                const durationInTrafficMin = hasTrafficData ? Math.round(totalDurationInTrafficSeconds / 60) : null;
-
-                // Update state
-                setRouteDistance(parseFloat(distanceKm));
-                setRouteDuration(durationMin);
-                setRouteDurationInTraffic(durationInTrafficMin);
-
-                // Notify parent component of route calculation
-                if (onRouteCalculated) {
-                  onRouteCalculated(parseFloat(distanceKm), durationMin);
-                }
+            directionsService.route(request, (result, status) => {
+              if (status === 'OK' && directionsRendererRef.current) {
+                directionsRendererRef.current.setDirections(result);
+                startPulseAnimation();
               }
-
-              // Re-apply polyline options with icons after setDirections
-              // (setDirections replaces the polyline, losing our custom icons)
-              const polylineOptions = {
-                strokeColor: '#E8A838',
-                strokeWeight: 4,
-                strokeOpacity: 0.7,
-                icons: [{
-                  icon: {
-                    path: window.google.maps.SymbolPath.CIRCLE,
-                    scale: 4,
-                    fillColor: '#ffffff',
-                    fillOpacity: 0.8,
-                    strokeColor: '#ffffff',
-                    strokeWeight: 2,
-                    strokeOpacity: 0.6
-                  },
-                  offset: '0%',
-                  repeat: '100px'
-                }]
-              };
-              directionsRendererRef.current.setOptions({ polylineOptions });
-
-              // Start animated pulse effect
-              startPulseAnimation();
-            } else {
-              console.warn('Directions request failed:', status);
-            }
-          });
+            });
+          }
         }
 
-        // Fit bounds to show all markers
+        // Fit bounds
         if (markersRef.current.length > 0) {
           const bounds = new window.google.maps.LatLngBounds();
-          markersRef.current.forEach(marker => {
-            bounds.extend(marker.getPosition());
-          });
+          markersRef.current.forEach(marker => bounds.extend(marker.getPosition()));
           map.fitBounds(bounds);
-
-          // Add padding
-          const padding = { top: 50, right: 50, bottom: 100, left: 50 };
-
-          // Small delay to ensure map is ready for bounds change
-          setTimeout(() => {
-            map.fitBounds(bounds, padding);
-          }, 100);
+          setTimeout(() => map.fitBounds(bounds, { top: 50, right: 50, bottom: 100, left: 50 }), 100);
         }
 
       } catch (error) {
