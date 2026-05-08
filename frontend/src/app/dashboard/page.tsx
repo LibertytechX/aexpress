@@ -4724,6 +4724,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             vehicle={vehicle}
             totalDeliveries={totalDeliveries}
             totalCost={totalCost}
+            //@ts-ignore
             polyline={multiFares?.vehicles?.[vehicle]?.polyline}
             distance={multiFares?.vehicles?.[vehicle]?.distance_km}
             duration={multiFares?.vehicles?.[vehicle]?.duration_minutes}
