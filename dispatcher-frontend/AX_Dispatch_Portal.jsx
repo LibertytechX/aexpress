@@ -6755,6 +6755,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [partnerOrderCount, setPartnerOrderCount] = useState(1);
   const [fileUploadedUrls, setFileUploadedUrls] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [backendFares, setBackendFares] = useState({});
 
   const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
   const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
@@ -6835,28 +6836,55 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   // Calculate route when both addresses change
   useEffect(() => {
-    if (!pickup || !dropoff) { setRouteDistance(null); setRouteDuration(null); return; }
+    // Only calculate when both addresses are sufficiently ready
+    const isPickupReady = pickupLat || (pickup && pickup.trim().length >= 8);
+    const isDropoffReady = dropoffLat || (dropoff && dropoff.trim().length >= 4);
+
+    if (!isPickupReady || !isDropoffReady) { 
+      setRouteDistance(null); 
+      setRouteDuration(null); 
+      setBackendFares({});
+      return; 
+    }
+
     setCalculatingRoute(true);
-    const tid = setTimeout(() => {
-      if (typeof google === 'undefined' || !google.maps) { setCalculatingRoute(false); return; }
-      new google.maps.DirectionsService().route({
-        origin: pickup, destination: dropoff,
-        travelMode: google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        setCalculatingRoute(false);
-        if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
-          let dist = 0, dur = 0;
-          result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
-          setRouteDistance(parseFloat((dist / 1000).toFixed(1)));
-          setRouteDuration(Math.ceil(dur / 60));
+    const tid = setTimeout(async () => {
+      try {
+        const pickupPoint = (pickupLat && pickupLng) ? { lat: pickupLat, lng: pickupLng } : pickup;
+        const dropoffPoint = (dropoffLat && dropoffLng) ? { lat: dropoffLat, lng: dropoffLng } : dropoff;
+
+        const payload = {
+          mode: 'quick',
+          pickup: pickupPoint,
+          deliveries: [dropoffPoint]
+        };
+
+        const res = await OrdersAPI.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // Identify first vehicle to extract common route stats
+          const firstV = Object.values(res.vehicles)[0];
+          if (firstV) {
+            setRouteDistance(firstV.distance_km);
+            setRouteDuration(firstV.duration_minutes);
+          }
+          setBackendFares(res.vehicles);
         }
-      });
-    }, 800);
+      } catch (err) {
+        console.error("Dispatcher route calculation error:", err);
+      } finally {
+        setCalculatingRoute(false);
+      }
+    }, 1000);
     return () => clearTimeout(tid);
-  }, [pickup, dropoff]);
+  }, [pickup, dropoff, pickupLat, pickupLng, dropoffLat, dropoffLng]);
 
   // Calculate price for a given vehicle
   const calcPrice = (vName) => {
+    // If backend already calculated the precise fare, use it.
+    if (backendFares && backendFares[vName]) {
+      return backendFares[vName].price;
+    }
+
     const p = vehiclePricing[vName];
     if (!p) return null;
     // Tiered pricing (Bike, Car, Van)

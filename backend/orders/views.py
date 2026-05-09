@@ -1247,6 +1247,14 @@ class BulkCalculateFareView(APIView):
         mode = request.data.get("mode", "quick")
         pickup = request.data.get("pickup")
         deliveries = request.data.get("deliveries", [])
+        if isinstance(pickup, str) or isinstance(deliveries, str):
+            return Response(
+                {
+                    "success": False,
+                    "error": "Invalid data format: pickup and deliveries must be dictionaries",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not pickup or not deliveries:
             return Response(

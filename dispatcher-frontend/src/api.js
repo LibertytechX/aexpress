@@ -480,6 +480,16 @@ export const OrdersAPI = {
         const data = await res.json();
         if (!res.ok) throw (data || new Error('Failed to merge orders'));
         return data;
+    },
+
+    async bulkCalculateFare(payload) {
+        const res = await fetchWithAuth(`/orders/bulk-calculate-fare/`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to calculate fare'));
+        return data;
     }
 };
 
