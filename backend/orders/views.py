@@ -410,6 +410,8 @@ class MultiDropView(APIView):
         from django.utils import timezone
         from datetime import timedelta
 
+        order_service = get_order_service()
+
         # whitelist = ["https://send.axpress.net/", "https://move.axpress.net/"]
 
         one_minute_ago = timezone.now() - timedelta(minutes=1)
@@ -466,27 +468,21 @@ class MultiDropView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
+        # get the payment method
+        payment_method = data.get("payment_method", "wallet")
+        user = request.user
+        ok, response = order_service.process_non_cash_payment(
+            payment_method, user, order
+        )
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"non_field_errors": [response.get("message")]},
+                },
+                status=response.get("status_code", status.HTTP_400_BAD_REQUEST),
+            )
 
-        # [NEW] Subscription processing
-        if data.get("payment_method") == "pay_with_subscription":
-
-            # [NEW] Subscription processing
-
-            subscription = process_order_subscription(order)
-            if not subscription:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to process subscription payment. User has no active subscription."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if data.get("payment_method") == "postpaid":
             # Postpaid processing
             merchant_profile = getattr(request.user, "merchant_profile", None)
             if not merchant_profile:
@@ -558,63 +554,6 @@ class MultiDropView(APIView):
                 duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
-
-        # Hold funds in escrow if payment method is wallet
-        if data["payment_method"] == "wallet":
-            try:
-                charges = Charge.objects.filter(
-                    user=request.user, status="pending", is_active=True
-                )
-                if charges.exists():
-                    return Response(
-                        {
-                            "success": False,
-                            "errors": {
-                                "wallet": [
-                                    "You have pending charges. Please clear them before creating a new order with wallet payment method."
-                                ]
-                            },
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                wallet = Wallet.objects.get(user=request.user)
-
-                # Hold funds in escrow
-                try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
-                        amount=total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Multi-Drop order #{order.order_number} ({num_deliveries} deliveries)",
-                    )
-
-                    # Mark order as having escrow held
-                    order.escrow_held = True
-                    order.save()
-
-                except ValueError as e:
-                    # Insufficient balance - rollback order
-                    order.delete()
-                    return Response(
-                        {"success": False, "errors": {"wallet": [str(e)]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            except Wallet.DoesNotExist:
-                # Create wallet if it doesn't exist
-                wallet = Wallet.objects.create(user=request.user)
-                order.delete()
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "wallet": [
-                                "Insufficient wallet balance. Please fund your wallet first."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         # Notify all online riders about the new order (fire-and-forget in background)
         def _notify_riders_multi():
