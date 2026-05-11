@@ -800,9 +800,9 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** March 28, 2026
-**Version:** 1.1
-**Recent Changes:** Added "Rider Earning" to Order Admin and fixed tiered pricing calculation logic in the merchant frontend to support 4+ tiers.
+**Last Updated:** May 11, 2026
+**Version:** 1.2
+**Recent Changes:** Implemented multi-drop route visualization in the Dispatcher Portal, including sequential stop rendering and expanded order serialization.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.

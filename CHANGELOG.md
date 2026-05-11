@@ -1,6 +1,16 @@
-# Changelog
-
 All notable changes to the AXpress project are documented in this file.
+
+# [2026-05-11] — Multi-Drop Route Visualization
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Multi-Drop Map Rendering**: Updated `DeliveryRouteMap` to visualize all delivery stops for `multi` mode orders. Markers are now sequence-numbered, and the route path connects every stop in order.
+- **Enhanced Route Details**: The `OrderDetail` sidebar now lists all delivery stops sequentially, showing stop numbers, addresses, status, and receiver contact information.
+- **Dynamic Route Indicators**: Implemented a dynamic vertical path indicator in the Route section that scales based on the number of delivery stops.
+
+### API
+#### Changed
+- **Serializer Expansion**: Updated the dispatcher's `OrderSerializer` to include the nested `deliveries` field, providing full stop data to the frontend.
 
 # [2026-05-08] — Unified Coordinate-Based Routing
 

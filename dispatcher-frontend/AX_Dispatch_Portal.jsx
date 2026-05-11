@@ -451,11 +451,35 @@ function DeliveryRouteMap({ order, rider }) {
       markersRef.current = [];
       if (directionsRendererRef.current) directionsRendererRef.current.setPath([]);
 
-      const [pickupLoc, dropoffLoc] = await Promise.all([
-        geocodeAddr(order.pickup),
-        geocodeAddr(order.dropoff),
-      ]);
-      if (!pickupLoc || !dropoffLoc) { setMapStatus('error'); return; }
+      const bounds = new window.google.maps.LatLngBounds();
+
+      // Resolve pickup
+      const pickupLoc = (order.pickupLat && order.pickupLng) 
+        ? new window.google.maps.LatLng(parseFloat(order.pickupLat), parseFloat(order.pickupLng))
+        : await geocodeAddr(order.pickup);
+      
+      if (!pickupLoc) { setMapStatus('error'); return; }
+      bounds.extend(pickupLoc);
+
+      // Resolve all drops
+      let dropLocations = [];
+      if (order.mode === 'multi' && order.deliveries?.length > 0) {
+        const sortedDeliveries = [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        dropLocations = await Promise.all(sortedDeliveries.map(async (d) => {
+          const loc = (d.dropoff_latitude && d.dropoff_longitude)
+            ? new window.google.maps.LatLng(parseFloat(d.dropoff_latitude), parseFloat(d.dropoff_longitude))
+            : await geocodeAddr(d.dropoff_address);
+          return { loc, addr: d.dropoff_address, sequence: d.sequence };
+        }));
+      } else {
+        const dropoffLoc = (order.dropoffLat && order.dropoffLng)
+          ? new window.google.maps.LatLng(parseFloat(order.dropoffLat), parseFloat(order.dropoffLng))
+          : await geocodeAddr(order.dropoff);
+        if (dropoffLoc) dropLocations.push({ loc: dropoffLoc, addr: order.dropoff, sequence: 1 });
+      }
+
+      if (dropLocations.some(d => !d.loc)) { setMapStatus('error'); return; }
+      dropLocations.forEach(d => bounds.extend(d.loc));
 
       // Pickup marker — navy dot
       markersRef.current.push(new window.google.maps.Marker({
@@ -465,37 +489,42 @@ function DeliveryRouteMap({ order, rider }) {
         label: { text: '📦', fontSize: '16px' }
       }));
 
-      // Dropoff marker — green dot
-      markersRef.current.push(new window.google.maps.Marker({
-        position: dropoffLoc, map,
-        title: 'Dropoff: ' + order.dropoff,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-        label: { text: '🏠', fontSize: '16px' }
-      }));
+      // Dropoff markers — green dots
+      dropLocations.forEach((d, i) => {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: d.loc, map,
+          title: `Stop ${d.sequence || i + 1}: ` + d.addr,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { 
+            text: order.mode === 'multi' ? String(d.sequence || i + 1) : '🏠', 
+            fontSize: order.mode === 'multi' ? '12px' : '16px', 
+            color: '#fff', 
+            fontWeight: 'bold' 
+          }
+        }));
+      });
 
       // Rider marker — gold dot (only if GPS available)
       if (rider && rider.lat && rider.lng) {
+        const riderLoc = { lat: rider.lat, lng: rider.lng };
         markersRef.current.push(new window.google.maps.Marker({
-          position: { lat: rider.lat, lng: rider.lng }, map,
+          position: riderLoc, map,
           title: 'Rider: ' + (rider.name || 'Rider'),
           icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
           label: { text: '🏍️', fontSize: '16px' }
         }));
+        bounds.extend(riderLoc);
       }
 
-      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      // Draw straight polyline path connecting the locations directly
       if (directionsRendererRef.current) {
-        directionsRendererRef.current.setPath([pickupLoc, dropoffLoc]);
+        directionsRendererRef.current.setPath([pickupLoc, ...dropLocations.map(d => d.loc)]);
       }
 
-      const bounds = new window.google.maps.LatLngBounds();
-      bounds.extend(pickupLoc);
-      bounds.extend(dropoffLoc);
-      if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
       map.fitBounds(bounds, { padding: 40 });
       setMapStatus('ready');
     })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
-  }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
+  }, [mapReady, order.id, order.pickup, order.dropoff, order.deliveries?.length, rider?.id, rider?.lat, rider?.lng]);
 
   return (
     <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${S.border}` }}>
@@ -3212,7 +3241,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Route</div>
             <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 4 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} /><div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} /><div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} />
+                <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                {order.mode === 'multi' && order.deliveries?.length > 1 && order.deliveries.slice(0, -1).map((_, i) => (
+                   <React.Fragment key={i}>
+                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.border }} />
+                     <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                   </React.Fragment>
+                ))}
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* Pickup */}
@@ -3231,22 +3268,35 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{order.pickup}</div>
                   )}
                 </div>
-                {/* Dropoff */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
-                    {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
-                  </div>
-                  {editDropoff ? (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
-                      <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
-                      <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                {/* Dropoff(s) */}
+                {order.mode === 'multi' && order.deliveries?.length > 0 ? (
+                  [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map((d, idx) => (
+                    <div key={d.id || idx} style={{ borderTop: idx > 0 ? `1px solid ${S.border}` : 'none', paddingTop: idx > 0 ? 10 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>STOP {d.sequence || idx + 1}</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: d.status === 'Delivered' ? S.greenBg : S.yellowBg, color: d.status === 'Delivered' ? S.green : S.yellow, fontWeight: 700 }}>{d.status || 'Pending'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{d.dropoff_address}</div>
+                      <div style={{ fontSize: 11, color: S.textMuted, marginTop: 2 }}>{d.receiver_name} • {d.receiver_phone}</div>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
-                  )}
-                </div>
+                  ))
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
+                      {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
+                    </div>
+                    {editDropoff ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
+                        <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
+                        <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
