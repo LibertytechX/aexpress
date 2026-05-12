@@ -398,7 +398,8 @@ class AmortizationTransactionAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
-    list_filter = ["entry_type", "status", "created_at", "amortization_wallet"]
+    list_filter = ["entry_type", "status", "amortization_wallet", "created_at"]
+    date_hierarchy = "created_at"
 
     fieldsets = (
         (

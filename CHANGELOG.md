@@ -1,5 +1,11 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-12] — Amortization Transaction Admin Enhancements
+
+### Backend (Admin)
+#### Added
+- **Day Filter**: Added `date_hierarchy` to `AmortizationTransactionAdmin` for better date-based filtering, matching the `OrderAdmin` configuration.
+
 # [2026-05-11] — Multi-Drop Route Visualization
 
 ### Frontend (Dispatcher Portal)
