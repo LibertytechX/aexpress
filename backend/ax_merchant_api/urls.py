@@ -35,6 +35,7 @@ urlpatterns = [
         name="order_complete",
     ),
     path("api/dispatch/", include("dispatcher.urls")),
+    path("api/operations/v1/", include("operations.urls")),
     path("api/riders/", include("riders.urls")),
     path("api/bot/", include("bot.urls")),
     path("api/webhooks/", include("webhooks.urls")),
