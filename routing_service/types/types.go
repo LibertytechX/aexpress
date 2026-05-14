@@ -43,3 +43,12 @@ type DirectionsRequest struct {
 	Origin       Coordinate   `json:"origin"`
 	Destinations []Coordinate `json:"destinations"`
 }
+
+type OSRMTableResponse struct {
+	Code         string       `json:"code"`
+	Distances    [][]float64  `json:"distances"`
+	Durations    [][]float64  `json:"durations"`
+	Sources      []Waypoint   `json:"sources"`
+	Destinations []Waypoint   `json:"destinations"`
+}
+

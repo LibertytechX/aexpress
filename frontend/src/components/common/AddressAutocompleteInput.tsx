@@ -18,6 +18,7 @@ const isInLagos = (lat: number, lng: number) =>
 interface AddressAutocompleteInputProps {
   value: string;
   onChange: (value: string) => void;
+  onSelect?: (address: string, lat: number, lng: number) => void;
   placeholder?: string;
   style?: React.CSSProperties;
   disabled?: boolean;
@@ -25,7 +26,7 @@ interface AddressAutocompleteInputProps {
   onOpenMapPicker?: () => void;
 }
 
-export default function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: AddressAutocompleteInputProps) {
+export default function AddressAutocompleteInput({ value, onChange, onSelect, placeholder, style, disabled, onOpenMapPicker }: AddressAutocompleteInputProps) {
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -211,7 +212,11 @@ export default function AddressAutocompleteInput({ value, onChange, placeholder,
             onChange('');
             setError('⚠️ Outside service area — we only deliver within Lagos State.');
           } else {
-            onChange(place.formatted_address || suggestion.description);
+            const addr = place.formatted_address || suggestion.description;
+            onChange(addr);
+            if (onSelect) {
+              onSelect(addr, loc.lat(), loc.lng());
+            }
           }
           return;
         }

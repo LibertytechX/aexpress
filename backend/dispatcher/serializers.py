@@ -10,6 +10,7 @@ from .models import (
     Vertical,
 )
 from authentication.serializers import UserSerializer
+from orders.serializers import DeliverySerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -275,6 +276,7 @@ class OrderSerializer(serializers.ModelSerializer):
     created = serializers.DateTimeField(
         source="created_at", format="%Y-%m-%d %H:%M", read_only=True
     )
+    deliveries = DeliverySerializer(many=True, read_only=True)
 
     # Computed fields
     pickup = serializers.CharField(source="pickup_address", read_only=True)
@@ -431,6 +433,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "dispatcher_assigned",
             "source",
             "cancellation_reason",
+            "deliveries",
         ]
 
     def get_pickup_lat(self, obj):

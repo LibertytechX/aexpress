@@ -532,7 +532,9 @@ class IOrderService(OrderService):
         order_user = request_user
         merchant_profile = None
         if merchant_id:
-            merchant_profile = MerchantProfile.objects.filter(merchant_id=merchant_id).first()
+            merchant_profile = MerchantProfile.objects.filter(
+                merchant_id=merchant_id
+            ).first()
             if merchant_profile:
                 order_user = merchant_profile.user
         else:
@@ -549,23 +551,29 @@ class IOrderService(OrderService):
                 raise ServiceException(
                     status_code=400, message="Merchant is not a partner"
                 )
-            
+
             if not merchant_profile.partner_base_price:
                 raise ServiceException(
-                    status_code=400, message="Partner base price is not set for this merchant"
+                    status_code=400,
+                    message="Partner base price is not set for this merchant",
                 )
-            
+
             if not partner_order_count:
                 raise ServiceException(
-                    status_code=400, message="partner_order_count is required for partner orders"
+                    status_code=400,
+                    message="partner_order_count is required for partner orders",
                 )
-            
+
             total_amount = merchant_profile.partner_base_price * partner_order_count
-            
+
             # Default values for missing data
             pickup = pickup or "Partner Pickup"
             dropoff = dropoff or "Partner Delivery"
-            sender_name = sender_name or (getattr(order_user, "business_name", "") or order_user.contact_name or order_user.phone)
+            sender_name = sender_name or (
+                getattr(order_user, "business_name", "")
+                or order_user.contact_name
+                or order_user.phone
+            )
             sender_phone = sender_phone or order_user.phone
             receiver_name = receiver_name or "Partner Receiver"
             receiver_phone = receiver_phone or "0000000000"
@@ -608,6 +616,7 @@ class IOrderService(OrderService):
         # Resolve Rider
         rider_obj = None
         if rider_id:
+
             def _is_uuid(val: str) -> bool:
                 try:
                     uuid.UUID(str(val))
@@ -672,6 +681,7 @@ class IOrderService(OrderService):
         payment_method = validated_data.get("payment_method")
         if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
             from orders.tasks import create_order_charge
+
             create_order_charge.delay(order.id)
 
         return order
