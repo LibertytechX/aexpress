@@ -89,6 +89,7 @@ class TransactionAdmin(admin.ModelAdmin):
         "paystack_reference",
         "description",
         "wallet__user__business_name",
+        "wallet__user__virtual_account__account_number",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     list_filter = ["type", "status", "created_at", "wallet"]
