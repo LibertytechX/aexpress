@@ -1,5 +1,11 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-15] — Transaction Admin Date Hierarchy
+
+### Backend (Admin)
+#### Added
+- **Transaction Date Hierarchy**: Added `date_hierarchy` to `TransactionAdmin` for improved date-based navigation and filtering of wallet transactions.
+
 # [2026-05-12] — Amortization Transaction Admin Enhancements
 
 ### Backend (Admin)

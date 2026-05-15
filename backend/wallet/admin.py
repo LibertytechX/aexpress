@@ -92,6 +92,7 @@ class TransactionAdmin(admin.ModelAdmin):
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
     list_filter = ["type", "status", "created_at", "wallet"]
+    date_hierarchy = "created_at"
 
     def has_delete_permission(self, request, obj=None):
         return False
