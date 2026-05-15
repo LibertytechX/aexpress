@@ -294,4 +294,6 @@ class MerchantNotificationSettingsSerializer(serializers.ModelSerializer):
             "order_cancelled",
             "wallet_credit",
             "marketing",
+            "email_notification",
+            "sms_notification",
         ]

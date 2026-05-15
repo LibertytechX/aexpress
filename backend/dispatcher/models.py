@@ -1303,6 +1303,8 @@ class MerchantNotificationSettings(models.Model):
     order_cancelled = models.BooleanField(default=True)
     wallet_credit = models.BooleanField(default=True)
     marketing = models.BooleanField(default=True)
+    email_notification = models.BooleanField(default=True)
+    sms_notification = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
