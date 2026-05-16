@@ -1,5 +1,13 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-16] — Partner Order Count Flexibility
+
+### Frontend (Dispatcher Portal)
+#### Changed
+- **Number of Orders Flexibility**: Modified the "Number of Orders" input in the Partner Bulk creation flow to accept any integer value.
+- **Input Clearing**: Enabled the ability to clear the "Number of Orders" input field during editing for a better user experience.
+- **Robust Calculations**: Updated pricing calculations and order submission logic to handle empty or non-numeric input values gracefully.
+
 # [2026-05-15] — Transaction Admin Date Hierarchy
 
 ### Backend (Admin)

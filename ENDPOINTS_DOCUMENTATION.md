@@ -800,9 +800,9 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** May 11, 2026
-**Version:** 1.2
-**Recent Changes:** Implemented multi-drop route visualization in the Dispatcher Portal, including sequential stop rendering and expanded order serialization.
+**Last Updated:** May 16, 2026
+**Version:** 1.3
+**Recent Changes:** Enhanced 'Number of Orders' input in the Dispatcher Portal to support flexible integer values and field clearing. Implemented multi-drop route visualization and expanded order serialization.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.
