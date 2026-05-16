@@ -384,7 +384,7 @@ class QuickSendView(APIView):
 
         threading.Thread(target=_trigger_created, daemon=True).start()
 
-        if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
+        if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
             from .tasks import create_order_charge
 
             create_order_charge.delay(order.id)
