@@ -338,7 +338,9 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         "is_active",
     ]
     search_fields = [
-        "user__full_name",
+        "user__first_name",
+        "user__last_name",
+        "user__contact_name",
         "user__phone",
         "user__email",
     ]
@@ -390,7 +392,13 @@ class AmortizationTransactionAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
-    search_fields = ["reference", "description", "amortization_wallet__user__full_name"]
+    search_fields = [
+        "reference",
+        "description",
+        "amortization_wallet__user__first_name",
+        "amortization_wallet__user__last_name",
+        "amortization_wallet__user__contact_name",
+    ]
     readonly_fields = [
         "entry_type",
         "amount",
@@ -435,7 +443,9 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         "created_at",
     ]
     search_fields = [
-        "user__full_name",
+        "user__first_name",
+        "user__last_name",
+        "user__contact_name",
         "user__phone",
         "user__email",
         "account_number",

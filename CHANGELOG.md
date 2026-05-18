@@ -1,5 +1,14 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-18] — Amortization Admin Search Bug Fix
+
+### Backend (Admin)
+#### Fixed
+- **Amortization Admin User Search**: Resolved a Django `FieldError` (unsupported lookup 'full_name') by replacing the invalid Python `@property` lookup with actual database fields (`first_name`, `last_name`, `contact_name`) across `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, and `AmortizationVirtualAccountAdmin`.
+- **Search Robustness**: Standardized user search across amortization admin views to allow querying by first name, last name, or contact name.
+
+---
+
 # [2026-05-16] — Partner Order Count Flexibility
 
 ### Frontend (Dispatcher Portal)
