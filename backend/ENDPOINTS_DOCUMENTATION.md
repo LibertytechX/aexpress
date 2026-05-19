@@ -237,6 +237,18 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 
 ---
 
+### 3. List Vehicle Assets
+**Endpoint:** `GET /vehicle-assets/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Returns a list of all vehicle assets including their assignment, distance covered yesterday, and orders completed today.
+
+**Key Response Fields:**
+- `orders_today` (integer): Count of completed orders today for the assigned rider(s) calculated dynamically using local timezone boundaries and fallback mechanisms.
+- `yesterday_distance` (decimal): Travelled distance (in km or specified units) covered by the asset yesterday.
+- `assigned_rider` (object|null): Details of the currently assigned rider.
+
+---
+
 ## Chat System API Documentation
 
 > [!TIP]
