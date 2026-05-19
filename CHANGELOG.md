@@ -1,5 +1,13 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-19] — Transaction Admin User Phone Search
+
+### Backend (Admin)
+#### Added
+- **Transaction User Phone Search**: Added user `phone` search field (`wallet__user__phone`) to `TransactionAdmin` to enable administrative users to search/filter wallet transactions by the associated user's phone number.
+
+---
+
 # [2026-05-18] — Amortization Admin Search Bug Fix
 
 ### Backend (Admin)
