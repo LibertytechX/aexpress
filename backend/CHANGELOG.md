@@ -3,6 +3,14 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+
+## [2026-05-19] — Route-Based Rider Proximity Restructuring
+
+### Changed
+- **Rider Proximity Check (Pickup & Completion)**: Replaced straight-line `Zone.haversine_distance` calculation with real route-based distance calculation using Google Maps/OSRM-based `calculate_route` helper in both the order status advance logic (`_advance_order` in `orders/views.py`) and the order completion logic (`OrderCompleteView` in `orders/views.py`). Included a defensive fallback to `haversine_distance` if the routing service is offline or unavailable.
+- **Proximity Restriction Tests**: Overhauled `orders/test_proximity_restrictions.py` to correctly initialize rider coordinates, mock routing API responses via `unittest.mock.patch`, and verify both successful routing API results and graceful haversine fallbacks for both pickup and completion views.
+
+---
 ## [2026-05-06] — Bike Amortization System (Phase 1)
 
 ### Added

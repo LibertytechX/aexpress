@@ -1393,12 +1393,19 @@ def _advance_order(request, order_number, new_status, event_desc):
         lat, lng = float(lat), float(lng)
 
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
-            from dispatcher.models import Zone
+            origin = {"lat": lat, "lng": lng}
+            drop = {"lat": float(order.pickup_latitude), "lng": float(order.pickup_longitude)}
+            route_data = calculate_route(origin=origin, destinations=[drop])
+            
+            if route_data:
+                dist = float(route_data["distance_km"])
+            else:
+                from dispatcher.models import Zone
+                dist = Zone.haversine_distance(
+                    lat, lng, order.pickup_latitude, order.pickup_longitude
+                )
 
-            dist = Zone.haversine_distance(
-                lat, lng, order.pickup_latitude, order.pickup_longitude
-            )
-            if dist > 2.0:  # 2000 kmeters
+            if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
                     message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
@@ -1698,14 +1705,24 @@ class OrderCompleteView(APIView):
             and final_delivery.dropoff_latitude is not None
             and final_delivery.dropoff_longitude is not None
         ):
-            from dispatcher.models import Zone
+            origin = {"lat": lat, "lng": lng}
+            drop = {
+                "lat": float(final_delivery.dropoff_latitude),
+                "lng": float(final_delivery.dropoff_longitude),
+            }
+            route_data = calculate_route(origin=origin, destinations=[drop])
 
-            dist = Zone.haversine_distance(
-                lat,
-                lng,
-                final_delivery.dropoff_latitude,
-                final_delivery.dropoff_longitude,
-            )
+            if route_data:
+                dist = float(route_data["distance_km"])
+            else:
+                from dispatcher.models import Zone
+                dist = Zone.haversine_distance(
+                    lat,
+                    lng,
+                    final_delivery.dropoff_latitude,
+                    final_delivery.dropoff_longitude,
+                )
+
             if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
