@@ -391,6 +391,8 @@ class SoftDeleteQuerySet(models.QuerySet):
         return self.filter(is_deleted=True)
 
 
+from typing import Any
+
 class SoftDeleteManager(models.Manager):
     def get_queryset(self):
         return SoftDeleteQuerySet(self.model, using=self._db).alive()
@@ -400,6 +402,23 @@ class SoftDeleteManager(models.Manager):
 
     def deleted(self):
         return SoftDeleteQuerySet(self.model, using=self._db).dead()
+
+
+class RiderManager(SoftDeleteManager):
+    def create(self, **kwargs: Any) -> "Rider":
+        user = kwargs.get("user")
+        if user:
+            try:
+                rider = user.rider_profile
+                for k, v in kwargs.items():
+                    if k != "user":
+                        setattr(rider, k, v)
+                rider.save(using=self._db)
+                return rider
+            except Exception:
+                pass
+        return super().create(**kwargs)
+
 
 
 class Rider(models.Model):
@@ -547,7 +566,7 @@ class Rider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
-    objects = SoftDeleteManager()
+    objects = RiderManager()
 
     class Meta:
         db_table = "riders"

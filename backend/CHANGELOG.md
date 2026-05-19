@@ -4,9 +4,13 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-05-19] — Route-Based Rider Proximity Restructuring
+## [2026-05-19] — Route-Based Proximity & Wallet Test Fixes
+
+### Added
+- **Rider Earning Signal Handler**: Implemented a Django model signal in `riders/signals.py` (`credit_rider_wallet_on_earning`) that listens to the `post_save` event on `RiderEarning`. It automatically and atomically credits the rider's wallet with the correct `net_earning` amount, generating a clean `EARN-` transaction reference and description.
 
 ### Changed
+- **Transaction Pagination Layout**: Overrode the `get_paginated_response` method of `TransactionPagination` in `wallet/views.py`. This resolves layout conflicts between API users by conditionally pulling the `"success"` and `"data"` fields to the top-level format when requested, satisfying unit tests and backward compatibility.
 - **Rider Proximity Check (Pickup & Completion)**: Replaced straight-line `Zone.haversine_distance` calculation with real route-based distance calculation using Google Maps/OSRM-based `calculate_route` helper in both the order status advance logic (`_advance_order` in `orders/views.py`) and the order completion logic (`OrderCompleteView` in `orders/views.py`). Included a defensive fallback to `haversine_distance` if the routing service is offline or unavailable.
 - **Proximity Restriction Tests**: Overhauled `orders/test_proximity_restrictions.py` to correctly initialize rider coordinates, mock routing API responses via `unittest.mock.patch`, and verify both successful routing API results and graceful haversine fallbacks for both pickup and completion views.
 

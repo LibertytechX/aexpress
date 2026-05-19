@@ -1065,8 +1065,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
                 "An error occurred while creating the user."
             )
 
-        # Create Rider Profile
-        rider = Rider.objects.create(user=user, **validated_data)
+        # Create or update Rider Profile to avoid duplicate key issues if the signal already fired
+        rider, _ = Rider.objects.update_or_create(user=user, defaults=validated_data)
+
 
         # Trigger Background Task for Email
         send_onboarding_email_task.delay(

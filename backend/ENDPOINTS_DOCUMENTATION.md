@@ -53,6 +53,51 @@
 
 ---
 
+### 3. Rider Wallet Transactions
+**Endpoint:** `GET /wallet/transactions/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Returns a paginated list of wallet transaction history for the authenticated rider.
+
+**Query Parameters:**
+- `page` (optional): Page number.
+- `page_size` (optional): Results per page (default: 20, max: 100).
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "data": [
+    {
+      "id": "uuid",
+      "type": "debit",
+      "amount": "500.00",
+      "description": "Test Debit",
+      "reference": "TXN-XXXXXX",
+      "balance_before": "1000.00",
+      "balance_after": "500.00",
+      "status": "completed",
+      "created_at": "2026-05-19T14:00:00Z"
+    },
+    {
+      "id": "uuid",
+      "type": "credit",
+      "amount": "1000.00",
+      "description": "Test Credit",
+      "reference": "TXN-YYYYYY",
+      "balance_before": "0.00",
+      "balance_after": "1000.00",
+      "status": "completed",
+      "created_at": "2026-05-19T13:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/

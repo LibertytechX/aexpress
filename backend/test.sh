@@ -17,4 +17,3 @@ if [ "$#" -gt 0 ]; then
 else
   docker compose --profile test run --rm test
 fi
-2
