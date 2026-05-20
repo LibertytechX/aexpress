@@ -1232,6 +1232,7 @@ class RiderAssignmentTaskTests(TestCase):
             pickup_address="Origin",
             pickup_latitude=6.4,
             pickup_longitude=3.2,
+            total_amount=Decimal("1000.00"),
         )
         sub_order = Order.objects.create(
             order_number="S101",
@@ -1242,6 +1243,7 @@ class RiderAssignmentTaskTests(TestCase):
             pickup_longitude=3.3,
             status="Pending",
             pickup_address="Hub Address",
+            total_amount=Decimal("1000.00"),
         )
         leg = OrderLeg.objects.create(
             order=parent, leg_number=2, start_relay_node=self.hub, status="Pending"

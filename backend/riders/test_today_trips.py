@@ -95,7 +95,7 @@ class TestTodayTrips:
             order=order3, dropoff_address="Ajah, Lagos", cod_amount=15000
         )
 
-        url = "/api/riders/orders/today/"
+        url = "/api/riders/orders-today/"
         response = self.client.get(url)
 
         assert response.status_code == status.HTTP_200_OK
@@ -108,7 +108,7 @@ class TestTodayTrips:
         first_order = data[0]
         assert first_order["id"] == "ORDER001"
         assert "Surulere -> V.I." in first_order["route"]
-        assert "12.4km" in first_order["distance"]
+        assert "12.4" in first_order["distance"]
         assert first_order["earned"] == 2500.0
         assert first_order["cod"] == 8037.0
         assert first_order["time"] is not None

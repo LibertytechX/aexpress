@@ -133,6 +133,7 @@ class TestEscrowSystem(TestCaseHelper):
         )
 
         # Assertions
+        self.wallet.refresh_from_db()
         assert self.wallet.balance == balance_after_hold + self.hold_amount
         assert escrow_txn.metadata["escrow_status"] == "refunded"
         assert escrow_txn.metadata["can_refund"] is False
@@ -173,6 +174,7 @@ class TestEscrowSystem(TestCaseHelper):
         )
 
         # Assertions
+        self.wallet.refresh_from_db()
         assert self.wallet.balance == balance_after_hold + partial_amount
         assert escrow_txn.metadata["partial_refund"] == float(partial_amount)
         assert escrow_txn.metadata["remaining_escrow"] == float(self.hold_amount - partial_amount)

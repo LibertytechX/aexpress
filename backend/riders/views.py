@@ -110,6 +110,10 @@ class OrderOfferListView(APIView):
             .order_by("-created_at")
         )
 
+        rider = getattr(request.user, "rider_profile", None)
+        if rider and rider.home_zone:
+            offers = offers.filter(zone=rider.home_zone)
+
         serializer = OrderOfferListSerializer(offers, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -548,7 +552,7 @@ class RiderToggleDutyView(APIView):
 
             # Update status
             request_status = serializer.validated_data["status"]
-            new_status = "online" if request_status == "on_duty" else "offline"
+            new_status = "online" if request_status in ["on_duty", "online"] else "offline"
             rider.status = new_status
 
             # Update location if provided
@@ -565,6 +569,7 @@ class RiderToggleDutyView(APIView):
 
             return Response(
                 {
+                    "success": True,
                     "status": request_status,
                     "timestamp": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
