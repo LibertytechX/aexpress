@@ -563,8 +563,11 @@ class IOrderService(OrderService):
                     status_code=400,
                     message="partner_order_count is required for partner orders",
                 )
-
-            total_amount = merchant_profile.partner_base_price * partner_order_count
+            # TODO: Add partner pricing logic
+            if manual_price and price is not None:
+                total_amount = price
+            else:
+                total_amount = merchant_profile.partner_base_price * partner_order_count
 
             # Default values for missing data
             pickup = pickup or "Partner Pickup"
