@@ -520,7 +520,7 @@ class IOrderService(OrderService):
         vehicle_name = validated_data.get("vehicle")
         package_type = validated_data.get("packageType")
         price = validated_data.get("price")
-        manual_price = bool(validated_data.get("manual_price"))
+        manual_price = bool(validated_data.get("price"))
         rider_id = (validated_data.get("riderId", "") or "").strip()
         merchant_id = (validated_data.get("merchantId", "") or "").strip()
         distance_km = validated_data.get("distance_km")
@@ -564,7 +564,7 @@ class IOrderService(OrderService):
                     message="partner_order_count is required for partner orders",
                 )
             # TODO: Add partner pricing logic
-            if manual_price and price is not None:
+            if price is not None:
                 total_amount = price
             else:
                 total_amount = merchant_profile.partner_base_price * partner_order_count
