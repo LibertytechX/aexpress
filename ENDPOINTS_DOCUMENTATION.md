@@ -800,9 +800,9 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** May 16, 2026
-**Version:** 1.3
-**Recent Changes:** Enhanced 'Number of Orders' input in the Dispatcher Portal to support flexible integer values and field clearing. Implemented multi-drop route visualization and expanded order serialization.
+**Last Updated:** May 20, 2026
+**Version:** 1.4
+**Recent Changes:** Added comprehensive Rider App Endpoints section covering Today's Trips period list, Rider Wallet Info balance aggregation, and duty toggle endpoints.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.
@@ -1070,4 +1070,70 @@ Query Parameters:
   - vehicle: VEHICLE_ID
   - active: true|false
 Response: Paginated list of Pricing Override objects.
+```
+
+---
+
+## RIDER APP ENDPOINTS
+
+These endpoints support rider mobile application interactions:
+
+### 1. Toggle Duty Status
+```
+POST /api/riders/duty/
+Description: Toggles the online/offline duty status of the rider.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "status": "online" | "offline"
+  }
+Response:
+  {
+    "success": true,
+    "data": {
+      "status": "online",
+      "working_type": "freelancer",
+      "is_authorized": true
+    }
+  }
+```
+
+### 2. Today's Trips
+```
+GET /api/riders/orders/today/
+Description: Retrieves completed trips (orders) for the authenticated rider during the active period (today, week, month).
+Authentication: Required (Rider)
+Query Parameters:
+  - period: today (default), week, month
+Response:
+  {
+    "success": true,
+    "data": [
+      {
+        "id": "ORDER001",
+        "route": "Surulere -> V.I.",
+        "time": "7:16 AM",
+        "distance": "12.40km",
+        "earned": 2500.0,
+        "cod": 8037.0
+      },
+      ...
+    ]
+  }
+```
+
+### 3. Rider Wallet Info
+```
+GET /api/riders/wallet/info/
+Description: Retrieves available balance, pending COD, and withdrawable balance details for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "success": true,
+    "data": {
+      "available_balance": 5000.0,
+      "pending_cod": 0.0,
+      "withdrawable_balance": 5000.0
+    }
+  }
 ```

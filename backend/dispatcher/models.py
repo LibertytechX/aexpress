@@ -704,6 +704,8 @@ class Rider(models.Model):
         cache.set(cache_key, distance, 60 * 60 * 24)
         return round(distance, 2)
 
+    yesterday_distance_covered.short_description = "Prev Day Distance (km)"
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 

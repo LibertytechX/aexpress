@@ -13,6 +13,7 @@ from wallet.models import Charge, Wallet
 from wallet.escrow import EscrowManager
 
 import requests
+from rest_framework import serializers
 from django.conf import settings
 from abc import ABC, abstractmethod
 from typing import Tuple
@@ -610,6 +611,10 @@ class IOrderService(OrderService):
                 if geo:
                     dropoff_lat = geo.get("lat")
                     dropoff_lng = geo.get("lng")
+
+        if is_relay_order:
+            if pickup_lat is None or pickup_lng is None or dropoff_lat is None or dropoff_lng is None:
+                raise serializers.ValidationError("Relay orders require geocoded coordinates for both pickup and dropoff.")
 
         try:
             total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))

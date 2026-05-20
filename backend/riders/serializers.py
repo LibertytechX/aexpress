@@ -148,7 +148,7 @@ class DutyToggleSerializer(serializers.Serializer):
     Serializer for toggling rider duty status.
     """
 
-    status = serializers.ChoiceField(choices=["on_duty", "off_duty"])
+    status = serializers.ChoiceField(choices=["on_duty", "off_duty", "online", "offline"])
     latitude = serializers.DecimalField(
         max_digits=30, decimal_places=20, required=False, allow_null=True
     )
@@ -458,18 +458,14 @@ class RiderWalletInfoSerializer(serializers.Serializer):
     def get_available_balance(self, obj):
         # Available Balance = Wallet Balance + Pending COD
         try:
-            wallet_balance = obj.user.wallet.balance
-        except (AttributeError, Wallet.DoesNotExist):
+            from wallet.models import Wallet
+            wallet = Wallet.objects.get(user=obj.user)
+            wallet_balance = wallet.balance
+        except Wallet.DoesNotExist:
             wallet_balance = 0.00
 
-        # Sum of pending COD records
-        # pending_cod = (
-        #     obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
-        #         "amount__sum"
-        #     ]
-        #     or 0.00
-        # )
-        return float(wallet_balance)
+        pending_cod = self.get_pending_cod(obj)
+        return float(wallet_balance) + pending_cod
 
     def get_pending_cod(self, obj):
         # Sum of pending COD records

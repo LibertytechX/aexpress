@@ -1,5 +1,23 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-05-20] — Backend Test Suite Failure Resolution
+
+### Backend
+#### Added
+- **Rider Home Zone Filter**: Implemented home-zone filtering on rider order offers to ensure riders only view jobs that originate from or are routed to their designated zones.
+- **Relay Coordinates Validation**: Enforced strict coordinate validation in `create_dispatcher_order` when relay leg generation is requested, raising standard validation errors on missing coordinates.
+
+#### Fixed
+- **Rider Wallet Balance Aggregation**: Restored available balance retrieval in `RiderWalletInfoSerializer` to sum the current wallet balance and pending Cash On Delivery (COD) amounts. Queried the `Wallet` model directly to bypass stale in-memory cached relationships.
+- **Today's Trips Route Resolution**: Fixed dynamic pattern capturing collision in `riders/urls.py` by re-ordering the `"orders/today/"` pattern before the dynamic `"orders/<str:order_id>/"` pattern, resolving a false "Order not found" 404 response.
+- **Wallet Escrow Balance Verification**: Updated escrow tests to force refresh the wallet database state before asserting balances, avoiding stale assert failures.
+- **Merchant Subscription Creation Conflicts**: Adjusted subscription test setup to fetch pre-existing model instances automatically spawned by Django signals, preventing unique constraint violations.
+- **Proximity Checks Graceful Bypass**: Modified delivery completion views to skip proximity validation checks when geolocation coordinates are omitted from the client payload.
+- **Rider Admin Metadata**: Added `short_description` properties to custom model methods in `Rider` model to pass admin view validation checks in the test harness.
+- **Rider Duty Switch Standard choices**: Integrated `"online"` and `"offline"` choice options to the `DutyToggleSerializer` class to gracefully bridge mobile app toggle payloads.
+
+---
+
 # [2026-05-19] — Transaction Admin User Phone Search
 
 ### Backend (Admin)

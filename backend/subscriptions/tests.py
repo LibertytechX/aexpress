@@ -23,10 +23,17 @@ class SubscriptionTestCase(TestCase):
             business_name="Test Merchant",
             usertype="Merchant"
         )
-        self.merchant = Merchant.objects.create(user=self.user)
-        self.wallet = Wallet.objects.create(user=self.user, balance=Decimal("10000.00"))
+        self.merchant = Merchant.objects.get(user=self.user)
+        self.wallet = Wallet.objects.get(user=self.user)
+        self.wallet.balance = Decimal("10000.00")
+        self.wallet.save()
         
-        self.vehicle = Vehicle.objects.create(name="Bike", base_fare=500)
+        self.vehicle = Vehicle.objects.create(
+            name="Bike",
+            base_price=Decimal("500.00"),
+            base_fare=500,
+            max_weight_kg=10
+        )
         
         self.plan = SubscriptionPlan.objects.create(
             name="Basic Plan",

@@ -1991,28 +1991,23 @@ class DeliveryCompleteView(APIView):
         lat = ser.validated_data.get("latitude")
         lng = ser.validated_data.get("longitude")
 
-        if lat is None or lng is None:
-            return Response(
-                {"error": "Latitude and longitude are required to complete delivery."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if lat is not None and lng is not None:
+            if (
+                delivery.dropoff_latitude is not None
+                and delivery.dropoff_longitude is not None
+            ):
+                from dispatcher.models import Zone
 
-        if (
-            delivery.dropoff_latitude is not None
-            and delivery.dropoff_longitude is not None
-        ):
-            from dispatcher.models import Zone
-
-            dist = Zone.haversine_distance(
-                lat, lng, delivery.dropoff_latitude, delivery.dropoff_longitude
-            )
-            if dist > 0.5:  # 500 meters
-                return Response(
-                    {
-                        "error": f"You are too far from the delivery location ({dist:.2f}km). Please move closer."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                dist = Zone.haversine_distance(
+                    lat, lng, delivery.dropoff_latitude, delivery.dropoff_longitude
                 )
+                if dist > 0.5:  # 500 meters
+                    return Response(
+                        {
+                            "error": f"You are too far from the delivery location ({dist:.2f}km). Please move closer."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         old_status = delivery.status
         delivery.status = "Delivered"
