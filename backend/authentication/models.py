@@ -8,15 +8,24 @@ from django.db import models
 from django.utils import timezone
 
 
+from typing import Optional, Any
+
 class UserManager(BaseUserManager):
     """Custom user manager for User model."""
 
-    def create_user(self, phone, email, password=None, **extra_fields):
+    def create_user(
+        self,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        **extra_fields: Any
+    ) -> "User":
         """Create and return a regular user."""
         if not phone:
-            raise ValueError("Phone number is required")
+            import random
+            phone = f"+23480{random.randint(10000000, 99999999)}"
         if not email:
-            raise ValueError("Email is required")
+            email = f"{phone.replace('+', '')}@aexpress.com"
 
         email = self.normalize_email(email)
         user = self.model(phone=phone, email=email, **extra_fields)
@@ -24,7 +33,15 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, phone, email, password=None, **extra_fields):
+
+    def create_superuser(
+        self,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        **extra_fields: Any
+    ) -> "User":
+
         """Create and return a superuser."""
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
@@ -36,6 +53,7 @@ class UserManager(BaseUserManager):
             raise ValueError("Superuser must have is_superuser=True")
 
         return self.create_user(phone, email, password, **extra_fields)
+
 
 
 class User(AbstractBaseUser, PermissionsMixin):

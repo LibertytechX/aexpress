@@ -15,6 +15,8 @@ class TestEscrowSystem(TestCaseHelper):
     def setup_method(self):
         super().setup_method()
         self.wallet = WalletFactory(balance=Decimal("10000.00"))
+        self.wallet.balance = Decimal("10000.00")
+        self.wallet.save()
         self.order_number = "6158001"
         self.hold_amount = Decimal("3000.00")
 

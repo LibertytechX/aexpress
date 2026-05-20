@@ -33,9 +33,16 @@ CACHES = {
 # Ensure no live services are hit
 PAYSTACK_SECRET_KEY = "sk_test_mockkey"
 PAYSTACK_PUBLIC_KEY = "pk_test_mockkey"
-SMARTPARCEL_API_KEY = "smartparcel_test_key"
+SMARTPARCEL_API_KEY = "Smartparcel_test_key"
 SMARTPARCEL_SECRET_KEY = "smartparcel_test_secret"
 ABLY_API_KEY = "ably_test_key"
 RESPOND_IO_API_KEY = "respond_io_test_key"
 GOOGLE_MAPS_API_KEY = "google_maps_test_key"
 ROUTING_SERVICE_API_KEY = "routing_test_key"
+
+# Disable SSL redirect and HSTS in test environment to avoid 301 redirects
+SECURE_SSL_REDIRECT = False
+SECURE_HSTS_SECONDS = 0
+SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+SECURE_HSTS_PRELOAD = False
+

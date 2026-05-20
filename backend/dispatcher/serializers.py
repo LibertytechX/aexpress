@@ -1,3 +1,4 @@
+from typing import Any, Dict, Optional, Union
 from rest_framework import serializers
 from .models import (
     Rider,
@@ -13,8 +14,11 @@ from authentication.serializers import UserSerializer
 from orders.serializers import DeliverySerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from django.core.cache import cache
+from django.utils import timezone
+from django.db.models import Q
+from orders.models import Order, Delivery
 from .models import VehicleTracking
 
 User = get_user_model()
@@ -1065,8 +1069,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
                 "An error occurred while creating the user."
             )
 
-        # Create Rider Profile
-        rider = Rider.objects.create(user=user, **validated_data)
+        # Create or update Rider Profile to avoid duplicate key issues if the signal already fired
+        rider, _ = Rider.objects.update_or_create(user=user, defaults=validated_data)
+
 
         # Trigger Background Task for Email
         send_onboarding_email_task.delay(
@@ -1202,17 +1207,9 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
-    assigned_rider = serializers.SerializerMethodField()
-    # Sourced from the persisted model field so Ably real-time payloads include the
-    # correct value without requiring a live ORM annotation on every publish.
-    orders_today = serializers.DecimalField(
-        source="deliveries_km_today",
-        max_digits=10,
-        decimal_places=2,
-        read_only=True,
-        default=0,
-    )
-    yesterday_distance = serializers.SerializerMethodField()
+    assigned_rider: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    orders_today: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    yesterday_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
 
     class Meta:
         model = VehicleAsset
@@ -1250,8 +1247,15 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 
-    def get_yesterday_distance(self, obj):
+    def get_yesterday_distance(self, obj: VehicleAsset) -> Union[float, Decimal]:
+        """Calculate and return the vehicle's travelled distance from yesterday.
 
+        Args:
+            obj: The VehicleAsset instance.
+
+        Returns:
+            The distance travelled yesterday.
+        """
         yesterday = datetime.now() - timedelta(days=1)
         cache_key = f"yesterday_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
 
@@ -1274,7 +1278,15 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         cache.set(cache_key, distance, 60 * 60 * 24)
         return distance
 
-    def get_assigned_rider(self, obj):
+    def get_assigned_rider(self, obj: VehicleAsset) -> Optional[Dict[str, Any]]:
+        """Get the details of the rider currently assigned to this vehicle asset.
+
+        Args:
+            obj: The VehicleAsset instance.
+
+        Returns:
+            A dictionary containing rider details if assigned, otherwise None.
+        """
         # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
         rider = obj.riders.all().first()
         if rider:
@@ -1285,6 +1297,49 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
                 "phone": rider.user.phone if rider.user else "",
             }
         return None
+
+    def get_orders_today(self, obj: VehicleAsset) -> int:
+        """Calculate the count of completed orders today for riders assigned to the vehicle asset.
+
+        It aggregates completed orders across three fallback criteria within the local timezone day:
+        Criterion A: Order status is "Done" and completed_at is today.
+        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
+            delivered_at is today.
+        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
+            "Delivered" with a null delivered_at, and the order's updated_at is today.
+
+        Args:
+            obj: The VehicleAsset instance.
+
+        Returns:
+            The number of completed orders today.
+        """
+        riders = obj.riders.all()
+        if not riders.exists():
+            return 0
+
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.combine(day, time.min), tz
+        )
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(completed_at__gte=start)
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=start,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=start,
+        )
+
+        return orders.filter(q_a | q_b | q_c).distinct().count()
 
 
 class VerticalSerializer(serializers.ModelSerializer):
