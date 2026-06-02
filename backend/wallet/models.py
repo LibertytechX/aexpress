@@ -29,7 +29,12 @@ class Wallet(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.user.business_name} - ₦{self.balance}"
+        name = (
+            self.user.business_name
+            if self.user.business_name
+            else self.user.get_full_name()
+        )
+        return f"{name} - ₦{self.balance}"
 
     @db_transaction.atomic
     def credit(self, amount, description="", reference="", metadata=None):
