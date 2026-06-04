@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from typing import Optional, Any
 
+
 class UserManager(BaseUserManager):
     """Custom user manager for User model."""
 
@@ -18,11 +19,12 @@ class UserManager(BaseUserManager):
         phone: Optional[str] = None,
         email: Optional[str] = None,
         password: Optional[str] = None,
-        **extra_fields: Any
+        **extra_fields: Any,
     ) -> "User":
         """Create and return a regular user."""
         if not phone:
             import random
+
             phone = f"+23480{random.randint(10000000, 99999999)}"
         if not email:
             email = f"{phone.replace('+', '')}@aexpress.com"
@@ -33,15 +35,13 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-
     def create_superuser(
         self,
         phone: Optional[str] = None,
         email: Optional[str] = None,
         password: Optional[str] = None,
-        **extra_fields: Any
+        **extra_fields: Any,
     ) -> "User":
-
         """Create and return a superuser."""
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
@@ -53,7 +53,6 @@ class UserManager(BaseUserManager):
             raise ValueError("Superuser must have is_superuser=True")
 
         return self.create_user(phone, email, password, **extra_fields)
-
 
 
 class User(AbstractBaseUser, PermissionsMixin):

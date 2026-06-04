@@ -4,6 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-06-04] — Fix Admin Charge Change Page Timeout
+
+### Fixed
+- **Order representation N+1 query optimization**: Optimized the `Order` model's `__str__` method to return only the order number (`f"Order {self.order_number}"`), avoiding heavy database query loops on related user objects when rendering list choices.
+- **Admin models raw_id_fields optimization**: Added `raw_id_fields` to foreign key relationships in all `wallet` and `orders` admin modules (`ChargeAdmin`, `WalletAdmin`, `TransactionAdmin`, `VirtualAccountAdmin`, `WebhookLogAdmin`, `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, `AmortizationVirtualAccountAdmin`, `OrderAdmin`, `DeliveryAdmin`, `OrderLegAdmin`, `MerchantPricingOverrideAdmin`, `MerchantPriceListAdmin`, `MerchantPriceListItemAdmin`). This completely prevents Django admin from executing N+1 select list queries or rendering massive dropdown lists, fixing the gunicorn timeout crash when displaying admin change pages.
+
+---
+
 ## [2026-05-19] — Route-Based Proximity & Wallet Test Fixes
 
 ### Added
