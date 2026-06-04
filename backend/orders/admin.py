@@ -247,6 +247,7 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
     ]
     list_filter = ["is_active", "vehicle", "created_at"]
     search_fields = ["merchant__id", "merchant__business_name", "merchant__phone"]
+    raw_id_fields = ["merchant"]
     ordering = ["-created_at"]
 
 
@@ -260,6 +261,7 @@ class MerchantPriceListAdmin(admin.ModelAdmin):
     list_display = ["name", "merchant", "vehicle", "is_active", "created_at"]
     list_filter = ["is_active", "vehicle", "created_at"]
     search_fields = ["name", "merchant__business_name", "merchant__phone"]
+    raw_id_fields = ["merchant"]
     inlines = [MerchantPriceListItemInline]
     ordering = ["-created_at"]
 
@@ -277,6 +279,7 @@ class MerchantPriceListItemAdmin(ImportExportModelAdmin):
     list_display = ["label", "price_list", "min_km", "max_km", "fixed_fee"]
     list_filter = ["price_list"]
     search_fields = ["label", "price_list__name"]
+    raw_id_fields = ["price_list"]
     ordering = ["min_km"]
 
 
@@ -398,6 +401,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "pickup_address",
     ]
     readonly_fields = ["order_number", "get_rider_earning", "created_at", "updated_at"]
+    raw_id_fields = ["user", "rider", "parent_order", "suggested_rider"]
     ordering = ["-created_at"]
 
     fieldsets = (
@@ -484,6 +488,7 @@ class DeliveryAdmin(admin.ModelAdmin):
         "dropoff_address",
     ]
     readonly_fields = ["created_at", "delivered_at"]
+    raw_id_fields = ["order"]
     ordering = ["order", "sequence"]
 
     fieldsets = (
@@ -535,4 +540,5 @@ class OrderLegAdmin(admin.ModelAdmin):
     list_filter = ["status", "created_at"]
     search_fields = ["order__order_number", "rider__rider_id", "hub_pin"]
     readonly_fields = ["id", "hub_pin", "created_at"]
+    raw_id_fields = ["order", "rider", "suggested_rider"]
     ordering = ["order", "leg_number"]

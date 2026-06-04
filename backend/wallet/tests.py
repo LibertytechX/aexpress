@@ -8,9 +8,16 @@ from wallet.models import (
     AmortizationWallet,
     AmortizationTransaction,
     AmortizationVirtualAccount,
+    Charge,
+    VirtualAccount,
+    WebhookLog,
 )
 from wallet.admin import (
+    WalletAdmin,
     TransactionAdmin,
+    VirtualAccountAdmin,
+    WebhookLogAdmin,
+    ChargeAdmin,
     AmortizationWalletAdmin,
     AmortizationTransactionAdmin,
     AmortizationVirtualAccountAdmin,
@@ -189,4 +196,37 @@ class TransactionAdminSearchTest(TestCase):
         )
         self.assertEqual(results_queryset.count(), 1)
         self.assertEqual(results_queryset.first(), self.transaction)
+
+
+class AdminRawIdFieldsTest(TestCase):
+    """Test suite to verify that admin models have raw_id_fields optimized."""
+
+    def test_raw_id_fields_configured(self) -> None:
+        """Verify that foreign key fields are optimized to use raw_id_fields."""
+        site = AdminSite()
+
+        charge_admin = ChargeAdmin(Charge, site)
+        self.assertIn("user", charge_admin.raw_id_fields)
+        self.assertIn("order", charge_admin.raw_id_fields)
+
+        wallet_admin = WalletAdmin(Wallet, site)
+        self.assertIn("user", wallet_admin.raw_id_fields)
+
+        transaction_admin = TransactionAdmin(Transaction, site)
+        self.assertIn("wallet", transaction_admin.raw_id_fields)
+
+        virtual_account_admin = VirtualAccountAdmin(VirtualAccount, site)
+        self.assertIn("user", virtual_account_admin.raw_id_fields)
+
+        webhook_log_admin = WebhookLogAdmin(WebhookLog, site)
+        self.assertIn("transaction", webhook_log_admin.raw_id_fields)
+
+        amortization_wallet_admin = AmortizationWalletAdmin(AmortizationWallet, site)
+        self.assertIn("user", amortization_wallet_admin.raw_id_fields)
+
+        amortization_transaction_admin = AmortizationTransactionAdmin(AmortizationTransaction, site)
+        self.assertIn("amortization_wallet", amortization_transaction_admin.raw_id_fields)
+
+        amortization_virtual_account_admin = AmortizationVirtualAccountAdmin(AmortizationVirtualAccount, site)
+        self.assertIn("user", amortization_virtual_account_admin.raw_id_fields)
 

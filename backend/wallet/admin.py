@@ -21,6 +21,7 @@ class WalletAdmin(admin.ModelAdmin):
         "updated_at",
     ]
     search_fields = ["user__business_name", "user__phone", "user__email"]
+    raw_id_fields = ["user"]
     readonly_fields = ["id", "created_at", "updated_at"]
     list_filter = ["created_at"]
     actions = ["settle_pending_charges"]
@@ -84,6 +85,7 @@ class TransactionAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
+    raw_id_fields = ["wallet"]
     search_fields = [
         "reference",
         "paystack_reference",
@@ -130,6 +132,7 @@ class VirtualAccountAdmin(admin.ModelAdmin):
         "is_active",
         "created_at",
     ]
+    raw_id_fields = ["user"]
     list_filter = ["is_active", "bank_name", "created_at"]
     search_fields = [
         "user__business_name",
@@ -168,6 +171,7 @@ class WebhookLogAdmin(admin.ModelAdmin):
         "recipient_account_number",
         "signature_valid",
     ]
+    raw_id_fields = ["transaction"]
     list_filter = ["source", "status", "signature_valid", "created_at"]
     search_fields = [
         "transaction_reference",
@@ -233,6 +237,7 @@ class ChargeAdmin(admin.ModelAdmin):
         "id",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
+    raw_id_fields = ["user", "order"]
     ordering = ["-created_at"]
     actions = ["debit_and_complete_charge", "soft_delete_charges"]
 
@@ -338,6 +343,7 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         "created_at",
         "is_active",
     ]
+    raw_id_fields = ["user"]
     search_fields = [
         "user__first_name",
         "user__last_name",
@@ -393,6 +399,7 @@ class AmortizationTransactionAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
+    raw_id_fields = ["amortization_wallet"]
     search_fields = [
         "reference",
         "description",
@@ -443,6 +450,7 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         "is_active",
         "created_at",
     ]
+    raw_id_fields = ["user"]
     search_fields = [
         "user__first_name",
         "user__last_name",
