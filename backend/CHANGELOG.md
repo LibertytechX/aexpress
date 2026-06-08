@@ -4,7 +4,17 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-06-08] — Amortization Transaction Import/Export Support
+
+### Added
+- **Amortization Transaction Import/Export**: Integrated `django-import-export` into `AmortizationTransactionAdmin` in `wallet/admin.py`, defining `AmortizationTransactionResource` to support CSV/Excel import and export of bike hire-purchase transactions. Includes customized fields for User Name and User Phone.
+
+---
+
 ## [2026-06-04] — Fix Admin Charge Change Page Timeout
+
+### Added
+- **Makefile Update**: Added a `test` target to run the pytest test suite via `.venv/bin/pytest` or system fallback.
 
 ### Fixed
 - **Order representation N+1 query optimization**: Optimized the `Order` model's `__str__` method to return only the order number (`f"Order {self.order_number}"`), avoiding heavy database query loops on related user objects when rendering list choices.

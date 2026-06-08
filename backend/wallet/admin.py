@@ -1,4 +1,6 @@
 from django.contrib import admin
+from import_export.admin import ImportExportModelAdmin
+from import_export import resources, fields
 from .models import (
     Wallet,
     Transaction,
@@ -387,8 +389,43 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         )
 
 
+class AmortizationTransactionResource(resources.ModelResource):
+    user_name: fields.Field = fields.Field(column_name="User Name")
+    user_phone: fields.Field = fields.Field(column_name="User Phone")
+
+    class Meta:
+        model = AmortizationTransaction
+        fields = (
+            "id",
+            "reference",
+            "amortization_wallet",
+            "user_name",
+            "user_phone",
+            "entry_type",
+            "amount",
+            "balance_before",
+            "balance_after",
+            "status",
+            "description",
+            "created_at",
+            "updated_at",
+        )
+        export_order = fields
+
+    def dehydrate_user_name(self, obj: AmortizationTransaction) -> str:
+        if obj.amortization_wallet and obj.amortization_wallet.user:
+            return str(obj.amortization_wallet.user.full_name)
+        return "-"
+
+    def dehydrate_user_phone(self, obj: AmortizationTransaction) -> str:
+        if obj.amortization_wallet and obj.amortization_wallet.user:
+            return str(obj.amortization_wallet.user.phone)
+        return "-"
+
+
 @admin.register(AmortizationTransaction)
-class AmortizationTransactionAdmin(admin.ModelAdmin):
+class AmortizationTransactionAdmin(ImportExportModelAdmin):
+    resource_classes = [AmortizationTransactionResource]
     list_display = [
         "reference",
         "amortization_wallet",
