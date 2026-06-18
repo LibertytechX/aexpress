@@ -490,6 +490,32 @@ def rider_summary(rider, start_dt, end_dt):
     }
 
 
+def rider_performance(rider, start_dt, end_dt):
+    """Rider detail + a performance block computed only from data we actually
+    have (F15). Metrics with no real source (acceptance_rate, ghost_ratio,
+    peak_util) are intentionally NOT returned rather than fabricated."""
+    payload = rider_summary(rider, start_dt, end_dt)
+    metrics = payload["orders"]
+    distance = metrics["distance_km"]
+    active_days = (
+        Order.objects.filter(rider=rider, created_at__gte=start_dt, created_at__lte=end_dt)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .distinct()
+        .count()
+    )
+    payload["performance"] = {
+        # Naira of completed-order revenue per delivered km.
+        "rev_per_km": round(metrics["revenue"] / distance, 1) if distance else 0,
+        "avg_delivery_minutes": metrics["avg_delivery_minutes"],
+        # Average delivery rating in the period (0 if no ratings captured yet).
+        "csat_avg": payload["rating"],
+        # Distinct calendar days the rider had at least one order in the period.
+        "active_days": active_days,
+    }
+    return payload
+
+
 def merchant_summary(merchant, start_dt, end_dt):
     orders = Order.objects.filter(user=merchant.user, created_at__gte=start_dt, created_at__lte=end_dt)
     metrics = order_metrics(orders)
