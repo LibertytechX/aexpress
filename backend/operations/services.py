@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Max, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -209,6 +209,41 @@ def scoped_merchants(scope):
     return qs
 
 
+# Merchant activity is classified from the merchant's REAL latest order rather
+# than the stored Merchant.activity_status / last_order_date fields, which are
+# only maintained by seed commands in this system (audit F1/RC1). "active" =
+# ordered in the last 7 days, "watch" = 8–30 days, "inactive" = 30+ days / never.
+ACTIVE_WINDOW_DAYS = 7
+WATCH_WINDOW_DAYS = 30
+
+
+def annotate_merchant_activity(qs):
+    """Annotate a Merchant queryset with the real max order timestamp."""
+    return qs.annotate(_last_order_at=Max("user__orders__created_at"))
+
+
+def activity_from_last_order(last_order_at, now=None):
+    if last_order_at is None:
+        return "inactive"
+    now = now or timezone.now()
+    if last_order_at >= now - timedelta(days=ACTIVE_WINDOW_DAYS):
+        return "active"
+    if last_order_at >= now - timedelta(days=WATCH_WINDOW_DAYS):
+        return "watch"
+    return "inactive"
+
+
+def merchant_activity_counts(qs):
+    """Bucket counts (total/active/watch/inactive) from live order recency."""
+    now = timezone.now()
+    counts = {"total": 0, "active": 0, "watch": 0, "inactive": 0}
+    # Select id alongside the aggregate so GROUP BY is per-merchant (one row each).
+    for _id, last_order_at in annotate_merchant_activity(qs).values_list("id", "_last_order_at"):
+        counts["total"] += 1
+        counts[activity_from_last_order(last_order_at, now)] += 1
+    return counts
+
+
 def scoped_hubs(scope):
     qs = RelayNode.objects.filter(is_active=True).select_related("zone", "zone__vertical")
     if not scope.is_global:
@@ -321,12 +356,7 @@ def dashboard_summary(scope, period):
             "on_delivery": riders.filter(status=Rider.Status.ON_DELIVERY).count(),
             "offline": riders.filter(status=Rider.Status.OFFLINE).count(),
         },
-        "merchants": {
-            "total": merchants.count(),
-            "active": merchants.filter(activity_status="active").count(),
-            "watch": merchants.filter(activity_status="watch").count(),
-            "inactive": merchants.filter(activity_status="inactive").count(),
-        },
+        "merchants": merchant_activity_counts(merchants),
         "targets": {
             "revenue": decimal_to_float(target_revenue),
             "revenue_attainment_pct": (
@@ -410,12 +440,7 @@ def zone_summary(zone, scope, start_dt, end_dt, include_nested=False):
             "online": riders.filter(status=Rider.Status.ONLINE).count(),
             "on_delivery": riders.filter(status=Rider.Status.ON_DELIVERY).count(),
         },
-        "merchants": {
-            "total": merchants.count(),
-            "active": merchants.filter(activity_status="active").count(),
-            "watch": merchants.filter(activity_status="watch").count(),
-            "inactive": merchants.filter(activity_status="inactive").count(),
-        },
+        "merchants": merchant_activity_counts(merchants),
     }
     if include_nested:
         payload["rider_list"] = [rider_summary(r, start_dt, end_dt) for r in riders]
@@ -468,18 +493,26 @@ def rider_summary(rider, start_dt, end_dt):
 def merchant_summary(merchant, start_dt, end_dt):
     orders = Order.objects.filter(user=merchant.user, created_at__gte=start_dt, created_at__lte=end_dt)
     metrics = order_metrics(orders)
+    # Derive activity from the real latest order (annotated when called from a
+    # list; otherwise queried) instead of the stale stored field (F1).
+    if hasattr(merchant, "_last_order_at"):
+        last_order_at = merchant._last_order_at
+    else:
+        last_order_at = Order.objects.filter(user=merchant.user).aggregate(
+            last=Max("created_at")
+        )["last"]
     return {
         "id": str(merchant.id),
         "merchant_id": merchant.merchant_id,
         "business_name": merchant.user.business_name or merchant.user.contact_name or "",
         "phone": merchant.user.phone,
         "email": merchant.user.email,
-        "activity_status": merchant.activity_status,
+        "activity_status": activity_from_last_order(last_order_at),
         "merchant_type": merchant.merchant_type,
         "is_partner": merchant.is_partner,
         "has_active_subscription": merchant.has_active_subscription,
         "has_price_list": merchant.has_price_list,
-        "last_order_date": merchant.last_order_date.isoformat() if merchant.last_order_date else None,
+        "last_order_date": last_order_at.isoformat() if last_order_at else None,
         "zone": {
             "id": str(merchant.zone_id) if merchant.zone_id else None,
             "name": merchant.zone.name if merchant.zone else None,
@@ -606,7 +639,11 @@ def orders_analytics(scope, period):
 
 def merchants_list(scope, period, filters):
     start_dt, end_dt = parse_period(period)
-    qs = scoped_merchants(scope).order_by("user__business_name", "merchant_id")
+    # Annotate live last-order time so merchant_summary reads it (no N+1) and the
+    # activity filter operates on real recency, not the stale stored field (F1).
+    qs = annotate_merchant_activity(scoped_merchants(scope)).order_by(
+        "user__business_name", "merchant_id"
+    )
 
     zone_id = filters.get("zone_id")
     if zone_id:
@@ -614,7 +651,15 @@ def merchants_list(scope, period, filters):
 
     activity_status = filters.get("activity_status") or filters.get("status")
     if activity_status:
-        qs = qs.filter(activity_status=activity_status)
+        now = timezone.now()
+        active_cutoff = now - timedelta(days=ACTIVE_WINDOW_DAYS)
+        watch_cutoff = now - timedelta(days=WATCH_WINDOW_DAYS)
+        if activity_status == "active":
+            qs = qs.filter(_last_order_at__gte=active_cutoff)
+        elif activity_status == "watch":
+            qs = qs.filter(_last_order_at__gte=watch_cutoff, _last_order_at__lt=active_cutoff)
+        elif activity_status == "inactive":
+            qs = qs.filter(Q(_last_order_at__lt=watch_cutoff) | Q(_last_order_at__isnull=True))
 
     is_partner = filters.get("is_partner")
     if is_partner in ("true", "false"):
