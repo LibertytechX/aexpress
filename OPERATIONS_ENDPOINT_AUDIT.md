@@ -422,6 +422,24 @@ The dashboard's **numbers cannot be trusted at face value** — not because the 
 
 ---
 
+## Fix status (branch `chuks/operations-audit-fixes`)
+Backend operations-app fixes shipped on this branch (no prod writes; no other apps touched):
+
+| Finding | Status | Commit |
+|---|---|---|
+| F9 — leaderboard zero-order/test accounts | ✅ fixed (`orders_total > 0` filter) | a4b605f |
+| F16 — analytics `by_day` gaps | ✅ fixed (every calendar day, zero-filled) | a4b605f |
+| F17 — `/orders/` pagination | ✅ fixed (`offset` + `limit/offset/has_more`) | a4b605f |
+| F20 — invalid period silent fallback | ✅ fixed (raises `ValidationError`) | a4b605f |
+| F1/RC1 — merchant activity wrong | ✅ mitigated in operations (live from real orders) | 614a52b |
+| F15 — `/performance/` thin & FE expects rich data | ⏳ **needs decision** (only some metrics have real data; see Cat. 1) |
+
+Remaining backend operations-app code work is **F15 only** — and it needs a product call on which metrics to expose (truthfully computable: `rev_per_km`, `avg_delivery_minutes`, `csat_avg`, `active_days`; **not** truthfully available: `acceptance_rate`, `ghost_ratio`, `peak_util`). Everything else outstanding is either frontend (Cat. 2c), other-app/infra (Cat. 2a/2b), or data entry via the admin endpoints (RC6).
+
+Verification note: the local Postgres is behind on migrations (`riders.hub_id` absent), so the full DB-backed suite was not run here; pure-logic paths (period parsing, activity windows, pagination/day-fill boundaries) were verified against real settings. Run the operations test suite on a migrated DB before merge.
+
+---
+
 ## Note on method
 All findings verified read-only against `https://www.orders.axpress.net` as COO ("Ayo").
 No write/POST/PATCH/PUT calls were made against production. No application code was modified.
