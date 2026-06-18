@@ -1,6 +1,7 @@
 from django.contrib.admin.sites import AdminSite
 from django.db.models.signals import post_save
 from django.test import TestCase
+from import_export.admin import ImportExportModelAdmin
 from authentication.models import User
 from wallet.models import (
     Wallet,
@@ -21,6 +22,7 @@ from wallet.admin import (
     AmortizationWalletAdmin,
     AmortizationTransactionAdmin,
     AmortizationVirtualAccountAdmin,
+    AmortizationTransactionResource,
 )
 from wallet.signals import create_amortization_wallet_account_detail
 
@@ -130,6 +132,35 @@ class AmortizationAdminSearchTest(TestCase):
             MockRequest(), queryset, "TEST-REF"
         )
         self.assertEqual(results_queryset.count(), 1)
+
+    def test_amortization_transaction_admin_import_export(self) -> None:
+        """Test import/export functionality for AmortizationTransactionAdmin."""
+        model_admin: AmortizationTransactionAdmin = AmortizationTransactionAdmin(
+            AmortizationTransaction, self.site
+        )
+
+        # Verify admin class inherits from ImportExportModelAdmin
+        self.assertTrue(issubclass(AmortizationTransactionAdmin, ImportExportModelAdmin))
+
+        # Verify resource class is configured
+        self.assertIn(AmortizationTransactionResource, model_admin.resource_classes)
+
+        # Test resource export data contains custom fields
+        resource: AmortizationTransactionResource = AmortizationTransactionResource()
+        dataset = resource.export(AmortizationTransaction.objects.all())
+
+        # Check headers
+        headers = dataset.headers
+        self.assertIn("User Name", headers)
+        self.assertIn("User Phone", headers)
+        self.assertIn("reference", headers)
+
+        # Check values
+        self.assertEqual(len(dataset), 1)
+        row = dataset.dict[0]
+        self.assertEqual(row["reference"], "TEST-REF-123")
+        self.assertEqual(row["User Name"], "Olabode Olaniyi")
+        self.assertEqual(row["User Phone"], "08011112222")
 
     def test_amortization_virtual_account_admin_search(self) -> None:
         """Test searching on AmortizationVirtualAccountAdmin with bank details and name parts."""
