@@ -135,8 +135,16 @@ class RiderDetailView(OperationsBaseView):
         return Response(services.rider_summary(rider, start_dt, end_dt))
 
 
-class RiderPerformanceView(RiderDetailView):
-    pass
+class RiderPerformanceView(OperationsBaseView):
+    def get(self, request, pk):
+        scope = self.get_scope()
+        start_dt, end_dt = services.parse_period(self.get_period())
+        rider = get_object_or_404(
+            Rider.objects.select_related("user", "hub", "hub__zone", "vehicle_asset"),
+            pk=pk,
+        )
+        services.ensure_rider_allowed(scope, rider)
+        return Response(services.rider_performance(rider, start_dt, end_dt))
 
 
 class RiderDailyActivityView(OperationsBaseView):

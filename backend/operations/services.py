@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Max, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from dispatcher.models import (
     DeliveryRating,
@@ -65,7 +65,7 @@ def parse_period(period):
         start = datetime.combine(date(today.year, 1, 1), time.min)
         return timezone.make_aware(start), now
 
-    if period and len(period) == 7:
+    if period and len(period) == 7 and period.count("-") == 1:
         try:
             year, month = [int(part) for part in period.split("-")]
             start_date = date(year, month, 1)
@@ -77,10 +77,25 @@ def parse_period(period):
             end = datetime.combine(end_date, time.max)
             return timezone.make_aware(start), timezone.make_aware(end)
         except ValueError:
-            pass
+            raise ValidationError(
+                {"period": f"Invalid month '{period}'. Expected YYYY-MM."}
+            )
 
-    start = datetime.combine(today.replace(day=1), time.min)
-    return timezone.make_aware(start), now
+    # Omitted or explicit "this_month" → current month to now (documented default).
+    if period in (None, "", "this_month"):
+        start = datetime.combine(today.replace(day=1), time.min)
+        return timezone.make_aware(start), now
+
+    # Any other non-empty value is malformed — fail loudly instead of silently
+    # returning current-month data the caller did not ask for (F20).
+    raise ValidationError(
+        {
+            "period": (
+                f"Unknown period '{period}'. Use one of: today, yesterday, "
+                "this_week, past_7_days, this_month, last_month, this_year, or YYYY-MM."
+            )
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -192,6 +207,41 @@ def scoped_merchants(scope):
     if not scope.is_global:
         qs = qs.filter(zone_id__in=scope.zone_ids)
     return qs
+
+
+# Merchant activity is classified from the merchant's REAL latest order rather
+# than the stored Merchant.activity_status / last_order_date fields, which are
+# only maintained by seed commands in this system (audit F1/RC1). "active" =
+# ordered in the last 7 days, "watch" = 8–30 days, "inactive" = 30+ days / never.
+ACTIVE_WINDOW_DAYS = 7
+WATCH_WINDOW_DAYS = 30
+
+
+def annotate_merchant_activity(qs):
+    """Annotate a Merchant queryset with the real max order timestamp."""
+    return qs.annotate(_last_order_at=Max("user__orders__created_at"))
+
+
+def activity_from_last_order(last_order_at, now=None):
+    if last_order_at is None:
+        return "inactive"
+    now = now or timezone.now()
+    if last_order_at >= now - timedelta(days=ACTIVE_WINDOW_DAYS):
+        return "active"
+    if last_order_at >= now - timedelta(days=WATCH_WINDOW_DAYS):
+        return "watch"
+    return "inactive"
+
+
+def merchant_activity_counts(qs):
+    """Bucket counts (total/active/watch/inactive) from live order recency."""
+    now = timezone.now()
+    counts = {"total": 0, "active": 0, "watch": 0, "inactive": 0}
+    # Select id alongside the aggregate so GROUP BY is per-merchant (one row each).
+    for _id, last_order_at in annotate_merchant_activity(qs).values_list("id", "_last_order_at"):
+        counts["total"] += 1
+        counts[activity_from_last_order(last_order_at, now)] += 1
+    return counts
 
 
 def scoped_hubs(scope):
@@ -306,12 +356,7 @@ def dashboard_summary(scope, period):
             "on_delivery": riders.filter(status=Rider.Status.ON_DELIVERY).count(),
             "offline": riders.filter(status=Rider.Status.OFFLINE).count(),
         },
-        "merchants": {
-            "total": merchants.count(),
-            "active": merchants.filter(activity_status="active").count(),
-            "watch": merchants.filter(activity_status="watch").count(),
-            "inactive": merchants.filter(activity_status="inactive").count(),
-        },
+        "merchants": merchant_activity_counts(merchants),
         "targets": {
             "revenue": decimal_to_float(target_revenue),
             "revenue_attainment_pct": (
@@ -395,12 +440,7 @@ def zone_summary(zone, scope, start_dt, end_dt, include_nested=False):
             "online": riders.filter(status=Rider.Status.ONLINE).count(),
             "on_delivery": riders.filter(status=Rider.Status.ON_DELIVERY).count(),
         },
-        "merchants": {
-            "total": merchants.count(),
-            "active": merchants.filter(activity_status="active").count(),
-            "watch": merchants.filter(activity_status="watch").count(),
-            "inactive": merchants.filter(activity_status="inactive").count(),
-        },
+        "merchants": merchant_activity_counts(merchants),
     }
     if include_nested:
         payload["rider_list"] = [rider_summary(r, start_dt, end_dt) for r in riders]
@@ -450,21 +490,55 @@ def rider_summary(rider, start_dt, end_dt):
     }
 
 
+def rider_performance(rider, start_dt, end_dt):
+    """Rider detail + a performance block computed only from data we actually
+    have (F15). Metrics with no real source (acceptance_rate, ghost_ratio,
+    peak_util) are intentionally NOT returned rather than fabricated."""
+    payload = rider_summary(rider, start_dt, end_dt)
+    metrics = payload["orders"]
+    distance = metrics["distance_km"]
+    active_days = (
+        Order.objects.filter(rider=rider, created_at__gte=start_dt, created_at__lte=end_dt)
+        .annotate(day=TruncDate("created_at"))
+        .values("day")
+        .distinct()
+        .count()
+    )
+    payload["performance"] = {
+        # Naira of completed-order revenue per delivered km.
+        "rev_per_km": round(metrics["revenue"] / distance, 1) if distance else 0,
+        "avg_delivery_minutes": metrics["avg_delivery_minutes"],
+        # Average delivery rating in the period (0 if no ratings captured yet).
+        "csat_avg": payload["rating"],
+        # Distinct calendar days the rider had at least one order in the period.
+        "active_days": active_days,
+    }
+    return payload
+
+
 def merchant_summary(merchant, start_dt, end_dt):
     orders = Order.objects.filter(user=merchant.user, created_at__gte=start_dt, created_at__lte=end_dt)
     metrics = order_metrics(orders)
+    # Derive activity from the real latest order (annotated when called from a
+    # list; otherwise queried) instead of the stale stored field (F1).
+    if hasattr(merchant, "_last_order_at"):
+        last_order_at = merchant._last_order_at
+    else:
+        last_order_at = Order.objects.filter(user=merchant.user).aggregate(
+            last=Max("created_at")
+        )["last"]
     return {
         "id": str(merchant.id),
         "merchant_id": merchant.merchant_id,
         "business_name": merchant.user.business_name or merchant.user.contact_name or "",
         "phone": merchant.user.phone,
         "email": merchant.user.email,
-        "activity_status": merchant.activity_status,
+        "activity_status": activity_from_last_order(last_order_at),
         "merchant_type": merchant.merchant_type,
         "is_partner": merchant.is_partner,
         "has_active_subscription": merchant.has_active_subscription,
         "has_price_list": merchant.has_price_list,
-        "last_order_date": merchant.last_order_date.isoformat() if merchant.last_order_date else None,
+        "last_order_date": last_order_at.isoformat() if last_order_at else None,
         "zone": {
             "id": str(merchant.zone_id) if merchant.zone_id else None,
             "name": merchant.zone.name if merchant.zone else None,
@@ -529,10 +603,16 @@ def orders_list(scope, period, filters):
         qs = qs.filter(user_id=merchant_id)
 
     limit = min(int(filters.get("limit") or 100), 500)
+    offset = max(int(filters.get("offset") or 0), 0)
+    total = qs.count()
+    page = qs[offset:offset + limit]
     return {
         "period": period,
-        "count": qs.count(),
-        "results": [order_summary(order) for order in qs[:limit]],
+        "count": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+        "results": [order_summary(order) for order in page],
     }
 
 
@@ -547,16 +627,32 @@ def orders_analytics(scope, period):
         {"source": row["source"], "count": row["count"]}
         for row in qs.values("source").annotate(count=Count("id")).order_by("source")
     ]
-    by_day = [
-        {
-            "date": row["day"].isoformat() if row["day"] else None,
-            **order_metrics(qs.filter(created_at__date=row["day"])),
-        }
+    # Metrics for the days that actually have orders (one query per such day).
+    day_metrics = {
+        row["day"]: order_metrics(qs.filter(created_at__date=row["day"]))
         for row in qs.annotate(day=TruncDate("created_at"))
         .values("day")
         .annotate(count=Count("id"))
-        .order_by("day")
-    ]
+        if row["day"]
+    }
+    # Emit a row for EVERY calendar day in the range so charts align with
+    # rider daily-activity (F16); days without orders get zeroed metrics.
+    zero_metrics = {
+        "orders_total": 0,
+        "orders_completed": 0,
+        "orders_failed": 0,
+        "orders_canceled": 0,
+        "completion_rate": 0,
+        "revenue": 0.0,
+        "distance_km": 0.0,
+        "avg_delivery_minutes": 0,
+    }
+    by_day = []
+    current = start_dt.date()
+    end_date = end_dt.date()
+    while current <= end_date:
+        by_day.append({"date": current.isoformat(), **day_metrics.get(current, zero_metrics)})
+        current += timedelta(days=1)
     return {
         "period": period,
         "range": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
@@ -569,7 +665,11 @@ def orders_analytics(scope, period):
 
 def merchants_list(scope, period, filters):
     start_dt, end_dt = parse_period(period)
-    qs = scoped_merchants(scope).order_by("user__business_name", "merchant_id")
+    # Annotate live last-order time so merchant_summary reads it (no N+1) and the
+    # activity filter operates on real recency, not the stale stored field (F1).
+    qs = annotate_merchant_activity(scoped_merchants(scope)).order_by(
+        "user__business_name", "merchant_id"
+    )
 
     zone_id = filters.get("zone_id")
     if zone_id:
@@ -577,7 +677,15 @@ def merchants_list(scope, period, filters):
 
     activity_status = filters.get("activity_status") or filters.get("status")
     if activity_status:
-        qs = qs.filter(activity_status=activity_status)
+        now = timezone.now()
+        active_cutoff = now - timedelta(days=ACTIVE_WINDOW_DAYS)
+        watch_cutoff = now - timedelta(days=WATCH_WINDOW_DAYS)
+        if activity_status == "active":
+            qs = qs.filter(_last_order_at__gte=active_cutoff)
+        elif activity_status == "watch":
+            qs = qs.filter(_last_order_at__gte=watch_cutoff, _last_order_at__lt=active_cutoff)
+        elif activity_status == "inactive":
+            qs = qs.filter(Q(_last_order_at__lt=watch_cutoff) | Q(_last_order_at__isnull=True))
 
     is_partner = filters.get("is_partner")
     if is_partner in ("true", "false"):
@@ -803,8 +911,12 @@ def leaderboard(scope, period):
         rider_summary(rider, start_dt, end_dt)
         for rider in scoped_riders(scope)[:500]
     ]
+    # Only rank riders who actually had orders in the period. This drops the
+    # test/admin/hub-less accounts (Super Admin, Test Ignore, …) that otherwise
+    # padded the bottom of the board with zero-order rows (F9).
+    active_riders = [item for item in riders if item["orders"]["orders_total"] > 0]
     rider_rankings = sorted(
-        riders, key=lambda item: item["orders"]["orders_completed"], reverse=True
+        active_riders, key=lambda item: item["orders"]["orders_completed"], reverse=True
     )[:50]
     for index, item in enumerate(rider_rankings, start=1):
         item["rank"] = index
