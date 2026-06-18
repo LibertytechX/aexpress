@@ -438,6 +438,25 @@ Backend operations-app fixes shipped on this branch (no prod writes; no other ap
 
 Verification note: the local Postgres is behind on migrations (`riders.hub_id` absent), so the full DB-backed suite was not run here; pure-logic paths (period parsing, activity windows, pagination/day-fill boundaries) were verified against real settings. Run the operations test suite on a migrated DB before merge.
 
+## Frontend fix status (repo `axpress-operations-command-center`, branch `chuks/audit-data-accuracy`)
+Guiding rule applied throughout: **a card/tile with no real backend data is removed, not faked.**
+
+| Finding | Status | Notes |
+|---|---|---|
+| F6/FE4 — zone % via `\|\|`-on-zero / inconsistent nullish | ✅ fixed | shows real `completion_rate` consistently |
+| F7/FE1 — zone cards alphabetical, leaderboard unused | ✅ fixed | cards driven by leaderboard revenue `rank` |
+| F18 — idle hubs shown "CRITICAL" | ✅ fixed | 0-order hubs render neutral "IDLE" |
+| FE2 — merchant cards read wrong keys | ✅ fixed | `activity_status` + nested `orders.*` (formatters + Zone/Hub) |
+| FE5 — Orders analytics hardcoded mocks | ✅ fixed | mapped `summary.*`/`by_status`/`by_source`; table nested + `total_amount`; real status filters |
+| FE6 — KM banner fake 91.2%/3 | ✅ fixed | real pass-rate/failed/available; removed no-data Odometer card; integrity table uses `km_*` keys |
+| FE7 — rider metrics empty + hardcoded targets | ✅ fixed | nested `orders.*` + new `/performance/` block; removed ghost/peak/acceptance tiles & gauges & fake targets |
+| FE8 — fabricated "Lead Earnings" | ✅ removed | panel deleted; ghost-ride alert removed; merchants mapped |
+| FE9 — fabricated "Captain Earnings"; "On Track" always 0 | ✅ fixed/removed | earnings panel deleted; On Track uses `completion_rate`; merchant tiles mapped, no-data tiles dropped |
+| FE3 — Coach/Comms call 404 routes | ✅ removed | route/nav/tabs + orphan files deleted (API wrappers left for future) |
+| FE10 — lead/captain user picker | ⏳ open | Admin assign forms — verify user source (untouched) |
+
+Verified by production `vite build` (149 modules, no errors) and a dangling-reference grep after each removal. The repo has no ESLint config, so build is the gate.
+
 ---
 
 ## Note on method
