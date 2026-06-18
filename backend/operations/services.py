@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.db.models import Avg, Count, Q, Sum
 from django.db.models.functions import Coalesce, TruncDate
 from django.utils import timezone
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from dispatcher.models import (
     DeliveryRating,
@@ -65,7 +65,7 @@ def parse_period(period):
         start = datetime.combine(date(today.year, 1, 1), time.min)
         return timezone.make_aware(start), now
 
-    if period and len(period) == 7:
+    if period and len(period) == 7 and period.count("-") == 1:
         try:
             year, month = [int(part) for part in period.split("-")]
             start_date = date(year, month, 1)
@@ -77,10 +77,25 @@ def parse_period(period):
             end = datetime.combine(end_date, time.max)
             return timezone.make_aware(start), timezone.make_aware(end)
         except ValueError:
-            pass
+            raise ValidationError(
+                {"period": f"Invalid month '{period}'. Expected YYYY-MM."}
+            )
 
-    start = datetime.combine(today.replace(day=1), time.min)
-    return timezone.make_aware(start), now
+    # Omitted or explicit "this_month" → current month to now (documented default).
+    if period in (None, "", "this_month"):
+        start = datetime.combine(today.replace(day=1), time.min)
+        return timezone.make_aware(start), now
+
+    # Any other non-empty value is malformed — fail loudly instead of silently
+    # returning current-month data the caller did not ask for (F20).
+    raise ValidationError(
+        {
+            "period": (
+                f"Unknown period '{period}'. Use one of: today, yesterday, "
+                "this_week, past_7_days, this_month, last_month, this_year, or YYYY-MM."
+            )
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -529,10 +544,16 @@ def orders_list(scope, period, filters):
         qs = qs.filter(user_id=merchant_id)
 
     limit = min(int(filters.get("limit") or 100), 500)
+    offset = max(int(filters.get("offset") or 0), 0)
+    total = qs.count()
+    page = qs[offset:offset + limit]
     return {
         "period": period,
-        "count": qs.count(),
-        "results": [order_summary(order) for order in qs[:limit]],
+        "count": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+        "results": [order_summary(order) for order in page],
     }
 
 
@@ -547,16 +568,32 @@ def orders_analytics(scope, period):
         {"source": row["source"], "count": row["count"]}
         for row in qs.values("source").annotate(count=Count("id")).order_by("source")
     ]
-    by_day = [
-        {
-            "date": row["day"].isoformat() if row["day"] else None,
-            **order_metrics(qs.filter(created_at__date=row["day"])),
-        }
+    # Metrics for the days that actually have orders (one query per such day).
+    day_metrics = {
+        row["day"]: order_metrics(qs.filter(created_at__date=row["day"]))
         for row in qs.annotate(day=TruncDate("created_at"))
         .values("day")
         .annotate(count=Count("id"))
-        .order_by("day")
-    ]
+        if row["day"]
+    }
+    # Emit a row for EVERY calendar day in the range so charts align with
+    # rider daily-activity (F16); days without orders get zeroed metrics.
+    zero_metrics = {
+        "orders_total": 0,
+        "orders_completed": 0,
+        "orders_failed": 0,
+        "orders_canceled": 0,
+        "completion_rate": 0,
+        "revenue": 0.0,
+        "distance_km": 0.0,
+        "avg_delivery_minutes": 0,
+    }
+    by_day = []
+    current = start_dt.date()
+    end_date = end_dt.date()
+    while current <= end_date:
+        by_day.append({"date": current.isoformat(), **day_metrics.get(current, zero_metrics)})
+        current += timedelta(days=1)
     return {
         "period": period,
         "range": {"start": start_dt.isoformat(), "end": end_dt.isoformat()},
@@ -803,8 +840,12 @@ def leaderboard(scope, period):
         rider_summary(rider, start_dt, end_dt)
         for rider in scoped_riders(scope)[:500]
     ]
+    # Only rank riders who actually had orders in the period. This drops the
+    # test/admin/hub-less accounts (Super Admin, Test Ignore, …) that otherwise
+    # padded the bottom of the board with zero-order rows (F9).
+    active_riders = [item for item in riders if item["orders"]["orders_total"] > 0]
     rider_rankings = sorted(
-        riders, key=lambda item: item["orders"]["orders_completed"], reverse=True
+        active_riders, key=lambda item: item["orders"]["orders_completed"], reverse=True
     )[:50]
     for index, item in enumerate(rider_rankings, start=1):
         item["rank"] = index
