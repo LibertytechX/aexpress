@@ -4,6 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-06-24] — Export Rider Distance Covered command
+
+### Added
+- **Rider Distance Export Command**: Added `export_rider_distances` management command under `dispatcher` app. It calculates rider distance covered for a specified date range based on `VehicleTracking` odometer logs and outputs a styled Excel sheet with zebra-striping, custom alignments, and auto-fitted column widths.
+- **Unit Tests**: Added `ExportRiderDistancesCommandTests` in `dispatcher/tests.py` to assert correct distance calculations, Excel headers, formatting, and file generation.
+
+---
+
 ## [2026-06-08] — Amortization Transaction Import/Export Support
 
 ### Added
