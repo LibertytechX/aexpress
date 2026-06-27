@@ -385,6 +385,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "status",
         "mode",
         "is_relay_order",
+        "escrow_held",
         "payment_method",
         "is_partner_order",
         AssignedRiderFilter,

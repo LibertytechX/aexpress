@@ -448,13 +448,21 @@ class IOrderService(OrderService):
                     return False, response
                 wallet = wallet.first()
                 try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
+                    reference = uuid.uuid4().hex
+                    reference = f"WP-{reference[:12].upper()}"
+                    _ = wallet.debit(
                         amount=order.total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Quick Send order #{order.order_number}",
+                        description=f"Order {order.order_number}",
+                        reference=reference,
                     )
-                    order.escrow_held = True
+                    # EscrowManager.hold_funds(
+                    #     wallet=wallet,
+                    #     amount=order.total_amount,
+                    #     order_number=order.order_number,
+                    #     description=f"Escrow hold for Quick Send order #{order.order_number}",
+                    # )
+
+                    order.payment_status = "Paid"
                     order.save()
                 except ValueError as e:
                     response["message"] = str(e)
@@ -613,8 +621,15 @@ class IOrderService(OrderService):
                     dropoff_lng = geo.get("lng")
 
         if is_relay_order:
-            if pickup_lat is None or pickup_lng is None or dropoff_lat is None or dropoff_lng is None:
-                raise serializers.ValidationError("Relay orders require geocoded coordinates for both pickup and dropoff.")
+            if (
+                pickup_lat is None
+                or pickup_lng is None
+                or dropoff_lat is None
+                or dropoff_lng is None
+            ):
+                raise serializers.ValidationError(
+                    "Relay orders require geocoded coordinates for both pickup and dropoff."
+                )
 
         try:
             total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
