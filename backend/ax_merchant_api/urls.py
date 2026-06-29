@@ -39,6 +39,7 @@ urlpatterns = [
     path("api/bot/", include("bot.urls")),
     path("api/webhooks/", include("webhooks.urls")),
     path("api/occ/", include("dispatcher.occ_urls")),
+    path("api/ops/", include("oprtn_dashboard.urls")),
     path("api/riders/referrals/", include("referrals.urls")),
     path("api/chats/", include("chats.urls")),
     path("api/whatsapp/", include("whatsapp_messaging.urls")),
