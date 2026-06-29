@@ -95,7 +95,9 @@ def calculate_route(
     origin: Dict[str, float], destinations: List[Dict[str, float]]
 ) -> Optional[Dict]:
     """
-    Calculate route total distance and duration using Google Maps Distance Matrix API.
+    Calculate route total distance and duration.
+
+    Switches between Google Maps and custom Routing Service based on settings.
 
     Args:
         origin: Dictionary with 'lat' and 'lng' keys for pickup location
@@ -103,6 +105,73 @@ def calculate_route(
 
     Returns:
         Dictionary with 'distance_km' and 'duration_minutes' keys, or None if calculation fails
+    """
+    provider = getattr(settings, "ROUTING_PROVIDER", "google")
+
+    if provider == "custom":
+        return _calculate_route_custom(origin, destinations)
+    return _calculate_route_google(origin, destinations)
+
+
+def _calculate_route_custom(
+    origin: Dict[str, float], destinations: List[Dict[str, float]]
+) -> Optional[Dict]:
+    """
+    Calculate route using the custom Go-based routing service.
+    """
+    service_url = getattr(settings, "ROUTING_SERVICE_URL", "")
+    api_key = getattr(settings, "ROUTING_SERVICE_API_KEY", "")
+
+    if not service_url:
+        print("ROUTING_SERVICE_URL not configured, falling back to Google")
+        return _calculate_route_google(origin, destinations)
+
+    if not destinations:
+        return {"distance_km": 0.0, "duration_minutes": 0}
+
+    # OSRM expects lng,lat
+    origin_str = f"{origin['lng']},{origin['lat']}"
+    destinations_list = [f"{p['lng']},{p['lat']}" for p in destinations]
+
+    params = {
+        "origin": origin_str,
+        "destinations": destinations_list,
+    }
+    headers = {"X-API-Key": api_key}
+
+    try:
+        response = requests.get(service_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") == "success" and data.get("data"):
+            # OSRM returns distance in meters and duration in seconds
+            # We take the first route from the list
+            route = data["data"][0]
+            total_distance_meters = route["distance"]
+            total_duration_seconds = route["duration"]
+
+            distance_km = round(total_distance_meters / 1000, 2)
+            duration_minutes = round(total_duration_seconds / 60, 0)
+
+            return {
+                "distance_km": distance_km,
+                "duration_minutes": int(duration_minutes),
+            }
+        else:
+            print(f"Custom routing service error: {data.get('message')}")
+            return None
+
+    except Exception as e:
+        print(f"Custom route calculation error: {str(e)}")
+        return None
+
+
+def _calculate_route_google(
+    origin: Dict[str, float], destinations: List[Dict[str, float]]
+) -> Optional[Dict]:
+    """
+    Calculate route total distance and duration using Google Maps Distance Matrix API.
     """
     api_key = settings.GOOGLE_MAPS_API_KEY
 
@@ -164,5 +233,7 @@ def calculate_route(
             return None
 
     except Exception as e:
-        print(f"Route calculation error: {str(e)}")
+        print(f"Google route calculation error: {str(e)}")
         return None
+
+

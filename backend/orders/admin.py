@@ -14,7 +14,15 @@ from riders.models import RiderEarning, RiderCodRecord
 from riders.notifications import notify_rider
 from wallet.models import Wallet
 
-from .models import Vehicle, Order, Delivery, OrderLeg, MerchantPricingOverride, MerchantPriceList, MerchantPriceListItem
+from .models import (
+    Vehicle,
+    Order,
+    Delivery,
+    OrderLeg,
+    MerchantPricingOverride,
+    MerchantPriceList,
+    MerchantPriceListItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -361,7 +369,12 @@ class OrderAdmin(ImportExportModelAdmin):
         "picked_up_at",
         "arrived_at",
         "completed_at",
+        "is_partner_order",
+        "partner_order_count",
+        "day_returned_count",
+        "rider_completed_count",
         "collect_on_delivery",
+        "vertical_lead_name",
         "cod_amount",
         "created_at",
     ]
@@ -370,6 +383,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "mode",
         "is_relay_order",
         "payment_method",
+        "is_partner_order",
         AssignedRiderFilter,
         "rider",
         "created_at",
@@ -412,7 +426,17 @@ class OrderAdmin(ImportExportModelAdmin):
                 )
             },
         ),
-        ("Delivery Details", {"fields": ("vehicle", "payment_method", "total_amount", "get_rider_earning")}),
+        (
+            "Delivery Details",
+            {
+                "fields": (
+                    "vehicle",
+                    "payment_method",
+                    "total_amount",
+                    "get_rider_earning",
+                )
+            },
+        ),
         ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
         (
             "Timestamps",

@@ -658,6 +658,7 @@ class RiderEarningsView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         try:
             rider = getattr(request.user, "rider_profile", None)
@@ -726,11 +727,12 @@ class RiderEarningsView(APIView):
 class RiderTodayTripsView(APIView):
     """
     API endpoint for the 'Today's Trips' list.
-    Returns completed orders for today.
+    Supports period filtering: today (default), week, month.
     """
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def get(self, request):
         try:
             rider = getattr(request.user, "rider_profile", None)
@@ -745,11 +747,22 @@ class RiderTodayTripsView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # now = timezone.now()
-        # start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        period = request.query_params.get("period", "today").lower()
+        now = timezone.now()
+
+        if period == "today":
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "week":
+            start_date = now - timedelta(days=7)
+        elif period == "month":
+            start_date = now - timedelta(days=30)
+        else:
+            start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         orders = (
-            Order.objects.filter(rider=rider, status="Done")
+            Order.objects.filter(
+                rider=rider, status="Done", completed_at__gte=start_date
+            )
             .prefetch_related("deliveries")
             .order_by("-completed_at")
         )
@@ -1067,7 +1080,7 @@ class RiderAssignmentActionView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
-    @exception_advice()
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         action = request.data.get("action")
         if action not in ["accept", "reject"]:

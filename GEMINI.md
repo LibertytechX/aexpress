@@ -50,7 +50,7 @@ class CryptoPaymentSerializer(serializers.Serializer):
                 "text": "Changed Named",
                 "userType": "AI",
                 "timestamp": datetime.now().isoformat(),
-                "username": "GetLinkedAI",
+                "username": "Somename",
             }
         )
         return service_response(
@@ -69,3 +69,67 @@ class CryptoPaymentSerializer(serializers.Serializer):
 
 ### 3. Running Commands
 - Active venv in the backend directory `/Users/ayo/Liberty/aexpress/backend` using `source venv/bin/activate`
+
+
+## ClickUp Task Logging
+
+Log dev work to ClickUp so the PM and QA team can track it.
+
+### Credentials
+Load from ⁠ .claude/clickup.env ⁠ (gitignored). See ⁠ .claude/clickup.env.example ⁠ for the full list of required values.
+
+### When to log
+•⁠  ⁠*End of session*: Log everything done in the session automatically.
+•⁠  ⁠*On-demand*: If the user says "log now", "log to clickup", or similar, log immediately without waiting for end of session.
+•⁠  ⁠*Every task must be assigned to ⁠ CLICKUP_USER_ID ⁠*.
+
+### Status mapping (ClickUp expects lowercase values in the API)
+•⁠  ⁠Not started → ⁠ to do ⁠
+•⁠  ⁠Currently working on it → ⁠ in progress ⁠
+•⁠  ⁠Blocked by something external → ⁠ blocker ⁠
+•⁠  ⁠Completed in this session → ⁠ in qa ⁠ (default) or ⁠ awaiting dev deployment ⁠ if the user specifies
+
+Before creating tasks on a list, fetch the list's statuses (⁠ GET /list/{id} ⁠) and use the exact string returned. ClickUp sometimes has trailing whitespace in status names — always read and use the exact value from the API.
+
+# Task Routing Guide
+
+## Task routing (infer from the task subject)
+
+- Merchant web features (dashboard, orders view, analytics, settings, integrations) → **CLICKUP_LIST_MERCHANT_WEB**
+- Merchant mobile app features (order management, notifications, profile, in-app actions) → **CLICKUP_LIST_MERCHANT_APP**
+- Rider app features (delivery flow, navigation, availability, earnings, notifications) → **CLICKUP_LIST_RIDER_APP**
+- Operations dashboard (admin tools, monitoring, reporting, system-wide controls) → **CLICKUP_LIST_OPERATION_DASHBOARD**
+- Dispatcher tools (order assignment, routing, live tracking, dispatch controls) → **CLICKUP_LIST_DISPATCHER**
+
+---
+
+## Cross-layer rule
+
+If a task spans backend and frontend, create **one task per layer**:
+
+- **Backend:** focus on APIs, business logic, data handling  
+- **Frontend:** focus on UI, UX, state management  
+
+Always **cross-reference both tasks** in their descriptions.
+
+---
+
+## Examples
+
+- **Backend: Optimize dispatch auto-assignment logic**  
+  Improved how orders are assigned to riders based on proximity and load.
+
+- **Frontend: Improve dispatcher live map performance**  
+  Reduced lag and improved real-time updates for order and rider movement.
+
+- **Backend: Persist merchant notification settings**  
+  Merchant preferences now save and reload correctly across sessions.
+
+- **Frontend: Add order filtering on merchant dashboard**  
+  Merchants can now filter orders by status, date, and delivery progress.
+
+### Task format
+•⁠  ⁠*Title*: Imperative, concise. Prefix with ⁠ Backend: ⁠ or ⁠ Frontend: ⁠ when useful.
+•⁠  ⁠*Description*: 1-3 sentences in plain language — what changed and why. No code snippets, function names, or endpoint paths. The PM and QA read these.
+•⁠  ⁠*Assignee*: Always ⁠ CLICKUP_USER_ID ⁠.
+•⁠  ⁠*Priority*: Default unless the user specifies.

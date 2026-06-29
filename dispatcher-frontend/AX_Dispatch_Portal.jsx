@@ -451,11 +451,35 @@ function DeliveryRouteMap({ order, rider }) {
       markersRef.current = [];
       if (directionsRendererRef.current) directionsRendererRef.current.setPath([]);
 
-      const [pickupLoc, dropoffLoc] = await Promise.all([
-        geocodeAddr(order.pickup),
-        geocodeAddr(order.dropoff),
-      ]);
-      if (!pickupLoc || !dropoffLoc) { setMapStatus('error'); return; }
+      const bounds = new window.google.maps.LatLngBounds();
+
+      // Resolve pickup
+      const pickupLoc = (order.pickupLat && order.pickupLng) 
+        ? new window.google.maps.LatLng(parseFloat(order.pickupLat), parseFloat(order.pickupLng))
+        : await geocodeAddr(order.pickup);
+      
+      if (!pickupLoc) { setMapStatus('error'); return; }
+      bounds.extend(pickupLoc);
+
+      // Resolve all drops
+      let dropLocations = [];
+      if (order.mode === 'multi' && order.deliveries?.length > 0) {
+        const sortedDeliveries = [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        dropLocations = await Promise.all(sortedDeliveries.map(async (d) => {
+          const loc = (d.dropoff_latitude && d.dropoff_longitude)
+            ? new window.google.maps.LatLng(parseFloat(d.dropoff_latitude), parseFloat(d.dropoff_longitude))
+            : await geocodeAddr(d.dropoff_address);
+          return { loc, addr: d.dropoff_address, sequence: d.sequence };
+        }));
+      } else {
+        const dropoffLoc = (order.dropoffLat && order.dropoffLng)
+          ? new window.google.maps.LatLng(parseFloat(order.dropoffLat), parseFloat(order.dropoffLng))
+          : await geocodeAddr(order.dropoff);
+        if (dropoffLoc) dropLocations.push({ loc: dropoffLoc, addr: order.dropoff, sequence: 1 });
+      }
+
+      if (dropLocations.some(d => !d.loc)) { setMapStatus('error'); return; }
+      dropLocations.forEach(d => bounds.extend(d.loc));
 
       // Pickup marker — navy dot
       markersRef.current.push(new window.google.maps.Marker({
@@ -465,37 +489,42 @@ function DeliveryRouteMap({ order, rider }) {
         label: { text: '📦', fontSize: '16px' }
       }));
 
-      // Dropoff marker — green dot
-      markersRef.current.push(new window.google.maps.Marker({
-        position: dropoffLoc, map,
-        title: 'Dropoff: ' + order.dropoff,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-        label: { text: '🏠', fontSize: '16px' }
-      }));
+      // Dropoff markers — green dots
+      dropLocations.forEach((d, i) => {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: d.loc, map,
+          title: `Stop ${d.sequence || i + 1}: ` + d.addr,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { 
+            text: order.mode === 'multi' ? String(d.sequence || i + 1) : '🏠', 
+            fontSize: order.mode === 'multi' ? '12px' : '16px', 
+            color: '#fff', 
+            fontWeight: 'bold' 
+          }
+        }));
+      });
 
       // Rider marker — gold dot (only if GPS available)
       if (rider && rider.lat && rider.lng) {
+        const riderLoc = { lat: rider.lat, lng: rider.lng };
         markersRef.current.push(new window.google.maps.Marker({
-          position: { lat: rider.lat, lng: rider.lng }, map,
+          position: riderLoc, map,
           title: 'Rider: ' + (rider.name || 'Rider'),
           icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
           label: { text: '🏍️', fontSize: '16px' }
         }));
+        bounds.extend(riderLoc);
       }
 
-      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      // Draw straight polyline path connecting the locations directly
       if (directionsRendererRef.current) {
-        directionsRendererRef.current.setPath([pickupLoc, dropoffLoc]);
+        directionsRendererRef.current.setPath([pickupLoc, ...dropLocations.map(d => d.loc)]);
       }
 
-      const bounds = new window.google.maps.LatLngBounds();
-      bounds.extend(pickupLoc);
-      bounds.extend(dropoffLoc);
-      if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
       map.fitBounds(bounds, { padding: 40 });
       setMapStatus('ready');
     })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
-  }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
+  }, [mapReady, order.id, order.pickup, order.dropoff, order.deliveries?.length, rider?.id, rider?.lat, rider?.lng]);
 
   return (
     <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${S.border}` }}>
@@ -1473,6 +1502,8 @@ export default function AXDispatchPortal() {
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState(null);
   const [orders, setOrders] = useState([]);
   const [totalOrdersCount, setTotalOrdersCount] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -1541,7 +1572,10 @@ export default function AXDispatchPortal() {
       if (["Picked Up", "In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "Package picked up", by: o.rider, type: "pickup" });
       if (["In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "In transit to dropoff", by: "GPS", type: "transit" });
       if (o.status === "Delivered") { b.push({ time: "auto", event: "Delivered — confirmed", by: o.rider, type: "delivered" }); if (o.cod > 0) b.push({ time: "auto", event: `COD settled: ₦${(o.cod - o.codFee).toLocaleString()}`, by: "System", type: "settlement" }); }
-      if (o.status === "Cancelled") b.push({ time: "auto", event: "Order cancelled", by: "Dispatch", type: "cancel" });
+      if (o.status === "Cancelled") {
+        const cancelText = o.cancellation_reason ? `Order cancelled (${o.cancellation_reason})` : "Order cancelled";
+        b.push({ time: "auto", event: cancelText, by: "Dispatch", type: "cancel" });
+      }
       if (o.status === "Failed") b.push({ time: "auto", event: "Delivery failed", by: o.rider || "System", type: "fail" });
       logs[o.id] = b;
     });
@@ -1841,18 +1875,22 @@ export default function AXDispatchPortal() {
     }
   };
 
-  const changeStatus = async (oid, ns) => {
+  const changeStatus = async (oid, ns, reason = null) => {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
-      await OrdersAPI.updateStatus(oid, ns);
+      await OrdersAPI.updateStatus(oid, ns, reason);
       // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
       if (ns === "Picked Up") {
         await OrdersAPI.updateStatus(oid, "In Transit");
         updateOrder(oid, { status: "In Transit" });
         addLog(oid, "Picked up → In Transit", "Dispatch", "status");
       } else {
-        updateOrder(oid, { status: ns, ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}) });
-        addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        updateOrder(oid, { 
+          status: ns, 
+          ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}),
+          ...(ns === "Cancelled" ? { cancellation_reason: reason } : {})
+        });
+        addLog(oid, `Status → ${ns}${reason ? ` (${reason})` : ""}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
         if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
         // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
         if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
@@ -1882,6 +1920,11 @@ export default function AXDispatchPortal() {
     { id: "settings", label: "Settings", icon: I.settings },
   ];
 
+  const handleCancelRequest = (order) => {
+    setOrderToCancel(order);
+    setShowCancelModal(true);
+  };
+
   return (
     <div style={{ display: "flex", height: "100vh", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", color: S.text, overflow: "hidden" }}>
       <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -1898,7 +1941,7 @@ export default function AXDispatchPortal() {
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
           {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned", "AssignmentAccepted", "AssignmentRejected"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -1918,9 +1961,9 @@ export default function AXDispatchPortal() {
           <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
-        <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
+        <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
@@ -1954,6 +1997,18 @@ export default function AXDispatchPortal() {
           staleOrders={staleOrders}
           onClose={() => setShowStaleModal(false)}
           onViewOrder={(id) => navTo("orders", id)}
+        />
+      )}
+
+      {showCancelModal && (
+        <CancellationModal
+          order={orderToCancel}
+          onClose={() => { setShowCancelModal(false); setOrderToCancel(null); }}
+          onConfirm={(reason) => {
+            changeStatus(orderToCancel.id, "Cancelled", reason);
+            setShowCancelModal(false);
+            setOrderToCancel(null);
+          }}
         />
       )}
 
@@ -2214,8 +2269,117 @@ function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
   );
 }
 
+// ─── CANCELLATION REASON MODAL ──────────────────────────────────────
+function CancellationModal({ order, onClose, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const [typedReason, setTypedReason] = useState("");
+  
+  const suggestedReasons = [
+    "Customer changed their mind",
+    "Duplicate order",
+    "Rider unavailable",
+    "Incorrect address",
+    "Merchant closed",
+    "Service area mismatch"
+  ];
+
+  const handleConfirm = () => {
+    const finalReason = typedReason.trim() || reason || "Order canceled by dispatcher";
+    onConfirm(finalReason);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 24, width: 480, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)", overflow: "hidden", animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}>
+        <div style={{ padding: "24px", borderBottom: `1px solid ${S.border}`, background: `linear-gradient(to right, ${S.card}, ${S.bg})` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: S.redBg, color: S.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>⚠️</div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: S.navy }}>Cancel Order</h3>
+                <div style={{ fontSize: 12, color: S.textMuted, fontFamily: "'Space Mono', monospace" }}>ID: #{order?.id}</div>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: S.bg, border: "none", cursor: "pointer", color: S.textMuted, width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ padding: "24px" }}>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</label>
+            <textarea
+              value={typedReason}
+              onChange={(e) => setTypedReason(e.target.value)}
+              placeholder="Explain why this order is being canceled..."
+              style={{
+                width: "100%", height: 120, padding: "14px", borderRadius: 16,
+                border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 14,
+                color: S.text, fontFamily: "inherit", resize: "none", outline: "none",
+                transition: "all 0.2s"
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = S.gold;
+                e.currentTarget.style.background = S.card;
+                e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = S.border;
+                e.currentTarget.style.background = S.bg;
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Suggested Reasons</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {suggestedReasons.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setTypedReason(r)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 20, border: `1px solid ${typedReason === r ? S.gold : S.border}`,
+                    background: typedReason === r ? S.goldPale : S.card,
+                    color: typedReason === r ? S.gold : S.textDim,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+            <button onClick={onClose} style={{ padding: "14px", borderRadius: 14, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Keep Order</button>
+            <button
+              onClick={handleConfirm}
+              style={{
+                padding: "14px",
+                borderRadius: 14,
+                border: "none",
+                background: `linear-gradient(135deg, ${S.red}, #c1121f)`,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: "0 8px 20px rgba(239,68,68,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+              }}
+            >
+              Confirm Cancellation
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
 // ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
   const [expandedRows, setExpandedRows] = useState({});
@@ -2256,7 +2420,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
     return (
       <>
-        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
+        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onCancelRequest={onCancelRequest} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
         {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
       </>
     );
@@ -2317,7 +2481,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
       };
 
-      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Vertical Lead", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
       const rows = dataToExport.map(o => {
         const dt = formatOrderDateTime(o.created);
         return [
@@ -2327,6 +2491,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
           o.customer,
           o.customerPhone,
           o.merchant,
+          o.verticalLeadName || "",
           o.pickup,
           o.dropoff,
           o.rider || "Unassigned",
@@ -2402,11 +2567,11 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
   const handleMergeGrouped = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length < 2) return;
-    
+
     // Validate all selected orders are "grouped" and "Pending"
     const selectedOrders = filtered.filter(o => selectedIds.has(o.id));
     const nonGrouped = selectedOrders.filter(o => o.mode !== 'grouped' || o.status !== 'Pending');
-    
+
     if (nonGrouped.length > 0) {
       alert("Only 'Pending' orders in 'Grouped' mode can be merged.");
       return;
@@ -2440,12 +2605,12 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
     const isPaid = psLower === "paid" || psLower === "success";
 
     return (
-      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button') && e.target.tagName !== 'INPUT') onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "40px 100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button') && e.target.tagName !== 'INPUT') onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
         <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
           {!isChild && (
-            <input 
-              type="checkbox" 
-              checked={selectedIds.has(rowOrder.id)} 
+            <input
+              type="checkbox"
+              checked={selectedIds.has(rowOrder.id)}
               onChange={(e) => handleToggleSelect(e, rowOrder.id)}
               style={{ cursor: "pointer", width: 16, height: 16, accentColor: S.gold }}
             />
@@ -2527,6 +2692,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
         <div><div style={{ fontSize: 12, fontWeight: 600 }}>{rowOrder.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{rowOrder.customerPhone}</div></div>
         <span style={{ fontSize: 12, color: S.textDim }}>{rowOrder.merchant}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={rowOrder.verticalLeadName}>{rowOrder.verticalLeadName || "—"}</span>
         <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowOrder.pickup.split(",")[0]} → {rowOrder.dropoff.split(",")[0]}</div>
         <div>{rowOrder.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{rowOrder.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
         <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.waitingTime || "—"}</span>
@@ -2595,21 +2761,21 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
         <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
 
         {selectedIds.size > 0 && (
-          <button 
-            onClick={handleMergeGrouped} 
+          <button
+            onClick={handleMergeGrouped}
             disabled={merging || selectedIds.size < 2}
-            style={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: 6, 
-              padding: "0 16px", 
-              borderRadius: 10, 
-              border: "none", 
-              background: selectedIds.size < 2 ? S.borderLight : S.gold, 
-              color: "#fff", 
-              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer", 
-              fontSize: 12, 
-              fontWeight: 700, 
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 16px",
+              borderRadius: 10,
+              border: "none",
+              background: selectedIds.size < 2 ? S.borderLight : S.gold,
+              color: "#fff",
+              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: 700,
               fontFamily: "inherit",
               boxShadow: selectedIds.size < 2 ? "none" : "0 4px 12px rgba(232,168,56,0.25)",
               transition: "all 0.2s ease"
@@ -2636,17 +2802,17 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 
       <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
         <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 1200 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "40px 100px 95px 1fr 1fr 1fr 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <div style={{ minWidth: 1500 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <input 
-                  type="checkbox" 
+                <input
+                  type="checkbox"
                   checked={selectedIds.size > 0 && selectedIds.size === filtered.filter(o => !o.parentOrderNumber).length}
                   onChange={handleSelectAll}
                   style={{ cursor: "pointer", width: 14, height: 14, accentColor: S.gold }}
                 />
               </div>
-              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>PAID</span><span>Status</span>
+              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Vertical Lead</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>PAID</span><span>Status</span>
             </div>
             <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
               {filtered.map(o => {
@@ -2724,7 +2890,7 @@ function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRide
 }
 
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -2746,6 +2912,17 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [codLoading, setCodLoading] = useState(false);
   const [codData, setCodData] = useState(null);
   const [codError, setCodError] = useState("");
+
+  const [editPartnerStats, setEditPartnerStats] = useState(false);
+  const [riderCompletedVal, setRiderCompletedVal] = useState(order.riderCompletedCount || 0);
+  const [dayReturnedVal, setDayReturnedVal] = useState(order.dayReturnedCount || 0);
+  const [partnerStatsSaving, setPartnerStatsSaving] = useState(false);
+
+  useEffect(() => {
+    setRiderCompletedVal(order.riderCompletedCount || 0);
+    setDayReturnedVal(order.dayReturnedCount || 0);
+    setEditPartnerStats(false);
+  }, [order.id]);
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
@@ -2842,6 +3019,23 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
     }
   };
 
+  const savePartnerStats = async () => {
+    setPartnerStatsSaving(true);
+    try {
+      const updated = await OrdersAPI.updatePartnerStats(order.id, {
+        rider_completed_count: riderCompletedVal,
+        day_returned_count: dayReturnedVal
+      });
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Partner stats updated: Completed=${riderCompletedVal}, Returned=${dayReturnedVal}`, "Dispatch", "edit");
+      setEditPartnerStats(false);
+    } catch (e) {
+      alert(e?.message || e?.error || "Failed to update partner stats");
+    } finally {
+      setPartnerStatsSaving(false);
+    }
+  };
+
   const logColors = { create: S.gold, payment: S.blue, assign: S.green, status: S.textDim, pickup: S.purple, transit: S.gold, cod: S.green, delivered: S.green, settlement: S.gold, cancel: S.red, fail: S.red, edit: S.blue };
 
   const iStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", color: S.navy, background: "#fff" };
@@ -2885,9 +3079,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
-          {!isTerminal && <button onClick={() => onChangeStatus(order.id, "Cancelled")} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
+          {!isTerminal && <button onClick={() => onCancelRequest(order)} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
         </div>
       </div>
+
+      {order.status === "Cancelled" && order.cancellation_reason && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: `1.5px solid ${S.red}44`, borderRadius: 12, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, animation: "fadeIn 0.3s ease" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: S.red, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>!</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: S.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{order.cancellation_reason}</div>
+          </div>
+        </div>
+      )}
 
       {/* STATUS PROGRESSION BAR */}
       {!isTerminal && (
@@ -2899,7 +3103,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               {showStatusMenu && (
                 <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: S.card, border: `1px solid ${S.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
                   {nextStatuses().map(ns => (
-                    <button key={ns} onClick={() => { onChangeStatus(order.id, ns); setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <button key={ns} onClick={() => { if (ns === "Cancelled") { onCancelRequest(order); } else { onChangeStatus(order.id, ns); } setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       → {ns}
                     </button>
                   ))}
@@ -2965,12 +3169,87 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
 
+          {/* PARTNER DETAILS SECTION */}
+          {order.isPartnerOrder && (
+            <div style={{ background: S.goldPale, borderRadius: 14, border: `1px solid ${S.gold}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#B8860B", textTransform: "uppercase", letterSpacing: "0.5px" }}>🤝 Partner Details</span>
+                {!isTerminal && !editPartnerStats && <button onClick={() => setEditPartnerStats(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit Stats</button>}
+              </div>
+              
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>TOTAL EXPECTED</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{order.partnerOrderCount || 0}</div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RIDER COMPLETED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={riderCompletedVal} onChange={e => setRiderCompletedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.green }}>{order.riderCompletedCount || 0}</div>
+                  )}
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RETURNED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={dayReturnedVal} onChange={e => setDayReturnedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.red }}>{order.dayReturnedCount || 0}</div>
+                  )}
+                </div>
+              </div>
+
+              {editPartnerStats && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <button onClick={savePartnerStats} disabled={partnerStatsSaving} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: partnerStatsSaving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    {partnerStatsSaving ? "Saving..." : "Save Stats"}
+                  </button>
+                  <button onClick={() => { setEditPartnerStats(false); setRiderCompletedVal(order.riderCompletedCount); setDayReturnedVal(order.dayReturnedCount); }} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                </div>
+              )}
+
+              {((order.fileUploadedUrls && order.fileUploadedUrls.length > 0) || order.fileUploadedUrl) && (
+                <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Documents</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {order.fileUploadedUrls && order.fileUploadedUrls.length > 0 ? (
+                      order.fileUploadedUrls.map((url, index) => (
+                        <a key={index} href={url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "calc(50% - 4px)" }}>
+                          <img src={url} alt={`Order document ${index}`} style={{ width: "100%", maxHeight: 120, objectFit: "contain" }} />
+                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 6px", fontSize: 8, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                            Click to view
+                          </div>
+                        </a>
+                      ))
+                    ) : (
+                      <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "100%" }}>
+                        <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                          Click to view full size
+                        </div>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ADDRESSES — EDITABLE */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Route</div>
             <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 4 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} /><div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} /><div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} />
+                <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                {order.mode === 'multi' && order.deliveries?.length > 1 && order.deliveries.slice(0, -1).map((_, i) => (
+                   <React.Fragment key={i}>
+                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.border }} />
+                     <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                   </React.Fragment>
+                ))}
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* Pickup */}
@@ -2989,22 +3268,35 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{order.pickup}</div>
                   )}
                 </div>
-                {/* Dropoff */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
-                    {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
-                  </div>
-                  {editDropoff ? (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
-                      <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
-                      <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                {/* Dropoff(s) */}
+                {order.mode === 'multi' && order.deliveries?.length > 0 ? (
+                  [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map((d, idx) => (
+                    <div key={d.id || idx} style={{ borderTop: idx > 0 ? `1px solid ${S.border}` : 'none', paddingTop: idx > 0 ? 10 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>STOP {d.sequence || idx + 1}</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: d.status === 'Delivered' ? S.greenBg : S.yellowBg, color: d.status === 'Delivered' ? S.green : S.yellow, fontWeight: 700 }}>{d.status || 'Pending'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{d.dropoff_address}</div>
+                      <div style={{ fontSize: 11, color: S.textMuted, marginTop: 2 }}>{d.receiver_name} • {d.receiver_phone}</div>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
-                  )}
-                </div>
+                  ))
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
+                      {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
+                    </div>
+                    {editDropoff ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
+                        <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
+                        <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -5001,6 +5293,7 @@ function MessagingScreen() {
   const [activeId, setActiveId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [loadingConvos, setLoadingConvos] = useState(true);
   const [loadingMsgs, setLoadingMsgs] = useState(false);
   const [sending, setSending] = useState(false);
@@ -5036,6 +5329,8 @@ function MessagingScreen() {
   // ── Fetch conversation list whenever tab changes ─────────────────
   const loadConversations = useCallback(async () => {
     setLoadingConvos(true);
+    // Keep activeId if it still exists in the new tab's list (optional optimization)
+    // For now, simpler to clear it on tab change as before.
     setActiveId(null);
     setMessages([]);
     try {
@@ -5111,7 +5406,6 @@ function MessagingScreen() {
     setInput('');
     try {
       const msg = await ChatsAPI.sendMessage(activeId, content);
-      // Optimistically append (Ably will also deliver it but dedup by id is fine)
       setMessages(prev => {
         if (prev.find(m => m.id === msg.id)) return prev;
         return [...prev, msg];
@@ -5128,82 +5422,128 @@ function MessagingScreen() {
 
   const fmt = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
 
-  const riders = conversations.filter(c => c.type === 'riders');
-  const customers = conversations.filter(c => c.type === 'customers');
-  const list = tab === 'riders' ? riders : customers;
-  const active = conversations.find(c => c.id === activeId) || null;
+  const ridersCount = conversations.filter(c => c.type === 'riders').reduce((s, c) => s + (c.unread_count || 0), 0);
+  const customersCount = conversations.filter(c => c.type === 'customers').reduce((s, c) => s + (c.unread_count || 0), 0);
+
+  const filteredList = conversations.filter(c =>
+    c.type === tab &&
+    (c.participant?.name || c.participant?.phone || "").toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const activeChat = conversations.find(c => c.id === activeId) || null;
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-      {/* Sidebar */}
-      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${S.border}` }}>
-          {[
-            { id: "customers", l: "Customers", c: customers.reduce((s, c) => s + (c.unread_count || 0), 0) },
-            { id: "riders", l: "Riders", c: riders.reduce((s, c) => s + (c.unread_count || 0), 0) },
-          ].map(t => (
-            <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); }}
-              style={{ flex: 1, padding: "12px 0", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, borderBottom: tab === t.id ? `2px solid ${S.gold}` : "2px solid transparent", color: tab === t.id ? S.gold : S.textMuted, background: "transparent" }}>
-              {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff", fontWeight: 700 }}>{t.c}</span>}
-            </button>
-          ))}
+    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gridTemplateRows: "100%", gap: 0, height: "100%", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.04)" }}>
+      {/* Sidebar - Enhanced list with search */}
+      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#f8fafc" }}>
+        <div style={{ padding: "20px 16px 15px", borderBottom: `1px solid ${S.border}`, background: "#fff" }}>
+          <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 12, padding: "3px", marginBottom: 16 }}>
+            {[
+              { id: "customers", l: "Customers", c: customersCount },
+              { id: "riders", l: "Riders", c: ridersCount },
+            ].map(t => (
+              <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); setSearchTerm(""); }}
+                style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: tab === t.id ? "#fff" : "transparent", color: tab === t.id ? S.gold : S.textMuted, boxShadow: tab === t.id ? "0 2px 6px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s" }}>
+                {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff" }}>{t.c}</span>}
+              </button>
+            ))}
+          </div>
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted, lineHeight: 0 }}>{I.search}</span>
+            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search conversations..."
+              style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 12, border: `1.5px solid ${S.border}`, fontSize: 13, outline: "none", background: "#f8fafc", fontFamily: "inherit", transition: "border-color 0.2s" }}
+              onFocus={e => e.target.style.borderColor = S.gold}
+              onBlur={e => e.target.style.borderColor = S.border}
+            />
+          </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
           {loadingConvos ? (
-            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>
-          ) : list.length === 0 ? (
-            <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No conversations</div>
-          ) : list.map(ch => (
-            <div key={ch.id} onClick={() => setActiveId(ch.id)}
-              style={{ padding: "12px 14px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", background: activeId === ch.id ? S.goldPale : "transparent", transition: "background 0.12s" }}
-              onMouseEnter={e => { if (activeId !== ch.id) e.currentTarget.style.background = S.borderLight; }}
-              onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                <span style={{ fontSize: 13, fontWeight: ch.unread_count ? 700 : 500 }}>
-                  {ch.participant?.name || ch.participant?.phone || 'Unknown'}
-                </span>
-                <span style={{ fontSize: 10, color: S.textMuted }}>{fmt(ch.updated_at)}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 11, color: ch.unread_count ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>
-                  {ch.last_message || '—'}
-                </span>
-                {ch.unread_count > 0 && (
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: S.gold, color: "#fff", minWidth: 16, textAlign: "center" }}>
-                    {ch.unread_count}
-                  </span>
-                )}
-              </div>
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+              <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+              Loading…
             </div>
-          ))}
+          ) : filteredList.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>
+              <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.5 }}>📭</div>
+              {searchTerm ? "No results found" : "No conversations yet"}
+            </div>
+          ) : filteredList.map(ch => {
+            const isSelected = activeId === ch.id;
+            const hasUnread = ch.unread_count > 0;
+            return (
+              <div key={ch.id} onClick={() => setActiveId(ch.id)}
+                style={{ padding: "14px 14px", borderRadius: 12, marginBottom: 4, cursor: "pointer", background: isSelected ? "#fff" : "transparent", boxShadow: isSelected ? "0 4px 12px rgba(0,0,0,0.04)" : "none", border: isSelected ? `1px solid ${S.border}` : "1px solid transparent", transition: "all 0.2s" }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 14, fontWeight: isSelected || hasUnread ? 700 : 500, color: S.navy }}>
+                    {ch.participant?.name || ch.participant?.phone || 'Unknown'}
+                  </span>
+                  <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 500 }}>{fmt(ch.updated_at)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: hasUnread ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200, fontWeight: hasUnread ? 600 : 400 }}>
+                    {ch.last_message || 'No messages yet'}
+                  </span>
+                  {hasUnread && (
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 10, background: S.gold, color: "#fff", boxShadow: `0 2px 6px ${S.gold}40` }}>
+                      {ch.unread_count}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* Chat area */}
-      {active ? (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {/* Header */}
-          <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>
-              {(active.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
-            </div>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{active.participant?.name || active.participant?.phone}</div>
-              <div style={{ fontSize: 10, color: S.textMuted }}>{active.type === 'riders' ? 'Rider' : 'Customer'} • {active.participant?.phone}</div>
+      {activeChat ? (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#fff" }}>
+          {/* Enhanced Chat Header */}
+          <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", zIndex: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 14, background: `linear-gradient(135deg, ${S.goldPale}, #fff)`, border: `1px solid ${S.gold}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, color: S.gold }}>
+                {(activeChat.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{activeChat.participant?.name || activeChat.participant?.phone}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }}></div>
+                  <div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600 }}>{activeChat.type === 'riders' ? 'Rider' : 'Customer'} • {activeChat.participant?.phone}</div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Messages */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+          {/* Modern Messages with dynamic bubbles */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: 14, background: "#fcfdfe" }}>
             {loadingMsgs ? (
-              <div style={{ textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading messages…</div>
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+                Loading history…
+              </div>
             ) : messages.map(m => {
               const isAgent = m.sender_type === 'agent';
               return (
-                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start" }}>
-                  <div style={{ maxWidth: "65%", padding: "10px 14px", borderRadius: 12, borderBottomRightRadius: isAgent ? 4 : 12, borderBottomLeftRadius: isAgent ? 12 : 4, background: isAgent ? S.goldPale : S.borderLight, fontSize: 12, lineHeight: 1.5 }}>
+                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start", animation: "fadeIn 0.2s ease-out" }}>
+                  <div style={{
+                    maxWidth: "75%",
+                    padding: "12px 18px",
+                    borderRadius: 18,
+                    borderBottomRightRadius: isAgent ? 4 : 18,
+                    borderBottomLeftRadius: isAgent ? 18 : 4,
+                    background: isAgent ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#fff",
+                    color: isAgent ? S.navy : S.text,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    boxShadow: isAgent ? "0 4px 12px rgba(232,168,56,0.2)" : "0 2px 8px rgba(0,0,0,0.05)",
+                    border: isAgent ? "none" : `1px solid ${S.borderLight}`
+                  }}>
                     <div>{m.content}</div>
-                    <div style={{ fontSize: 9, color: S.textMuted, marginTop: 4, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
+                    <div style={{ fontSize: 10, color: isAgent ? "rgba(27,42,74,0.6)" : S.textMuted, marginTop: 6, fontWeight: 600, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
                   </div>
                 </div>
               );
@@ -5211,40 +5551,56 @@ function MessagingScreen() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Quick replies */}
-          <div style={{ padding: "8px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 6, overflowX: "auto" }}>
-            {TEMPLATES.slice(0, 3).map((t, i) => (
-              <button key={i} onClick={() => setInput(t)}
-                style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.borderLight, color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 10, whiteSpace: "nowrap", flexShrink: 0 }}>
-                {t.substring(0, 32)}…
-              </button>
-            ))}
-          </div>
+          {/* Smart Input Controls */}
+          <div style={{ padding: "16px 24px", borderTop: `1px solid ${S.border}`, background: "#fff" }}>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+              {TEMPLATES.map((t, i) => (
+                <button key={i} onClick={() => setInput(t)}
+                  style={{ padding: "6px 14px", borderRadius: 30, border: `1px solid ${S.border}`, background: "#f8fafc", color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", transition: "all 0.2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = S.gold; e.currentTarget.style.color = S.gold; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.color = S.textDim; }}>
+                  {t}
+                </button>
+              ))}
+            </div>
 
-          {/* Input */}
-          <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 8 }}>
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
-              placeholder="Type a message…"
-              style={{ flex: 1, background: S.borderLight, border: `1px solid ${S.border}`, borderRadius: 8, padding: "0 14px", height: 40, color: S.text, fontSize: 12, fontFamily: "inherit", outline: "none" }}
-            />
-            <button onClick={sendMessage} disabled={sending || !input.trim()}
-              style={{ width: 40, height: 40, borderRadius: 8, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {I.send}
-            </button>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+              <div style={{ flex: 1, position: "relative" }}>
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  placeholder="Your message..."
+                  rows={Math.min(4, input.split('\n').length)}
+                  style={{ width: "100%", background: "#f1f5f9", border: `1.5px solid ${S.border}`, borderRadius: 16, padding: "12px 48px 12px 16px", color: S.text, fontSize: 14, fontFamily: "inherit", outline: "none", resize: "none", transition: "border-color 0.2s" }}
+                  onFocus={e => e.target.style.borderColor = S.gold}
+                  onBlur={e => e.target.style.borderColor = S.border}
+                />
+              </div>
+              <button onClick={sendMessage} disabled={sending || !input.trim()}
+                style={{ width: 48, height: 48, borderRadius: 16, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 12px rgba(232,168,56,0.3)", transform: "translateY(-2px)" }}>
+                {I.send}
+              </button>
+            </div>
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-          <div style={{ fontSize: 40, opacity: 0.2 }}>💬</div>
-          <div style={{ fontSize: 14, color: S.textMuted }}>Select a conversation</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, flexDirection: "column", gap: 16, background: "#fcfdfe" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 24, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, opacity: 0.8 }}>💬</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>Messaging Portal</div>
+            <div style={{ fontSize: 14, color: S.textMuted, marginTop: 4 }}>Select a conversation to start chatting</div>
+          </div>
         </div>
       )}
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
+
 
 
 // ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
@@ -6445,6 +6801,67 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [routeDistance, setRouteDistance] = useState(null);
   const [routeDuration, setRouteDuration] = useState(null);
   const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [isPartnerOrder, setIsPartnerOrder] = useState(false);
+  const [partnerOrderCount, setPartnerOrderCount] = useState(1);
+  const [fileUploadedUrls, setFileUploadedUrls] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [backendFares, setBackendFares] = useState({});
+
+  const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
+  const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
+
+  const handleFileUpload = async (e) => {
+    const inputElement = e.target;
+    const files = Array.from(inputElement.files);
+    if (files.length === 0) return;
+    setIsUploading(true);
+    
+    try {
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
+          method: 'POST',
+          headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
+          body: formData
+        });
+        const data = await res.json();
+        console.log("Upload Response:", data);
+        const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+        
+        if (res.ok && fileUrl) {
+          return fileUrl;
+        } else {
+          throw new Error(data.message || "Invalid response structure");
+        }
+      });
+
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUrls = [];
+      let hasError = false;
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successfulUrls.push(result.value);
+        } else {
+          hasError = true;
+          console.error("File upload failed:", result.reason);
+        }
+      });
+
+      if (hasError) {
+        setError("Some files failed to upload.");
+      }
+
+      setFileUploadedUrls(prev => [...prev, ...successfulUrls]);
+    } catch (err) {
+      setError("File upload error");
+    } finally {
+      setIsUploading(false);
+      // Clear the input value so the same files can be selected again if needed
+      if (inputElement) inputElement.value = '';
+    }
+  };
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -6469,28 +6886,55 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   // Calculate route when both addresses change
   useEffect(() => {
-    if (!pickup || !dropoff) { setRouteDistance(null); setRouteDuration(null); return; }
+    // Only calculate when both addresses are sufficiently ready
+    const isPickupReady = pickupLat || (pickup && pickup.trim().length >= 8);
+    const isDropoffReady = dropoffLat || (dropoff && dropoff.trim().length >= 4);
+
+    if (!isPickupReady || !isDropoffReady) { 
+      setRouteDistance(null); 
+      setRouteDuration(null); 
+      setBackendFares({});
+      return; 
+    }
+
     setCalculatingRoute(true);
-    const tid = setTimeout(() => {
-      if (typeof google === 'undefined' || !google.maps) { setCalculatingRoute(false); return; }
-      new google.maps.DirectionsService().route({
-        origin: pickup, destination: dropoff,
-        travelMode: google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        setCalculatingRoute(false);
-        if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
-          let dist = 0, dur = 0;
-          result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
-          setRouteDistance(parseFloat((dist / 1000).toFixed(1)));
-          setRouteDuration(Math.ceil(dur / 60));
+    const tid = setTimeout(async () => {
+      try {
+        const pickupPoint = (pickupLat && pickupLng) ? { lat: pickupLat, lng: pickupLng } : pickup;
+        const dropoffPoint = (dropoffLat && dropoffLng) ? { lat: dropoffLat, lng: dropoffLng } : dropoff;
+
+        const payload = {
+          mode: 'quick',
+          pickup: pickupPoint,
+          deliveries: [dropoffPoint]
+        };
+
+        const res = await OrdersAPI.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // Identify first vehicle to extract common route stats
+          const firstV = Object.values(res.vehicles)[0];
+          if (firstV) {
+            setRouteDistance(firstV.distance_km);
+            setRouteDuration(firstV.duration_minutes);
+          }
+          setBackendFares(res.vehicles);
         }
-      });
-    }, 800);
+      } catch (err) {
+        console.error("Dispatcher route calculation error:", err);
+      } finally {
+        setCalculatingRoute(false);
+      }
+    }, 1000);
     return () => clearTimeout(tid);
-  }, [pickup, dropoff]);
+  }, [pickup, dropoff, pickupLat, pickupLng, dropoffLat, dropoffLng]);
 
   // Calculate price for a given vehicle
   const calcPrice = (vName) => {
+    // If backend already calculated the precise fare, use it.
+    if (backendFares && backendFares[vName]) {
+      return backendFares[vName].price;
+    }
+
     const p = vehiclePricing[vName];
     if (!p) return null;
     // Tiered pricing (Bike, Car, Van)
@@ -6526,7 +6970,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     return Math.round(p.base_fare);
   };
 
-  const displayPrice = priceOverride ? parseInt(priceOverride) : calcPrice(vehicle);
+  const displayPrice = isPartnerOrder
+    ? (selectedMerchant?.partnerBasePrice || 0) * partnerOrderCount
+    : (priceOverride ? parseInt(priceOverride) : calcPrice(vehicle));
 
   // Local helpers for reliable coordinate capture
   const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
@@ -6564,10 +7010,15 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   const handleSubmit = async () => {
     setError(null);
-    if (!pickup) { setError("Pickup address is required"); return; }
-    if (!dropoff) { setError("Dropoff address is required"); return; }
-    if (!senderName) { setError("Sender name is required"); return; }
-    if (!receiverName) { setError("Receiver name is required"); return; }
+    if (!isPartnerOrder) {
+      if (!pickup) { setError("Pickup address is required"); return; }
+      if (!dropoff) { setError("Dropoff address is required"); return; }
+      if (!senderName) { setError("Sender name is required"); return; }
+      if (!receiverName) { setError("Receiver name is required"); return; }
+    } else {
+      if (!merchantId) { setError("Merchant is required for partner orders"); return; }
+      if (fileUploadedUrls.length === 0) { setError("Proof/File upload is required for partner orders"); return; }
+    }
     setSubmitting(true);
     try {
       // Ensure relay orders always have coordinates (either from Places selection or fallback geocode)
@@ -6618,6 +7069,9 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         pickup_lng: finalPickupLng,
         dropoff_lat: finalDropoffLat,
         dropoff_lng: finalDropoffLng,
+        is_partner_order: isPartnerOrder,
+        partner_order_count: partnerOrderCount,
+        file_uploaded_urls: fileUploadedUrls,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -6642,52 +7096,124 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
         </div>
         <div style={{ padding: "20px 24px" }}>
+          {/* Mode Selector */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(false)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: !isPartnerOrder ? `2px solid ${S.primary}` : `1px solid ${S.border}`,
+                background: !isPartnerOrder ? `${S.primary}10` : "transparent",
+                color: !isPartnerOrder ? S.primary : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🚀 Standard Order
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(true)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: isPartnerOrder ? `2px solid ${S.gold}` : `1px solid ${S.border}`,
+                background: isPartnerOrder ? S.goldPale : "transparent",
+                color: isPartnerOrder ? "#B8860B" : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🤝 Partner Bulk
+            </button>
+          </div>
+
           {/* Merchant */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Merchant</label>
             <select value={merchantId} onChange={e => setMerchantId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Select merchant...</option>
-              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {m.contact}</option>)}
+              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} {m.isPartner ? "⭐" : ""} — {m.contact}</option>)}
             </select>
+            {isPartnerOrder && !isSelectedMerchantPartner && merchantId && (
+              <div style={{ fontSize: 10, color: S.red, marginTop: 4 }}>⚠️ This merchant is not configured as a Partner.</div>
+            )}
           </div>
 
-          {/* Sender */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Sender</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
-              <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+          {isPartnerOrder ? (
+            <div style={{ padding: "20px", background: S.goldPale, borderRadius: 12, border: `1px solid ${S.gold}`, marginBottom: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Number of Orders</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={partnerOrderCount}
+                  onChange={e => setPartnerOrderCount(parseInt(e.target.value) || 1)}
+                  style={{ ...iSt, fontSize: 16, fontWeight: 700 }}
+                />
+              </div>
+              <div>
+                <label style={lSt}>Upload Partner Proof / File {isUploading && "(Uploading...)"}</label>
+                <div style={{ position: "relative" }}>
+                  <input type="file" multiple accept="image/*" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
+                  {fileUploadedUrls.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {fileUploadedUrls.map((url, index) => (
+                        <div key={index} style={{ position: "relative", width: 60, height: 60, borderRadius: 8, overflow: "hidden", border: `1px solid ${S.border}` }}>
+                          <img src={url} alt={`Upload ${index}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <button
+                            type="button"
+                            onClick={() => setFileUploadedUrls(fileUploadedUrls.filter((_, i) => i !== index))}
+                            style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 16, height: 16, fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Sender */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Sender</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
+                  <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+                </div>
+              </div>
 
-          {/* Pickup */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
-              if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
-              setPickupLat(p.lat); setPickupLng(p.lng);
-            }} placeholder="Enter pickup address..." style={iSt} />
-          </div>
+              {/* Pickup */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Pickup Address</label>
+                <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
+                  setPickupLat(p.lat); setPickupLng(p.lng);
+                }} placeholder="Enter pickup address..." style={iSt} />
+              </div>
 
-          {/* Dropoff */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
-              if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
-              setDropoffLat(p.lat); setDropoffLng(p.lng);
-            }} placeholder="Enter delivery address..." style={iSt} />
-          </div>
+              {/* Dropoff */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Dropoff Address</label>
+                <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
+                  setDropoffLat(p.lat); setDropoffLng(p.lng);
+                }} placeholder="Enter delivery address..." style={iSt} />
+              </div>
 
-          {/* Receiver */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Receiver</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
-              <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
-            </div>
-          </div>
+              {/* Receiver */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Receiver</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
+                  <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Route info */}
           {(calculatingRoute || routeDistance) && (

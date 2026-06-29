@@ -1,0 +1,187 @@
+All notable changes to the AXpress project are documented in this file.
+
+# [2026-05-15] — Transaction Admin Date Hierarchy
+
+### Backend (Admin)
+#### Added
+- **Transaction Date Hierarchy**: Added `date_hierarchy` to `TransactionAdmin` for improved date-based navigation and filtering of wallet transactions.
+- **Enhanced Search**: Added support for searching transactions by user virtual account number in `TransactionAdmin`.
+
+# [2026-05-12] — Amortization Transaction Admin Enhancements
+
+### Backend (Admin)
+#### Added
+- **Day Filter**: Added `date_hierarchy` to `AmortizationTransactionAdmin` for better date-based filtering, matching the `OrderAdmin` configuration.
+
+# [2026-05-11] — Multi-Drop Route Visualization
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Multi-Drop Map Rendering**: Updated `DeliveryRouteMap` to visualize all delivery stops for `multi` mode orders. Markers are now sequence-numbered, and the route path connects every stop in order.
+- **Enhanced Route Details**: The `OrderDetail` sidebar now lists all delivery stops sequentially, showing stop numbers, addresses, status, and receiver contact information.
+- **Dynamic Route Indicators**: Implemented a dynamic vertical path indicator in the Route section that scales based on the number of delivery stops.
+
+### API
+#### Changed
+- **Serializer Expansion**: Updated the dispatcher's `OrderSerializer` to include the nested `deliveries` field, providing full stop data to the frontend.
+
+# [2026-05-08] — Unified Coordinate-Based Routing
+
+### Frontend
+#### Added
+- **Coordinate Capture**: Enhanced `AddressAutocompleteInput` to capture and return `lat`/`lng` coordinates alongside formatted addresses.
+- **Precise Routing**: Integrated coordinate-based inputs into the `bulk-calculate-fare` API calls for Quick, Multi-drop, and Bulk order modes, improving pricing and ETA accuracy.
+- **State Management**: Updated `dashboard/page.tsx` to store and manage coordinate data for all delivery stops.
+
+---
+
+# [2026-05-07] — Routing Service Development Environment & Types
+
+### Backend (Routing Service)
+#### Added
+- **Live Reloading**: Configured `air` for hot-reloading during development.
+- **OSRM Types**: Defined `OSRMResponse` and related structs in `types/types.go` for handling map service responses.
+
+#### Fixed
+- **Development Tooling**: Resolved "no such tool 'air'" error by properly registering `air` as a Go tool in `go.mod` and adding a `.air.toml` configuration.
+- **Multiple Destinations**: Updated the directions endpoint to support multiple destinations via repeated query parameters (`?destinations=p1&destinations=p2`), bypassing semicolon parsing issues in Go 1.17+.
+
+
+---
+
+# [2026-05-06] — Amortization Wallet & Transactions
+
+### API
+#### Added
+- **Amortization Wallet**: Implemented `GET /wallet/amortization-wallet/` for riders to view bike hire-purchase progress.
+- **Amortization Transactions**: Added `GET /wallet/amortization-transactions/` to retrieve paginated transaction history for the amortization wallet.
+
+---
+
+# [2026-05-05] — Merchant Pricing Override Fix
+
+### API
+#### Fixed
+- **Merchant Pricing Overrides**: Enabled "upsert" (update or create) behavior for the pricing overrides endpoint by removing the default DRF `UniqueTogetherValidator`, allowing `POST` requests to update existing overrides as originally intended.
+
+---
+
+# [2026-05-04] — Merchant & Dispatcher Cancellation Reason Support
+
+### Frontend (Merchant Dashboard)
+#### Fixed
+- **Cancellation Reason Visibility**: Fixed an issue where the cancellation reason textarea was not appearing. Optimized modal layout and increased width to prevent clipping.
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Enhanced Cancellation Modal**: Redesigned the cancellation modal to always show the reason input field and added "Suggested Reasons" for faster processing.
+
+### API
+#### Changed
+- **Standardized Responses**: Refactored both Merchant and Dispatcher cancellation endpoints to use `service_response` and `ServiceException` for consistent API behavior.
+
+---
+
+## [2026-04-29] — Multiple Image Upload in Dispatcher Portal
+
+### Frontend
+#### Added
+- **Multiple Image Selection**: Enhanced the "Create Order" modal to support selecting and uploading multiple images simultaneously.
+- **Image Previews**: Added a grid view for uploaded images with the ability to remove individual files before submission.
+- **Improved Order Details**: Updated the Order Details view to display all uploaded documents.
+
+#### Changed
+- **API Payload**: Updated the dispatcher create order payload to send `file_uploaded_urls` as a list of strings.
+
+## [2026-04-23] — Partner Order Tracking & Management
+
+### Frontend
+#### Added
+- **Partner Details View**: Integrated a premium partner information card in the Order Detail modal.
+- **Document Preview**: Added high-fidelity preview for uploaded proof/waybill documents with full-size viewing support.
+- **Processing Metrics Editing**: Enabled inline editing for `Rider Completed` and `Returned` counts for partner bulk orders.
+- **Real-time Synchronization**: Added `useEffect` hooks to ensure partner metrics are correctly loaded and reset during order navigation.
+
+### API
+#### Added
+- **Order Stats Update**: Added `PATCH /dispatch/orders/{order_number}/update-partner-stats/` to update partner processing counts.
+- **Serializer Expansion**: Updated `OrderSerializer` to include `is_partner_order`, `partner_order_count`, `day_returned_count`, `rider_completed_count`, and `file_uploaded_url`.
+- **Merchant Access Control**: Restricted `MerchantViewSet` list action to `IsDispatcher` permission and other actions to `IsDispatcherAdmin`.
+
+---
+
+## [2026-04-22] — ClickUp Task Logging Automation
+
+### Chore
+- **ClickUp Logger**: Implemented a Python script `scripts/clickup_logger.py` to automate task logging to ClickUp.
+- **Session Tracking**: Added `.claude/session_log.json` to track and batch-log development tasks.
+- **Auto-routing**: Implemented keyword-based routing to automatically assign tasks to the correct ClickUp Lists.
+
+---
+
+## [2026-04-16] — SmartParcel Toggle Fix
+
+### Frontend
+#### Fixed
+- **SmartParcel Toggle**: Resolved a `TypeError` that occurred when toggling "Deliver to SmartParcel Locker" by ensuring that data fetched from the SmartParcel API is always treated as an array before mapping.
+- **Robust Data Fetching**: Updated `useEffect` hooks to correctly extract lists (states, cities, boxes, sizes) from backend responses and added defensive array checks in the render logic.
+---
+
+## [2026-04-17] — SmartParcel Integration & Simulation
+
+### API
+#### Added
+- **SmartParcel Simulation**: Added `simulate/drop/` and `simulate/collect/` endpoints to simulate locker state transitions in sandbox mode for end-to-end testing of the locker workflow.
+- **SmartParcel Integration**: Implemented comprehensive suite of endpoints for SmartParcel locker integration:
+  - `GET smart-parcel/states/`
+  - `GET smart-parcel/states/{id}/cities/`
+  - `GET smart-parcel/boxes/city/{id}/`
+  - `GET smart-parcel/boxes/assigned/city/{id}/`
+  - `GET smart-parcel/locker-sizes/`
+  - `POST smart-parcel/parcels/`
+  - `GET smart-parcel/parcels/pending-pickups/`
+  - `GET smart-parcel/parcels/resolve-collect-code/{code}/`
+  - `GET smart-parcel/parcels/{tracking}/`
+  - `POST smart-parcel/parcels/{tracking}/cancel/`
+
+### Frontend
+#### Added
+- **SmartParcel Locker Workflow**: Integrated SmartParcel locker selection and collect code resolution directly into the Order Creation flow in the dashboard.
+- **Defensive guards**: Added defensive null guards for SmartParcel data arrays to prevent runtime crashes during API latency or failures.
+
+## [2026-04-02] — Order Mode Redesign & Grouped Pricing Fix
+
+
+### Frontend
+#### Changed
+- **Order Mode Selector**: Redesigned the "Quick vs Grouped" sub-mode selection from a standard dropdown to modern, interactive cards with icons and premium aesthetics.
+- **Grouped Pricing Fix**: Resolved a bug where "Grouped Order" failed to trigger route calculation and estimation.
+- **Payload Fix**: Ensured the `mode` field ("quick" or "grouped") is correctly included in the API payload when placing an order.
+- **Estimated Prices**: Optimized the dynamic pricing logic to correctly apply the 30% discount to both simple and tiered pricing models in "Grouped" mode.
+
+---
+
+## [2026-03-27] — Checkout Referral & Virtual Account Integration
+
+### Frontend
+#### Added
+- **Signup Referral:** Added an optional "Referral Code" field to Step 1 of the merchant signup form.
+- **Dynamic Wallet Funding:** Integrated `getVirtualAccount` API to fetch real bank details for wallet funding via bank transfer.
+- **Subscription Management:** Added a new "Subscription" sidebar item and management screen for plan selection.
+- **Subscription Enhancements:** Refactored sidebar to a nested "Subscription" menu with "Plan" and "Invoice" sub-items.
+- **Postpaid Plans:** Added support for Postpaid subscription plans with a multi-tab interface in the Subscription screen.
+- **Invoices Screen:** Implemented a dedicated screen for viewing and downloading subscription invoices.
+- **API Wrapper:** Added `Wallet.getVirtualAccount()`, `SubscriptionAPI`, and Postpaid methods to `src/lib/api.ts`.
+
+#### Changed
+- Updated signup payload to include `referral_code`.
+- Improved professional UI for referral input with a "Gift" icon.
+
+### API
+#### Added
+- `GET /wallet/virtual-account/` — Retrieves or creates a dedicated virtual account for the merchant.
+- `GET /subscriptions/plans/` — Retrieves available subscription plans.
+- `POST /subscriptions/plans/{id}/subscribe/` — Subscribes a merchant to a plan.
+- `GET /subscriptions/postpaid/plans/` — Retrieves available postpaid plans.
+- `POST /subscriptions/postpaid/plans/{id}/activate/` — Activates a postpaid plan for a merchant.
+- `GET /subscriptions/postpaid/active/` — Retrieves the current active postpaid subscription.

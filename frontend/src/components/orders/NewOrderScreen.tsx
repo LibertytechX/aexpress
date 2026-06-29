@@ -99,6 +99,94 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   const [routeDistance, setRouteDistance] = useState<number | null>(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState<number | null>(null); // in minutes
 
+  // ─── SmartParcel Integration state ───
+  const [isPickupParcel, setIsPickupParcel] = useState(false);
+  const [collectCode, setCollectCode] = useState("");
+  const [isResolvingCode, setIsResolvingCode] = useState(false);
+  const [resolveError, setResolveError] = useState("");
+
+  const [isDeliveryParcel, setIsDeliveryParcel] = useState(false);
+  const [spStates, setSpStates] = useState<any[]>([]);
+  const [spCities, setSpCities] = useState<any[]>([]);
+  const [spBoxes, setSpBoxes] = useState<any[]>([]);
+  const [spSizes, setSpSizes] = useState<any[]>([]);
+
+  const [selectedSpStateId, setSelectedSpStateId] = useState("");
+  const [selectedSpCityId, setSelectedSpCityId] = useState("");
+  const [selectedSpBoxId, setSelectedSpBoxId] = useState("");
+  const [selectedSpSizeId, setSelectedSpSizeId] = useState("");
+
+  // Load locker states and sizes on mount
+  useEffect(() => {
+    const loadSPInitialData = async () => {
+      try {
+        const [statesRes, sizesRes] = await Promise.all([
+          API.SmartParcel.listStates(),
+          API.SmartParcel.listLockerSizes(),
+        ]);
+        if (statesRes.status === 'success') setSpStates(statesRes.data);
+        if (sizesRes.status === 'success') setSpSizes(sizesRes.data);
+      } catch (err) {
+        console.error('Failed to load SmartParcel initial data:', err);
+      }
+    };
+    loadSPInitialData();
+  }, []);
+
+  // Fetch cities when state changes
+  useEffect(() => {
+    if (!selectedSpStateId) {
+      setSpCities([]);
+      return;
+    }
+    const loadCities = async () => {
+      try {
+        const res = await API.SmartParcel.listCities(selectedSpStateId);
+        if (res.status === 'success') setSpCities(res.data);
+      } catch (err) {
+        console.error('Failed to load cities:', err);
+      }
+    };
+    loadCities();
+  }, [selectedSpStateId]);
+
+  // Fetch assigned boxes when city changes
+  useEffect(() => {
+    if (!selectedSpCityId) {
+      setSpBoxes([]);
+      return;
+    }
+    const loadBoxes = async () => {
+      try {
+        const res = await API.SmartParcel.listAssignedBoxes(selectedSpCityId);
+        if (res.status === 'success') setSpBoxes(res.data.boxes || res.data);
+      } catch (err) {
+        console.error('Failed to load assigned boxes:', err);
+      }
+    };
+    loadBoxes();
+  }, [selectedSpCityId]);
+
+  // Handle collect code resolution
+  const handleResolveCollectCode = async () => {
+    if (!collectCode) return;
+    setIsResolvingCode(true);
+    setResolveError("");
+    try {
+      const res = await API.SmartParcel.resolveCollectCode(collectCode);
+      if (res.status === 'success' && res.data) {
+        setPickupAddress(res.data.boxaddress);
+        // We might also want to lock the address or show a success state
+      } else {
+        setResolveError(res.message || "Could not resolve collect code.");
+      }
+    } catch (err: any) {
+      setResolveError(err.message || "Failed to resolve collect code.");
+    } finally {
+      setIsResolvingCode(false);
+    }
+  };
+
   // Load vehicle pricing
   useEffect(() => {
     const loadVehiclePricing = async () => {
@@ -142,52 +230,38 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
     setCalculatingRoute(true);
 
     const calculateEarlyRoute = async () => {
-      try {
-        if (typeof window === 'undefined' || !(window as any).google || !(window as any).google.maps) {
-          setRouteError('Maps not loaded');
-          setCalculatingRoute(false);
-          return;
-        }
+      console.log('🔄 Starting early route calculation (Backend)...', { pickupAddress, dropoffAddress });
+      setRouteError(null);
 
-        const directionsService = new (window as any).google.maps.DirectionsService();
-        const request = {
-          origin: pickupAddress,
-          destination: dropoffAddress,
-          travelMode: (window as any).google.maps.TravelMode.DRIVING,
-          drivingOptions: {
-            departureTime: new Date(),
-            trafficModel: (window as any).google.maps.TrafficModel.BEST_GUESS
-          }
+      try {
+        const payload = {
+          mode: mode === 'grouped' ? 'quick' : mode,
+          pickup: pickupAddress,
+          deliveries: [dropoffAddress]
         };
 
-        directionsService.route(request, (result: any, status: any) => {
-          if (status === (window as any).google.maps.DirectionsStatus.OK && result.routes[0]) {
-            const route = result.routes[0];
-            let totalDistance = 0;
-            let totalDuration = 0;
-
-            route.legs.forEach((leg: any) => {
-              totalDistance += leg.distance.value;
-              totalDuration += leg.duration_in_traffic?.value || leg.duration.value;
-            });
-
-            const distanceKm = (totalDistance / 1000).toFixed(1);
-            const durationMin = Math.ceil(totalDuration / 60);
-
-            setEarlyRouteDistance(parseFloat(distanceKm));
-            setEarlyRouteDuration(durationMin);
-            setCalculatingRoute(false);
-          } else {
-            setRouteError('Unable to calculate route');
-            setCalculatingRoute(false);
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // In this component, we don't have multiFares state yet, 
+          // let's see if we should add it or just update earlyRouteDistance/Duration.
+          const vehicleData = res.vehicles[vehicle];
+          if (vehicleData) {
+            setEarlyRouteDistance(vehicleData.distance_km);
+            setEarlyRouteDuration(vehicleData.duration_minutes);
+            // We might want to store the full result if we want to bypass frontend pricing
           }
-        });
-      } catch (error) {
-        console.error('Error calculating route:', error);
-        setRouteError('Error calculating route');
+          setCalculatingRoute(false);
+        } else {
+          setRouteError('Unable to calculate route via backend');
+          setCalculatingRoute(false);
+        }
+      } catch (error: any) {
+        console.error('❌ Error calculating route via backend:', error);
+        setRouteError(error.message || 'Error calculating route');
         setCalculatingRoute(false);
       }
     };
+
 
     const timeoutId = setTimeout(calculateEarlyRoute, 1000);
     return () => clearTimeout(timeoutId);
@@ -309,7 +383,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   const calcFareForVehicle = (vName: string, distanceKm: number | null, durationMin: number | null) => {
     const pricing = vehiclePricing[vName];
     if (!pricing) return 0;
-    
+
     // 1. Manual pricing list
     if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
       const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
@@ -374,6 +448,16 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
   if (isBlank(senderName)) proceedErrors.push('Sender name is required.');
   if (isBlank(senderPhone)) proceedErrors.push('Sender phone is required.');
 
+  if (isPickupParcel && isBlank(collectCode)) {
+    proceedErrors.push('Please enter and verify a collect code for parcel pickup.');
+  }
+
+  if (isDeliveryParcel) {
+    if (isBlank(selectedSpBoxId) || isBlank(selectedSpSizeId)) {
+      proceedErrors.push('Please select a locker box and size for parcel delivery.');
+    }
+  }
+
   if (mode === 'quick' || mode === 'grouped') {
     if (isBlank(dropoffAddress)) proceedErrors.push('Delivery address is required.');
     if (isBlank(receiverName)) proceedErrors.push('Receiver name is required.');
@@ -421,6 +505,14 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
       duration_minutes: routeDuration || earlyRouteDuration || 0,
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
+
+      // SmartParcel fields
+      is_percel_order: isPickupParcel || isDeliveryParcel,
+      is_pickup_percel: isPickupParcel,
+      collect_code: isPickupParcel ? collectCode : undefined,
+      isdelivery_percel: isDeliveryParcel,
+      box_id: isDeliveryParcel ? selectedSpBoxId : undefined,
+      locker_size_id: isDeliveryParcel ? selectedSpSizeId : undefined,
     };
 
     if (mode === 'quick' || mode === 'grouped') {
@@ -465,15 +557,15 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
               {["quick", "multi", "bulk"].map(m => {
                 const isActive = (m === 'quick') ? (mode === 'quick' || mode === 'grouped') : (mode === m);
                 return (
-                  <button key={m} onClick={() => { 
+                  <button key={m} onClick={() => {
                     if (m === 'quick') {
                       // Don't reset to 'quick' if already on 'grouped'
                       if (mode !== 'quick' && mode !== 'grouped') setMode('quick');
                     } else {
-                      setMode(m); 
+                      setMode(m);
                     }
-                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]); 
-                    setBulkRows([]); 
+                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+                    setBulkRows([]);
                   }}
                     style={{
                       flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
@@ -492,7 +584,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
             {/* Quick vs Grouped selection (Exclusive to Quick Send flow) */}
             {(mode === 'quick' || mode === 'grouped') && (
               <div style={{ display: "flex", gap: 12 }}>
-                <button 
+                <button
                   onClick={() => setMode('quick')}
                   style={{
                     flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'quick' ? S.navy : '#e2e8f0'}`,
@@ -502,7 +594,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 >
                   Quick Send (Single)
                 </button>
-                <button 
+                <button
                   onClick={() => setMode('grouped')}
                   style={{
                     flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'grouped' ? S.navy : '#e2e8f0'}`,
@@ -523,6 +615,43 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender Name" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
                 <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender Phone" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
               </div>
+
+              {/* SmartParcel Pickup toggle */}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: S.navy, cursor: "pointer", width: "fit-content" }}>
+                <input type="checkbox" checked={isPickupParcel} onChange={e => setIsPickupParcel(e.target.checked)} />
+                Pickup from SmartParcel Locker
+              </label>
+
+              {isPickupParcel && (
+                <div style={{ marginTop: 10, background: "#f8fafc", padding: 14, borderRadius: 12, border: "1.5px solid #e2e8f0" }}>
+                  <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, marginBottom: 8, textTransform: "uppercase" as const }}>Enter Percel Box Locker Number</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <input
+                      value={collectCode}
+                      onChange={e => setCollectCode(e.target.value)}
+                      placeholder="e.g. TBKJ"
+                      style={{ flex: 1, height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #cbd5e1", fontSize: 14 }}
+                    />
+                    <button
+                      onClick={handleResolveCollectCode}
+                      disabled={isResolvingCode || !collectCode}
+                      style={{
+                        padding: "0 20px", borderRadius: 10, border: "none",
+                        background: S.navy, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                        opacity: (isResolvingCode || !collectCode) ? 0.6 : 1
+                      }}
+                    >
+                      {isResolvingCode ? "Verifying..." : "Verify"}
+                    </button>
+                  </div>
+                  {resolveError && <div style={{ color: S.red, fontSize: 11, marginTop: 6, fontWeight: 600 }}>{resolveError}</div>}
+                  {pickupAddress && !resolveError && !isResolvingCode && collectCode && (
+                    <div style={{ marginTop: 8, padding: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 12, color: "#166534" }}>
+                      ✅ Resolved: <strong>{pickupAddress}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {mode === "quick" && (
@@ -531,7 +660,7 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 <AddressAutocompleteInput
                   value={dropoffAddress}
                   onChange={setDropoffAddress}
-                  placeholder="Enter dropoff address"
+                  placeholder="Enter delivery address"
                   style={{
                     width: "100%", height: 48, padding: "0 16px", borderRadius: 10, fontSize: 14,
                     border: sameAddressError === "same-quick" ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0"
@@ -555,6 +684,63 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
                 {routeError && !sameAddressError && <div style={{ color: S.red, fontSize: 12, marginTop: 4 }}>{routeError}</div>}
                 {calculatingRoute && !sameAddressError && <div style={{ color: S.gold, fontSize: 12, marginTop: 4 }}>Computing route...</div>}
+
+                {/* SmartParcel Delivery toggle */}
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: S.navy, cursor: "pointer", width: "fit-content" }}>
+                  <input type="checkbox" checked={isDeliveryParcel} onChange={e => setIsDeliveryParcel(e.target.checked)} />
+                  Deliver to SmartParcel Locker
+                </label>
+
+                {isDeliveryParcel && (
+                  <div style={{ marginTop: 10, background: "#f8fafc", padding: 14, borderRadius: 12, border: "1.5px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, textTransform: "uppercase" as const }}>Select Locker Station</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <select
+                        value={selectedSpStateId}
+                        onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(""); setSelectedSpBoxId(""); }}
+                        style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13 }}
+                      >
+                        <option value="">Select State</option>
+                        {spStates.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+
+                      <select
+                        value={selectedSpCityId}
+                        onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(""); }}
+                        disabled={!selectedSpStateId}
+                        style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13, opacity: !selectedSpStateId ? 0.6 : 1 }}
+                      >
+                        <option value="">Select City</option>
+                        {spCities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+
+                    <select
+                      value={selectedSpBoxId}
+                      onChange={e => {
+                        const boxId = e.target.value;
+                        setSelectedSpBoxId(boxId);
+                        const box = spBoxes.find(b => String(b.boxid) === String(boxId));
+                        if (box) setDropoffAddress(box.boxaddress);
+                      }}
+                      disabled={!selectedSpCityId}
+                      style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13, opacity: !selectedSpCityId ? 0.6 : 1 }}
+                    >
+                      <option value="">Select Assigned Box</option>
+                      {spBoxes.map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                    </select>
+
+                    <select
+                      value={selectedSpSizeId}
+                      onChange={e => setSelectedSpSizeId(e.target.value)}
+                      style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13 }}
+                    >
+                      <option value="">Select Locker Size</option>
+                      {spSizes.map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
+                    </select>
+                  </div>
+                )}
 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
                   <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver Name" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />

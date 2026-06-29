@@ -303,6 +303,12 @@ MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "")
 MAILGUN_FROM_EMAIL = os.getenv("MAILGUN_FROM_EMAIL", f"mailgun@{MAILGUN_DOMAIN}")
 
+# MailNow Configuration
+MAILNOW_API_URL = os.getenv("MAILNOW_API_URL", "http://127.0.0.1:3200/v1/email/send")
+MAILNOW_API_KEY = os.getenv(
+    "MAILNOW_API_KEY", "mn_live_7e59df7ce4a14545b443837804ec9722"
+)
+
 # AWS S3 Configuration
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
@@ -414,8 +420,20 @@ MESSENGER360_API_KEY = os.getenv("MESSENGER360_API_KEY", "")
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
 
-# Logger Configuration
+# Routing Service Configuration
+ROUTING_SERVICE_URL = os.getenv(
+    "ROUTING_SERVICE_URL", "http://localhost:8071/api/v1/directions"
+)
+ROUTING_SERVICE_API_KEY = os.getenv("ROUTING_SERVICE_API_KEY", "")
+ROUTING_PROVIDER = os.getenv("ROUTING_PROVIDER", "google")  # 'google' or 'custom'
 
+
+SMARTPARCEL_BASE_URL = os.getenv("SMARTPARCEL_BASE_URL", "")
+SMARTPARCEL_API_KEY = os.getenv("SMARTPARCEL_API_KEY", "")
+SMARTPARCEL_SECRET_KEY = os.getenv("SMARTPARCEL_SECRET_KEY", "")
+SMARTPARCEL_PUBLIC_KEY = os.getenv("SMARTPARCEL_PUBLIC_KEY", "")
+
+# Logger Configuration
 LOG_LEVEL = "INFO"
 
 logger_config = LoggerConfig(log_level=LOG_LEVEL)

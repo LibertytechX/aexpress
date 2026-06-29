@@ -3,8 +3,173 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+## [2026-05-06] — Bike Amortization System (Phase 1)
+
+### Added
+- **Amortization Models**: Implemented core models for tracking bike hire-purchase payments.
+    - `AmortizationWallet`: Dedicated locked wallet for riders to track their progress towards bike ownership.
+    - `AmortizationTransaction`: Ledger for recording payments and balance changes within the amortization wallet.
+    - `AmortizationVirtualAccount`: Support for assigned virtual bank accounts dedicated to amortization payments.
+- **Admin Management**: Registered all amortization models in the Django Admin interface with custom list views, search, and filters.
+- **Rider Admin Action**: Added "Create amortization wallet for selected riders" action to the Rider admin to allow bulk wallet initialization.
+- **Wallet Admin Actions**: Added "Activate" and "Deactivate" actions to the Amortization Wallet admin for status management.
+
+
+
+### Fixed
+- **AmortizationWallet Typo**: Corrected a typo in the `ownership_percentage` property calculation.
+
+---
+
+## [2026-05-04] — Email Service Resilience & Fallback
+
+### Added
+- **MailNow Service Integration**: Implemented `MailNowService` in `dispatcher/utils.py` to provide a secondary email dispatch channel via a local MailNow API service (port 3200).
+- **Email Fallback Mechanism**: Integrated automatic fallback logic into `MailgunEmailService`.
+    - If a Mailgun dispatch fails (e.g., due to API errors, timeouts, or invalid credentials), the system automatically retries the request using `MailNowService`.
+    - Supports both standard onboarding emails and CSV attachments with base64 encoding.
+- **MailNow Configuration**: Added `MAILNOW_API_URL` and `MAILNOW_API_KEY` settings to support the new service.
+
+---
+
+## [2026-04-24] — Vehicle Tracking Tools
+
+### Added
+- **Vehicle History Command**: Created `get_vehicle_history` management command to retrieve historical telemetry for a specific rider (by riderID) within a date range.
+
+---
+
+## [2026-04-23] — Data Integrity, Reassignment Tracking & Record Protection
+
+### Added
+- **Vehicle Reassignment History**: Implemented comprehensive tracking of vehicle movements between riders.
+    - Added `VehicleReassignment` model with `from_rider`, `to_rider`, and `admin` tracking.
+    - Records are automatically created during every `assign_vehicle` action.
+- **Rider Soft Delete**: Implemented a robust soft-delete mechanism for the `Rider` model.
+    - Added `is_deleted` field and `SoftDeleteManager`/`SoftDeleteQuerySet`.
+    - `Rider.objects.all()` now automatically excludes soft-deleted riders.
+    - Overridden `Rider.delete()` to perform soft deletion instead of database removal.
+- **Record Protection (Admin)**: Disabled Django Admin deletion for mission-critical models to prevent accidental data loss.
+    - Affected models: `Rider`, `VehicleAsset`, `Transaction`, `Charge`.
+    - Removed the "Delete" button from individual record views and the "Delete selected" bulk action from list views.
+
+### Changed
+- **Vehicle Assignment Restriction**: Restricted the `assign_vehicle` endpoint to users with the `admin` dispatcher role.
+
+---
+ 
+ ## [2026-04-22] — Partner Orders & Order Creation Refactor
+ 
+ ### Added
+ - **Partner Order Support**: Added ability for dispatchers to create orders for partners.
+     - New fields in `OrderCreateSerializer`: `is_partner_order`, `partner_order_count`, `file_uploaded_url`.
+     - These fields are persisted to the `Order` model when `is_partner_order` is True.
+- **Partner Order Constraints**:
+    - Validates that the merchant is a partner before processing.
+    - Automatically calculates `total_amount` as `partner_base_price * partner_order_count`.
+    - Allows skipping of pickup/delivery details, providing sensible defaults when omitted.
+ 
+ ### Changed
+ - **Refactored Order Creation**: Moved core order creation logic from `OrderCreateSerializer` to `IOrderService.create_dispatcher_order` to reduce complexity and improve maintainability.
+ - **Service Layer Enhancements**:
+     - Added `create_dispatcher_order` to `OrderService` interface and implementation.
+     - Added `process_partners_order` to handle partner-specific logic within the service layer.
+ 
+ ---
+ 
+
+## [2026-04-21] — Merchant Notification Management
+
+### Added
+- **Delete Merchant Notification**: Implemented endpoints for merchants to delete notifications.
+    - `DELETE /api/auth/notifications/<uuid:pk>/`: Delete a single notification.
+    - `DELETE /api/auth/notifications/delete-all/`: Clear all notifications for the merchant.
+- **Improved Logging**: Integrated `@exception_advice` with `ErrorLog` for consistent error tracking in notification views.
+
+---
+
+## [2026-04-20] — Parcel Service Refactor & Bug Fixes
+
+### Changed
+- **Refactored `OrderService`** in `orders/services.py`:
+    - Renamed `process_percel_delivery` to `process_parcel_delivery` (fixed typo).
+    - Fixed a critical **`NameError`** where `list_response` was used before definition when `is_pickup` was False.
+    - Improved logic to safely separate pickup and delivery workflows.
+    - **Removed unsafe side-effects**: The service no longer mutates the `request_data` dictionary. Instead, it returns updated `pickup_address` and `dropoff_address` in the response dictionary.
+- **Updated `QuickSendView`** in `orders/views.py`:
+    - Updated call to the renamed `process_parcel_delivery` method.
+    - **Fixed logic bug**: `is_percel_order` flag is now correctly calculated as `is_pickup_percel or isdelivery_percel` instead of being hardcoded to `False`.
+    - Explicitly update validated data with addresses returned from the service.
+
+---
+
+## [2026-04-20] — Performance Optimization: Notification Backgrounding
+
+### Changed
+- **Optimized Rider Notifications** in `orders/views.py`:
+    - Moved real-time push notifications into background threads to reduce API latency and prevent external service delays from blocking the request-response cycle.
+    - Affected views: `OrderStartView`, `OrderStatusChangeView` (for the "start" action), and `OrderCompleteView`.
+
+---
+
+## [2026-04-09] — AI Agent Context & UUID Validation
+- **AI Agent Fix**: Resolved an issue where the AI Support Agent would hallucinate a placeholder `user_1234` ID when calling tools.
+    - **Injected Context**: Explicitly prepending `[SYSTEM CONTEXT: User ID = ...]` to user messages in `get_ai_response`.
+    - **Robust Validation**: Added `uuid.UUID` validation in `get_user_profile` to prevent `ValidationError` crashes, returning helpful errors to the agent instead.
+    - **Instruction Update**: Refined the `SupportCoordinator` instruction to explicitly look for the provided User ID in the context.
+- **Cleanup**: Removed redundant debug print statements in Celery tasks.
+
+---
+
+## [2026-04-17] — Rider Trips Period Filtering
+
+### Changed
+- **Updated `RiderTodayTripsView`** in `riders/views.py`: Added support for period filtering (`today`, `week`, `month`) via the `period` query parameter, matching the logic in the Earnings view.
+- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Documented the period filtering for Today's Trips.
+
+---
+
+## [2026-04-15] — SmartParcel V2 Business API Overhaul
+
+### Changed
+- **Overhauled SmartPercelIntegration class** in `orders/services.py`: Corrected the integration to match the SmartParcel V2 Business requirements.
+    - All external requests now use the **POST method**.
+    - Authentication **apikey** is now sent within the JSON request body instead of headers.
+    - Updated endpoint paths: `/states/`, `/cities/state/`, `/boxes/city/`, `/boxes/info/`, `/sizes/`, `/parcels/create/`, `/parcels/info/all/`, `/parcels/cancel/`.
+    - Added `list_assigned_boxes()` — retrieve the list of boxes assigned to the merchant.
+- **Refactored `orders/views.py`**:
+    - Updated `SmartParcelCreateParcelView` to map internal snake_case fields to the external API's required field names (e.g., `recipientname`, `boxid`, `sizeid`).
+    - Consolidated several retrieval views and removed defunct endpoints (e.g., `SmartParcelCitiesView` and `SmartParcelBoxesView` which are not supported in the Business V2 spec).
+    - Updated `SmartParcelAvailableBoxesView` to require a `city_id` query parameter.
+    - Added `SmartParcelAssignedBoxesByCityView` to fetch assigned boxes for a specific city.
+- **Updated `orders/urls.py`**: Added `SmartParcelAssignedBoxesByCityView` and removed defunct URL patterns.
+- **Updated `ENDPOINTS_DOCUMENTATION.md`**: Simplified and corrected the documentation for the Locker Delivery Integration, including the new Assigned Boxes endpoint.
+
+### Removed
+- Defunct endpoints: `GET /cities/`, `GET /boxes/`, `GET /parcels/<tracking_number>/timeline/`.
+
+---
+
+## [2026-04-10] — Dashboard & Weekly Reports
+- **Vertical Lead Visibility**: Added `vertical_lead_name` to the dispatcher dashboard order list.
+    - Updated UI table with a new "Vertical Lead" column.
+    - Included `vertical_lead_name` in the CSV export data.
+    - Updated `OrderSerializer` to include the lead name derived from the order's vertical.
+- **Weekly Delivery Report Enhance**: Added `total_order_amount` to the weekly Monday reports (E1 template).
+    - Calculated total order amount for all orders requested during the past week.
+    - Updated `tasks.py` to include the amount in the email context, formatted with commas.
+    - Updated `E1.html` template to display the total order amount with a Naira symbol.
+- **Rider Performance Metrics**: Added comprehensive order and distance metrics to the Django Admin.
+    - Implemented real-time order counts for Today, This Week (starting Monday), and This Month.
+    - Added "Overall Orders" and "Distance All Time" (km) tracking.
+    - Integrated metrics into the Rider list view and CSV export functionality via `RiderResource`.
+    - Added property methods to the `Rider` model for programmatic access to performance data.
+
+---
 
 ## [2026-04-07] — Chats API & Merchant Deactivation
+- **Ably Realtime Chats Documentation**: Created [ably_realtime_chats.md](file:///Users/mac/Liberty/aexpress/backend/ably_realtime_chats.md) guide for client-side integration.
+- **`subscribe_chat` Management Command**: Added a new command to subscribe to real-time chat messages for debugging.
 - **Chats API Documentation**: Documented the Chat System REST API in `ENDPOINTS_DOCUMENTATION.md`.
 - **Merchant Deactivation (Delete)**: Implemented new endpoints for soft-deactivating merchant accounts.
     - **Dispatcher Portal**: Admins can deactivate merchants via `DELETE /api/dispatcher/merchants/<id>/`.

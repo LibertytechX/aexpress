@@ -1,12 +1,17 @@
+from orders.serializers import CreateParcelSerializer
+from rest_framework.settings import api_settings
+from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
 import traceback
 from dispatcher.models import SystemSettings
 import logging
 import threading
-from rest_framework import status, generics, permissions
+from rest_framework import serializers, status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
@@ -36,18 +41,25 @@ from riders.models import RiderEarning, RiderCodRecord
 from dispatcher.tasks import send_merchant_notification
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
 from dispatcher.serializers import OrderEventSerializer
 from subscriptions.services import (
     process_order_subscription,
     get_active_postpaid_subscription,
     accumulate_postpaid_order,
 )
+from .services import SmartPercelIntegration, get_order_service
 
 logger = logging.getLogger(__name__)
 
 
 class VehicleListView(APIView):
     """API endpoint to list all available vehicles."""
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -142,13 +154,22 @@ class VehicleUpdateView(generics.UpdateAPIView):
 class QuickSendView(APIView):
     """API endpoint for Quick Send order creation."""
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
+    # TODO Refactor to be less complex
+
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Create a Quick Send order with single delivery."""
         from django.utils import timezone
         from datetime import timedelta
+
+        order_service = get_order_service()
 
         # Get requested mode (defaults to quick)
         requested_mode = request.data.get("mode", "quick")
@@ -181,6 +202,40 @@ class QuickSendView(APIView):
 
         data = serializer.validated_data
 
+        # ------------------------------------------------------------------
+        # SmartParcel Integration (Pre-Creation)
+        # ------------------------------------------------------------------
+        is_pickup_percel = data.get("is_pickup_percel", False)
+        isdelivery_percel = data.get("isdelivery_percel", False)
+        is_percel_order = is_pickup_percel or isdelivery_percel
+        percel_info = None
+        percel_payload = {
+            "sendername": data.get("sender_name", ""),
+            "senderphone": data.get("sender _phone", ""),
+            "senderemail": request.user.email,
+            "recipientname": data.get("receiver_name", ""),
+            "recipientphone": data.get("receiver_phone", ""),
+            "recipientemail": data.get("receiver_email", ""),
+            "boxid": data.get("box_id", ""),
+            "sizeid": data.get("locker_size_id", ""),
+            "parceldescription": data.get("notes", "Parcel Delivery"),
+            "parcelvalue": 0,  # default placeholder
+        }
+        ok, response = order_service.process_parcel_delivery(
+            is_pickup_percel, isdelivery_percel, data, percel_payload
+        )
+
+        if not ok:
+            raise ServiceException(
+                status_code=response.get("status_code"), message=response.get("message")
+            )
+
+        # Explicitly update addresses from response
+        data["pickup_address"] = response.get("pickup_address", data["pickup_address"])
+        data["dropoff_address"] = response.get(
+            "dropoff_address", data["dropoff_address"]
+        )
+        percel_info = response.get("parcel_info")
         # Get vehicle
         vehicle = Vehicle.objects.get(name=data["vehicle"], is_active=True)
 
@@ -193,6 +248,22 @@ class QuickSendView(APIView):
 
         # Apply 30% discount for grouped orders
         if data.get("mode") == "grouped":
+            if (
+                not hasattr(request.user, "merchant_profile")
+                or not request.user.merchant_profile.can_group_orders
+            ):
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {
+                            "non_field_errors": [
+                                "You are not allowed to create grouped orders."
+                            ]
+                        },
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             from decimal import Decimal
 
             total_amount = (total_amount * Decimal("0.7")).quantize(Decimal("0.01"))
@@ -213,80 +284,24 @@ class QuickSendView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
             cod_amount=data.get("cod_amount"),
+            is_percel_order=is_percel_order,
+            is_pickup_percel=is_pickup_percel,
+            isdelivery_percel=isdelivery_percel,
+            percel_info=percel_info,
+        )
+        payment_method = data.get("payment_method", "wallet")
+        ok, response = order_service.process_non_cash_payment(
+            payment_method, request.user, order
         )
 
-        if data.get("payment_method") == "subscription":
-
-            # [NEW] Subscription processing
-            from subscriptions.services import process_order_subscription
-
-            subscription = process_order_subscription(order)
-            if not subscription:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to process subscription payment. User has no active subscription."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if data.get("payment_method") == "postpaid":
-            # Postpaid processing
-            merchant_profile = getattr(request.user, "merchant_profile", None)
-            if not merchant_profile:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {"payment_method": ["User is not a merchant."]},
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
-            if not postpaid_sub:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "You do not have an active postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if postpaid_sub.status == "blocked":
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Your postpaid plan is blocked due to unpaid invoice."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Accumulate amount
-            accumulated = accumulate_postpaid_order(order)
-            if not accumulated:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to accumulate order amount to postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"non_field_errors": [response.get("message")]},
+                },
+                status=response.get("status_code", status.HTTP_400_BAD_REQUEST),
+            )
 
         # Create single delivery
         Delivery.objects.create(
@@ -306,6 +321,10 @@ class QuickSendView(APIView):
             sequence=1,
             cod_amount=data.get("cod_amount") or 0,
         )
+
+        # Store the resulting parcel JSON (containing tracking number etc)
+        order.percel_info = percel_info
+        order.save()
 
         # Emit activity event for live feed (fire-and-forget in background thread)
         merchant_name = (
@@ -329,48 +348,6 @@ class QuickSendView(APIView):
             },
             daemon=True,
         ).start()
-
-        # Hold funds in escrow if payment method is wallet
-        if data["payment_method"] == "wallet":
-            try:
-                wallet = Wallet.objects.get(user=request.user)
-
-                # Hold funds in escrow
-                try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
-                        amount=total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Quick Send order #{order.order_number}",
-                    )
-
-                    # Mark order as having escrow held
-                    order.escrow_held = True
-                    order.save()
-
-                except ValueError as e:
-                    # Insufficient balance - rollback order
-                    order.delete()
-                    return Response(
-                        {"success": False, "errors": {"wallet": [str(e)]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            except Wallet.DoesNotExist:
-                # Create wallet if it doesn't exist
-                wallet = Wallet.objects.create(user=request.user)
-                order.delete()
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "wallet": [
-                                "Insufficient wallet balance. Please fund your wallet first."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         # Notify all online riders about the new order (fire-and-forget in background)
         def _notify_riders():
@@ -427,11 +404,15 @@ class MultiDropView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Create a Multi-Drop order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
+
+        order_service = get_order_service()
+
+        # whitelist = ["https://send.axpress.net/", "https://move.axpress.net/"]
 
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
@@ -469,7 +450,7 @@ class MultiDropView(APIView):
         unit_fare = calculate_effective_fare(
             request.user, vehicle, distance_km, duration_minutes
         )
-        total_amount = unit_fare * num_deliveries
+        total_amount = unit_fare
 
         # Create order
         order = Order.objects.create(
@@ -487,80 +468,20 @@ class MultiDropView(APIView):
             scheduled_pickup_time=data.get("scheduled_pickup_time"),
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
-
-        # [NEW] Subscription processing
-        if data.get("payment_method") == "pay_with_subscription":
-
-            # [NEW] Subscription processing
-            from subscriptions.services import process_order_subscription
-
-            subscription = process_order_subscription(order)
-            if not subscription:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to process subscription payment. User has no active subscription."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if data.get("payment_method") == "postpaid":
-            # Postpaid processing
-            merchant_profile = getattr(request.user, "merchant_profile", None)
-            if not merchant_profile:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {"payment_method": ["User is not a merchant."]},
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
-            if not postpaid_sub:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "You do not have an active postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if postpaid_sub.status == "blocked":
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Your postpaid plan is blocked due to unpaid invoice."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Accumulate amount
-            accumulated = accumulate_postpaid_order(order)
-            if not accumulated:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to accumulate order amount to postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        # get the payment method
+        payment_method = data.get("payment_method", "wallet")
+        user = request.user
+        ok, response = order_service.process_non_cash_payment(
+            payment_method, user, order
+        )
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"non_field_errors": [response.get("message")]},
+                },
+                status=response.get("status_code", status.HTTP_400_BAD_REQUEST),
+            )
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -580,48 +501,6 @@ class MultiDropView(APIView):
                 duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
-
-        # Hold funds in escrow if payment method is wallet
-        if data["payment_method"] == "wallet":
-            try:
-                wallet = Wallet.objects.get(user=request.user)
-
-                # Hold funds in escrow
-                try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
-                        amount=total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Multi-Drop order #{order.order_number} ({num_deliveries} deliveries)",
-                    )
-
-                    # Mark order as having escrow held
-                    order.escrow_held = True
-                    order.save()
-
-                except ValueError as e:
-                    # Insufficient balance - rollback order
-                    order.delete()
-                    return Response(
-                        {"success": False, "errors": {"wallet": [str(e)]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            except Wallet.DoesNotExist:
-                # Create wallet if it doesn't exist
-                wallet = Wallet.objects.create(user=request.user)
-                order.delete()
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "wallet": [
-                                "Insufficient wallet balance. Please fund your wallet first."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         # Notify all online riders about the new order (fire-and-forget in background)
         def _notify_riders_multi():
@@ -679,11 +558,12 @@ class BulkImportView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
     def post(self, request):
         """Create a Bulk Import order with multiple deliveries."""
         from django.utils import timezone
         from datetime import timedelta
+
+        order_service = get_order_service()
 
         one_minute_ago = timezone.now() - timedelta(minutes=1)
         if Order.objects.filter(
@@ -740,79 +620,19 @@ class BulkImportView(APIView):
             collect_on_delivery=data.get("collect_on_delivery", False),
         )
 
-        if data.get("payment_method") == "pay_with_subscription":
-
-            # [NEW] Subscription processing
-            from subscriptions.services import process_order_subscription
-
-            subscription = process_order_subscription(order)
-            if not subscription:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to process subscription payment. User has no active subscription."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        if data.get("payment_method") == "postpaid":
-            # Postpaid processing
-            merchant_profile = getattr(request.user, "merchant_profile", None)
-            if not merchant_profile:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {"payment_method": ["User is not a merchant."]},
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            postpaid_sub = get_active_postpaid_subscription(merchant_profile)
-            if not postpaid_sub:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "You do not have an active postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if postpaid_sub.status == "blocked":
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Your postpaid plan is blocked due to unpaid invoice."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # Accumulate amount
-            accumulated = accumulate_postpaid_order(order)
-            if not accumulated:
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "payment_method": [
-                                "Failed to accumulate order amount to postpaid plan."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
+        payment_method = data.get("payment_method", "wallet")
+        user = request.user
+        ok, response = order_service.process_non_cash_payment(
+            payment_method, user, order
+        )
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"non_field_errors": [response.get("message")]},
+                },
+                status=response.get("status_code", status.HTTP_400_BAD_REQUEST),
+            )
         # Create multiple deliveries
         for idx, delivery_data in enumerate(data["deliveries"], start=1):
             Delivery.objects.create(
@@ -832,48 +652,6 @@ class BulkImportView(APIView):
                 duration_minutes=delivery_data.get("duration_minutes"),
                 sequence=idx,
             )
-
-        # Hold funds in escrow if payment method is wallet
-        if data["payment_method"] == "wallet":
-            try:
-                wallet = Wallet.objects.get(user=request.user)
-
-                # Hold funds in escrow
-                try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
-                        amount=total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Bulk Import order #{order.order_number} ({num_deliveries} deliveries)",
-                    )
-
-                    # Mark order as having escrow held
-                    order.escrow_held = True
-                    order.save()
-
-                except ValueError as e:
-                    # Insufficient balance - rollback order
-                    order.delete()
-                    return Response(
-                        {"success": False, "errors": {"wallet": [str(e)]}},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            except Wallet.DoesNotExist:
-                # Create wallet if it doesn't exist
-                wallet = Wallet.objects.create(user=request.user)
-                order.delete()
-                return Response(
-                    {
-                        "success": False,
-                        "errors": {
-                            "wallet": [
-                                "Insufficient wallet balance. Please fund your wallet first."
-                            ]
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         # Notify all online riders about the new order (fire-and-forget in background)
         def _notify_riders_bulk():
@@ -946,11 +724,11 @@ class OrderPayNowView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if order.payment_status == "Paid":
-            return Response(
-                {"success": False, "message": "Order is already paid."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # if order.payment_status == "Paid":
+        #     return Response(
+        #         {"success": False, "message": "Order is already paid."},
+        #         status=status.HTTP_400_BAD_REQUEST,
+        #     )
 
         # Get or create virtual account
         try:
@@ -996,6 +774,11 @@ class OrderPayNowView(APIView):
 
 class OrderListView(APIView):
     """API endpoint to list all orders for the authenticated user."""
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
 
     permission_classes = [permissions.IsAuthenticated]
 
@@ -1139,8 +922,13 @@ class CalculateFareView(APIView):
     }
     """
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         vehicle_name = request.data.get("vehicle")
         distance_km = request.data.get("distance_km")
@@ -1217,12 +1005,26 @@ class BulkCalculateFareView(APIView):
     }
     """
 
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         mode = request.data.get("mode", "quick")
         pickup = request.data.get("pickup")
         deliveries = request.data.get("deliveries", [])
+        if isinstance(pickup, str) or isinstance(deliveries, str):
+            return Response(
+                {
+                    "success": False,
+                    "error": "Invalid data format: pickup and deliveries must be dictionaries",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not pickup or not deliveries:
             return Response(
@@ -1264,8 +1066,12 @@ class BulkCalculateFareView(APIView):
                 drop_fares = {v.name: 0 for v in vehicles}
                 drop_details = []
 
-                for drop in deliveries:
-                    route_data = calculate_route(origin=pickup, destinations=[drop])
+                for idx, drop in enumerate(deliveries):
+                    if idx == 0:
+                        origin = pickup
+                    else:
+                        origin = deliveries[idx - 1]
+                    route_data = calculate_route(origin=origin, destinations=[drop])
                     if not route_data:
                         continue
 
@@ -1279,6 +1085,7 @@ class BulkCalculateFareView(APIView):
                         "duration_minutes": dur_mins,
                         "fares": {},
                     }
+                    # fix this
                     for vehicle in vehicles:
                         fare = calculate_effective_fare(
                             request.user, vehicle, dist_km, dur_mins
@@ -1286,6 +1093,13 @@ class BulkCalculateFareView(APIView):
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
+                # for vehicle in vehicles:
+                #     fare = calculate_effective_fare(
+                #         request.user, vehicle, total_distances, total_durations
+                #     )
+                #     drop_fares[vehicle.name] = fare
+                #     # drop_info["fares"][vehicle.name] = fare
+                # # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
@@ -1329,7 +1143,7 @@ class CancelOrderView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
-    @transaction.atomic
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
         """Cancel an order and process refund if needed"""
 
@@ -1338,42 +1152,33 @@ class CancelOrderView(APIView):
 
         # Get the order
         try:
-            order = Order.objects.select_for_update().get(
-                order_number=order_number, user=request.user
-            )
+            order = Order.objects.get(order_number=order_number, user=request.user)
         except Order.DoesNotExist:
-            return Response(
-                {"error": f"Order {order_number} not found"},
-                status=status.HTTP_404_NOT_FOUND,
+            raise ServiceException(
+                status_code=404, message=f"Order {order_number} not found"
             )
 
         # Check if order can be canceled
         if order.status in ["Canceled", "CustomerCanceled"]:
-            return Response(
-                {"error": "Order is already canceled"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise ServiceException(status_code=400, message="Order is already canceled")
 
         if order.status == "Delivered":
-            return Response(
-                {"error": "Cannot cancel a delivered order"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400, message="Cannot cancel a delivered order"
             )
 
         # Once the package has been picked up, cancellation is not allowed
         if order.status in ["PickedUp", "Started"]:
-            return Response(
-                {"error": "Cannot cancel an order that has already been picked up"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel an order that has already been picked up",
             )
 
         # Check if escrow was released (delivery completed)
         if order.escrow_held and order.escrow_released:
-            return Response(
-                {
-                    "error": "Cannot cancel order - delivery already completed and funds released"
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message="Cannot cancel order - delivery already completed and funds released",
             )
 
         # Process escrow refund if applicable
@@ -1395,14 +1200,15 @@ class CancelOrderView(APIView):
                 refund_amount = float(refund_transaction.amount)
 
             except ValueError as e:
-                return Response(
-                    {"error": f"Failed to process refund: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ServiceException(
+                    status_code=400, message=f"Failed to process refund: {str(e)}"
                 )
 
         # Update order status
         old_status = order.status
         order.status = "CustomerCanceled"
+        order.cancellation_reason = reason
+        order.canceled_at = timezone.now()
         order.updated_at = timezone.now()
         order.save()
 
@@ -1464,8 +1270,6 @@ class CancelOrderView(APIView):
 
         # Prepare response
         response_data = {
-            "success": True,
-            "message": f"Order {order_number} has been canceled",
             "order": {
                 "order_number": order.order_number,
                 "old_status": old_status,
@@ -1481,7 +1285,12 @@ class CancelOrderView(APIView):
             },
         }
 
-        return Response(response_data, status=status.HTTP_200_OK)
+        return service_response(
+            status="success",
+            message=f"Order {order_number} has been canceled",
+            data=response_data,
+            status_code=200,
+        )
 
 
 class CancelableOrdersView(APIView):
@@ -1719,17 +1528,21 @@ class OrderStartView(APIView):
         response = _advance_order(request, order_number, "Started", "Order Started")
 
         # Push notification — fire-and-forget, don't block the response
-        try:
-            rider = getattr(request.user, "rider_profile", None)
-            if rider:
-                notify_rider(
-                    rider=rider,
-                    title="Trip Started 🚀",
-                    body=f"You're on your way to pick up order #{order_number}.",
-                    data={"order_number": order_number, "status": "Started"},
-                )
-        except Exception as exc:
-            logger.warning(f"Start notification failed: {exc}")
+        rider = getattr(request.user, "rider_profile", None)
+        if rider:
+
+            def _notify_rider_start():
+                try:
+                    notify_rider(
+                        rider=rider,
+                        title="Trip Started 🚀",
+                        body=f"You're on your way to pick up order #{order_number}.",
+                        data={"order_number": order_number, "status": "Started"},
+                    )
+                except Exception as exc:
+                    logger.warning(f"Start notification failed: {exc}")
+
+            threading.Thread(target=_notify_rider_start, daemon=True).start()
 
         return response
 
@@ -1742,6 +1555,7 @@ class OrderArrivedView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         if not order_number:
@@ -1766,6 +1580,7 @@ class OrderStatusChangeView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         order_number = request.data.get("order_number")
         action = request.data.get("action")
@@ -1780,17 +1595,21 @@ class OrderStatusChangeView(APIView):
 
         if action == "start":
             response = _advance_order(request, order_number, "Started", "Order Started")
-            try:
-                rider = getattr(request.user, "rider_profile", None)
-                if rider:
-                    notify_rider(
-                        rider=rider,
-                        title="Trip Started 🚀",
-                        body=f"You're on your way to pick up order #{order_number}.",
-                        data={"order_number": order_number, "status": "Started"},
-                    )
-            except Exception as exc:
-                logger.warning(f"Start notification failed: {exc}")
+            rider = getattr(request.user, "rider_profile", None)
+            if rider:
+
+                def _notify_rider_start_alt():
+                    try:
+                        notify_rider(
+                            rider=rider,
+                            title="Trip Started 🚀",
+                            body=f"You're on your way to pick up order #{order_number}.",
+                            data={"order_number": order_number, "status": "Started"},
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Start notification failed: {exc}")
+
+                threading.Thread(target=_notify_rider_start_alt, daemon=True).start()
             return response
 
         elif action == "pickup":
@@ -1833,127 +1652,125 @@ class OrderCompleteView(APIView):
 
     @exception_advice(model_object=ErrorLog)
     def post(self, request, order_number):
+        if not order_number:
+            return service_response(
+                status="error",
+                message="order_number is required",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            if not order_number:
+            order = Order.objects.get(order_number=order_number)
+        except Order.DoesNotExist:
+            return service_response(
+                status="error",
+                message="Order not found",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return service_response(
+                status="error",
+                message="Rider profile not found.",
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+
+        # Proximity check for order completion (check final delivery location)
+        # Fetch rider's last known location from the database (since no payload is sent)
+        lat = rider.current_latitude
+        lng = rider.current_longitude
+
+        if lat is None or lng is None:
+            return service_response(
+                status="error",
+                message="Rider location not found. Please ensure GPS is active.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lat = float(lat)
+        lng = float(lng)
+
+        # Find the final delivery (highest sequence)
+        final_delivery = order.deliveries.order_by("-sequence").first()
+        if (
+            final_delivery
+            and final_delivery.dropoff_latitude is not None
+            and final_delivery.dropoff_longitude is not None
+        ):
+            from dispatcher.models import Zone
+
+            dist = Zone.haversine_distance(
+                lat,
+                lng,
+                final_delivery.dropoff_latitude,
+                final_delivery.dropoff_longitude,
+            )
+            if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
-                    message="order_number is required",
+                    message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
                     status_code=status.HTTP_400_BAD_REQUEST,
                 )
 
-            try:
-                order = Order.objects.get(order_number=order_number)
-            except Order.DoesNotExist:
-                return service_response(
-                    status="error",
-                    message="Order not found",
-                    status_code=status.HTTP_404_NOT_FOUND,
-                )
+        # ── Step 1: COD wallet balance check ─────────────────────────────────
+        cod_total = Decimal("0.00")
 
-            rider = getattr(request.user, "rider_profile", None)
-            if not rider:
-                return service_response(
-                    status="error",
-                    message="Rider profile not found.",
-                    status_code=status.HTTP_403_FORBIDDEN,
-                )
+        # ── Step 2: Calculate and record rider earnings ───────────────────────
+        settings_obj = SystemSettings.objects.first()
+        commission_pct = (
+            settings_obj.commission_pct if settings_obj else self.DEFAULT_COMMISSION_PCT
+        )
 
-            # Proximity check for order completion (check final delivery location)
-            # Fetch rider's last known location from the database (since no payload is sent)
-            lat = rider.current_latitude
-            lng = rider.current_longitude
+        order_amount = Decimal(str(order.total_amount))
+        commission_amount = (commission_pct / Decimal("100")) * order_amount
+        net_earning = commission_amount
 
-            if lat is None or lng is None:
-                return service_response(
-                    status="error",
-                    message="Rider location not found. Please ensure GPS is active.",
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                )
+        # Create or update RiderEarning for this order (idempotent)
+        earning, _ = RiderEarning.objects.get_or_create(
+            order=order,
+            defaults={
+                "rider": rider,
+                "base_fare": order_amount,
+                "commission_pct": commission_pct,
+                "commission_amount": commission_amount,
+                "net_earning": commission_amount,
+                "cod_amount": cod_total,
+            },
+        )
 
-            lat = float(lat)
-            lng = float(lng)
+        # Credit rider wallet with net earning
+        rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
+        rider_wallet_for_credit.credit(
+            amount=commission_amount,
+            description=f"Trip earning for order #{order_number}",
+            reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
+            metadata={
+                "order_number": order_number,
+                "gross": str(order_amount),
+                "commission_pct": str(commission_pct),
+                "net_earning": str(commission_amount),
+            },
+        )
 
-            # Find the final delivery (highest sequence)
-            final_delivery = order.deliveries.order_by("-sequence").first()
-            if (
-                final_delivery
-                and final_delivery.dropoff_latitude is not None
-                and final_delivery.dropoff_longitude is not None
-            ):
-                from dispatcher.models import Zone
+        # ── Step 3: Mark COD record as remitted ──────────────────────────────
+        # if order.collect_on_delivery:
+        #     RiderCodRecord.objects.filter(
+        #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
+        #     ).update(
+        #         status=RiderCodRecord.Status.REMITTED,
+        #         remitted_at=timezone.now(),
+        #     )
 
-                dist = Zone.haversine_distance(
-                    lat,
-                    lng,
-                    final_delivery.dropoff_latitude,
-                    final_delivery.dropoff_longitude,
-                )
-                if dist > 2.0:  # 2000 meters
-                    return service_response(
-                        status="error",
-                        message=f"You are too far from the final delivery location ({dist:.2f}km). Please move closer.",
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                    )
+        # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
+        deliveries = order.deliveries.exclude(status="Delivered")
+        for d in deliveries:
+            d.status = "Delivered"
+            d.delivered_at = timezone.now()
+            d.save(update_fields=["status", "delivered_at"])
 
-            # ── Step 1: COD wallet balance check ─────────────────────────────────
-            cod_total = Decimal("0.00")
-
-            # ── Step 2: Calculate and record rider earnings ───────────────────────
-            settings_obj = SystemSettings.objects.first()
-            commission_pct = (
-                settings_obj.commission_pct
-                if settings_obj
-                else self.DEFAULT_COMMISSION_PCT
-            )
-
-            order_amount = Decimal(str(order.total_amount))
-            commission_amount = (commission_pct / Decimal("100")) * order_amount
-            net_earning = commission_amount
-
-            # Create or update RiderEarning for this order (idempotent)
-            earning, _ = RiderEarning.objects.get_or_create(
-                order=order,
-                defaults={
-                    "rider": rider,
-                    "base_fare": order_amount,
-                    "commission_pct": commission_pct,
-                    "commission_amount": commission_amount,
-                    "net_earning": commission_amount,
-                    "cod_amount": cod_total,
-                },
-            )
-
-            # Credit rider wallet with net earning
-            rider_wallet_for_credit, _ = Wallet.objects.get_or_create(user=rider.user)
-            rider_wallet_for_credit.credit(
-                amount=commission_amount,
-                description=f"Trip earning for order #{order_number}",
-                reference=f"EARN-{order_number}-{order.id.hex[:8].upper()}",
-                metadata={
-                    "order_number": order_number,
-                    "gross": str(order_amount),
-                    "commission_pct": str(commission_pct),
-                    "net_earning": str(commission_amount),
-                },
-            )
-
-            # ── Step 3: Mark COD record as remitted ──────────────────────────────
-            # if order.collect_on_delivery:
-            #     RiderCodRecord.objects.filter(
-            #         order=order, rider=rider, status=RiderCodRecord.Status.PENDING
-            #     ).update(
-            #         status=RiderCodRecord.Status.REMITTED,
-            #         remitted_at=timezone.now(),
-            #     )
-
-            # ── Step 4: Mark all deliveries Delivered, advance order to Done ─────
-            deliveries = order.deliveries.exclude(status="Delivered")
-            for d in deliveries:
-                d.status = "Delivered"
-                d.delivered_at = timezone.now()
-                d.save(update_fields=["status", "delivered_at"])
-
-            # ── Step 5: Push notification ─────────────────────────────────────────
+        # ── Step 5: Push notification ─────────────────────────────────────────
+        def _notify_order_done():
             try:
                 notify_rider(
                     rider=rider,
@@ -1969,33 +1786,14 @@ class OrderCompleteView(APIView):
                     f"Failed to send completion notification to rider {rider.rider_id}: {exc}"
                 )
 
-            # Notify the merchant that their order was delivered
-            try:
-                merchant_profile = getattr(order.merchant, "merchant_profile", None)
-                if merchant_profile:
-                    send_merchant_notification.delay(
-                        merchant_id=str(merchant_profile.id),
-                        title="Order Delivered ✅",
-                        body=f"Your order #{order_number} has been delivered successfully.",
-                        data={"order_number": order_number, "status": "Done"},
-                        category="order_completed",
-                    )
-            except Exception as exc:
-                logger.warning(f"Merchant completion notification failed: {exc}")
+        threading.Thread(target=_notify_order_done, daemon=True).start()
 
-            # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
-            # but we can rely on `_advance_order` to handle it cleanly.
+        # Trigger F2 email. The `_advance_order` call below also triggers it if new_status is "Done",
+        # but we can rely on `_advance_order` to handle it cleanly.
 
-            return _advance_order(
-                request, order_number, "Done", "Order Completed (All Deliveries)"
-            )
-        except Exception as exc:
-            logger.error(f"Failed to complete order {order_number}: {exc}")
-            traceback.print_exc()
-            return Response(
-                {"success": False, "message": "Failed to complete order."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        return _advance_order(
+            request, order_number, "Done", "Order Completed (All Deliveries)"
+        )
 
 
 class AssignedOrderDetailView(APIView):
@@ -2107,6 +1905,7 @@ class DeliveryStartView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request, delivery_id):
         try:
             delivery = Delivery.objects.get(id=delivery_id)
@@ -2159,7 +1958,6 @@ class DeliveryCompleteView(APIView):
 
     permission_classes = [permissions.IsAuthenticated, IsRider]
 
-    @transaction.atomic
     def post(self, request, delivery_id):
         try:
             delivery = Delivery.objects.select_for_update().get(id=delivery_id)
@@ -2273,7 +2071,6 @@ class MergeGroupedOrdersView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @exception_advice(model_object=ErrorLog)
-    @transaction.atomic
     def post(self, request):
         serializer = MergeGroupedOrdersSerializer(data=request.data)
         if not serializer.is_valid():
@@ -2320,4 +2117,353 @@ class MergeGroupedOrdersView(APIView):
                 "parent_id": str(parent_order.id),
             },
             status_code=201,
+        )
+
+
+# ---------------------------------------------------------------------------
+# SmartParcel Locker Delivery Integration
+# ---------------------------------------------------------------------------
+
+
+def _sp() -> SmartPercelIntegration:
+    """Return a shared SmartPercelIntegration instance."""
+    return SmartPercelIntegration()
+
+
+class SmartParcelStatesView(APIView):
+    """List all states where SmartParcel operates."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_states()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel states retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCitiesByStateView(APIView):
+    """List cities for a specific SmartParcel state."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, state_id: str, *args, **kwargs):
+        ok, data = _sp().list_cities_by_state(state_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel cities for state retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelBoxesByCityView(APIView):
+    """List all SmartParcel boxes in a specific city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelAssignedBoxesByCityView(APIView):
+    """List SmartParcel boxes assigned to the merchant, filtered by city."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, city_id: str, *args, **kwargs):
+        ok, data = _sp().list_assigned_boxes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        # SmartParcel API returns boxes in 'boxes' field for this endpoint
+        boxes = data.get("boxes", [])
+        if not isinstance(boxes, list):
+            # Fallback if the structure is different
+            boxes = data if isinstance(data, list) else []
+
+        # Filter by city_id
+        filtered_boxes = [b for b in boxes if str(b.get("cityid")) == str(city_id)]
+
+        return service_response(
+            status="success",
+            message=f"SmartParcel assigned boxes for city {city_id} retrieved successfully.",
+            data=filtered_boxes,
+            status_code=200,
+        )
+
+
+class SmartParcelBoxDetailView(APIView):
+    """Retrieve details of a single SmartParcel box."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, box_id: str, *args, **kwargs):
+        ok, data = _sp().get_box_details(box_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel box details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelAvailableBoxesView(APIView):
+    """List all SmartParcel boxes in a specific city (wrapper for business logic)."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        city_id = request.query_params.get("city_id")
+        if not city_id:
+            raise ServiceException(status_code=400, message="city_id is required.")
+
+        ok, data = _sp().list_boxes_by_city(city_id)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel boxes for city retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelLockerSizesView(APIView):
+    """List all locker sizes on the SmartParcel network."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @method_decorator(cache_page(60 * 30))
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_locker_sizes()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel locker sizes retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelPendingPickupsView(APIView):
+    """List all pending parcels ready for pickup on the SmartParcel network."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        ok, data = _sp().list_pending_pickups()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel pending pickups retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelResolveCollectCodeView(APIView):
+    """Resolve a SmartParcel collect code to a pending parcel detail."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, collect_code: str, *args, **kwargs):
+        ok, data = _sp().list_pending_pickups()
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+
+        parcels = data.get("parcels") or []
+        if not isinstance(parcels, list):
+            parcels = []
+
+        # Find the parcel with the matching collectcode (case-insensitive)
+        found_parcel = next(
+            (
+                p
+                for p in parcels
+                if str(p.get("boxlockernumber")).strip().lower()
+                == collect_code.strip().lower()
+            ),
+            None,
+        )
+
+        if not found_parcel:
+            return service_response(
+                status="error",
+                message=f"No pending parcel found for collect code '{collect_code}'.",
+                data={},
+                status_code=404,
+            )
+
+        return service_response(
+            status="success",
+            message="SmartParcel parcel resolved successfully.",
+            data=found_parcel,
+            status_code=200,
+        )
+
+
+class SmartParcelCreateParcelView(APIView):
+    """Create a new SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        serializer = CreateParcelSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise ServiceException(
+                status_code=400,
+                message=str(serializer.errors),
+            )
+
+        # Map to V2 Business API keys
+        vd = serializer.validated_data
+        payload = {
+            "recipientname": vd["receiver_name"],
+            "recipientemail": vd.get("receiver_email", ""),
+            "recipientphone": vd["receiver_phone"],
+            "sendername": vd["sender_name"],
+            "senderemail": vd.get("sender_email", ""),
+            "senderphone": vd["sender_phone"],
+            "boxid": vd["box_id"],
+            "sizeid": vd["locker_size_id"],
+            "parceldescription": vd.get("description", ""),
+        }
+
+        ok, data = _sp().create_parcel(payload)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel created successfully.",
+            data=data,
+            status_code=201,
+        )
+
+
+class SmartParcelParcelDetailView(APIView):
+    """Retrieve details of a SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().get_parcel_details(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel details retrieved successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelCancelParcelView(APIView):
+    """Cancel an existing SmartParcel parcel."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, tracking_number: str, *args, **kwargs):
+        ok, data = _sp().cancel_parcel(tracking_number)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel cancelled successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelSimulateDropView(APIView):
+    """[Sandbox] Simulate dropping a parcel into a locker box.
+
+    Triggers the 'dropped' state transition on a parcel so the collect-code
+    flow can be tested end-to-end without physical hardware.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        box_id = request.data.get("box_id")
+        unlock_code = request.data.get("unlock_code")
+        if not box_id or not unlock_code:
+            raise ServiceException(
+                status_code=400, message="box_id and unlock_code are required."
+            )
+
+        ok, data = _sp().simulate_drop_parcel(box_id, unlock_code)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel drop simulated successfully.",
+            data=data,
+            status_code=200,
+        )
+
+
+class SmartParcelSimulateCollectView(APIView):
+    """[Sandbox] Simulate a recipient collecting a parcel from a locker.
+
+    Triggers the 'collected' state transition on a parcel so the full
+    pickup workflow can be tested end-to-end without physical hardware.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        box_id = request.data.get("box_id")
+        unlock_code = request.data.get("unlock_code")
+        if not box_id or not unlock_code:
+            raise ServiceException(
+                status_code=400, message="box_id and unlock_code are required."
+            )
+
+        ok, data = _sp().simulate_collect_parcel(box_id, unlock_code)
+        if not ok:
+            raise ServiceException(status_code=502, message=data)
+        return service_response(
+            status="success",
+            message="SmartParcel parcel collect simulated successfully.",
+            data=data,
+            status_code=200,
         )

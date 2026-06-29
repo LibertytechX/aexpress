@@ -1,3 +1,4 @@
+from dispatcher.utils import generate_notification_id
 from email.policy import default
 import hashlib
 import math
@@ -9,6 +10,7 @@ from django.dispatch import receiver
 import uuid
 import random
 import string
+from django.utils import timezone
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +377,31 @@ class VehicleTracking(models.Model):
 # ---------------------------------------------------------------------------
 
 
+class SoftDeleteQuerySet(models.QuerySet):
+    def delete(self):
+        return super().update(is_deleted=True, updated_at=timezone.now())
+
+    def hard_delete(self):
+        return super().delete()
+
+    def alive(self):
+        return self.filter(is_deleted=False)
+
+    def dead(self):
+        return self.filter(is_deleted=True)
+
+
+class SoftDeleteManager(models.Manager):
+    def get_queryset(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).alive()
+
+    def all_with_deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db)
+
+    def deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).dead()
+
+
 class Rider(models.Model):
     class Status(models.TextChoices):
         ONLINE = "online", "Online"
@@ -408,8 +435,10 @@ class Rider(models.Model):
     is_authorized = models.BooleanField(
         default=False, help_text="Controls whether driver can receive jobs"
     )
+    is_jumia_rider = models.BooleanField(default=False)
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
+    is_deleted = models.BooleanField(default=False, db_index=True)
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
@@ -518,6 +547,8 @@ class Rider(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = SoftDeleteManager()
+
     class Meta:
         db_table = "riders"
 
@@ -526,7 +557,11 @@ class Rider(models.Model):
             # Generate unique 6-digit ID
             while True:
                 new_id = "".join(random.choices(string.digits, k=6))
-                if not Rider.objects.filter(rider_id=new_id).exists():
+                if (
+                    not Rider.objects.all_with_deleted()
+                    .filter(rider_id=new_id)
+                    .exists()
+                ):
                     self.rider_id = new_id
                     break
 
@@ -548,6 +583,13 @@ class Rider(models.Model):
 
         super().save(*args, **kwargs)
 
+    def delete(self, using=None, keep_parents=False):
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted", "updated_at"])
+
+    def hard_delete(self, using=None, keep_parents=False):
+        super().delete(using=using, keep_parents=keep_parents)
+
     def go_online(self):
         self.status = self.Status.ONLINE
         self.save()
@@ -564,8 +606,134 @@ class Rider(models.Model):
         self.status = self.Status.ONLINE
         self.save()
 
+    @property
+    def orders_completed_today(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date=today
+        ).count()
+
+    @property
+    def orders_completed_this_week(self) -> int:
+        from django.utils import timezone
+        from datetime import timedelta
+        from orders.models import Order
+
+        today = timezone.now().date()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=week_start
+        ).count()
+
+    @property
+    def orders_completed_this_month(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        month_start = today.replace(day=1)
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=month_start
+        ).count()
+
+    @property
+    def total_distance_covered(self) -> float:
+        from django.db.models import Sum
+        from orders.models import Order
+
+        val = Order.objects.filter(rider=self, status="Done").aggregate(
+            total=Sum("distance_km")
+        )["total"]
+        return float(round(val, 2)) if val else 0.00
+
+    @property
+    def total_completed_orders(self) -> int:
+        from orders.models import Order
+
+        return Order.objects.filter(rider=self, status="Done").count()
+
+    def yesterday_distance_covered(self):
+        """Return yesterday's odometer delta for the rider's assigned asset."""
+        if not self.vehicle_asset_id:
+            return 0.00
+
+        from datetime import timedelta
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{self.vehicle_asset_id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset_id=self.vehicle_asset_id, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
+
+
+class VehicleReassignment(models.Model):
+    """Tracks history of vehicle asset assignments to riders."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    from_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_from",
+    )
+    to_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_to",
+    )
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reassignments",
+        help_text="The vehicle asset assigned (null if unassigned)",
+    )
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_initiated",
+        help_text="The admin who performed this assignment",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicle_reassignments"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        v_plate = self.vehicle_asset.plate_number if self.vehicle_asset else "None"
+        f_rider = self.from_rider.rider_id if self.from_rider else "None"
+        t_rider = self.to_rider.rider_id if self.to_rider else "None"
+        return f"Reassignment: {v_plate} ({f_rider} -> {t_rider}) by {self.admin}"
 
 
 class DispatcherProfile(models.Model):
@@ -610,6 +778,7 @@ class Merchant(models.Model):
         on_delete=models.CASCADE,
         related_name="merchant_profile",
     )
+    can_group_orders = models.BooleanField(default=False)
     zone = models.ForeignKey(
         Zone,
         on_delete=models.SET_NULL,
@@ -649,6 +818,10 @@ class Merchant(models.Model):
     has_price_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_partner = models.BooleanField(default=False)
+    partner_base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
 
     class Meta:
         db_table = "merchants"
@@ -1031,99 +1204,115 @@ class MerchantAPIKey(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return (
-            f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
-        )
+        return f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
 
 
 # ---------------------------------------------------------------------------
-# Merchant Notifications
+# Merchant Notifications & Devices
 # ---------------------------------------------------------------------------
 
 
 class MerchantDevice(models.Model):
     """
-    Stores FCM device tokens for merchant mobile app installs.
-    A merchant may have multiple active devices (multi-device support).
+    Stores FCM registration tokens and device metadata for merchants.
+    A single merchant may have multiple devices (e.g. phone and tablet).
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="devices",
+        Merchant, on_delete=models.CASCADE, related_name="devices"
     )
-    device_id = models.CharField(max_length=255, unique=True, db_index=True)
-    fcm_token = models.CharField(max_length=500, blank=True, default="")
-    platform = models.CharField(max_length=50, blank=True, default="")
-    model_name = models.CharField(max_length=255, blank=True, default="")
+    device_id = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Unique hardware/vendor ID from the mobile app",
+    )
+    fcm_token = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Firebase Cloud Messaging token for push delivery",
+    )
+    platform = models.CharField(
+        max_length=50, blank=True, default="", help_text='e.g. "ios", "android"'
+    )
+    model_name = models.CharField(
+        max_length=255, blank=True, default="", help_text='e.g. "iPhone 13", "Pixel 6"'
+    )
     os_version = models.CharField(max_length=50, blank=True, default="")
     app_version = models.CharField(max_length=50, blank=True, default="")
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True, help_text="Set to False if token is invalid/expired"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "merchant_devices"
+        verbose_name = "Merchant Device"
+        verbose_name_plural = "Merchant Devices"
 
     def __str__(self):
-        return f"Device {self.device_id} for merchant {self.merchant.merchant_id}"
+        return f"{self.merchant.merchant_id} — {self.model_name or self.device_id[:8]}"
 
 
 class MerchantNotification(models.Model):
     """
-    Persisted notification record for a merchant.
-    Created regardless of push delivery outcome so the merchant
-    can always see their notification history in-app.
+    Stores the history of push notifications sent to a merchant.
+    Allows for in-app 'Notification Center' / inbox functionality.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="notifications",
+        Merchant, on_delete=models.CASCADE, related_name="notifications"
     )
     title = models.CharField(max_length=255)
     body = models.TextField()
-    data = models.JSONField(default=dict)
+    data = models.JSONField(
+        default=dict, blank=True, help_text="Arbitrary JSON payload for deep linking"
+    )
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         db_table = "merchant_notifications"
         ordering = ["-created_at"]
+        verbose_name = "Merchant Notification"
+        verbose_name_plural = "Merchant Notifications"
 
     def __str__(self):
-        return f"[{'read' if self.is_read else 'unread'}] {self.title} → merchant {self.merchant.merchant_id}"
+        return f"[{'READ' if self.is_read else 'UNREAD'}] {self.merchant.merchant_id}: {self.title[:30]}"
 
 
 class MerchantNotificationSettings(models.Model):
     """
     Per-merchant notification preference toggles.
-    Auto-created when a Merchant is created (via post_save signal).
     """
 
     merchant = models.OneToOneField(
-        Merchant,
-        on_delete=models.CASCADE,
-        related_name="notification_settings",
+        Merchant, on_delete=models.CASCADE, related_name="notification_settings"
     )
-    push_enabled = models.BooleanField(default=True, help_text="Master switch for all push notifications")
-    order_assigned = models.BooleanField(default=True, help_text="Notify when a rider is assigned to an order")
-    order_completed = models.BooleanField(default=True, help_text="Notify when an order is delivered")
-    order_cancelled = models.BooleanField(default=True, help_text="Notify when an order is cancelled")
-    wallet_credit = models.BooleanField(default=True, help_text="Notify on wallet credits and escrow releases")
-    marketing = models.BooleanField(default=True, help_text="Promotional and marketing notifications")
+
+    # Master switch
+    push_enabled = models.BooleanField(
+        default=True, help_text="Global master switch for all push notifications"
+    )
+
+    # Category toggles
+    order_assigned = models.BooleanField(default=True)
+    order_completed = models.BooleanField(default=True)
+    order_cancelled = models.BooleanField(default=True)
+    wallet_credit = models.BooleanField(default=True)
+    marketing = models.BooleanField(default=True)
+    email_notification = models.BooleanField(default=True)
+    sms_notification = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "merchant_notification_settings"
+        verbose_name = "Merchant Notification Settings"
+        verbose_name_plural = "Merchant Notification Settings"
 
     def __str__(self):
-        return f"NotificationSettings for merchant {self.merchant.merchant_id}"
-
-
-@receiver(post_save, sender=Merchant)
-def create_merchant_notification_settings(sender, instance, created, **kwargs):
-    """Auto-create notification settings when a new Merchant is created."""
-    if created:
-        MerchantNotificationSettings.objects.get_or_create(merchant=instance)
+        return f"Settings for {self.merchant.merchant_id}"

@@ -1,6 +1,9 @@
 import requests
 import logging
+import base64
+import json
 from django.conf import settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +118,19 @@ class MailgunEmailService:
             logger.info(f"Onboarding email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send onboarding email to {email}: {str(e)}")
+            logger.error(f"Failed to send onboarding email to {email} via Mailgun: {str(e)}")
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
-            return False
+            
+            # Fallback to MailNow
+            logger.info(f"Attempting fallback to MailNow for {email}")
+            return MailNowService.send_email(
+                from_email=f"Assured Express <mailgun@{settings.MAILGUN_DOMAIN}>",
+                to_email=email,
+                subject=subject,
+                text=None,
+                html=html_body
+            )
 
     @staticmethod
     def send_csv_attachment_email(email, csv_content, filename, subject, body):
@@ -149,68 +161,101 @@ class MailgunEmailService:
             logger.info(f"CSV export email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send CSV export email to {email}: {str(e)}")
+            logger.error(f"Failed to send CSV export email to {email} via Mailgun: {str(e)}")
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
+            
+            # Fallback to MailNow
+            logger.info(f"Attempting fallback to MailNow for {email}")
+            attachments = [
+                {
+                    "filename": filename,
+                    "content": base64.b64encode(csv_content.encode() if isinstance(csv_content, str) else csv_content).decode('utf-8'),
+                    "content_type": "text/csv"
+                }
+            ]
+            return MailNowService.send_email(
+                from_email=f"Assured Express <mailgun@{settings.MAILGUN_DOMAIN}>",
+                to_email=email,
+                subject=subject,
+                text=body,
+                attachments=attachments
+            )
+
+
+class MailNowService:
+    """
+    Utility service to send emails via MailNow API.
+    Used as a fallback for Mailgun.
+    """
+
+    @staticmethod
+    def send_email(from_email, to_email, subject, text, html=None, attachments=None):
+        """
+        Sends an email using the MailNow API.
+        """
+        if not all([settings.MAILNOW_API_URL, settings.MAILNOW_API_KEY]):
+            logger.error("MailNow settings are not fully configured.")
+            return False
+
+        payload = {
+            "from": from_email,
+            "to": to_email,
+            "subject": subject,
+            "text": text,
+        }
+        if html:
+            payload["html"] = html
+        if attachments:
+            payload["attachments"] = attachments
+
+        try:
+            response = requests.post(
+                settings.MAILNOW_API_URL,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MAILNOW_API_KEY,
+                },
+                json=payload,
+                timeout=30,
+            )
+            response.raise_for_status()
+            logger.info(f"Email sent successfully to {to_email} via MailNow")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to send email to {to_email} via MailNow: {str(e)}")
+            if hasattr(e, "response") and e.response is not None:
+                logger.error(f"MailNow response: {e.response.text}")
             return False
 
 
 def find_closest_zone(lat, lng):
     """
     Find the closest active Zone to a given (lat, lng) point.
-    Uses Google Maps Distance Matrix API for road distance,
-    falling back to Haversine (great-circle) distance if API fails or is not configured.
+    Switches between Google Maps and custom Routing Service based on settings,
+    falling back to Haversine distance if needed.
     """
     from .models import Zone
     from django.conf import settings
-    import requests
 
     zones = list(Zone.objects.filter(is_active=True))
     if not zones:
         return None
 
-    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
-    if api_key:
-        try:
-            # Prepare Distance Matrix request
-            origins = f"{lat},{lng}"
-            destinations = "|".join([f"{z.center_lat},{z.center_lng}" for z in zones])
+    provider = getattr(settings, "ROUTING_PROVIDER", "google")
 
-            url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-            params = {
-                "origins": origins,
-                "destinations": destinations,
-                "key": api_key,
-                "mode": "driving",
-            }
+    if provider == "custom":
+        closest = _find_closest_zone_custom(lat, lng, zones)
+        if closest:
+            return closest
 
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get("status") == "OK":
-                results = data["rows"][0]["elements"]
-                min_distance = float("inf")
-                closest_index = -1
-
-                for i, res in enumerate(results):
-                    if res.get("status") == "OK":
-                        # distance['value'] is in meters
-                        dist_val = res["distance"]["value"]
-                        if dist_val < min_distance:
-                            min_distance = dist_val
-                            closest_index = i
-
-                if closest_index != -1:
-                    logger.info(
-                        f"find_closest_zone: Found closest zone '{zones[closest_index].name}' via Google Maps (dist: {min_distance}m)"
-                    )
-                    return zones[closest_index]
-
-        except Exception as e:
-            logger.error(f"find_closest_zone: Google Maps Distance Matrix failed: {e}")
+    # Try Google if provider is 'google' or custom failed
+    closest = _find_closest_zone_google(lat, lng, zones)
+    if closest:
+        return closest
 
     # Fallback to Haversine distance
+    logger.info(f"find_closest_zone: Falling back to Haversine for ({lat}, {lng})")
     closest = None
     min_dist = float("inf")
     for zone in zones:
@@ -218,9 +263,115 @@ def find_closest_zone(lat, lng):
         if dist < min_dist:
             min_dist = dist
             closest = zone
-
-    if closest:
-        logger.info(
-            f"find_closest_zone: Found closest zone '{closest.name}' via Haversine (dist: {min_dist:.2f}km)"
-        )
     return closest
+
+
+def _find_closest_zone_custom(lat, lng, zones):
+    """Find closest zone using the custom Go routing service (Table API)."""
+    from django.conf import settings
+    import requests
+
+    service_url = getattr(settings, "ROUTING_SERVICE_URL", "")
+    api_key = getattr(settings, "ROUTING_SERVICE_API_KEY", "")
+
+    if not service_url:
+        return None
+
+    # Use the table endpoint instead of directions
+    table_url = service_url.replace("/directions", "/table")
+
+    try:
+        # OSRM expects lng,lat
+        origin = f"{lng},{lat}"
+        destinations = [f"{z.center_lng},{z.center_lat}" for z in zones]
+
+        params = {
+            "origin": origin,
+            "destinations": destinations,
+        }
+        headers = {"X-API-Key": api_key}
+
+        response = requests.get(table_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") == "success" and "data" in data:
+            # distances is a 2D array [sources][destinations]
+            # Since we only have one source, it's distances[0]
+            distances = data["data"]["distances"][0]
+            min_distance = float("inf")
+            closest_index = -1
+
+            for i, dist in enumerate(distances):
+                if dist is not None and dist < min_distance:
+                    min_distance = dist
+                    closest_index = i
+
+            if closest_index != -1:
+                logger.info(
+                    f"find_closest_zone: Found closest zone '{zones[closest_index].name}' via Custom OSRM (dist: {min_distance}m)"
+                )
+                return zones[closest_index]
+
+    except Exception as e:
+        logger.error(f"find_closest_zone: Custom OSRM Table failed: {e}")
+
+    return None
+
+
+def _find_closest_zone_google(lat, lng, zones):
+    """Find closest zone using Google Maps Distance Matrix API."""
+    from django.conf import settings
+    import requests
+
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if not api_key:
+        return None
+
+    try:
+        # Prepare Distance Matrix request
+        origins = f"{lat},{lng}"
+        destinations = "|".join([f"{z.center_lat},{z.center_lng}" for z in zones])
+
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        params = {
+            "origins": origins,
+            "destinations": destinations,
+            "key": api_key,
+            "mode": "driving",
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") == "OK":
+            results = data["rows"][0]["elements"]
+            min_distance = float("inf")
+            closest_index = -1
+
+            for i, res in enumerate(results):
+                if res.get("status") == "OK":
+                    # distance['value'] is in meters
+                    dist_val = res["distance"]["value"]
+                    if dist_val < min_distance:
+                        min_distance = dist_val
+                        closest_index = i
+
+            if closest_index != -1:
+                logger.info(
+                    f"find_closest_zone: Found closest zone '{zones[closest_index].name}' via Google Maps (dist: {min_distance}m)"
+                )
+                return zones[closest_index]
+
+    except Exception as e:
+        logger.error(f"find_closest_zone: Google Maps Distance Matrix failed: {e}")
+
+    return None
+
+
+def generate_notification_id() -> int:
+    from .models import MerchantNotification
+
+    count = MerchantNotification.objects.all().count() + 1
+    return count

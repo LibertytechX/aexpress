@@ -278,6 +278,12 @@ const normalizeOrder = (o) => ({
     paymentInfo: o.payment_info || null,
     payment_status: o.payment_status || null,
     charge: o.charge || null,
+    isPartnerOrder: o.is_partner_order || false,
+    partnerOrderCount: o.partner_order_count || null,
+    dayReturnedCount: o.day_returned_count || 0,
+    riderCompletedCount: o.rider_completed_count || 0,
+    fileUploadedUrl: o.file_uploaded_urls && o.file_uploaded_urls.length > 0 ? o.file_uploaded_urls[0] : (o.file_uploaded_url || null),
+    fileUploadedUrls: o.file_uploaded_urls || [],
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
@@ -316,6 +322,9 @@ const normalizeOrder = (o) => ({
     source: o.source || 'merchant_web',
     mode: o.mode || 'quick',
     dispatcher_assigned: o.dispatcher_assigned || false,
+    verticalLeadName: o.vertical_lead_name || null,
+    cancellation_reason: o.cancellation_reason || '',
+    deliveries: o.deliveries || [],
 });
 
 export const OrdersAPI = {
@@ -368,6 +377,17 @@ export const OrdersAPI = {
         return normalizeOrder(data);
     },
 
+    async updatePartnerStats(orderNumber, partnerData) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-partner-stats/`, {
+            method: 'PATCH',
+            body: JSON.stringify(partnerData)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update partner stats'));
+        return normalizeOrder(data);
+    },
+
     async create(orderData) {
         const res = await fetchWithAuth(`/dispatch/orders/`, {
             method: 'POST',
@@ -394,10 +414,10 @@ export const OrdersAPI = {
         return await res.json();
     },
 
-    async updateStatus(orderNumber, newStatus) {
+    async updateStatus(orderNumber, newStatus, reason = null) {
         const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify({ status: newStatus, reason })
         });
         if (!res.ok) throw new Error('Failed to update status');
         return await res.json();
@@ -461,6 +481,16 @@ export const OrdersAPI = {
         const data = await res.json();
         if (!res.ok) throw (data || new Error('Failed to merge orders'));
         return data;
+    },
+
+    async bulkCalculateFare(payload) {
+        const res = await fetchWithAuth(`/orders/bulk-calculate-fare/`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to calculate fare'));
+        return data;
     }
 };
 
@@ -482,7 +512,9 @@ export const MerchantsAPI = {
             monthOrders: m.monthOrders || 0,
             walletBalance: parseFloat(m.walletBalance) || 0,
             status: m.status || 'Active',
-            joined: m.joined || 'N/A'
+            joined: m.joined || 'N/A',
+            isPartner: m.isPartner || false,
+            partnerBasePrice: parseFloat(m.partnerBasePrice) || 0
         }));
     }
 };

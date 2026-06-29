@@ -7,7 +7,7 @@ from rest_framework import viewsets, permissions, status, views, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
-
+from orders.models import Order
 from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.pagination import PageNumberPagination
@@ -66,19 +66,6 @@ class RiderViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # user = self.request.user
-        # role = user.dispatcher_profile.role
-        # if the dispatcher role is zone_lead
-        # if role == "zone_lead":
-        #     try:
-        #         zone_lead = VerticalLead.objects.get(user=user)
-        #         zones = zone_lead.area_zones.all()
-        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
-        #         return Rider.objects.filter(hub__in=relay_nodes).select_related(
-        #             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
-        #         )
-        #     except VerticalLead.DoesNotExist:
-        #         pass
         return Rider.objects.all().select_related(
             "user", "vehicle_type", "vehicle_asset", "hub", "hub__zone"
         )
@@ -97,27 +84,69 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.user.save(update_fields=["password"])
         return Response({"success": True, "message": "Password updated successfully."})
 
-    @action(detail=True, methods=["post"], url_path="assign_vehicle")
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="assign_vehicle",
+        permission_classes=[IsDispatcherAdmin],
+    )
     def assign_vehicle(self, request, pk=None):
         """Assign or unassign a vehicle asset to a rider."""
         rider = self.get_object()
         vehicle_asset_id = request.data.get("vehicle_asset_id")
 
-        if vehicle_asset_id:
-            from .models import VehicleAsset
+        from .models import VehicleAsset, VehicleReassignment, Rider
 
+        old_vehicle = rider.vehicle_asset
+        new_vehicle = None
+        from_rider = None
+        to_rider = None
+
+        if vehicle_asset_id:
             try:
-                vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
+                new_vehicle = VehicleAsset.objects.get(id=vehicle_asset_id)
             except VehicleAsset.DoesNotExist:
                 return Response(
                     {"error": "Vehicle asset not found."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            rider.vehicle_asset = vehicle
+
+            # If the vehicle was already with someone else, they are the from_rider
+            from_rider = Rider.objects.filter(vehicle_asset=new_vehicle).first()
+            to_rider = rider
+
+            # If the rider was already with another vehicle, record that unassignment too
+            if old_vehicle and old_vehicle != new_vehicle:
+                VehicleReassignment.objects.create(
+                    from_rider=rider,
+                    to_rider=None,
+                    vehicle_asset=old_vehicle,
+                    admin=request.user,
+                )
+
+            # If from_rider exists and is different from to_rider, clear their vehicle
+            if from_rider and from_rider != to_rider:
+                from_rider.vehicle_asset = None
+                from_rider.save(update_fields=["vehicle_asset"])
+
+            rider.vehicle_asset = new_vehicle
         else:
+            # Unassigning current rider from their current vehicle
+            from_rider = rider
+            to_rider = None
+            new_vehicle = old_vehicle
             rider.vehicle_asset = None
 
         rider.save(update_fields=["vehicle_asset"])
+
+        # Create reassignment history record for the target vehicle
+        VehicleReassignment.objects.create(
+            from_rider=from_rider,
+            to_rider=to_rider,
+            vehicle_asset=new_vehicle,
+            admin=request.user,
+        )
+
         serializer = self.get_serializer(rider)
         return Response(serializer.data)
 
@@ -204,11 +233,10 @@ class OrderPagination(PageNumberPagination):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    from orders.models import Order
 
     queryset = (
         Order.objects.all()
-        .select_related("user", "rider", "rider__user")
+        .select_related("user", "rider", "rider__user", "vehicle")
         .prefetch_related("deliveries")
     )
     from .serializers import (
@@ -438,26 +466,24 @@ class OrderViewSet(viewsets.ModelViewSet):
                 {"error": "Rider not found"}, status=status.HTTP_404_NOT_FOUND
             )
 
+    @exception_advice(model_object=ErrorLog)
     @action(detail=True, methods=["post"])
     def update_status(self, request, order_number=None):
-        """Update Order.status and emit an activity event.
-
-        Accepts both internal names (Started, Done, CustomerCanceled) and
-        the display names the frontend uses (In Transit, Delivered, Cancelled,
-        Picked Up).
-        """
+        """Update Order.status and emit an activity event."""
         order = self.get_object()
         new_status = request.data.get("status")
-        user = request.user
+
+        if not new_status:
+            raise ServiceException(status_code=400, message="Status is required")
 
         # Map frontend display names → internal model values
         DISPLAY_TO_INTERNAL = {
             "Assignment Accepted": "AssignmentAccepted",
             "In Transit": "Started",
-            "At Dropoff": "Arrived",  # rider is at the dropoff location
+            "At Dropoff": "Arrived",
             "Delivered": "Done",
             "Cancelled": "CustomerCanceled",
-            "Picked Up": "PickedUp",  # distinct stage; rider app uses this too
+            "Picked Up": "PickedUp",
         }
         new_status = DISPLAY_TO_INTERNAL.get(new_status, new_status)
 
@@ -476,9 +502,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         }
 
         if new_status not in STATUS_MAP:
-            return Response(
-                {"error": f"Invalid status. Choose from: {list(STATUS_MAP.keys())}"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400,
+                message=f"Invalid status. Choose from: {list(STATUS_MAP.keys())}",
             )
 
         old_status = order.status
@@ -488,13 +514,18 @@ class OrderViewSet(viewsets.ModelViewSet):
         # Keep timestamps consistent with rider-app completion flows.
         update_fields = ["status", "updated_at", "payment_status"]
         if new_status == "CustomerCanceled":
+            reason = request.data.get("reason")
+            order.cancellation_reason = reason
+            order.canceled_at = now
             order.payment_status = "Cancelled"
+            update_fields.extend(["cancellation_reason", "canceled_at"])
+
             # cancel the order charge as well
             charge = order.charges.all().first()
             if charge:
                 if charge.status == "completed":
                     # refund the user wallet
-                    wallet = user.wallet
+                    wallet = order.user.wallet
                     wallet.credit(
                         charge.amount,
                         f"Refund for order #{order.order_number}",
@@ -504,9 +535,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 charge.save()
 
         if new_status == "Assigned":
-            return Response(
-                {"error": f"Please go assign a rider first biko! 😡"},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise ServiceException(
+                status_code=400, message="Please go assign a rider first biko! 😡"
             )
 
         if new_status == "PickedUp" and not getattr(order, "picked_up_at", None):
@@ -517,22 +547,20 @@ class OrderViewSet(viewsets.ModelViewSet):
             update_fields.append("arrived_at")
         if new_status == "Done" and not getattr(order, "completed_at", None):
             if not order.rider:
-                return Response(
-                    {
-                        "error": f"You can't complete an order that has rider assigned! 😡"
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                raise ServiceException(
+                    status_code=400,
+                    message="You can't complete an order that has no rider assigned! 😡",
                 )
             order.completed_at = now
             update_fields.append("completed_at")
 
         order.save(update_fields=update_fields)
 
-        # Keep Delivery records in sync so the serializer fallback stays consistent.
+        # Keep Delivery records in sync
         ORDER_TO_DELIVERY_STATUS = {
-            "PickedUp": "InTransit",  # rider has picked up → delivery in transit
+            "PickedUp": "InTransit",
             "Started": "InTransit",
-            "Arrived": "InTransit",  # rider at dropoff; delivery still in progress
+            "Arrived": "InTransit",
             "Done": "Delivered",
             "CustomerCanceled": "Canceled",
             "RiderCanceled": "Canceled",
@@ -562,10 +590,11 @@ class OrderViewSet(viewsets.ModelViewSet):
             "Assigned": "assigned",
         }
         label = status_labels.get(new_status, new_status.lower())
-        if rider_name and new_status == "Started":
-            text = f"{order.order_number} {label} — {rider_name} heading out"
-        else:
-            text = f"{order.order_number} {label}"
+        text = (
+            f"{order.order_number} {label} — {rider_name} heading out"
+            if rider_name and new_status == "Started"
+            else f"{order.order_number} {label}"
+        )
 
         emit_activity(
             event_type=event_type,
@@ -579,7 +608,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             },
         )
 
-        return Response(self.get_serializer(order).data)
+        serializer = self.get_serializer(order)
+        return service_response(
+            status="success",
+            message=f"Order status updated to {new_status}",
+            data=serializer.data,
+            status_code=200,
+        )
 
     @action(detail=True, methods=["patch"], url_path="update-price")
     def update_price(self, request, order_number=None):
@@ -641,6 +676,27 @@ class OrderViewSet(viewsets.ModelViewSet):
                         )
                         leg.rider_payout = payout
                         leg.save(update_fields=["rider_payout"])
+
+        return Response(self.get_serializer(order).data)
+
+    @action(detail=True, methods=["patch"], url_path="update-partner-stats")
+    def update_partner_stats(self, request, order_number=None):
+        """Update partner-specific order stats (rider_completed_count, day_returned_count)."""
+        order = self.get_object()
+
+        rider_completed_count = request.data.get("rider_completed_count")
+        day_returned_count = request.data.get("day_returned_count")
+
+        update_fields = []
+        if rider_completed_count is not None:
+            order.rider_completed_count = int(rider_completed_count)
+            update_fields.append("rider_completed_count")
+        if day_returned_count is not None:
+            order.day_returned_count = int(day_returned_count)
+            update_fields.append("day_returned_count")
+
+        if update_fields:
+            order.save(update_fields=update_fields)
 
         return Response(self.get_serializer(order).data)
 
@@ -792,7 +848,9 @@ class OrderViewSet(viewsets.ModelViewSet):
 
                 # Notify the merchant that a rider was assigned to a relay leg
                 try:
-                    merchant_profile = getattr(sub_order.merchant, "merchant_profile", None)
+                    merchant_profile = getattr(
+                        sub_order.merchant, "merchant_profile", None
+                    )
                     if merchant_profile:
                         send_merchant_notification.delay(
                             merchant_id=str(merchant_profile.id),
@@ -928,9 +986,8 @@ class OrderViewSet(viewsets.ModelViewSet):
 
         return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     @exception_advice(model_object=ErrorLog)
-    @transaction.atomic
+    @action(detail=False, methods=["post"], url_path="merge-grouped-orders")
     def merge_grouped_orders(self, request):
         """Bulk merge multiple grouped orders into a parent order (Dispatcher Action)."""
         serializer = MergeGroupedOrdersSerializer(data=request.data)
@@ -943,6 +1000,7 @@ class OrderViewSet(viewsets.ModelViewSet):
         order_ids = serializer.validated_data["order_ids"]
         # Use simple Order model here if possible or self.queryset.model
         from orders.models import Order
+
         orders = Order.objects.filter(order_number__in=order_ids)
         if not orders.exists():
             return Response(
@@ -1052,13 +1110,13 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
 
         # If already ready with legs and not a forced retry, return current state
-        if (
-            getattr(order, "routing_status", None) == Order.RoutingStatus.READY
-            and order.legs.exists()
-            and not request.data.get("force", False)
-        ):
-            serializer = self.get_serializer(order)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+        # if (
+        #     getattr(order, "routing_status", None) == Order.RoutingStatus.READY
+        #     and order.legs.exists()
+        #     and not request.data.get("force", False)
+        # ):
+        #     serializer = self.get_serializer(order)
+        #     return Response(serializer.data, status=status.HTTP_200_OK)
 
         emit_activity(
             event_type="relay_route_processing",
@@ -1119,6 +1177,7 @@ class MerchantAPIKeyRequestOTPView(views.APIView):
 
         # Generate OTP
         otp = OTPService.generate_otp()
+        print(otp)
         user.otp = otp
         user.otp_created_at = timezone.now()
         user.save(update_fields=["otp", "otp_created_at"])
@@ -1333,114 +1392,6 @@ class MerchantRequestAPIAccessView(views.APIView):
 
         return Response(self.get_serializer(order).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["post"], url_path="generate-relay-route")
-    def generate_relay_route(self, request, order_number=None):
-        """Synchronously generate relay legs for this order (triggered manually by dispatcher)."""
-        from orders.models import Order
-        from .tasks import generate_relay_legs_sync
-
-        order = self.get_object()
-
-        # Auto-convert non-relay orders to relay when dispatcher triggers routing
-        if not getattr(order, "is_relay_order", False):
-            # Geocode missing coordinates from address strings
-            from orders.utils import geocode_address
-
-            first_delivery = order.deliveries.first()
-
-            if not order.pickup_latitude or not order.pickup_longitude:
-                if order.pickup_address:
-                    geo = geocode_address(order.pickup_address)
-                    if geo:
-                        order.pickup_latitude = geo["lat"]
-                        order.pickup_longitude = geo["lng"]
-
-            if first_delivery and (
-                not first_delivery.dropoff_latitude
-                or not first_delivery.dropoff_longitude
-            ):
-                if first_delivery.dropoff_address:
-                    geo = geocode_address(first_delivery.dropoff_address)
-                    if geo:
-                        first_delivery.dropoff_latitude = geo["lat"]
-                        first_delivery.dropoff_longitude = geo["lng"]
-                        first_delivery.save(
-                            update_fields=["dropoff_latitude", "dropoff_longitude"]
-                        )
-
-            # Check again after geocoding attempt
-            pickup_ok = order.pickup_latitude and order.pickup_longitude
-            dropoff_ok = (
-                first_delivery
-                and first_delivery.dropoff_latitude
-                and first_delivery.dropoff_longitude
-            )
-
-            if not pickup_ok or not dropoff_ok:
-                missing = []
-                if not pickup_ok:
-                    missing.append("pickup")
-                if not dropoff_ok:
-                    missing.append("dropoff")
-                return Response(
-                    {
-                        "error": f"Could not geocode {' and '.join(missing)} address. Please check the address is valid."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            order.is_relay_order = True
-            order.routing_status = Order.RoutingStatus.PENDING
-            order.save(
-                update_fields=[
-                    "is_relay_order",
-                    "routing_status",
-                    "pickup_latitude",
-                    "pickup_longitude",
-                ]
-            )
-
-        # If already ready with legs and not a forced retry, return current state
-        if (
-            getattr(order, "routing_status", None) == Order.RoutingStatus.READY
-            and order.legs.exists()
-            and not request.data.get("force", False)
-        ):
-            serializer = self.get_serializer(order)
-            return Response(serializer.data, status=status.HTTP_200_OK)
-
-        emit_activity(
-            event_type="relay_route_processing",
-            order_id=order.order_number,
-            text=f"Relay routing started for {order.order_number}",
-            color="blue",
-            metadata={},
-        )
-
-        # Run synchronously — blocking until legs are created or an error is set
-        generate_relay_legs_sync(str(order.id))
-
-        # Re-fetch with all needed relations so the serializer includes relay legs
-        from orders.models import Order as OrderModel
-
-        order = (
-            OrderModel.objects.prefetch_related(
-                "legs",
-                "legs__start_relay_node",
-                "legs__end_relay_node",
-                "legs__suggested_rider",
-                "legs__suggested_rider__user",
-                "deliveries",
-            )
-            .select_related(
-                "user", "rider", "rider__user", "rider__vehicle_type", "suggested_rider"
-            )
-            .get(pk=order.pk)
-        )
-
-        serializer = self.get_serializer(order)
-        return Response(serializer.data, status=status.HTTP_200_OK)
-
 
 class ActivityFeedView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -1530,6 +1481,11 @@ class MerchantViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("-created_at")
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [IsDispatcher()]
+        return super().get_permissions()
 
     @exception_advice(model_object=ErrorLog)
     def destroy(self, request, *args, **kwargs):

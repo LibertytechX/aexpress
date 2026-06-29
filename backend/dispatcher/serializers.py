@@ -10,6 +10,7 @@ from .models import (
     Vertical,
 )
 from authentication.serializers import UserSerializer
+from orders.serializers import DeliverySerializer
 from django.contrib.auth import get_user_model
 from decimal import Decimal
 from datetime import datetime, timedelta
@@ -275,6 +276,7 @@ class OrderSerializer(serializers.ModelSerializer):
     created = serializers.DateTimeField(
         source="created_at", format="%Y-%m-%d %H:%M", read_only=True
     )
+    deliveries = DeliverySerializer(many=True, read_only=True)
 
     # Computed fields
     pickup = serializers.CharField(source="pickup_address", read_only=True)
@@ -322,6 +324,7 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     sub_order_numbers = serializers.SerializerMethodField()
     sub_orders = serializers.SerializerMethodField()
+    vertical_lead_name = serializers.SerializerMethodField()
 
     def get_sub_order_numbers(self, obj):
         """Return list of sub-order order_numbers if this is a relay or grouped parent order."""
@@ -344,15 +347,30 @@ class OrderSerializer(serializers.ModelSerializer):
                 {
                     "id": so.order_number,
                     "status": so.status,
-                    "rider": so.rider.user.contact_name if so.rider and getattr(so.rider, "user", None) else None,
+                    "rider": (
+                        so.rider.user.contact_name
+                        if so.rider and getattr(so.rider, "user", None)
+                        else None
+                    ),
                     "riderId": so.rider.rider_id if so.rider else None,
-                    "created": so.created_at.strftime("%Y-%m-%d %H:%M") if getattr(so, "created_at", None) else None,
-                    "amount": float(so.total_amount) if getattr(so, "total_amount", None) else 0.0,
+                    "created": (
+                        so.created_at.strftime("%Y-%m-%d %H:%M")
+                        if getattr(so, "created_at", None)
+                        else None
+                    ),
+                    "amount": (
+                        float(so.total_amount)
+                        if getattr(so, "total_amount", None)
+                        else 0.0
+                    ),
                     "relay_leg_number": so.relay_leg_number,
                 }
                 for so in sub_orders
             ]
         return []
+
+    def get_vertical_lead_name(self, obj):
+        return obj.vertical_lead_name
 
     class Meta:
         from orders.models import Order
@@ -376,11 +394,17 @@ class OrderSerializer(serializers.ModelSerializer):
             "collect_on_delivery",
             "payment",
             "items",
+            "vertical_lead_name",
             "pkg",
             "notes",
             "timeline",
             "customer",
             "payment_info",
+            "is_partner_order",
+            "partner_order_count",
+            "day_returned_count",
+            "rider_completed_count",
+            "file_uploaded_urls",
             "customerPhone",
             "vehicle",
             "payment_status",
@@ -408,6 +432,8 @@ class OrderSerializer(serializers.ModelSerializer):
             "sub_orders",
             "dispatcher_assigned",
             "source",
+            "cancellation_reason",
+            "deliveries",
         ]
 
     def get_pickup_lat(self, obj):
@@ -454,7 +480,11 @@ class OrderSerializer(serializers.ModelSerializer):
         return first.receiver_phone if first else ""
 
     def get_vehicle(self, obj):
-        return obj.vehicle.name if obj.vehicle else "Bike"
+        vehicle = getattr(obj, "vehicle", None)
+        try:
+            return vehicle.name if vehicle else "Bike"
+        except Exception:
+            return "Bike"
 
     def get_pkg(self, obj):
         first = obj.deliveries.first()
@@ -627,14 +657,26 @@ class OrderPriceUpdateSerializer(serializers.Serializer):
 
 class OrderCreateSerializer(serializers.ModelSerializer):
     # Input fields from Frontend
-    pickup = serializers.CharField(write_only=True)
-    dropoff = serializers.CharField(write_only=True)
-    senderName = serializers.CharField(write_only=True)
-    senderPhone = serializers.CharField(write_only=True)
-    receiverName = serializers.CharField(write_only=True)
-    receiverPhone = serializers.CharField(write_only=True)
-    vehicle = serializers.CharField(write_only=True)  # "Bike", "Car", etc.
-    packageType = serializers.CharField(write_only=True)
+    pickup = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    dropoff = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    senderName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    senderPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    vehicle = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )  # "Bike", "Car", etc.
+    packageType = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
     )
@@ -672,6 +714,13 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     is_relay_order = serializers.BooleanField(
         write_only=True, required=False, default=False
     )
+    is_partner_order = serializers.BooleanField(
+        write_only=True, required=False, default=False
+    )
+    partner_order_count = serializers.IntegerField(write_only=True, required=False)
+    file_uploaded_urls = serializers.ListField(
+        child=serializers.URLField(), required=False, default=list
+    )
 
     class Meta:
         from orders.models import Order
@@ -699,194 +748,19 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "distance_km",
             "duration_minutes",
             "is_relay_order",
+            "is_partner_order",
+            "partner_order_count",
+            "file_uploaded_urls",
+            "payment_method",
         ]
 
     def create(self, validated_data):
-        from orders.models import Order, Delivery, Vehicle
-        from .models import Rider
-        from authentication.models import User
-        from orders.utils import geocode_address
-        from orders.pricing import calculate_effective_fare
-        import uuid
+        from orders.services import get_order_service
 
-        # Extract non-model fields
-        pickup = validated_data.pop("pickup")
-        dropoff = validated_data.pop("dropoff")
-        pickup_lat = validated_data.pop("pickup_lat", None)
-        pickup_lng = validated_data.pop("pickup_lng", None)
-        dropoff_lat = validated_data.pop("dropoff_lat", None)
-        dropoff_lng = validated_data.pop("dropoff_lng", None)
-        is_relay_order = validated_data.pop("is_relay_order", False)
-        sender_name = validated_data.pop("senderName")
-        sender_phone = validated_data.pop("senderPhone")
-        receiver_name = validated_data.pop("receiverName")
-        receiver_phone = validated_data.pop("receiverPhone")
-        vehicle_name = validated_data.pop("vehicle")
-        package_type = validated_data.pop("packageType")
-        price = validated_data.get("price")
-        manual_price = bool(validated_data.get("manual_price"))
-        # cod = validated_data.get("cod") # Unused
-        # riderId/merchantId are frontend-only fields (not model fields)
-        rider_id = (validated_data.pop("riderId", "") or "").strip()
-        merchant_id = (validated_data.pop("merchantId", "") or "").strip()
-        distance_km = validated_data.get("distance_km")
-        duration_minutes = validated_data.get("duration_minutes")
-
-        def _coords_missing(lat, lng):
-            return lat is None or lng is None
-
-        # Best-effort geocoding fallback: frontend may send addresses without selecting a Places suggestion.
-        # For relay orders, coordinates are required (routing depends on them).
-        if _coords_missing(pickup_lat, pickup_lng) and pickup:
-            try:
-                geo = geocode_address(pickup)
-            except Exception:
-                geo = None
-            if geo:
-                pickup_lat = geo.get("lat")
-                pickup_lng = geo.get("lng")
-
-        if _coords_missing(dropoff_lat, dropoff_lng) and dropoff:
-            try:
-                geo = geocode_address(dropoff)
-            except Exception:
-                geo = None
-            if geo:
-                dropoff_lat = geo.get("lat")
-                dropoff_lng = geo.get("lng")
-
-        if is_relay_order:
-            missing = []
-            if _coords_missing(pickup_lat, pickup_lng):
-                missing.append("pickup")
-            if _coords_missing(dropoff_lat, dropoff_lng):
-                missing.append("dropoff")
-            if missing:
-                raise serializers.ValidationError(
-                    {
-                        "detail": (
-                            "Could not geocode "
-                            + " and ".join(missing)
-                            + " address. Please select from suggestions or enter a more specific address."
-                        )
-                    }
-                )
-
-        # Resolve Vehicle
-        vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
-        if not vehicle_obj:
-            vehicle_obj = Vehicle.objects.first()
-
-        # Resolve Rider
-        rider_obj = None
-        if rider_id:
-            # Frontend historically sends Rider.rider_id (6-digit string), but
-            # some clients may send the Rider UUID. Filtering a UUIDField with
-            # a non-UUID string raises ValidationError, so we must guard.
-            def _is_uuid(val: str) -> bool:
-                try:
-                    uuid.UUID(str(val))
-                    return True
-                except (ValueError, AttributeError, TypeError):
-                    return False
-
-            if _is_uuid(rider_id):
-                rider_obj = Rider.objects.filter(id=rider_id).first()
-                # Fallback in case an upstream client accidentally sends rider_id
-                if not rider_obj:
-                    rider_obj = Rider.objects.filter(rider_id=rider_id).first()
-            else:
-                rider_obj = Rider.objects.filter(rider_id=rider_id).first()
-
-        # Resolve User (Merchant or Request User)
-        order_user = self.context["request"].user
-        if merchant_id:
-            # Try to find merchant by profile id (6 chars) or user id (uuid)
-            # The frontend sends the 6-char ID usually if using the dropdown which likely uses the proper ID
-            # But wait, Merchant object in frontend has `id` (6 chars) and `userId` (UUID).
-            # Let's check how we want to look it up.
-            # If we send the UUID (userId), it's a direct User lookup.
-            # If we send the 6-char ID, we need to look up via Merchant profile.
-            # Let's assume we might send the 6-char ID.
-            from .models import Merchant as MerchantProfile
-
-            try:
-                profile = MerchantProfile.objects.filter(
-                    merchant_id=merchant_id
-                ).first()
-                if profile:
-                    order_user = profile.user
-            except Exception:
-                pass
-
-        # Calculate Price
-        if manual_price and price is not None:
-            total_amount = price
-        else:
-            total_amount = calculate_effective_fare(
-                order_user,
-                vehicle_obj,
-                distance_km or 0,
-                duration_minutes or 0,
-            )
-
-        # Ensure decimals serialize consistently
-        try:
-            total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))
-        except Exception:
-            pass
-
-        # Create Order
-        order = Order.objects.create(
-            user=order_user,
-            pickup_address=pickup,
-            pickup_latitude=pickup_lat,
-            pickup_longitude=pickup_lng,
-            sender_name=sender_name,
-            sender_phone=sender_phone,
-            vehicle=vehicle_obj,
-            total_amount=total_amount,
-            rider=rider_obj,
-            dispatcher_assigned=True if rider_obj else False,
-            source="dispatcher_web",
-            status="Assigned" if rider_obj else "Pending",
-            distance_km=distance_km,
-            duration_minutes=duration_minutes,
-            is_relay_order=is_relay_order,
-            routing_status=(
-                Order.RoutingStatus.PENDING
-                if is_relay_order
-                else Order.RoutingStatus.READY
-            ),
-            routing_error="",
-            suggested_rider=None,
+        order_service = get_order_service()
+        return order_service.create_dispatcher_order(
+            self.context["request"].user, validated_data
         )
-
-        # Create Delivery
-        Delivery.objects.create(
-            order=order,
-            pickup_address=pickup,
-            pickup_latitude=pickup_lat,
-            pickup_longitude=pickup_lng,
-            sender_name=sender_name,
-            sender_phone=sender_phone,
-            dropoff_address=dropoff,
-            dropoff_latitude=dropoff_lat,
-            dropoff_longitude=dropoff_lng,
-            receiver_name=receiver_name,
-            receiver_phone=receiver_phone,
-            package_type=package_type,
-            distance_km=distance_km,
-            duration_minutes=duration_minutes,
-        )
-
-        payment_method = self.initial_data.get("payment_method")
-        if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
-            from orders.tasks import create_order_charge
-
-            create_order_charge.delay(order.id)
-
-        return order
 
 
 class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
@@ -911,6 +785,8 @@ class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
+        # Remove default UniqueTogetherValidator to allow POST upsert (update_or_create)
+        validators = []
 
     def create(self, validated_data):
         from orders.models import MerchantPricingOverride
@@ -1001,6 +877,15 @@ class MerchantSerializer(serializers.ModelSerializer):
     walletBalance = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     joined = serializers.DateTimeField(source="created_at", read_only=True)
+    isPartner = serializers.BooleanField(
+        source="merchant_profile.is_partner", read_only=True
+    )
+    partnerBasePrice = serializers.DecimalField(
+        source="merchant_profile.partner_base_price",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
 
     class Meta:
         model = User
@@ -1016,6 +901,8 @@ class MerchantSerializer(serializers.ModelSerializer):
             "walletBalance",
             "status",
             "joined",
+            "isPartner",
+            "partnerBasePrice",
         ]
 
     def get_name(self, obj):

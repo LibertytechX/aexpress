@@ -172,7 +172,7 @@ class MerchantPricingOverride(models.Model):
 
     class Meta:
         db_table = "merchant_pricing_overrides"
-        unique_together = [("merchant", "vehicle")]
+        # unique_together = [("merchant", "vehicle")]
         indexes = [
             models.Index(fields=["merchant", "vehicle"]),
             models.Index(fields=["merchant", "-created_at"]),
@@ -251,7 +251,12 @@ class Order(models.Model):
     vehicle = models.ForeignKey(
         Vehicle, on_delete=models.PROTECT, related_name="orders"
     )
-
+    partner = models.CharField(max_length=20, null=True, blank=True)
+    is_partner_order = models.BooleanField(default=False)
+    partner_order_count = models.PositiveIntegerField(null=True, blank=True)
+    day_returned_count = models.PositiveIntegerField(null=True, blank=True)
+    rider_completed_count = models.PositiveIntegerField(null=True, blank=True)
+    file_uploaded_urls = models.JSONField(null=True, blank=True, default=list)
     # Pickup information
     pickup_address = models.TextField()
     pickup_latitude = models.FloatField(null=True, blank=True)
@@ -375,6 +380,22 @@ class Order(models.Model):
         help_text="Where the order was created from",
     )
 
+    # SmartParcel locker delivery fields
+    is_percel_order = models.BooleanField(
+        default=False, help_text="True if this is a SmartParcel locker order"
+    )
+    is_pickup_percel = models.BooleanField(
+        default=False, help_text="True if pickup is from a SmartParcel box"
+    )
+    isdelivery_percel = models.BooleanField(
+        default=False, help_text="True if delivery is to a SmartParcel box"
+    )
+    percel_info = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Full JSON response/info from SmartParcel for this order",
+    )
+
     # Additional info
     notes = models.TextField(blank=True)
     payment_info = models.JSONField(null=True, blank=True)
@@ -391,6 +412,13 @@ class Order(models.Model):
 
     def __str__(self):
         return f"Order {self.order_number} - {self.user.business_name}"
+
+    @property
+    def vertical_lead_name(self) -> str | None:
+        """Get the name of the vertical lead for this order."""
+        if not (self.rider and self.rider.hub and self.rider.hub.zone_id):
+            return None
+        return self.rider.hub.zone.zone_lead.user.full_name
 
     def save(self, *args, **kwargs):
         """Generate order number if not exists."""

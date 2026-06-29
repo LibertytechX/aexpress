@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     User, Phone, Mail, Lock, Building, MapPin,
     ArrowRight, Loader2, Eye, EyeOff, Check,
-    Package, Zap, Shield, ChevronLeft
+    Package, Shield, ChevronLeft, Gift
 } from 'lucide-react';
 import Image from 'next/image';
 import Logo from '@/components/ui/logo';
@@ -47,8 +47,10 @@ const slides = [
     }
 ];
 
-export default function SignupPage() {
+function SignupForm() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const source = searchParams.get('source');
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
@@ -69,6 +71,7 @@ export default function SignupPage() {
     const [confirmPass, setConfirmPass] = useState("");
     const [showPass, setShowPass] = useState(false);
     const [showConfirmPass, setShowConfirmPass] = useState(false);
+    const [referralCode, setReferralCode] = useState("");
 
     // Step 2 fields
     const [businessName, setBusinessName] = useState("");
@@ -98,8 +101,9 @@ export default function SignupPage() {
                 email: email,
                 password: pass,
                 confirm_password: confirmPass,
-                address: address
-            });
+                address: address,
+                referral_code: referralCode
+            }, source || undefined);
 
             if (response.success) {
                 // If it auto-logged in (no OTP required by backend actually), we'd just go to Step 4.
@@ -165,7 +169,7 @@ export default function SignupPage() {
                     <div className="absolute bottom-[-10%] left-[-20%] w-[800px] h-[800px] bg-[#00B67A]/5 blur-[120px] rounded-full" />
                 </div>
 
-                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3">
+                  <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="relative z-10 flex items-center gap-3 w-[50px]">
                     <Logo />
                 </motion.div>
 
@@ -362,6 +366,19 @@ export default function SignupPage() {
                                         </div>
                                     </div>
 
+                                    <div className="space-y-1.5">
+                                        <label className="text-sm font-semibold text-[#2F3758]">Do you have a referral code? (Optional)</label>
+                                        <div className="relative group">
+                                            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#FBB12F] transition-colors"><Gift size={18} /></div>
+                                            <input
+                                                value={referralCode}
+                                                onChange={e => setReferralCode(e.target.value)}
+                                                placeholder="Enter code if any"
+                                                className="w-full pl-10 pr-4 py-3.5 bg-slate-50 border border-slate-200 rounded-xl text-[#2F3758] placeholder:text-slate-400 focus:outline-none focus:border-[#FBB12F] focus:ring-4 focus:ring-[#FBB12F]/10 transition-all font-medium"
+                                            />
+                                        </div>
+                                    </div>
+
                                     <button
                                         onClick={() => setStep(2)}
                                         disabled={!contactName || phone.length < 10 || !email || !isValidEmail || !pass || !confirmPass || passwordsDontMatch}
@@ -500,5 +517,17 @@ export default function SignupPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+export default function SignupPage() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen w-full flex items-center justify-center bg-white">
+                <Loader2 className="w-10 h-10 animate-spin text-[#2F3758]" />
+            </div>
+        }>
+            <SignupForm />
+        </Suspense>
     );
 }

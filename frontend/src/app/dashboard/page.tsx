@@ -167,6 +167,26 @@ const Icons = {
       <path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4" />
     </svg>
   ),
+  subscription: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 3h12l4 6-10 12L2 9z" />
+    </svg>
+  ),
+  chevronDown: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  ),
+  plan: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 10h18" /><path d="M9 22V10" />
+    </svg>
+  ),
+  invoice: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14 2 14 8 20 8" /><path d="M8 13h8" /><path d="M8 17h8" /><path d="M8 9h2" />
+    </svg>
+  ),
 };
 
 // ─── MOCK DATA ──────────────────────────────────────────────────
@@ -200,6 +220,27 @@ const STATUS_COLORS = {
 };
 
 // ─── STYLES ─────────────────────────────────────────────────────
+// ─── UTILS ─────────────────────────────────────────────────────
+const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } | null> => {
+  return new Promise((resolve) => {
+    if (!window.google?.maps?.Geocoder) {
+      resolve(null);
+      return;
+    }
+    const geocoder = new window.google.maps.Geocoder();
+    // Bias towards Lagos context
+    const lagosAddress = address.toLowerCase().includes('lagos') ? address : `${address}, Lagos, Nigeria`;
+    geocoder.geocode({ address: lagosAddress }, (results, status) => {
+      if (status === 'OK' && results?.[0]?.geometry?.location) {
+        const loc = results[0].geometry.location;
+        resolve({ lat: loc.lat(), lng: loc.lng() });
+      } else {
+        resolve(null);
+      }
+    });
+  });
+};
+
 const S = {
   // New Palette
   navy: "#2F3758", // Primary Text / Headers / Dark Card
@@ -225,6 +266,7 @@ export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState(["subscription"]); // Subscription open by default
   const [walletBalance, setWalletBalance] = useState(0);
   const [orders, setOrders] = useState([]);
   const [transactions, setTransactions] = useState([]);
@@ -319,22 +361,27 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCancelOrder = async (orderNumber) => {
+  const handleCancelOrder = async (orderNumber, reason) => {
     setLoading(true);
     try {
-      const response = await API.Orders.cancelOrder(orderNumber);
-      if (response.success) {
+      const response = await API.Orders.cancelOrder(orderNumber, reason);
+      // Handle both {success: true} and {status: 'success'}
+      if (response.success || response.status === 'success') {
         showNotif(response.message, 'success');
-        if (response.refund && response.refund.processed) {
-          showNotif(`₦${response.refund.amount.toLocaleString()} refunded to wallet`, 'success');
+        
+        // Extract refund info from top-level or data object
+        const refund = response.refund || response.data?.refund;
+        if (refund && refund.processed) {
+          showNotif(`₦${refund.amount.toLocaleString()} refunded to wallet`, 'success');
         }
+        
         await loadOrders();
         await loadWalletBalance();
         await loadTransactions();
         setOrderDetailId(null); // Go back to orders list
         return { success: true };
       } else {
-        const errorMsg = response.error || response.detail || 'Failed to cancel order';
+        const errorMsg = response.error || response.message || response.detail || 'Failed to cancel order';
         showNotif(errorMsg, 'error');
         return { success: false, error: errorMsg };
       }
@@ -418,6 +465,12 @@ export default function DashboardPage() {
     const displayHours = hours % 12 || 12;
 
     return `${month} ${day}, ${displayHours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
+  };
+
+  const toggleMenu = (id) => {
+    setExpandedMenus(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
   };
 
   const handleLogin = (user) => {
@@ -513,6 +566,16 @@ export default function DashboardPage() {
     { id: "newOrder", label: "New Order", icon: Icons.newOrder },
     { id: "orders", label: "Orders", icon: Icons.orders },
     { id: "wallet", label: "Wallet", icon: Icons.wallet },
+    { 
+      id: "subscription", 
+      label: "Subscription", 
+      icon: Icons.subscription, 
+      badge: "NEW",
+      subItems: [
+        { id: "subscription", label: "Plan", icon: Icons.plan },
+        { id: "subscription-invoices", label: "Invoice", icon: Icons.invoice },
+      ]
+    },
     { id: "website", label: "My Website", icon: Icons.website },
     { id: "webpos", label: "WebPOS", icon: Icons.webpos, badge: "SOON" },
     { id: "loans", label: "Business Loans", icon: Icons.loans, badge: "SOON" },
@@ -694,44 +757,96 @@ export default function DashboardPage() {
         {/* Nav */}
         <nav style={{ flex: 1, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
           {navItems.map(item => {
-            const active = screen === item.id;
+            const hasSubItems = item.subItems && item.subItems.length > 0;
+            const isExpanded = expandedMenus.includes(item.id);
+            const isParentActive = screen === item.id || (hasSubItems && item.subItems.some(sub => screen === sub.id));
+            
             return (
-              <button key={item.id} onClick={() => { setScreen(item.id); setSidebarOpen(false); setOrderDetailId(null); }}
-                title={collapsed ? item.label : ""}
-                className={`relative group flex items-center gap-3 rounded-xl transition-all duration-200 ${collapsed ? "justify-center py-3" : "px-4 py-3"}`}
-                style={{
-                  background: active ? S.gold : "transparent",
-                  color: active ? S.navy : "rgba(255,255,255,0.7)",
-                  fontWeight: active ? 600 : 500,
-                  boxShadow: active ? "0 4px 12px rgba(251, 177, 47, 0.25)" : "none"
-                }}
-              >
-                <span style={{
-                  color: active ? S.navy : "rgba(255,255,255,0.7)",
-                  transition: "color 0.2s",
-                  transform: active ? "scale(1.05)" : "scale(1)"
-                }} className="group-hover:text-white">
-                  {React.cloneElement(item.icon, {
-                    strokeWidth: active ? 2.5 : 2,
-                    stroke: "currentColor"
-                  })}
-                </span>
+              <div key={item.id} className="flex flex-col gap-1">
+                <button 
+                  onClick={() => {
+                    if (hasSubItems && !collapsed) {
+                      toggleMenu(item.id);
+                    } else {
+                      setScreen(item.id);
+                      setSidebarOpen(false);
+                      setOrderDetailId(null);
+                    }
+                  }}
+                  title={collapsed ? item.label : ""}
+                  className={`relative group flex items-center gap-3 rounded-xl transition-all duration-300 ${collapsed ? "justify-center py-3" : "px-4 py-3"}`}
+                  style={{
+                    background: (!hasSubItems && screen === item.id) ? S.gold : "transparent",
+                    color: (screen === item.id || (hasSubItems && isParentActive)) ? "#fff" : "rgba(255,255,255,0.7)",
+                    fontWeight: isParentActive ? 600 : 500,
+                  }}
+                >
+                  <span style={{
+                    color: isParentActive ? S.gold : "rgba(255,255,255,0.7)",
+                    transition: "color 0.2s",
+                  }} className="group-hover:text-white">
+                    {React.cloneElement(item.icon, {
+                      strokeWidth: isParentActive ? 2.5 : 2,
+                      stroke: "currentColor"
+                    })}
+                  </span>
 
-                {!collapsed && (
-                  <>
-                    <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]! group-hover:text-white transition-colors'>{item.label}</span>
-                    {item.badge && (
-                      <span style={{
-                        marginLeft: "auto",
-                        background: item.badge === "FREE" ? S.green : "rgba(255,255,255,0.1)",
-                        color: "#fff",
-                        fontSize: 10, fontWeight: 700,
-                        padding: "2px 8px", borderRadius: 20
-                      }}>{item.badge}</span>
-                    )}
-                  </>
+                  {!collapsed && (
+                    <>
+                      <span style={{ fontFamily: "'Outfit', sans-serif" }} className='text-[13px]! group-hover:text-white transition-colors'>{item.label}</span>
+                      {item.badge && (
+                        <span style={{
+                          marginLeft: "auto",
+                          background: item.badge === "NEW" ? S.gold : item.badge === "FREE" ? S.green : "rgba(255,255,255,0.1)",
+                          color: item.badge === "NEW" ? S.navy : "#fff",
+                          fontSize: 8, fontWeight: 800,
+                          padding: "2px 7px", borderRadius: 6,
+                          boxShadow: item.badge === "NEW" ? "0 0 12px rgba(251, 177, 47, 0.3)" : "none",
+                          letterSpacing: "0.5px"
+                        }}>{item.badge}</span>
+                      )}
+                      {hasSubItems && (
+                        <span style={{ 
+                          marginLeft: item.badge ? 8 : "auto", 
+                          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                          transition: "transform 0.3s ease",
+                          opacity: 0.7
+                        }}>
+                          {Icons.chevronDown}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </button>
+
+                {/* Sub Items */}
+                {hasSubItems && isExpanded && !collapsed && (
+                  <div className="flex flex-col gap-1 ml-9 mt-1 mb-2 border-l border-white/10 pl-2">
+                    {item.subItems.map(sub => {
+                      const isSubActive = screen === sub.id;
+                      return (
+                        <button
+                          key={sub.id}
+                          onClick={() => {
+                            setScreen(sub.id);
+                            setSidebarOpen(false);
+                            setOrderDetailId(null);
+                          }}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200"
+                          style={{
+                            color: isSubActive ? S.gold : "rgba(255,255,255,0.5)",
+                            fontWeight: isSubActive ? 600 : 500,
+                            background: isSubActive ? "rgba(255,255,255,0.05)" : "transparent"
+                          }}
+                        >
+                          <span style={{ transform: "scale(0.85)" }}>{sub.icon}</span>
+                          <span style={{ fontSize: 12, fontFamily: "'Outfit', sans-serif" }}>{sub.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </nav>
@@ -807,7 +922,7 @@ export default function DashboardPage() {
 
           <div className="flex-1 min-w-0">
             <h1 className="text-lg md:text-xl font-bold text-[#2F3758] truncate">
-              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : "Page"}
+              {screen === "dashboard" ? "Dashboard" : screen === "newOrder" ? "New Delivery" : screen === "orders" ? "Orders" : screen === "wallet" ? "Wallet" : screen === "subscription" ? "Subscription" : screen === "website" ? "My Website" : screen === "webpos" ? "WebPOS" : screen === "loans" ? "Business Loans" : screen === "accounting" ? "Accounting" : screen === "settings" ? "Settings" : screen === "support" ? "Support" : "Page"}
             </h1>
           </div>
 
@@ -942,9 +1057,10 @@ export default function DashboardPage() {
                       package_type: orderData.packageType || 'Box',
                       notes: orderData.notes || '',
                       distance_km: orderData.distance_km || 0,
-                      duration_minutes: orderData.duration_minutes || 0
+                      duration_minutes: orderData.duration_minutes || 0,
+                      mode: orderData.mode
                     };
-                    console.log('📡 Sending to API (Quick Send):', apiPayload);
+                    console.log(`📡 Sending to API (${orderData.mode}):`, apiPayload);
                     response = await API.Orders.createQuickSend(apiPayload);
                   } else if (orderData.mode === 'multi') {
                     response = await API.Orders.createMultiDrop({
@@ -1006,6 +1122,17 @@ export default function DashboardPage() {
               transactions={transactions}
               onFund={() => setFundModal(true)}
             />
+          )}
+          {screen === "subscription" && (
+            <SubscriptionScreen 
+              currentUser={currentUser} 
+              onShowNotif={showNotif} 
+              balance={walletBalance}
+              onRefreshBalance={loadWalletBalance}
+            />
+          )}
+          {screen === "subscription-invoices" && (
+            <InvoicesScreen onShowNotif={showNotif} />
           )}
           {screen === "settings" && (
             <SettingsScreen
@@ -2881,20 +3008,129 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
 
   // ─── Quick Send state (declare BEFORE effects that depend on it) ───
   const [dropoffAddress, setDropoffAddress] = useState("");
+  const [dropoffCoords, setDropoffCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [receiverName, setReceiverName] = useState("");
   const [receiverPhone, setReceiverPhone] = useState("");
   const [notes, setNotes] = useState("");
   const [estimatedCost, setEstimatedCost] = useState(null);
 
+  // ─── SmartParcel integration ───
+  const [isPickupParcel, setIsPickupParcel] = useState(false);
+  const [collectCode, setCollectCode] = useState('');
+  const [isResolvingCode, setIsResolvingCode] = useState(false);
+  const [resolveError, setResolveError] = useState('');
+  const [resolvedParcel, setResolvedParcel] = useState<any>(null);
+
+  const [isDeliveryParcel, setIsDeliveryParcel] = useState(false);
+  const [spStates, setSpStates] = useState<any[]>([]);
+  const [spCities, setSpCities] = useState<any[]>([]);
+  const [spBoxes, setSpBoxes] = useState<any[]>([]);
+  const [spSizes, setSpSizes] = useState<any[]>([]);
+  const [selectedSpStateId, setSelectedSpStateId] = useState('');
+  const [selectedSpCityId, setSelectedSpCityId] = useState('');
+  const [selectedSpBoxId, setSelectedSpBoxId] = useState('');
+  const [selectedSpSizeId, setSelectedSpSizeId] = useState('');
+  const [loadingSpCities, setLoadingSpCities] = useState(false);
+  const [loadingSpBoxes, setLoadingSpBoxes] = useState(false);
+
+  // Load SP states & sizes once
+  useEffect(() => {
+    API.SmartParcel.listStates().then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.states && Array.isArray(raw.states)) arr = raw.states;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpStates(arr); 
+      }
+    }).catch(() => {});
+    
+    API.SmartParcel.listLockerSizes().then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.sizes && Array.isArray(raw.sizes)) arr = raw.sizes;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpSizes(arr); 
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSpStateId) { setSpCities([]); return; }
+    setLoadingSpCities(true);
+    setSpCities([]);
+    API.SmartParcel.listCities(selectedSpStateId).then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.cities && Array.isArray(raw.cities)) arr = raw.cities;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpCities(arr); 
+      }
+    }).catch(() => {}).finally(() => setLoadingSpCities(false));
+  }, [selectedSpStateId]);
+
+  useEffect(() => {
+    if (!selectedSpCityId) { setSpBoxes([]); return; }
+    setLoadingSpBoxes(true);
+    setSpBoxes([]);
+    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { 
+      if (r.status === 'success') {
+        const raw = r.data;
+        let arr = [];
+        if (Array.isArray(raw)) arr = raw;
+        else if (raw?.boxes && Array.isArray(raw.boxes)) arr = raw.boxes;
+        else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
+        else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
+        setSpBoxes(arr); 
+      }
+    }).catch(() => {}).finally(() => setLoadingSpBoxes(false));
+  }, [selectedSpCityId]);
+
+  const handleResolveCollectCode = async () => {
+    if (!collectCode) return;
+    setIsResolvingCode(true);
+    setResolveError('');
+    setResolvedParcel(null);
+    try {
+      const res = await API.SmartParcel.resolveCollectCode(collectCode);
+      if (res.status === 'success' && res.data) {
+        setResolvedParcel(res.data);
+        setPickupAddress(res.data.boxaddress);
+      } else {
+        setResolveError(res.message || 'Collect code not found.');
+      }
+    } catch (e: any) {
+      setResolveError(e.message || 'Failed to resolve collect code.');
+    } finally {
+      setIsResolvingCode(false);
+    }
+  };
+
   // Wrapper to log dropoff address changes
-  const handleDropoffChange = (value) => {
-    console.log('📍 Dropoff address changed:', value);
+  const handleDropoffChange = (value, coords?: { lat: number, lng: number }) => {
+    console.log('📍 Dropoff address changed:', value, coords);
     setDropoffAddress(value);
+    setDropoffCoords(coords || null);
+  };
+
+  const handlePickupChange = (value, coords?: { lat: number, lng: number }) => {
+    console.log('📍 Pickup address changed:', value, coords);
+    setPickupAddress(value);
+    setPickupCoords(coords || null);
   };
 
   // ─── Same-address validation ───
@@ -2952,13 +3188,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   useEffect(() => {
     console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
 
-    // Only calculate for Quick Send mode when both addresses are available
-    if (mode !== 'quick' || !pickupAddress || !dropoffAddress) {
-      console.log('⏭️ Skipping route calculation:', {
-        reason: mode !== 'quick' ? 'Not quick mode' : !pickupAddress ? 'No pickup' : 'No dropoff',
+    // Only calculate for Quick Send & Grouped mode when both addresses are sufficiently ready
+    const isPickupReady = pickupCoords || (pickupAddress && pickupAddress.trim().length >= 8);
+    const isDropoffReady = dropoffCoords || (dropoffAddress && dropoffAddress.trim().length >= 4);
+
+    if ((mode !== 'quick' && mode !== 'grouped') || !isPickupReady || !isDropoffReady) {
+      console.log('⏭️ Skipping route calculation: Addresses not ready', {
         mode,
-        hasPickup: !!pickupAddress,
-        hasDropoff: !!dropoffAddress
+        isPickupReady,
+        isDropoffReady
       });
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setCalculatingRoute(false);
@@ -2979,57 +3217,53 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     setCalculatingRoute(true);
 
     const calculateEarlyRoute = async () => {
-      console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
+      console.log('🔄 Starting early route calculation (Backend)...', { pickupAddress, dropoffAddress });
       setRouteError(null);
 
       try {
-        // Check if Google Maps is loaded
-        if (typeof google === 'undefined' || !google.maps) {
-          console.error('❌ Google Maps not loaded yet');
-          setRouteError('Maps not loaded');
-          setCalculatingRoute(false);
-          return;
+        let currentPickup = pickupCoords || pickupAddress;
+        let currentDropoff = dropoffCoords || dropoffAddress;
+
+        // Try to geocode if coordinates are missing to ensure coordinate-based payload
+        if (!pickupCoords && pickupAddress && pickupAddress.length > 5) {
+          const coords = await geocodeAddress(pickupAddress);
+          if (coords) {
+            setPickupCoords(coords);
+            currentPickup = coords;
+          }
+        }
+        if (!dropoffCoords && dropoffAddress && dropoffAddress.length > 5) {
+          const coords = await geocodeAddress(dropoffAddress);
+          if (coords) {
+            setDropoffCoords(coords);
+            currentDropoff = coords;
+          }
         }
 
-        // Use Google Maps Distance Matrix API to calculate route cheaply
-        const distanceMatrixService = new google.maps.DistanceMatrixService();
-
-        const request = {
-          origins: [pickupAddress],
-          destinations: [dropoffAddress],
-          travelMode: google.maps.TravelMode.DRIVING
+        const payload = {
+          mode: mode === 'grouped' ? 'quick' : mode, // Backend treats grouped as quick for routing
+          pickup: currentPickup,
+          deliveries: [currentDropoff]
         };
 
-        console.log('📡 Sending distance matrix request...', request);
-
-        distanceMatrixService.getDistanceMatrix(request, (response, status) => {
-          console.log('📥 Distance matrix response:', { status, response });
-
-          if (status === google.maps.DistanceMatrixStatus.OK && response?.rows[0]?.elements[0]) {
-            const element = response.rows[0].elements[0];
-            if (element.status === 'OK') {
-              const distanceKm = (element.distance.value / 1000).toFixed(1);
-              const durationMin = Math.ceil(element.duration.value / 60);
-
-              setEarlyRouteDistance(parseFloat(distanceKm));
-              setEarlyRouteDuration(durationMin);
-              setCalculatingRoute(false);
-
-              console.log('✅ Early route calculated (Matrix):', { distanceKm, durationMin });
-            } else {
-              console.error('❌ Route distance calculation failed within matrix:', element.status);
-              setRouteError('Could not find a route between these addresses');
-              setCalculatingRoute(false);
-            }
-          } else {
-            console.error('❌ Distance matrix request failed:', status);
-            setRouteError('Unable to calculate route');
-            setCalculatingRoute(false);
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          setMultiFares(res); // Store result in multiFares to share pricing logic
+          
+          const vehicleData = res.vehicles[vehicle];
+          if (vehicleData) {
+            setEarlyRouteDistance(vehicleData.distance_km);
+            setEarlyRouteDuration(vehicleData.duration_minutes);
           }
-        });
-      } catch (error) {
-        console.error('❌ Error calculating route:', error);
-        setRouteError('Error calculating route');
+          setCalculatingRoute(false);
+          console.log('✅ Early route calculated (Backend):', res);
+        } else {
+          setRouteError('Unable to calculate route via backend');
+          setCalculatingRoute(false);
+        }
+      } catch (error: any) {
+        console.error('❌ Error calculating route via backend:', error);
+        setRouteError(error.message || 'Error calculating route');
         setCalculatingRoute(false);
       }
     };
@@ -3037,7 +3271,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     // Debounce the calculation to avoid too many API calls
     const timeoutId = setTimeout(calculateEarlyRoute, 1000);
     return () => clearTimeout(timeoutId);
-  }, [mode, pickupAddress, dropoffAddress]);
+  }, [mode, pickupAddress, dropoffAddress, pickupCoords, dropoffCoords]);
 
   // ─── Load default address on mount ───
   useEffect(() => {
@@ -3063,102 +3297,22 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Multi-Drop state ───
   const [drops, setDrops] = useState([
-    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
+    { id: 1, address: "", coords: null, name: "", phone: "", pkg: "Box", notes: "" },
   ]);
   const nextDropId = useRef(2);
 
-  // ─── Calculate route for multi-drop price estimation ───
-  useEffect(() => {
-    if (mode !== 'multi' || !pickupAddress) {
-      setMultiFares(null);
-      setMultiRouteError(null);
-      setCalculatingMultiRoute(false);
-      return;
-    }
-
-    const validDrops = drops.filter(d => d.address.trim() && d.address.length > 5);
-    if (validDrops.length === 0) {
-      setMultiFares(null);
-      setMultiRouteError(null);
-      setCalculatingMultiRoute(false);
-      return;
-    }
-
-    setCalculatingMultiRoute(true);
-    setMultiRouteError(null);
-
-    const calculateMultiFares = async () => {
-      console.log('🔄 Starting multi route calculation for pricing...', { pickupAddress, validDrops });
-      try {
-        if (typeof google === 'undefined' || !google.maps) {
-          setMultiRouteError('Maps not loaded');
-          setCalculatingMultiRoute(false);
-          return;
-        }
-
-        const geocoder = new google.maps.Geocoder();
-        const geocode = (address: string) => new Promise((resolve, reject) => {
-          geocoder.geocode({ address }, (results: any, status: any) => {
-            if (status === 'OK' && results[0]) {
-              const loc = results[0].geometry.location;
-              resolve({ lat: loc.lat(), lng: loc.lng() });
-            } else {
-              reject(new Error(`Geocode failed for ${address}`));
-            }
-          });
-        });
-
-        // Geocode pickup and all drops
-        const pickupCoords = await geocode(pickupAddress);
-        const deliveriesCoords = await Promise.all(validDrops.map(d => geocode(d.address)));
-
-        const payload = {
-          mode: 'multi',
-          pickup: pickupCoords,
-          deliveries: deliveriesCoords
-        };
-
-        const res = await API.Orders.bulkCalculateFare(payload);
-        if (res.success && res.vehicles) {
-          setMultiFares(res);
-        } else {
-          setMultiRouteError("Failed to calculate multi-drop prices");
-        }
-      } catch (err: any) {
-        console.error("Multi-drop pricing error:", err);
-        setMultiRouteError(err.message || "Error calculating pricing");
-      } finally {
-        setCalculatingMultiRoute(false);
-      }
-    };
-
-    const timeoutId = setTimeout(calculateMultiFares, 1500);
-    return () => clearTimeout(timeoutId);
-  }, [mode, pickupAddress, drops]);
-
-  // ─── Route information state (for pricing) ───
-  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
-  const [routeDuration, setRouteDuration] = useState(null); // in minutes
-
-  // When navigating back to Step 1, ensure we don&apos;t keep using stale Step 2 route data.
-  // Step 1 should always reflect the *current* addresses via early-route calculation.
-  useEffect(() => {
-    if (step === 1) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRouteDistance(null);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setRouteDuration(null);
-    }
-  }, [step]);
-
   const addDrop = () => {
-    setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+    setDrops([...drops, { id: nextDropId.current++, address: "", coords: null, name: "", phone: "", pkg: "Box", notes: "" }]);
   };
   const removeDrop = (id) => {
     if (drops.length > 1) setDrops(drops.filter(d => d.id !== id));
   };
-  const updateDrop = (id, field, value) => {
-    setDrops(drops.map(d => d.id === id ? { ...d, [field]: value } : d));
+  const updateDrop = (id, field, value, coords?: { lat: number, lng: number }) => {
+    setDrops(drops.map(d => d.id === id ? { 
+      ...d, 
+      [field]: value, 
+      ...(field === "address" ? { coords: coords || null } : (coords ? { coords } : {}))
+    } : d));
   };
 
   // ─── Bulk Import state ───
@@ -3167,6 +3321,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [scanning, setScanning] = useState(false);
   const [scanPreview, setScanPreview] = useState(null);
   const fileRef = useRef(null);
+
+  const updateBulkRow = (id, field, value, coords?: { lat: number, lng: number }) => {
+    setBulkRows(bulkRows.map(r => r.id === id ? { 
+      ...r, 
+      [field]: value, 
+      ...(field === "address" ? { coords: coords || null } : (coords ? { coords } : {}))
+    } : r));
+  };
 
   // Parse pasted/typed text into rows
   const parseBulkText = (text) => {
@@ -3189,6 +3351,98 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     const rows = parseBulkText(bulkText);
     setBulkRows(rows);
   };
+
+  const removeBulkRow = (id) => {
+    setBulkRows(bulkRows.filter(r => r.id !== id));
+  };
+
+  // ─── Route information state (for pricing) ───
+  const [routeDistance, setRouteDistance] = useState(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState(null); // in minutes
+
+  // ─── Effects ───
+  // ─── Calculate route for multi-drop price estimation ───
+  useEffect(() => {
+    if ((mode !== 'multi' && mode !== 'bulk') || !pickupAddress) {
+      setMultiFares(null);
+      setMultiRouteError(null);
+      setCalculatingMultiRoute(false);
+      return;
+    }
+
+    const currentDrops = mode === 'bulk' ? bulkRows : drops;
+    const validDrops = currentDrops.filter(d => d.address && d.address.trim() && d.address.length > 5);
+    
+    if (validDrops.length === 0) {
+      setMultiFares(null);
+      setMultiRouteError(null);
+      setCalculatingMultiRoute(false);
+      return;
+    }
+
+    setCalculatingMultiRoute(true);
+    setMultiRouteError(null);
+
+    const calculateMultiFares = async () => {
+      console.log('🔄 Starting multi route calculation for pricing (Backend)...', { pickupAddress, validDrops });
+      try {
+        let currentPickup = pickupCoords || pickupAddress;
+        if (!pickupCoords && pickupAddress && pickupAddress.length > 5) {
+          const coords = await geocodeAddress(pickupAddress);
+          if (coords) {
+            setPickupCoords(coords);
+            currentPickup = coords;
+          }
+        }
+
+        const deliveries = await Promise.all(validDrops.map(async d => {
+          if (d.coords) return d.coords;
+          const coords = await geocodeAddress(d.address);
+          if (coords) {
+            if (mode === 'bulk') {
+              updateBulkRow(d.id, "coords", coords);
+            } else {
+              updateDrop(d.id, "coords", coords);
+            }
+            return coords;
+          }
+          return d.address;
+        }));
+
+        const payload = {
+          mode: 'multi',
+          pickup: currentPickup,
+          deliveries: deliveries
+        };
+
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          setMultiFares(res);
+        } else {
+          setMultiRouteError("Failed to calculate multi-drop prices via backend");
+        }
+      } catch (err: any) {
+        console.error("Multi-drop pricing error:", err);
+        setMultiRouteError(err.message || "Error calculating pricing");
+      } finally {
+        setCalculatingMultiRoute(false);
+      }
+    };
+
+    const timeoutId = setTimeout(calculateMultiFares, 1500);
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, drops, bulkRows, pickupCoords]);
+
+  // When navigating back to Step 1, ensure we don&apos;t keep using stale Step 2 route data.
+  // Step 1 should always reflect the *current* addresses via early-route calculation.
+  useEffect(() => {
+    if (step === 1) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRouteDistance(null);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRouteDuration(null);
+    }
+  }, [step]);
 
   // Simulate camera snap → OCR
   const handleSnap = () => {
@@ -3240,14 +3494,6 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     }
   };
 
-  const removeBulkRow = (id) => {
-    setBulkRows(bulkRows.filter(r => r.id !== id));
-  };
-
-  const updateBulkRow = (id, field, value) => {
-    setBulkRows(bulkRows.map(r => r.id === id ? { ...r, [field]: value } : r));
-  };
-
   // ─── Tiered price calculation (rate-switch with boundary floors) ───
   const calcTieredPrice = (km, pt) => {
     if (!pt || pt.type !== 'tiered') return null;
@@ -3268,13 +3514,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return null;
 
     const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-    if (tiered !== null) return tiered;
+    
+    // Apply 30% discount for grouped orders after calculating full estimate (simple or tiered)
+    const rawPrice = tiered !== null 
+      ? tiered 
+      : (pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
 
-    const distanceCost = earlyRouteDistance * pricing.rate_per_km;
-    const timeCost = earlyRouteDuration * pricing.rate_per_minute;
-    const rawPrice = pricing.base_fare + distanceCost + timeCost;
-
-    // Apply 30% discount for grouped orders after calculating full estimate
     return mode === 'grouped' ? Math.round(rawPrice * 0.7) : Math.round(rawPrice);
   };
 
@@ -3320,8 +3565,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   let totalCost = totalDeliveries * unitCost;
 
-  if (mode === 'multi' && multiFares?.vehicles?.[vehicle]) {
+  // Use backend-calculated fares as source of truth for all modes if available
+  if ((mode === 'multi' || mode === 'quick' || mode === 'grouped') && multiFares?.vehicles?.[vehicle]) {
     totalCost = multiFares.vehicles[vehicle].price;
+    
+    // For grouped mode, the backend might already apply discounts or we might need to apply it here
+    // In our case, the backend BulkCalculateFareView doesn't seem to know about 'grouped' discount specifically
+    // unless calculate_effective_fare handles it.
+    if (mode === 'grouped') {
+       totalCost = Math.round(totalCost * 0.7);
+    }
+    
     unitCost = totalDeliveries > 0 ? Math.round(totalCost / totalDeliveries) : 0;
   }
 
@@ -3353,7 +3607,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         notes: notes,
         // Include route information for pricing calculation
         distance_km: (mode === 'quick' || mode === 'grouped') && earlyRouteDistance ? earlyRouteDistance : (routeDistance || 0),
-        duration_minutes: (mode === 'quick' || mode === 'grouped') && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0)
+        duration_minutes: (mode === 'quick' || mode === 'grouped') && earlyRouteDuration ? earlyRouteDuration : (routeDuration || 0),
+
+        // SmartParcel fields
+        is_percel_order: isPickupParcel || isDeliveryParcel,
+        is_pickup_percel: isPickupParcel,
+        collect_code: isPickupParcel ? collectCode : undefined,
+        isdelivery_percel: isDeliveryParcel,
+        box_id: isDeliveryParcel ? selectedSpBoxId : undefined,
+        locker_size_id: isDeliveryParcel ? selectedSpSizeId : undefined,
       };
 
       // Debug: Log order data
@@ -3389,9 +3651,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // ─── Saved addresses for quick pick ───
   const savedAddresses = [
-    { label: "Office", address: "24 Harvey Rd, Sabo Yaba", icon: "🏢" },
-    { label: "Warehouse", address: "15 Creek Rd, Apapa", icon: "📦" },
-    { label: "Shop", address: "45 Adeniran Ogunsanya, Surulere", icon: "🏪" },
+    { label: "Office", address: "24 Harvey Rd, Sabo Yaba", coords: { lat: 6.5069541, lng: 3.3830028 }, icon: "🏢" },
+    { label: "Warehouse", address: "15 Creek Rd, Apapa", coords: { lat: 6.4475, lng: 3.3606 }, icon: "📦" },
+    { label: "Shop", address: "45 Adeniran Ogunsanya, Surulere", coords: { lat: 6.5002, lng: 3.3598 }, icon: "🏪" },
   ];
 
   const pkgTypes = ["Box", "Envelope", "Fragile", "Food", "Document"];
@@ -3418,18 +3680,19 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       {/* ─── Map picker modal ─── */}
       {mapPickerFor && (
         <MapPickerModal
-          onConfirm={(address) => {
+          onConfirm={(address, lat, lng) => {
+            const coords = { lat, lng };
             if (mapPickerFor === 'pickup') {
-              setPickupAddress(address);
+              handlePickupChange(address, coords);
             } else if (mapPickerFor === 'dropoff') {
-              handleDropoffChange(address);
+              handleDropoffChange(address, coords);
               //@ts-ignore
             } else if (mapPickerFor.startsWith('drop-')) {
               //@ts-ignore
               const dropIdStr = mapPickerFor.split('-')[1];
               const dropId = parseInt(dropIdStr, 10);
               if (!isNaN(dropId)) {
-                updateDrop(dropId, "address", address);
+                updateDrop(dropId, "address", address, coords);
               }
             }
             setMapPickerFor(null);
@@ -3475,16 +3738,111 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
           {/* Quick vs Grouped Sub-mode Select */}
           {(mode === 'quick' || mode === 'grouped') && (
-            <div style={{ marginBottom: 16 }}>
-              <label style={labelStyle}>Order Mode</label>
-              <select
-                value={mode}
-                onChange={(e) => setMode(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="quick">Quick Send (Single Delivery)</option>
-                <option value="grouped">Grouped Order (30% Discount)</option>
-              </select>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ ...labelStyle, marginBottom: 10 }}>Order Mode</label>
+              <div style={{ 
+                display: "flex", 
+                gap: isMobile ? 10 : 16, 
+                flexDirection: isMobile ? "column" : "row" 
+              }}>
+                {/* Quick Send Card */}
+                <div 
+                  onClick={() => setMode('quick')}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? "14px" : "18px",
+                    borderRadius: 16,
+                    cursor: 'pointer',
+                    border: mode === 'quick' ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
+                    background: mode === 'quick' ? S.goldPale : "#fff",
+                    boxShadow: mode === 'quick' ? "0 4px 12px rgba(251, 177, 47, 0.12)" : "none",
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    position: "relative",
+                    overflow: "hidden"
+                  }}
+                >
+                  <div style={{ 
+                    width: 44, 
+                    height: 44, 
+                    borderRadius: 12, 
+                    background: mode === 'quick' ? S.gold : "#f1f5f9",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    transition: "all 0.2s"
+                  }}>
+                    ⚡
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: S.navy, marginBottom: 2 }}>Quick Send</div>
+                    <div style={{ fontSize: 12, color: S.grayLight, fontWeight: 500 }}>Single delivery, instant processing</div>
+                  </div>
+                  {mode === 'quick' && (
+                    <div style={{ 
+                      position: "absolute", bottom: -8, right: -8, width: 32, height: 32, 
+                      background: S.gold, borderRadius: "50%", opacity: 0.1 
+                    }} />
+                  )}
+                </div>
+
+                {/* Grouped Order Card */}
+                <div 
+                  onClick={() => setMode('grouped')}
+                  style={{
+                    flex: 1,
+                    padding: isMobile ? "14px" : "18px",
+                    borderRadius: 16,
+                    cursor: 'pointer',
+                    border: mode === 'grouped' ? `2px solid ${S.gold}` : "2px solid #e2e8f0",
+                    background: mode === 'grouped' ? S.goldPale : "#fff",
+                    boxShadow: mode === 'grouped' ? "0 4px 12px rgba(251, 177, 47, 0.12)" : "none",
+                    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 14,
+                    position: "relative",
+                    overflow: "hidden"
+                  }}
+                >
+                  {/* Discount Badge */}
+                  <div style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    background: S.gold,
+                    color: S.navy,
+                    fontSize: 10,
+                    fontWeight: 900,
+                    padding: "4px 12px",
+                    borderBottomLeftRadius: 14,
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)",
+                    letterSpacing: "0.02em"
+                  }}>
+                    30% DISCOUNT
+                  </div>
+                  <div style={{ 
+                    width: 44, 
+                    height: 44, 
+                    borderRadius: 12, 
+                    background: mode === 'grouped' ? S.gold : "#f1f5f9",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 22,
+                    transition: "all 0.2s"
+                  }}>
+                    📦
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: S.navy, marginBottom: 2 }}>Grouped Order</div>
+                    <div style={{ fontSize: 12, color: S.grayLight, fontWeight: 500 }}>Schedule multiple & save on fee</div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -3498,7 +3856,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             {/* Saved addresses quick pick — own row on mobile */}
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
               {savedAddresses.map(sa => (
-                <button key={sa.label} onClick={() => setPickupAddress(sa.address)} style={{
+                <button key={sa.label} onClick={() => { handlePickupChange(sa.address, sa.coords); }} style={{
                   padding: isMobile ? "4px 8px" : "4px 10px",
                   borderRadius: 8, border: "1px solid #e2e8f0",
                   background: pickupAddress === sa.address ? S.goldPale : "#f8fafc",
@@ -3510,7 +3868,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             </div>
             <AddressAutocompleteInput
               value={pickupAddress}
-              onChange={setPickupAddress}
+              onChange={(val) => handlePickupChange(val)}
+              onSelect={(addr, lat, lng) => handlePickupChange(addr, { lat, lng })}
               onOpenMapPicker={() => setMapPickerFor('pickup')}
               placeholder="Enter pickup address in Lagos"
               style={{ ...inputStyle, marginBottom: 10 }}
@@ -3519,6 +3878,39 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={inputStyle} />
               <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={inputStyle} />
             </div>
+
+            {/* SmartParcel Pickup toggle */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12, fontSize: 12, fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={isPickupParcel} onChange={e => { setIsPickupParcel(e.target.checked); setResolveError(''); setResolvedParcel(null); }} style={{ width: 14, height: 14, cursor: 'pointer' }} />
+              Pickup from a SmartParcel Locker
+            </label>
+            {isPickupParcel && (
+              <div style={{ marginTop: 10, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0' }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Enter Collect Code</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    value={collectCode}
+                    onChange={e => setCollectCode(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleResolveCollectCode()}
+                    placeholder="e.g. TBKJ"
+                    style={{ ...inputStyle, flex: 1 }}
+                  />
+                  <button
+                    onClick={handleResolveCollectCode}
+                    disabled={isResolvingCode || !collectCode}
+                    style={{ padding: '0 18px', borderRadius: 10, border: 'none', background: '#1e293b', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', opacity: (isResolvingCode || !collectCode) ? 0.5 : 1 }}
+                  >
+                    {isResolvingCode ? 'Checking...' : 'Verify'}
+                  </button>
+                </div>
+                {resolveError && <div style={{ color: '#ef4444', fontSize: 11, marginTop: 6, fontWeight: 600 }}>{resolveError}</div>}
+                {resolvedParcel && (
+                  <div style={{ marginTop: 8, padding: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, fontSize: 12, color: '#166534' }}>
+                    ✅ <strong>{resolvedParcel.parcelrequesttype}</strong> — {resolvedParcel.boxname}, {resolvedParcel.boxaddress}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ═══ QUICK SEND MODE ═══ */}
@@ -3531,10 +3923,76 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               <AddressAutocompleteInput
                 value={dropoffAddress}
                 onChange={handleDropoffChange}
+                onSelect={(addr, lat, lng) => setDropoffCoords({ lat, lng })}
                 onOpenMapPicker={() => setMapPickerFor('dropoff')}
                 placeholder="Enter delivery address"
                 style={{ ...inputStyle, marginBottom: sameAddressError ? 0 : 10, border: sameAddressError ? '1.5px solid #ef4444' : inputStyle.border }}
               />
+
+              {/* SmartParcel Delivery toggle */}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: sameAddressError ? 0 : 2, marginBottom: 10, fontSize: 12, fontWeight: 600, color: '#334155', cursor: 'pointer', userSelect: 'none' }}>
+                <input type="checkbox" checked={isDeliveryParcel} onChange={e => { setIsDeliveryParcel(e.target.checked); setSelectedSpStateId(''); setSelectedSpCityId(''); setSelectedSpBoxId(''); setSelectedSpSizeId(''); }} style={{ width: 14, height: 14, cursor: 'pointer' }} />
+                Deliver to a SmartParcel Locker
+              </label>
+              {isDeliveryParcel && (
+                <div style={{ marginBottom: 12, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Select Locker Station</div>
+
+                  {/* ── Row 1: State + City ── */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+
+                    {/* State */}
+                    <select value={selectedSpStateId} onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(''); setSelectedSpBoxId(''); }} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
+                      <option value="">Select State</option>
+                      {(Array.isArray(spStates) ? spStates : []).map(s => <option key={s.stateid} value={s.stateid}>{s.statename}</option>)}
+                    </select>
+
+                    {/* City — loading / empty / populated */}
+                    {loadingSpCities ? (
+                      <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, background: '#f1f5f9', color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                        <div style={{ width: 14, height: 14, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                        Loading cities…
+                      </div>
+                    ) : selectedSpStateId && spCities.length === 0 ? (
+                      <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 6, background: '#fef2f2', color: '#b91c1c', fontSize: 12, fontWeight: 600, border: '1.5px solid #fecaca' }}>
+                        ⚠️ No cities found for this state
+                      </div>
+                    ) : (
+                      <select value={selectedSpCityId} onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(''); }} disabled={!selectedSpStateId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpStateId ? 0.5 : 1 }}>
+                        <option value="">Select City</option>
+                        {(Array.isArray(spCities) ? spCities : []).map(c => <option key={c.cityid} value={c.cityid}>{c.cityname}</option>)}
+                      </select>
+                    )}
+                  </div>
+
+                  {/* ── Row 2: Box (full width) — loading / empty / populated ── */}
+                  {loadingSpBoxes ? (
+                    <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 8, background: '#f1f5f9', color: '#64748b', fontSize: 13, fontWeight: 600 }}>
+                      <div style={{ width: 14, height: 14, border: '2px solid #94a3b8', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.7s linear infinite', flexShrink: 0 }} />
+                      Loading locker stations…
+                    </div>
+                  ) : selectedSpCityId && spBoxes.length === 0 ? (
+                    <div style={{ padding: '12px 14px', background: '#f8fafc', border: '1.5px dashed #cbd5e1', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ fontSize: 20 }}>📭</span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>No locker stations in this city</div>
+                        <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>Try a different city or use a regular delivery address.</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <select value={selectedSpBoxId} onChange={e => { const b = (Array.isArray(spBoxes) ? spBoxes : []).find(x => String(x.boxid) === e.target.value); setSelectedSpBoxId(e.target.value); if (b) handleDropoffChange(b.boxaddress); }} disabled={!selectedSpCityId} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer', opacity: !selectedSpCityId ? 0.5 : 1 }}>
+                      <option value="">Select Assigned Box</option>
+                      {(Array.isArray(spBoxes) ? spBoxes : []).map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                    </select>
+                  )}
+
+                  {/* ── Row 3: Locker Size ── */}
+                  <select value={selectedSpSizeId} onChange={e => setSelectedSpSizeId(e.target.value)} style={{ ...inputStyle, padding: '0 10px', background: '#fff', cursor: 'pointer' }}>
+                    <option value="">Select Locker Size</option>
+                    {(Array.isArray(spSizes) ? spSizes : []).map(sz => <option key={sz.sizeid} value={sz.sizeid}>{sz.sizename}</option>)}
+                  </select>
+                </div>
+              )}
 
               {/* Same-address error banner */}
               {sameAddressError && (
@@ -3735,6 +4193,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                       <AddressAutocompleteInput
                         value={drop.address}
                         onChange={(value) => updateDrop(drop.id, "address", value)}
+                        onSelect={(addr, lat, lng) => updateDrop(drop.id, "address", addr, { lat, lng })}
                         //@ts-ignore
                         onOpenMapPicker={() => setMapPickerFor(`drop-${drop.id}`)}
                         placeholder="Delivery address"
@@ -3994,6 +4453,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                         <AddressAutocompleteInput
                           value={row.address}
                           onChange={(value) => updateBulkRow(row.id, "address", value)}
+                          onSelect={(addr, lat, lng) => updateBulkRow(row.id, "address", addr, { lat, lng })}
                           placeholder="Address"
                           style={{ border: "none", fontSize: 13, color: S.navy, fontWeight: 600, fontFamily: "inherit", background: "transparent", width: "100%" }}
                         />
@@ -4024,7 +4484,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const isSelected = vehicle === v.id;
 
                 const hasEarlyQuick = (mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration;
-                const hasEarlyMulti = mode === 'multi' && multiFares?.vehicles?.[v.id];
+                const hasEarlyMulti = (mode === 'multi' || mode === 'bulk') && multiFares?.vehicles?.[v.id];
                 const hasEarly = hasEarlyQuick || hasEarlyMulti;
 
                 const isCalculating = ((mode === 'quick' || mode === 'grouped') && pickupAddress && dropoffAddress && calculatingRoute) ||
@@ -4264,8 +4724,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             vehicle={vehicle}
             totalDeliveries={totalDeliveries}
             totalCost={totalCost}
+            //@ts-ignore
+            polyline={multiFares?.vehicles?.[vehicle]?.polyline}
+            distance={multiFares?.vehicles?.[vehicle]?.distance_km}
+            duration={multiFares?.vehicles?.[vehicle]?.duration_minutes}
             onRouteCalculated={(distance, duration) => {
               console.log('onRouteCalculated called:', { distance, duration });
+              // We still set these for backward compatibility if needed, 
+              // but pricing logic now prioritizes multiFares.
               setRouteDistance(distance);
               setRouteDuration(duration);
             }}
@@ -4284,6 +4750,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isCanceling, setIsCanceling] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
 
   // Pay-now modal state
   const [payNowOrder, setPayNowOrder] = useState<any>(null);   // the order being paid
@@ -4670,8 +5137,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
             padding: 24, animation: "fadeIn 0.2s ease"
           }}>
             <div style={{
-              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 360,
-              overflow: "hidden", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 420,
+              overflow: "visible", boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
               animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)"
             }}>
               <div style={{ padding: "24px 24px 0", textAlign: "center" }}>
@@ -4686,12 +5153,41 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                 <p style={{ fontSize: 14, color: S.gray, margin: 0, lineHeight: 1.5 }}>
                   Are you sure you want to cancel order <strong style={{ color: S.navy }}>#{cancelModalOrder.id}</strong>?
                 </p>
+                <div style={{ marginTop: 24, textAlign: "left" }}>
+                  <label style={{ fontSize: 12, fontWeight: 800, color: S.navy, display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Reason for cancellation
+                  </label>
+                  <textarea
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="e.g. Changed my mind, Ordered wrong item..."
+                    style={{
+                      width: "100%", height: 100, padding: "14px", borderRadius: 14,
+                      border: `1.5px solid ${S.border}`, background: "#f8fafc", fontSize: 14,
+                      color: S.navy, fontFamily: "inherit", resize: "none", outline: "none",
+                      transition: "all 0.2s", display: "block"
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = S.gold;
+                      e.currentTarget.style.background = "#fff";
+                      e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = S.border;
+                      e.currentTarget.style.background = "#f8fafc";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  />
+                </div>
+
                 {cancelModalOrder.payment_method === 'wallet' && (
                   <div style={{
-                    marginTop: 12, padding: "8px 12px", background: "#f8fafc",
-                    borderRadius: 8, fontSize: 12, color: S.gray, border: "1px solid #e2e8f0"
+                    marginTop: 16, padding: "12px 16px", background: "#f0fdf4",
+                    borderRadius: 12, fontSize: 12, color: "#166534", border: "1px solid #bbf7d0",
+                    textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start"
                   }}>
-                    💡 Your wallet will be <strong style={{ color: S.gold }}>refunded automatically</strong>.
+                    <span style={{ fontSize: 16 }}>💰</span>
+                    <span>Your wallet will be <strong>refunded automatically</strong> for this order.</span>
                   </div>
                 )}
               </div>
@@ -4713,6 +5209,7 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     if (!isCanceling) {
                       setCancelModalOrder(null);
                       setCancelError(null);
+                      setCancelReason("");
                     }
                   }}
                   disabled={isCanceling}
@@ -4731,11 +5228,12 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder, 
                     if (isCanceling) return;
                     setIsCanceling(true);
                     setCancelError(null);
-                    const result = await onCancelOrder(cancelModalOrder.order_number);
+                    const result = await onCancelOrder(cancelModalOrder.order_number, cancelReason || "Order canceled by merchant");
                     console.log(result, "result")
                     setIsCanceling(false);
                     if (result?.success) {
                       setCancelModalOrder(null);
+                      setCancelReason("");
                     } else {
                       setCancelError(result?.error || "Failed to cancel order.");
                     }
@@ -5335,26 +5833,56 @@ function FundWalletModal({ onClose, onFund, onBankTransfer }) {
 }
 
 // ─── BANK TRANSFER MODAL ────────────────────────────────────────
+const LoadingSpinner = ({ state }) => (
+  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px" }}>
+    <div style={{
+      width: 60,
+      height: 60,
+      border: `4px solid ${S.goldPale}`,
+      borderTop: `4px solid ${S.gold}`,
+      borderRadius: "50%",
+      animation: "spin 1s linear infinite"
+    }} />
+    <p style={{ marginTop: 24, fontSize: 15, fontWeight: 600, color: S.navy }}>
+      {state === 'loading' ? 'Generating account details...' : 'Processing confirmation...'}
+    </p>
+    <p style={{ marginTop: 8, fontSize: 13, color: S.grayLight }}>Please wait</p>
+  </div>
+);
+
 function BankTransferModal({ amount, onClose, onSuccess }) {
-  const [state, setState] = useState('loading'); // 'loading', 'show-details', 'confirming', 'success'
+  const [state, setState] = useState('loading'); // 'loading', 'show-details', 'confirming', 'success', 'error'
   const [copied, setCopied] = useState(false);
+  const [bankDetails, setBankDetails] = useState(null);
+  const [error, setError] = useState(null);
 
-  // Bank details
-  const bankDetails = {
-    bankName: "Wema Bank",
-    accountNumber: "7924567890",
-    accountName: "Assured Express Limited"
-  };
-
-  // Initial loading
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setState('show-details');
-    }, 2500);
-    return () => clearTimeout(timer);
+    const fetchVirtualAccount = async () => {
+      try {
+        setState('loading');
+        const response = await API.Wallet.getVirtualAccount();
+        if (response.success) {
+          setBankDetails({
+            bankName: response.data.bank_name,
+            accountNumber: response.data.account_number,
+            accountName: response.data.account_name
+          });
+          setState('show-details');
+        } else {
+          setError(response.message || "Failed to load bank details");
+          setState('error');
+        }
+      } catch (err) {
+        console.error("Error fetching virtual account:", err);
+        setError("Network error. Please try again.");
+        setState('error');
+      }
+    };
+    fetchVirtualAccount();
   }, []);
 
   const copyAccountNumber = () => {
+    if (!bankDetails) return;
     navigator.clipboard.writeText(bankDetails.accountNumber);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -5362,41 +5890,19 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
 
   const handleConfirmPayment = () => {
     setState('confirming');
-    setTimeout(() => {
-      setState('success');
-    }, 2500);
+    setTimeout(() => setState('success'), 2500);
   };
 
   const handleClose = () => {
-    if (state === 'success' && onSuccess) {
-      onSuccess();
-    }
+    if (state === 'success' && onSuccess) onSuccess();
     onClose();
   };
 
-  // Loading Spinner Component
-  const LoadingSpinner = () => (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 40px" }}>
-      <div style={{
-        width: 60,
-        height: 60,
-        border: `4px solid ${S.goldPale}`,
-        borderTop: `4px solid ${S.gold}`,
-        borderRadius: "50%",
-        animation: "spin 1s linear infinite"
-      }} />
-      <p style={{ marginTop: 24, fontSize: 15, fontWeight: 600, color: S.navy }}>
-        {state === 'loading' ? 'Generating account details...' : 'Processing confirmation...'}
-      </p>
-      <p style={{ marginTop: 8, fontSize: 13, color: S.grayLight }}>Please wait</p>
-    </div>
-  );
-
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
       <div onClick={handleClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} />
       <div style={{ position: "relative", background: "#fff", borderRadius: 18, width: 440, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.3s ease" }}>
-
+        
         {/* Header */}
         <div style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>
@@ -5409,23 +5915,17 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
 
         {/* Content */}
         <div style={{ padding: 24 }}>
-          {/* Loading State */}
-          {
-            // eslint-disable-next-line react-hooks/static-components
-            (state === 'loading' || state === 'confirming') && <LoadingSpinner />}
+          {(state === 'loading' || state === 'confirming') && <LoadingSpinner state={state} />}
 
-          {/* Show Bank Details */}
-          {state === 'show-details' && (
+          {state === 'show-details' && bankDetails && (
             <div>
-              {/* Amount to Transfer */}
               <div style={{ background: S.goldPale, borderRadius: 12, padding: 20, marginBottom: 20, textAlign: "center" }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: S.grayLight, marginBottom: 6 }}>Amount to Transfer</div>
-                <div style={{ fontSize: 32, fontWeight: 800, color: S.navy }}>
+                <div style={{ fontSize: 32, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
                   ₦{amount.toLocaleString()}
                 </div>
               </div>
 
-              {/* Bank Details */}
               <div style={{ background: "#f8fafc", borderRadius: 12, padding: 20, marginBottom: 20 }}>
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: S.grayLight, marginBottom: 4 }}>Bank Name</div>
@@ -5435,20 +5935,13 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: S.grayLight, marginBottom: 4 }}>Account Number</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, flex: 1 }}>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace", flex: 1 }}>
                       {bankDetails.accountNumber}
                     </div>
                     <button onClick={copyAccountNumber} style={{
-                      padding: "6px 12px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: copied ? S.greenBg : S.goldPale,
-                      color: copied ? S.green : S.gold,
-                      fontSize: 12,
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      transition: "all 0.2s"
+                      padding: "6px 12px", borderRadius: 8, border: "none",
+                      background: copied ? S.greenBg : S.goldPale, color: copied ? S.green : S.gold,
+                      fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", transition: "all 0.2s"
                     }}>
                       {copied ? '✓ Copied' : 'Copy'}
                     </button>
@@ -5461,7 +5954,6 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 </div>
               </div>
 
-              {/* Instructions */}
               <div style={{ background: "#fffbeb", border: "1px solid #fef3c7", borderRadius: 10, padding: 16, marginBottom: 20 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e", marginBottom: 8 }}>⚠️ Important Instructions</div>
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: "#78350f", lineHeight: 1.6 }}>
@@ -5471,44 +5963,38 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 </ul>
               </div>
 
-              {/* Confirm Button */}
               <button onClick={handleConfirmPayment} style={{
-                width: "100%",
-                height: 48,
-                border: "none",
-                borderRadius: 10,
-                fontSize: 15,
-                fontWeight: 700,
-                cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
-                color: S.navy,
-                fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+                width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700,
+                cursor: "pointer", background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
               }}>
                 I have paid
               </button>
             </div>
           )}
 
-          {/* Success State */}
+          {state === 'error' && (
+            <div style={{ textAlign: "center", padding: "40px 20px" }}>
+              <p style={{ color: S.red, fontWeight: 600, marginBottom: 16 }}>{error}</p>
+              <button onClick={onClose} style={{
+                padding: "10px 24px", borderRadius: 10, border: "none", background: S.navy,
+                color: "#fff", fontWeight: 700, cursor: "pointer"
+              }}>
+                Close
+              </button>
+            </div>
+          )}
+
           {state === 'success' && (
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
-              {/* Success Icon */}
               <div style={{
-                width: 80,
-                height: 80,
-                borderRadius: "50%",
-                background: S.greenBg,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 24px",
-                animation: "scaleIn 0.5s ease"
+                width: 80, height: 80, borderRadius: "50%", background: S.greenBg,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "0 auto 24px", animation: "scaleIn 0.5s ease"
               }}>
                 <div style={{ fontSize: 40, color: S.green }}>✓</div>
               </div>
 
-              {/* Success Message */}
               <h3 style={{ fontSize: 20, fontWeight: 800, color: S.navy, margin: "0 0 12px" }}>
                 Payment Confirmation Received!
               </h3>
@@ -5516,16 +6002,17 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 Your wallet will be credited once payment is verified. This usually takes 5-10 minutes.
               </p>
 
-              {/* Transaction Details */}
               <div style={{ background: "#f8fafc", borderRadius: 10, padding: 16, marginBottom: 24, textAlign: "left" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                   <span style={{ fontSize: 13, color: S.grayLight }}>Amount</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>₦{amount.toLocaleString()}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: S.grayLight }}>Bank</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{bankDetails.bankName}</span>
-                </div>
+                {bankDetails && (
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: S.grayLight }}>Bank</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{bankDetails.bankName}</span>
+                  </div>
+                )}
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <span style={{ fontSize: 13, color: S.grayLight }}>Status</span>
                   <span style={{ fontSize: 12, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#fef3c7", color: "#92400e" }}>
@@ -5534,19 +6021,10 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
                 </div>
               </div>
 
-              {/* Done Button */}
               <button onClick={handleClose} style={{
-                width: "100%",
-                height: 48,
-                border: "none",
-                borderRadius: 10,
-                fontSize: 15,
-                fontWeight: 700,
-                cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
-                color: S.navy,
-                fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+                width: "100%", height: 48, border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700,
+                cursor: "pointer", background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: S.navy, fontFamily: "inherit", boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
               }}>
                 Done
               </button>
@@ -5555,18 +6033,458 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
         </div>
       </div>
 
-      {/* Add keyframe animations */}
       <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        @keyframes scaleIn {
-          0% { transform: scale(0); }
-          50% { transform: scale(1.1); }
-          100% { transform: scale(1); }
-        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        @keyframes scaleIn { 0% { transform: scale(0); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
       `}</style>
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION DETAILS MODAL ────────────────────────────────
+function SubscriptionDetailsModal({ subscription, onClose, onShowNotif }) {
+  const plan = subscription.plan;
+  const invoices = subscription.invoices || [];
+
+  const handleDownloadInvoice = (invoice) => {
+    if (invoice.url) {
+      window.open(invoice.url, "_blank");
+    } else {
+      onShowNotif("Invoice download URL not available", "info");
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s ease" }}>
+      <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} />
+      <div style={{ 
+        position: "relative", background: "#fff", borderRadius: 24, width: 500, maxHeight: "85vh", 
+        overflow: "hidden", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column"
+      }}>
+        {/* Header */}
+        <div style={{ padding: "24px 30px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <h3 style={{ fontSize: 20, fontWeight: 800, color: S.navy, margin: 0 }}>Subscription Details</h3>
+            <p style={{ fontSize: 13, color: S.grayLight, margin: "4px 0 0" }}>Manage your current {plan.name} plan</p>
+          </div>
+          <button onClick={onClose} style={{ background: "#f8fafc", border: "none", cursor: "pointer", color: S.gray, padding: 8, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {Icons.close}
+          </button>
+        </div>
+
+        {/* Content */}
+        <div style={{ padding: 30, overflowY: "auto", flex: 1 }} className="no-scrollbar text-left!">
+          {/* Plan Summary Card */}
+          <div style={{ background: `linear-gradient(135deg, ${S.navy}, #1a2a47)`, borderRadius: 20, padding: 24, color: "#fff", marginBottom: 30 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>PLAN NAME</div>
+                <div style={{ fontSize: 24, fontWeight: 800 }}>{plan.name}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>PRICE</div>
+                <div style={{ fontSize: 24, fontWeight: 800 }}>₦{parseFloat(plan.price).toLocaleString()}</div>
+              </div>
+            </div>
+            
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: 4 }}>START DATE</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{new Date(subscription.start_date).toLocaleDateString()}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: 4 }}>EXPIRY DATE</div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>{new Date(subscription.end_date).toLocaleDateString()}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Plan Features */}
+          <div style={{ marginBottom: 30 }}>
+            <h4 style={{ fontSize: 15, fontWeight: 700, color: S.navy, marginBottom: 16 }}>Plan Features & Limits</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>FREE ORDERS</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>{plan.free_orders_limit} / mo</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>OVERAGE FEE</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>₦{parseFloat(plan.overage_fee).toLocaleString()}</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>ORDER CREDITS</div>
+                <div style={{ color: S.navy, fontSize: 16, fontWeight: 700 }}>₦{parseFloat(plan.order_credits || 0).toLocaleString()}</div>
+              </div>
+              <div style={{ background: "#f8fafc", padding: 16, borderRadius: 16, border: "1px solid #f1f5f9" }}>
+                <div style={{ color: S.grayLight, fontSize: 11, fontWeight: 600, marginBottom: 4 }}>DEDICATED RIDER</div>
+                <div style={{ color: plan.has_dedicated_rider ? S.green : S.red, fontSize: 14, fontWeight: 700 }}>{plan.has_dedicated_rider ? "YES" : "NO"}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Invoices */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h4 style={{ fontSize: 15, fontWeight: 700, color: S.navy, margin: 0 }}>Invoices</h4>
+              <span style={{ fontSize: 12, color: S.grayLight }}>{invoices.length} Found</span>
+            </div>
+
+            {invoices.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {invoices.map((inv, idx) => (
+                  <div key={idx} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "12px 16px", borderRadius: 12, border: "1px solid #f1f5f9",
+                    background: "#fff", transition: "all 0.2s"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ width: 36, height: 36, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", color: S.gold }}>
+                        {Icons.orders}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Invoice #{inv.number || idx + 1001}</div>
+                        <div style={{ fontSize: 11, color: S.grayLight }}>{new Date(inv.date || subscription.created_at).toLocaleDateString()}</div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleDownloadInvoice(inv)}
+                      style={{
+                        background: S.navy, color: "#fff", border: "none", borderRadius: 8,
+                        padding: "6px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer"
+                      }}
+                    >
+                      Download
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: "center", padding: "30px 0", background: "#f8fafc", borderRadius: 16, border: "1.5px dashed #e2e8f0" }}>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>📄</div>
+                <p style={{ fontSize: 13, color: S.grayLight, margin: 0 }}>No invoices found for this subscription yet.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: 24, borderTop: "1px solid #f1f5f9", background: "#f8fafc" }}>
+          <button onClick={onClose} style={{
+            width: "100%", height: 48, background: "#fff", color: S.navy, border: "1px solid #e2e8f0",
+            borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer"
+          }}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SUBSCRIPTION SCREEN ────────────────────────────────────────
+function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalance }) {
+  const [plans, setPlans] = useState([]);
+  const [activeSub, setActiveSub] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [subscribing, setSubscribing] = useState(null); 
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [activeTab, setActiveTab] = useState("manual"); 
+  const [postpaidPlans, setPostpaidPlans] = useState([]);
+  const [activePostpaidSub, setActivePostpaidSub] = useState(null);
+  const [activatingPostpaid, setActivatingPostpaid] = useState(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [plansRes, activeRes, postpaidPlansRes, activePostpaidRes] = await Promise.all([
+        API.Subscription.getPlans(),
+        API.Subscription.getActiveSubscription(),
+        API.Subscription.getPostpaidPlans(),
+        API.Subscription.getActivePostpaidSubscription()
+      ]);
+
+      if (plansRes.status === "success" || plansRes.success) setPlans(plansRes.data || []);
+      if (activeRes.status === "success" || activeRes.success) setActiveSub(activeRes.data?.current_active || null);
+      if (postpaidPlansRes.status === "success" || postpaidPlansRes.success) setPostpaidPlans(postpaidPlansRes.data || []);
+      
+      if (activePostpaidRes.status === "success" || activePostpaidRes.success) {
+        const data = activePostpaidRes.data;
+        if (data?.current_active) {
+          setActivePostpaidSub(data.current_active);
+        } else if (data?.status && data.status !== null) {
+          setActivePostpaidSub(data);
+        } else {
+          setActivePostpaidSub(null);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load subscription data:", error);
+      onShowNotif("Failed to load subscription data", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubscribe = async (plan) => {
+    try {
+      setSubscribing(plan.id);
+      const response = await API.Subscription.subscribe(plan.id);
+      if (response.status === "success" || response.success) {
+        onShowNotif(`Successfully subscribed to ${plan.name} plan!`, "success");
+        onRefreshBalance();
+        loadData();
+      } else {
+        onShowNotif(response.message || "Subscription failed", "error");
+      }
+    } catch (error) {
+      console.error("Subscription error:", error);
+      onShowNotif("Network error. Please try again.", "error");
+    } finally {
+      setSubscribing(null);
+    }
+  };
+
+  const handleActivatePostpaid = async (plan) => {
+    try {
+      setActivatingPostpaid(plan.id);
+      const response = await API.Subscription.activatePostpaidPlan(plan.id);
+      if (response.status === "success" || response.success) {
+        onShowNotif(`Successfully activated ${plan.name}!`, "success");
+        loadData();
+      } else {
+        onShowNotif(response.message || "Activation failed", "error");
+      }
+    } catch (error) {
+      console.error("Postpaid activation error:", error);
+      onShowNotif("Network error. Please try again.", "error");
+    } finally {
+      setActivatingPostpaid(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "100px 0" }}>
+        <div style={{ width: 40, height: 40, border: `3px solid ${S.goldPale}`, borderTop: `3px solid ${S.gold}`, borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+        <p style={{ marginTop: 16, color: S.grayLight, fontSize: 14 }}>Loading subscription details...</p>
+      </div>
+    );
+  }
+
+  const currentPlans = activeTab === "manual" ? plans : postpaidPlans;
+  const currentActive = activeTab === "manual" ? activeSub : activePostpaidSub;
+
+  return (
+    <div style={{ animation: "fadeIn 0.3s ease" }}>
+      {/* Active Subscription Banner */}
+      {currentActive && (
+        <div style={{
+          background: `linear-gradient(135deg, ${S.navy}, #1a2a47)`,
+          borderRadius: 20, padding: "24px 30px", marginBottom: 32,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          color: "#fff", boxShadow: "0 10px 25px rgba(27,42,74,0.15)",
+          border: "1px solid rgba(255,255,255,0.05)"
+        }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 4 }}>
+              {activeTab === "manual" ? "CURRENT ACTIVE PLAN" : "ACTIVE POSTPAID PLAN"}
+            </div>
+            <h3 style={{ fontSize: 24, fontWeight: 800, margin: 0 }}>{currentActive.plan?.name || currentActive.name}</h3>
+            <div style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>
+              {currentActive.end_date ? `Ends on ${new Date(currentActive.end_date).toLocaleDateString()}` : "Active and ongoing"}
+            </div>
+          </div>
+          <div style={{ textAlign: "right", display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
+            <div style={{ background: "rgba(255,255,255,0.1)", padding: "8px 16px", borderRadius: 12, fontSize: 13, fontWeight: 600 }}>
+              Status: <span style={{ color: S.green }}>{(currentActive.status || "active").toUpperCase()}</span>
+            </div>
+            {activeTab === "manual" && (
+              <button 
+                onClick={() => setShowDetailsModal(true)}
+                style={{
+                  background: "rgba(255,255,255,0.15)", color: "#fff", border: "none",
+                  padding: "8px 20px", borderRadius: 10, fontSize: 13, fontWeight: 700,
+                  cursor: "pointer", transition: "all 0.2s"
+                }}
+              >
+                View Details
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showDetailsModal && activeSub && activeTab === "manual" && (
+        <SubscriptionDetailsModal 
+          subscription={activeSub} 
+          onClose={() => setShowDetailsModal(false)}
+          onShowNotif={onShowNotif}
+        />
+      )}
+
+      <div style={{ textAlign: "center", marginBottom: 40 }}>
+        <h2 style={{ fontSize: 28, fontWeight: 800, color: S.navy, margin: "0 0 12px", fontFamily: "'Outfit', sans-serif" }}>
+          Subscription Plans
+        </h2>
+        <p style={{ fontSize: 16, color: S.gray, maxWidth: 500, margin: "0 auto 30px" }}>
+          Select a subscription level that fits your business needs and start saving on every delivery.
+        </p>
+
+        {/* Tab Switcher */}
+        <div style={{ display: "inline-flex", background: "#f1f5f9", padding: 6, borderRadius: 16 }}>
+          {["manual", "postpaid"].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)} style={{
+              padding: "10px 24px", borderRadius: 12, border: "none",
+              background: activeTab === tab ? "#fff" : "transparent",
+              color: activeTab === tab ? S.navy : S.gray,
+              fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.2s"
+            }}>
+              {tab === "manual" ? "Manual Plan" : "Postpaid Plan"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 24, padding: "0 10px 40px" }}>
+        {currentPlans.map((plan) => {
+          const isActive = (activeTab === "manual" ? activeSub?.plan?.id : activePostpaidSub?.plan?.id) === plan.id;
+          const isEnterprise = plan.name === "Enterprise" || plan.name.includes("Monthly");
+          
+          return (
+            <div key={plan.id} style={{
+              background: "#fff", borderRadius: 24, padding: "40px 30px",
+              border: isActive ? `2px solid ${S.green}` : (isEnterprise ? `2px solid ${S.gold}` : "1.5px solid #e2e8f0"),
+              position: "relative", overflow: "hidden", display: "flex", flexDirection: "column",
+              transition: "all 0.3s ease",
+              boxShadow: isEnterprise ? "0 20px 40px rgba(251, 177, 47, 0.15)" : "0 4px 12px rgba(0,0,0,0.03)"
+            }}>
+              <div style={{ marginBottom: 30 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: S.grayLight, textTransform: "uppercase", marginBottom: 8 }}>{plan.name}</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+                  <span style={{ fontSize: 32, fontWeight: 800, color: S.navy }}>
+                    {plan.price ? `₦${parseFloat(plan.price).toLocaleString()}` : plan.plan_type?.toUpperCase()}
+                  </span>
+                  {plan.price && <span style={{ fontSize: 14, color: S.grayLight }}>/ month</span>}
+                </div>
+              </div>
+
+              <div style={{ flex: 1, marginBottom: 40 }}>
+                {activeTab === "manual" ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                      <span style={{ fontSize: 14, color: S.navyLight }}><strong>{plan.free_orders_limit}</strong> Free Orders / Month</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                      <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                      <span style={{ fontSize: 14, color: S.navyLight }}>₦{parseFloat(plan.overage_fee).toLocaleString()} Overage Fee</span>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                    <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                    <span style={{ fontSize: 14, color: S.navyLight }}>Automatic Billing: <strong>{plan.plan_type}</strong></span>
+                  </div>
+                )}
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <div style={{ color: S.green, width: 20 }}>{Icons.check}</div>
+                  <span style={{ fontSize: 14, color: S.navyLight }}>24/7 Priority Support</span>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => activeTab === "manual" ? handleSubscribe(plan) : handleActivatePostpaid(plan)}
+                disabled={(activeTab === "manual" ? (subscribing === plan.id || isActive) : (activatingPostpaid === plan.id || isActive))}
+                style={{
+                  width: "100%", height: 52, borderRadius: 14, border: "none",
+                  background: isActive ? S.greenBg : (isEnterprise ? S.navy : "#f1f5f9"),
+                  color: isActive ? S.green : (isEnterprise ? "#fff" : S.navy),
+                  fontSize: 15, fontWeight: 700, cursor: isActive ? "default" : "pointer",
+                  display: "flex", alignItems: "center", justifyContent: "center"
+                }}
+              >
+                {(subscribing === plan.id || activatingPostpaid === plan.id) ? (
+                   <div style={{ width: 20, height: 20, border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid currentColor", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
+                ) : isActive ? "Active" : "Activate Plan"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── INVOICES SCREEN ───────────────────────────────────────────
+function InvoicesScreen({ onShowNotif }) {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
+  const fetchInvoices = async () => {
+    try {
+      setLoading(true);
+      const response = await API.Subscription.getActiveSubscription();
+      if (response.status === "success" || response.success) {
+        setInvoices(response.data?.subscriptions?.[0]?.invoices || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch invoices:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) return <div style={{ display: "flex", justifyContent: "center", padding: 60 }}><div style={{ width: 40, height: 40, border: "3px solid #f3f3f3", borderTop: "3px solid #fb923c", borderRadius: "50%", animation: "spin 1s linear infinite" }} /></div>;
+
+  return (
+    <div style={{ animation: "fadeIn 0.3s ease" }}>
+      <div style={{ marginBottom: 32 }}>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: S.navy, marginBottom: 8 }}>My Invoices</h2>
+        <p style={{ color: S.gray, fontSize: 15 }}>View and download your subscription payment history.</p>
+      </div>
+
+      <div style={{ background: "#fff", borderRadius: 24, padding: "20px", border: `1px solid ${S.border}`, boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+        {invoices.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${S.border}`, textAlign: "left" }}>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>INVOICE #</th>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>DATE</th>
+                <th style={{ padding: "16px", color: S.gray, fontSize: 13, fontWeight: 600 }}>AMOUNT</th>
+                <th style={{ padding: "16px", textAlign: "right" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {invoices.map((inv, idx) => (
+                <tr key={idx} style={{ borderBottom: `1px solid ${S.border}`, transition: "background 0.2s" }} onMouseOver={e => e.currentTarget.style.background = "#f8fafc"} onMouseOut={e => e.currentTarget.style.background = "transparent"}>
+                  <td style={{ padding: "16px", fontWeight: 700, color: S.navy }}>INV-{inv.number || (1000 + idx)}</td>
+                  <td style={{ padding: "16px", color: S.navyLight }}>{new Date(inv.date || Date.now()).toLocaleDateString()}</td>
+                  <td style={{ padding: "16px", color: S.navy, fontWeight: 600 }}>₦{(inv.amount || 0).toLocaleString()}</td>
+                  <td style={{ padding: "16px", textAlign: "right" }}>
+                    <button style={{ background: S.goldPale, color: S.gold, border: "none", padding: "8px 16px", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+                      Download
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: "60px 0", textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
+            <h3 style={{ fontSize: 18, fontWeight: 700, color: S.navy, marginBottom: 8 }}>No Invoices Yet</h3>
+            <p style={{ color: S.gray, fontSize: 14 }}>Once you make a subscription payment, your invoices will appear here.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

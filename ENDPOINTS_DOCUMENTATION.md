@@ -13,6 +13,224 @@
 4. [Dashboard Endpoints](#dashboard-endpoints)
 5. [Dashboard Analytics Endpoints](#dashboard-analytics-endpoints)
 6. [Key Configuration Files](#key-configuration-files)
+7. [Wallet Endpoints](#wallet-endpoints)
+8. [Auth & Signup Endpoints](#auth--signup-endpoints)
+9. [Subscription Endpoints](#subscription-endpoints)
+10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
+11. [Dispatcher Orders](#dispatcher-orders)
+
+---
+
+## WALLET ENDPOINTS
+
+### 1. Get Virtual Account
+```
+GET /wallet/virtual-account/
+Description: Retrieves or creates a dedicated virtual account for the merchant to fund their wallet via bank transfer.
+Authentication: Required (Merchant)
+Response:
+  {
+    "success": true,
+    "data": {
+      "account_number": "7924567890",
+      "account_name": "AXPRESS/JOHN DOE",
+      "bank_name": "Wema Bank"
+    }
+  }
+```
+
+---
+
+### 2. Get Amortization Wallet Info
+```
+GET /wallet/amortization-wallet/
+Description: Retrieves bike hire-purchase progress for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "status": "success",
+    "message": "Amortization wallet info retrieved successfully",
+    "data": {
+      "balance": "5000.00",
+      "total_paid_to_date": "150000.00",
+      "cost": "1200000.00",
+      "expected_daily_payment": "1700.00",
+      "ownership_percentage": 12.5,
+      "is_active": true,
+      "virtual_account": {
+        "account_number": "1234567890",
+        "account_name": "AX-AMORT-JOHN",
+        "bank_name": "Wema Bank",
+        "bank_code": "000017",
+        "is_active": true
+      },
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  }
+```
+
+---
+
+### 3. Get Amortization Wallet Transactions
+```
+GET /wallet/amortization-transactions/
+Description: Retrieves paginated transaction history for the rider's amortization wallet.
+Authentication: Required (Rider)
+Query Parameters:
+  - page: Page number (default: 1)
+  - page_size: Items per page (default: 20)
+Response:
+  {
+    "count": 45,
+    "next": "...",
+    "previous": null,
+    "results": [
+      {
+        "id": "uuid",
+        "type": "credit",
+        "amount": "1700.00",
+        "description": "Daily bike payment",
+        "reference": "REF-123",
+        "balance_before": "5000.00",
+        "balance_after": "6700.00",
+        "status": "success",
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      ...
+    ]
+  }
+```
+
+---
+
+## AUTH & SIGNUP ENDPOINTS
+
+### 1. Merchant Signup
+```
+POST /api/auth/signup/
+Description: Register a new merchant account.
+Request Body:
+  {
+    "email": "user@example.com",
+    "password": "password123",
+    "business_name": "My Business",
+    "referral_code": "OPTIONAL_CODE"
+  }
+```
+
+---
+
+## SUBSCRIPTION ENDPOINTS
+
+### 1. Get Subscription Plans
+```
+GET /subscriptions/plans/
+Description: Retrieves all available subscription plans (Starter, Growth, Enterprise).
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Enterprise",
+        "price": "75000.00",
+        "free_orders_limit": 400,
+        "overage_fee": "300.00",
+        "has_dedicated_rider": true
+      },
+      ...
+    ]
+  }
+```
+
+### 2. Subscribe to a Plan
+```
+POST /subscriptions/plans/{plan_id}/subscribe/
+Description: Subscribes the merchant to a specific plan.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "id": "uuid",
+      "plan": { ... },
+      "start_date": "...",
+      "end_date": "...",
+      "status": "active"
+    }
+  }
+```
+
+### 3. Get Postpaid Plans
+```
+GET /subscriptions/postpaid/plans/
+Description: Retrieves all available postpaid subscription plans.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Monthly Postpaid",
+        "plan_type": "monthly",
+        "is_active": true
+      },
+      ...
+    ]
+  }
+```
+
+### 4. Activate Postpaid Plan
+```
+POST /subscriptions/postpaid/plans/{plan_id}/activate/
+Description: Activates a postpaid plan for the merchant.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "message": "Plan activated successfully"
+  }
+```
+
+### 5. Get Active Postpaid Subscription
+```
+GET /subscriptions/postpaid/active/
+Description: Retrieves the current active postpaid subscription details.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+       "id": "uuid",
+       "name": "Monthly Postpaid",
+       "status": "active"
+    }
+  }
+```
+
+### 3. Get Active Subscription
+```
+GET /subscriptions/active/
+Description: Retrieves the merchant's current active subscription.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "subscriptions": [ ... ],
+      "current_active": {
+        "id": "uuid",
+        "plan": { ... },
+        "status": "active",
+        "end_date": "..."
+      }
+    }
+  }
+```
 
 ---
 
@@ -582,9 +800,274 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** March 28, 2026
-**Version:** 1.1
-**Recent Changes:** Added "Rider Earning" to Order Admin and fixed tiered pricing calculation logic in the merchant frontend to support 4+ tiers.
+**Last Updated:** May 11, 2026
+**Version:** 1.2
+**Recent Changes:** Implemented multi-drop route visualization in the Dispatcher Portal, including sequential stop rendering and expanded order serialization.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.
+
+---
+
+## SMARTPARCEL LOCKER INTEGRATION
+
+This suite of endpoints manages integration with the SmartParcel locker network.
+
+### 1. List States
+```
+GET /api/orders/smart-parcel/states/
+Description: Retrieves all states where SmartParcel operates.
+Authentication: Required (Merchant)
+```
+
+### 2. List Cities by State
+```
+GET /api/orders/smart-parcel/states/{state_id}/cities/
+Description: Retrieves all cities for a specific SmartParcel state.
+Authentication: Required (Merchant)
+```
+
+### 3. List Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/city/{city_id}/
+Description: Retrieves all available SmartParcel boxes in a city.
+Authentication: Required (Merchant)
+```
+
+### 4. List Assigned Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/assigned/city/{city_id}/
+Description: Retrieves SmartParcel boxes assigned to the merchant in a city.
+Authentication: Required (Merchant)
+```
+
+### 5. Get Box Details
+```
+GET /api/orders/smart-parcel/boxes/{box_id}/
+Description: Retrieves details for a specific SmartParcel box.
+Authentication: Required (Merchant)
+```
+
+### 6. List Locker Sizes
+```
+GET /api/orders/smart-parcel/locker-sizes/
+Description: Retrieves all available locker sizes on the network.
+Authentication: Required (Merchant)
+```
+
+### 7. Create Parcel
+```
+POST /api/orders/smart-parcel/parcels/
+Description: Create a new SmartParcel parcel for locker pickup/delivery.
+Authentication: Required (Merchant)
+```
+
+### 8. List Pending Pickups
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves SmartParcel parcels awaiting pickup.
+Authentication: Required (Merchant)
+
+---
+
+## MERCHANT ORDERS
+
+### 1. Cancel Order
+```
+POST /api/orders/cancel/{order_number}/
+Description: Cancels an active order and processes refunds if applicable.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "reason": "Customer requested cancellation" (Optional)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order 6158001 has been canceled",
+    "data": {
+      "order": {
+        "order_number": "6158001",
+        "old_status": "Pending",
+        "new_status": "CustomerCanceled",
+        "payment_method": "wallet",
+        "total_amount": 2500.00,
+        "canceled_at": "2026-05-04T15:00:00Z"
+      },
+      "refund": {
+        "processed": true,
+        "amount": 2500.00,
+        "reason": "Customer requested cancellation"
+      }
+    }
+  }
+```
+
+---
+
+## DISPATCHER ORDERS
+
+### 1. Create Order
+```
+POST /dispatch/orders/
+Description: Creates a new order manually from the dispatcher portal.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "pickup": "Pickup Address",
+    "dropoff": "Dropoff Address",
+    "senderName": "Sender Name",
+    "senderPhone": "08012345678",
+    "receiverName": "Receiver Name",
+    "receiverPhone": "08087654321",
+    "vehicle": "Bike",
+    "packageType": "Box",
+    "price": 2500.00,
+    "cod": 0.00,
+    "riderId": "RIDER_UUID",
+    "merchantId": "MERCHANT_UUID",
+    "is_partner_order": true,
+    "partner_order_count": 10,
+    "file_uploaded_urls": [
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
+    ]
+  }
+Response: Created Order object.
+```
+
+### 2. Update Partner Stats
+```
+PATCH /dispatch/orders/{order_number}/update-partner-stats/
+Description: Updates processing metrics for a partner bulk order.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "rider_completed_count": 50,
+    "day_returned_count": 2
+  }
+Response: Updated Order object.
+```
+
+### 3. Update Order Status
+```
+POST /dispatch/orders/{order_number}/update_status/
+Description: Updates the status of an order (e.g., In Transit, Delivered, Cancelled).
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "status": "Cancelled",
+    "reason": "Customer changed their mind" (Optional, used for cancellation)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order status updated to CustomerCanceled",
+    "data": {
+      "id": "6158001",
+      "status": "CustomerCanceled",
+      "cancellation_reason": "Customer changed their mind",
+      ...
+    }
+  }
+```
+```
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves all pending parcels ready for pickup from the SmartParcel network.
+Authentication: Required (Merchant)
+```
+
+### 9. Resolve Collect Code
+```
+GET /api/orders/smart-parcel/parcels/resolve-collect-code/{collect_code}/
+Description: Resolves a collect code to a pending parcel for pickup.
+Authentication: Required (Merchant)
+```
+
+### 10. Get Parcel Details
+```
+GET /api/orders/smart-parcel/parcels/{tracking_number}/
+Description: Retrieves full details for a SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 11. Cancel Parcel
+```
+POST /api/orders/smart-parcel/parcels/{tracking_number}/cancel/
+Description: Cancels an existing SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 12. Simulate Drop Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/locker/simulate/drop/
+Description: Triggers a simulated "dropped" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "CJ95"
+  }
+```
+
+### 13. Simulate Collect Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/locker/simulate/collect/
+Description: Triggers a simulated "collected" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "J6E7"
+  }
+```
+
+---
+
+## DISPATCHER MERCHANTS
+
+### 1. List Merchants
+```
+GET /merchants/
+Description: Retrieves a list of all merchants.
+Authentication: Required (Dispatcher)
+Response: Paginated list of Merchant objects.
+```
+
+### 2. Deactivate Merchant
+```
+DELETE /merchants/{id}/
+Description: Soft-deactivates a merchant account.
+Authentication: Required (Dispatcher Admin)
+Response:
+  {
+    "status": "success",
+    "message": "Merchant deactivated successfully."
+  }
+```
+
+### 3. Merchant Pricing Overrides
+```
+POST /merchant-pricing-overrides/
+Description: Create or update (upsert) a pricing override for a specific merchant and vehicle type.
+Authentication: Required (Dispatcher Admin)
+Request Body:
+  {
+    "merchant": "USER_UUID",
+    "vehicle": VEHICLE_ID,
+    "flat_fee": 1500.00, (Optional)
+    "pricing_tiers": { ... }, (Optional)
+    "is_active": true
+  }
+Response: The created or updated Pricing Override object.
+```
+
+```
+GET /merchant-pricing-overrides/
+Description: List all merchant pricing overrides. Supports filtering.
+Authentication: Required (Dispatcher Admin)
+Query Parameters:
+  - merchant: USER_UUID
+  - vehicle: VEHICLE_ID
+  - active: true|false
+Response: Paginated list of Pricing Override objects.
+```

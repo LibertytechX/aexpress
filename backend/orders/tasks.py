@@ -1,3 +1,4 @@
+from django.db.models import Q
 import logging
 from celery import shared_task
 import os
@@ -377,6 +378,7 @@ def process_weekly_monday_reports():
     end_date = last_sunday.strftime("%b %d")
 
     merchants = User.objects.filter(usertype="Merchant", is_active=True)
+    context = {}
 
     for merchant in merchants:
         # Get orders from the past week
@@ -390,7 +392,13 @@ def process_weekly_monday_reports():
 
         if total_requested > 0:
             # E1: Active Merchant
-            total_delivered = weekly_orders.filter(status="Done").count()
+            completed_order = weekly_orders.filter(status="Done")
+            total_delivered = completed_order.count()
+            cancelled_orders = weekly_orders.filter(status="CustomerCanceled")
+            cancelled_orders_count = cancelled_orders.count()
+            exclude_status = ["Done", "CustomerCanceled"]
+            ongoing_orders = weekly_orders.filter(~Q(status__in=exclude_status))
+            ongoing_orders_count = ongoing_orders.count()
             success_rate = (
                 int((total_delivered / total_requested) * 100) if total_requested else 0
             )
@@ -439,20 +447,55 @@ def process_weekly_monday_reports():
                     else top_delivery["dropoff_address"][:30]
                 )
 
+            total_order_amount = (
+                weekly_orders.aggregate(total=Sum("total_amount"))["total"] or 0
+            )
+            completed_order_amount = (
+                completed_order.aggregate(total=Sum("total_amount"))["total"] or 0
+            )
+            cancelled_order_amount = (
+                cancelled_orders.aggregate(total=Sum("total_amount"))["total"] or 0
+            )
+            ongoing_order_amount = (
+                ongoing_orders.aggregate(total=Sum("total_amount"))["total"] or 0
+            )
+            formatted_order_amount = f"{total_order_amount:,.2f}"
+
             context = {
                 "start_date": start_date,
                 "end_date": end_date,
                 "total_requested": total_requested,
                 "total_delivered": total_delivered,
                 "success_rate": success_rate,
+                "total_order_amount": formatted_order_amount,
                 "most_active_day": most_active_day,
                 "top_delivery_zone": top_zone,
+                "cancelled_orders": cancelled_orders_count,
+                "ongoing_orders": ongoing_orders_count,
+                "completed_order_amount": completed_order_amount,
+                "cancelled_order_amount": cancelled_order_amount,
+                "ongoing_order_amount": ongoing_order_amount,
             }
 
             _send_marketing_email(
                 merchant, "E1", "Your Weekly Delivery Report 📊", context
             )
         else:
+            context = {
+                "total_requested": 0,
+                "total_delivered": 0,
+                "success_rate": 0,
+                "total_order_amount": 0,
+                "most_active_day": 0,
+                "cancelled_orders": 0,
+                "ongoing_orders": 0,
+                "completed_order_amount": 0,
+                "cancelled_order_amount": 0,
+                "ongoing_order_amount": 0,
+            }
+            _send_marketing_email(
+                merchant, "E1", "Your Weekly Delivery Report 📊", context
+            )
             # E2: Inactive Merchant
             _send_marketing_email(
                 merchant,
