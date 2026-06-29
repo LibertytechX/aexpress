@@ -999,7 +999,7 @@ class MerchantNotificationListView(APIView):
 
 class MerchantNotificationDetailView(APIView):
     """
-    GET /api/auth/notifications/<uuid:pk>/
+    GET /api/auth/notifications/<int:pk>/
     Returns a single notification belonging to the authenticated merchant.
     """
 
@@ -1019,7 +1019,7 @@ class MerchantNotificationDetailView(APIView):
 
 class MerchantNotificationMarkReadView(APIView):
     """
-    POST /api/auth/notifications/<uuid:pk>/read/
+    POST /api/auth/notifications/<int:pk>/read/
     Marks a single notification as read.
     """
 
@@ -1102,7 +1102,7 @@ class MerchantNotificationSettingsView(APIView):
 
 class MerchantNotificationDeleteView(APIView):
     """
-    DELETE /api/auth/notifications/<uuid:pk>/
+    DELETE /api/auth/notifications/<int:pk>/
     Deletes a single notification belonging to the authenticated merchant.
     """
 
