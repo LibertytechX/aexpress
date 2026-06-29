@@ -1262,7 +1262,6 @@ class MerchantNotification(models.Model):
     Allows for in-app 'Notification Center' / inbox functionality.
     """
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant = models.ForeignKey(
         Merchant, on_delete=models.CASCADE, related_name="notifications"
     )
