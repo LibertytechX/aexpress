@@ -11,10 +11,15 @@ from .views import (
     OpsAlertRuleDetailView,
     OpsAlertRuleListView,
     OpsCodDashboardView,
+    OpsCodOrdersView,
     OpsFuelDashboardView,
     OpsFuelUploadView,
     OpsHealthView,
+    OpsOrderDashboardView,
+    OpsOrderListView,
+    OpsPaymentOrdersView,
     OpsPaymentsView,
+    OpsTrackingDashboardView,
 )
 
 urlpatterns = [
@@ -52,12 +57,38 @@ urlpatterns = [
         OpsAlertRuleDetailView.as_view(),
         name="ops-alert-rule-detail",
     ),
+    # Consolidated order metrics + live rider/vehicle tracking
+    path(
+        "order-dashboard/",
+        OpsOrderDashboardView.as_view(),
+        name="ops-order-dashboard",
+    ),
+    path(
+        "order-dashboard/orders/",
+        OpsOrderListView.as_view(),
+        name="ops-order-list",
+    ),
+    path(
+        "tracking-dashboard/",
+        OpsTrackingDashboardView.as_view(),
+        name="ops-tracking-dashboard",
+    ),
     # Payments + COD dashboards (Phase 5, money side / Phase 2 metrics)
     path("payments/", OpsPaymentsView.as_view(), name="ops-payments"),
+    path(
+        "payments/orders/",
+        OpsPaymentOrdersView.as_view(),
+        name="ops-payment-orders",
+    ),
     path(
         "cod-dashboard/",
         OpsCodDashboardView.as_view(),
         name="ops-cod-dashboard",
+    ),
+    path(
+        "cod-dashboard/orders/",
+        OpsCodOrdersView.as_view(),
+        name="ops-cod-orders",
     ),
     # Fuel tracking (upload daily bills + stats)
     path("fuel/upload/", OpsFuelUploadView.as_view(), name="ops-fuel-upload"),

@@ -22,12 +22,40 @@ from dispatcher.periods import _parse_period
 from .filters import parse_filter
 from .models import OPEN_ALERT_STATUSES, Alert, AlertRule, AlertStatus
 from .permissions import HasOpsReadScope, HasOpsWriteScope
-from .serializers import AlertRuleSerializer, AlertSerializer
+from .serializers import (
+    AlertRuleSerializer,
+    AlertSerializer,
+    OrderDetailSerializer,
+)
 
 
 def _pct(part, whole):
     """Percentage helper (whole == 0 → 0.0)."""
     return round(part / whole * 100, 1) if whole else 0.0
+
+
+def _apply_order_status(qs, value):
+    """Filter by a logical status bucket (delivered/cancelled/…) or raw status."""
+    if not value:
+        return qs
+    from .metrics.order_metrics import (
+        CANCELLED_STATUSES,
+        DELIVERED_STATUSES,
+        FAILED_STATUSES,
+        IN_PROGRESS_STATUSES,
+        PENDING_STATUSES,
+    )
+
+    groups = {
+        "delivered": DELIVERED_STATUSES,
+        "cancelled": CANCELLED_STATUSES,
+        "in_progress": IN_PROGRESS_STATUSES,
+        "enroute": IN_PROGRESS_STATUSES,
+        "pending": PENDING_STATUSES,
+        "failed": FAILED_STATUSES,
+    }
+    group = groups.get(value)
+    return qs.filter(status__in=group) if group else qs.filter(status=value)
 
 
 def ops_response(data, *, success=True, period=None, date_range=None, **extra):
@@ -389,15 +417,74 @@ class OpsPaymentsView(APIView):
     def get(self, request):
         from orders.models import Order
 
+        from .caching import get_cached, set_cached
         from .metrics import payment_metrics
 
         start_dt, end_dt, desc = parse_filter(request)
+        cached = get_cached("payments", desc)
+        if cached is not None:
+            return ops_response(cached, date_range=desc)
         qs = Order.objects.filter(
             created_at__gte=start_dt, created_at__lte=end_dt
         )
-        return ops_response(
-            payment_metrics.payment_breakdown(qs), date_range=desc
+        data = set_cached("payments", desc, payment_metrics.payment_breakdown(qs))
+        return ops_response(data, date_range=desc)
+
+
+class OpsPaymentOrdersView(APIView):
+    """
+    GET /api/ops/payments/orders/ — drill-down list of the actual orders behind
+    the payments breakdown, with full order details. Honours the general filter.
+
+    Filters: ?method=<payment_method>, ?payment_status=<status>,
+    ?collection_timing=prepaid|rider_collected|deferred|other, + page/page_size.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+    permission_classes = [HasOpsReadScope]
+
+    def get(self, request):
+        from orders.models import Order
+
+        from .metrics.payment_metrics import COLLECTION_TIMING
+
+        start_dt, end_dt, desc = parse_filter(request)
+        qs = (
+            Order.objects.filter(
+                created_at__gte=start_dt, created_at__lte=end_dt
+            )
+            .select_related("user", "rider", "rider__user", "vehicle")
+            .prefetch_related("deliveries")
+            .order_by("-created_at")
         )
+
+        method = request.query_params.get("method")
+        if method:
+            qs = qs.filter(payment_method=method)
+
+        payment_status = request.query_params.get("payment_status")
+        if payment_status:
+            qs = qs.filter(payment_status=payment_status)
+
+        timing = request.query_params.get("collection_timing")
+        if timing:
+            if timing == "other":
+                qs = qs.exclude(payment_method__in=list(COLLECTION_TIMING))
+            else:
+                methods = [m for m, t in COLLECTION_TIMING.items() if t == timing]
+                qs = qs.filter(payment_method__in=methods)
+
+        items, meta = _paginate(request, qs)
+        data = {
+            "results": OrderDetailSerializer(items, many=True).data,
+            "filters": {
+                "method": method,
+                "payment_status": payment_status,
+                "collection_timing": timing,
+            },
+            **meta,
+        }
+        return ops_response(data, date_range=desc)
 
 
 class OpsCodDashboardView(APIView):
@@ -413,13 +500,166 @@ class OpsCodDashboardView(APIView):
     def get(self, request):
         from orders.models import Order
 
+        from .caching import get_cached, set_cached
         from .metrics import cod_metrics
 
         start_dt, end_dt, desc = parse_filter(request)
+        cached = get_cached("cod-dashboard", desc)
+        if cached is not None:
+            return ops_response(cached, date_range=desc)
         qs = Order.objects.filter(
             created_at__gte=start_dt, created_at__lte=end_dt
         )
-        return ops_response(cod_metrics.cod_dashboard(qs), date_range=desc)
+        data = set_cached("cod-dashboard", desc, cod_metrics.cod_dashboard(qs))
+        return ops_response(data, date_range=desc)
+
+
+class OpsOrderDashboardView(APIView):
+    """
+    GET /api/ops/order-dashboard/ — consolidated order metrics (management +
+    per-rider + per-merchant). Honours the general filter (§3); cached.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+    permission_classes = [HasOpsReadScope]
+
+    def get(self, request):
+        from orders.models import Order
+
+        from .caching import get_cached, set_cached
+        from .metrics import order_metrics
+
+        start_dt, end_dt, desc = parse_filter(request)
+        cached = get_cached("order-dashboard", desc)
+        if cached is not None:
+            return ops_response(cached, date_range=desc)
+        qs = Order.objects.filter(
+            created_at__gte=start_dt, created_at__lte=end_dt
+        )
+        data = set_cached("order-dashboard", desc, order_metrics.order_dashboard(qs))
+        return ops_response(data, date_range=desc)
+
+
+class OpsOrderListView(APIView):
+    """
+    GET /api/ops/order-dashboard/orders/ — drill-down list of orders behind the
+    order dashboard (per-rider / per-merchant rows). Honours the general filter.
+
+    Filters: ?rider=<rider_id>, ?merchant=<business_name>,
+    ?order_status=delivered|cancelled|in_progress|pending|failed (or raw status),
+    + page/page_size.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+    permission_classes = [HasOpsReadScope]
+
+    def get(self, request):
+        from orders.models import Order
+
+        start_dt, end_dt, desc = parse_filter(request)
+        qs = (
+            Order.objects.filter(
+                created_at__gte=start_dt, created_at__lte=end_dt
+            )
+            .select_related("user", "rider", "rider__user", "vehicle")
+            .prefetch_related("deliveries")
+            .order_by("-created_at")
+        )
+        rider = request.query_params.get("rider")
+        if rider:
+            qs = qs.filter(rider__rider_id=rider)
+        merchant = request.query_params.get("merchant")
+        if merchant:
+            qs = qs.filter(user__business_name=merchant)
+        order_status = request.query_params.get("order_status")
+        qs = _apply_order_status(qs, order_status)
+
+        items, meta = _paginate(request, qs)
+        data = {
+            "results": OrderDetailSerializer(items, many=True).data,
+            "filters": {
+                "rider": rider, "merchant": merchant,
+                "order_status": order_status,
+            },
+            **meta,
+        }
+        return ops_response(data, date_range=desc)
+
+
+class OpsCodOrdersView(APIView):
+    """
+    GET /api/ops/cod-dashboard/orders/ — drill-down list of COD orders behind the
+    COD dashboard, with each order's COD settlement records. General filter.
+
+    Filters: ?rider=<rider_id>, ?merchant=<business_name>,
+    ?cod_status=collected|pending, ?order_status=…, + page/page_size.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+    permission_classes = [HasOpsReadScope]
+
+    def get(self, request):
+        from orders.models import Order
+
+        from .serializers import CodOrderSerializer
+
+        start_dt, end_dt, desc = parse_filter(request)
+        qs = (
+            Order.objects.filter(
+                collect_on_delivery=True,
+                created_at__gte=start_dt, created_at__lte=end_dt,
+            )
+            .select_related("user", "rider", "rider__user", "vehicle")
+            .prefetch_related("deliveries", "cod_records")
+            .order_by("-created_at")
+        )
+        rider = request.query_params.get("rider")
+        if rider:
+            qs = qs.filter(rider__rider_id=rider)
+        merchant = request.query_params.get("merchant")
+        if merchant:
+            qs = qs.filter(user__business_name=merchant)
+
+        collected = ["remitted", "verified"]
+        cod_status = request.query_params.get("cod_status")
+        if cod_status == "collected":
+            qs = qs.filter(cod_records__status__in=collected).distinct()
+        elif cod_status in ("pending", "outstanding"):
+            qs = qs.exclude(cod_records__status__in=collected).distinct()
+
+        order_status = request.query_params.get("order_status")
+        qs = _apply_order_status(qs, order_status)
+
+        items, meta = _paginate(request, qs)
+        data = {
+            "results": CodOrderSerializer(items, many=True).data,
+            "filters": {
+                "rider": rider, "merchant": merchant,
+                "cod_status": cod_status, "order_status": order_status,
+            },
+            **meta,
+        }
+        return ops_response(data, date_range=desc)
+
+
+class OpsTrackingDashboardView(APIView):
+    """
+    GET /api/ops/tracking-dashboard/ — live rider & vehicle (VehicleAsset)
+    tracking snapshot (online/offline/moving), with rider↔vehicle linkage.
+    Live state — not date-filtered. `?limit` controls the live list size.
+    """
+
+    authentication_classes = [ServiceAPIKeyAuthentication]
+    permission_classes = [HasOpsReadScope]
+
+    def get(self, request):
+        from .metrics import tracking_metrics
+
+        try:
+            limit = min(max(int(request.query_params.get("limit", 50)), 1), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        return ops_response(tracking_metrics.tracking_dashboard(limit=limit))
 
 
 class OpsFuelUploadView(APIView):
@@ -469,11 +709,18 @@ class OpsFuelDashboardView(APIView):
     permission_classes = [HasOpsReadScope]
 
     def get(self, request):
+        from .caching import get_cached, set_cached
         from .metrics import fuel_metrics
         from .models import FuelBill
 
         start_dt, end_dt, desc = parse_filter(request)
+        cached = get_cached("fuel-dashboard", desc)
+        if cached is not None:
+            return ops_response(cached, date_range=desc)
         qs = FuelBill.objects.filter(
             bill_date__gte=start_dt.date(), bill_date__lte=end_dt.date()
         )
-        return ops_response(fuel_metrics.fuel_dashboard(qs), date_range=desc)
+        data = set_cached(
+            "fuel-dashboard", desc, fuel_metrics.fuel_dashboard(qs)
+        )
+        return ops_response(data, date_range=desc)

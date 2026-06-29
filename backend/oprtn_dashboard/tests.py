@@ -10,9 +10,10 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 
+from django.core.cache import cache
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -66,8 +67,17 @@ def fuel_row(invoice, plate, cost, liters, when, fuel_price=1200, kmpl=200):
 # ---------------------------------------------------------------------------
 
 
+@override_settings(
+    CACHES={
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "ops-test",
+        }
+    }
+)
 class OpsTestBase(TestCase):
     def setUp(self):
+        cache.clear()
         call_command("seed_alert_rules", stdout=StringIO())
         self.raw_key = "sk_" + secrets.token_hex(24)
         ServiceAPIKey.objects.create(
@@ -405,6 +415,43 @@ class PaymentCodTests(OpsTestBase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["data"]["cards"]["cod_fees_earned"], "530.00")
 
+    def test_payment_orders_drilldown(self):
+        # setUp made: 1000 wallet Done, 500 cash Done (COD), 800 postpaid Pending
+        base = "/api/ops/payments/orders/?period=this_month"
+        all_orders = self.client.get(base).json()["data"]
+        self.assertEqual(all_orders["count"], 3)
+        self.assertIn("order_number", all_orders["results"][0])
+        self.assertIn("merchant", all_orders["results"][0])
+
+        by_method = self.client.get(base + "&method=cash").json()["data"]
+        self.assertEqual(by_method["count"], 1)
+        self.assertEqual(by_method["results"][0]["payment_method"], "cash")
+        self.assertEqual(by_method["filters"]["method"], "cash")
+
+        rc = self.client.get(
+            base + "&collection_timing=rider_collected"
+        ).json()["data"]
+        self.assertEqual(rc["count"], 1)  # the cash order
+        deferred = self.client.get(
+            base + "&collection_timing=deferred"
+        ).json()["data"]
+        self.assertEqual(deferred["count"], 1)  # the postpaid order
+
+    def test_cod_orders_drilldown(self):
+        # setUp made exactly one COD order (cash, Done, 2000), no COD record yet
+        base = "/api/ops/cod-dashboard/orders/?period=this_month"
+        allc = self.client.get(base).json()["data"]
+        self.assertEqual(allc["count"], 1)
+        self.assertTrue(allc["results"][0]["collect_on_delivery"])
+        self.assertIn("cod_records", allc["results"][0])
+
+        by_merchant = self.client.get(base + "&merchant=TestMart").json()["data"]
+        self.assertEqual(by_merchant["count"], 1)
+        pending = self.client.get(base + "&cod_status=pending").json()["data"]
+        self.assertEqual(pending["count"], 1)  # nothing remitted yet
+        collected = self.client.get(base + "&cod_status=collected").json()["data"]
+        self.assertEqual(collected["count"], 0)
+
 
 # ---------------------------------------------------------------------------
 # Fuel tracking — upload + dashboard
@@ -545,3 +592,133 @@ class FilterTests(TestCase):
         s, e, desc = parse_filter(_StubRequest(filter="today"))
         self.assertEqual(desc["filter"], "today")
         self.assertEqual(s.date(), timezone.localdate())
+
+
+# ---------------------------------------------------------------------------
+# Dashboard cache refresh task (every 30 min)
+# ---------------------------------------------------------------------------
+
+
+class CacheRefreshTests(OpsTestBase):
+    def test_refresh_warms_cache_and_endpoint_serves_it(self):
+        from dispatcher.periods import _parse_period
+
+        from .caching import get_cached
+        from .tasks import refresh_dashboard_cache
+
+        m, v = self.make_user(), self.make_vehicle()
+        self.make_order(m, v, 1000, "wallet", "Done")
+
+        out = refresh_dashboard_cache()
+        self.assertEqual(out["warmed"]["this_month"], "ok")
+
+        # snapshot is cached for this_month payments
+        s, e, _ = _parse_period("this_month")
+        desc = {
+            "filter": "this_month",
+            "start": s.isoformat(),
+            "end": e.isoformat(),
+        }
+        cached = get_cached("payments", desc)
+        self.assertIsNotNone(cached)
+        self.assertEqual(cached["total_amount"], "1000.00")
+
+        # endpoint serves the cached snapshot: delete the order, still returns 1000
+        Order.objects.all().delete()
+        r = self.client.get("/api/ops/payments/?filter=this_month")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["data"]["total_amount"], "1000.00")
+
+
+# ---------------------------------------------------------------------------
+# Consolidated order dashboard
+# ---------------------------------------------------------------------------
+
+
+class OrderDashboardTests(OpsTestBase):
+    def test_order_dashboard_levels(self):
+        m, v, rider = self.make_user(), self.make_vehicle(), self.make_rider()
+        self.make_order(m, v, 1000, "wallet", "Done", rider=rider)
+        self.make_order(m, v, 2000, "cash", "Done", rider=rider)
+        self.make_order(m, v, 500, "wallet", "CustomerCanceled", rider=rider)
+        self.make_order(m, v, 800, "wallet", "Started", rider=rider)
+
+        data = self.client.get(
+            "/api/ops/order-dashboard/?period=this_month"
+        ).json()["data"]
+        mg = data["management"]
+        self.assertEqual(mg["total_orders"], 4)
+        self.assertEqual(mg["delivered"], 2)
+        self.assertEqual(mg["cancelled"], 1)
+        self.assertEqual(mg["in_progress"], 1)
+        self.assertEqual(mg["gross_revenue"], "3000.00")
+        self.assertEqual(mg["avg_order_value"], "1500.00")
+        self.assertEqual(mg["rider_commission_total"], "600.00")  # 3000 × 20%
+
+        self.assertEqual(len(data["by_rider"]), 1)
+        self.assertEqual(data["by_rider"][0]["delivered"], 2)
+        self.assertEqual(data["by_rider"][0]["commission"], "600.00")
+        self.assertEqual(len(data["by_merchant"]), 1)
+        self.assertEqual(data["by_merchant"][0]["delivered"], 2)
+
+    def test_order_orders_drilldown(self):
+        m, v, rider = self.make_user(), self.make_vehicle(), self.make_rider()
+        self.make_order(m, v, 1000, "wallet", "Done", rider=rider)
+        self.make_order(m, v, 500, "wallet", "CustomerCanceled", rider=rider)
+        base = "/api/ops/order-dashboard/orders/?period=this_month"
+
+        allo = self.client.get(base).json()["data"]
+        self.assertEqual(allo["count"], 2)
+        self.assertIn("order_number", allo["results"][0])
+
+        delivered = self.client.get(base + "&order_status=delivered").json()["data"]
+        self.assertEqual(delivered["count"], 1)
+        cancelled = self.client.get(base + "&order_status=cancelled").json()["data"]
+        self.assertEqual(cancelled["count"], 1)
+        by_rider = self.client.get(
+            base + f"&rider={rider.rider_id}"
+        ).json()["data"]
+        self.assertEqual(by_rider["count"], 2)
+
+
+# ---------------------------------------------------------------------------
+# Live rider / vehicle tracking dashboard
+# ---------------------------------------------------------------------------
+
+
+class TrackingDashboardTests(OpsTestBase):
+    def test_tracking_snapshot_and_linkage(self):
+        now = timezone.now()
+        a1 = self.make_asset(
+            "TRK1", vehicle_type="bike", speed=20,
+            engine_status="on", last_telemetry_at=now,
+        )
+        Rider.objects.create(
+            user=self.make_user(contact="Mover"), vehicle_asset=a1,
+            status="on_delivery", is_moving=True,
+            current_latitude=Decimal("6.45"), current_longitude=Decimal("3.39"),
+            current_speed=Decimal("20"), last_location_update=now,
+        )
+        a2 = self.make_asset(
+            "TRK2", vehicle_type="bike", speed=0,
+            engine_status="off", last_telemetry_at=now - timedelta(hours=5),
+        )
+        Rider.objects.create(
+            user=self.make_user(contact="Resting"), vehicle_asset=a2,
+            status="offline", is_moving=False,
+            current_latitude=Decimal("6.46"), current_longitude=Decimal("3.40"),
+            current_speed=Decimal("0"),
+            last_location_update=now - timedelta(hours=5),
+        )
+
+        data = self.client.get("/api/ops/tracking-dashboard/").json()["data"]
+        self.assertEqual(data["riders"]["total"], 2)
+        self.assertEqual(data["riders"]["moving_now"], 1)
+        self.assertEqual(data["riders"]["by_gps_status"]["moving"], 1)
+        self.assertEqual(data["vehicles"]["moving_now"], 1)
+        self.assertGreaterEqual(data["vehicles"]["offline"], 1)
+        # live list carries the rider↔vehicle linkage
+        plates = [
+            it["vehicle"]["plate_number"] for it in data["live"] if it["vehicle"]
+        ]
+        self.assertIn("TRK1", plates)

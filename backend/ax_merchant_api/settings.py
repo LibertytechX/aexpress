@@ -372,7 +372,12 @@ CELERY_BEAT_SCHEDULE = {
     # Ops Dashboard alert engine (full rule set)
     "generate-ops-alerts": {
         "task": "oprtn_dashboard.tasks.generate_alerts",
-        "schedule": crontab(minute="*/10"),
+        "schedule": crontab(minute="*/30"),
+    },
+    # Pre-warm payments/COD/fuel dashboard snapshots for fast reads.
+    "refresh-ops-dashboard-cache": {
+        "task": "oprtn_dashboard.tasks.refresh_dashboard_cache",
+        "schedule": crontab(minute="*/30"),
     },
     # Optional fast lane (uncomment once telemetry sync is on beat, guide §14.8):
     # "generate-ops-alerts-fast": {
