@@ -13,6 +13,7 @@ import math
 from django.db.models import Count, Q
 from rest_framework import status as http_status
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -104,8 +105,10 @@ def _paginate(request, qs, default_size=25, max_size=100):
 class OpsHealthView(APIView):
     """GET /api/ops/health/ — confirms the app is wired and auth works."""
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         period = request.query_params.get("period", "this_month")
@@ -123,8 +126,10 @@ class OpsAlertListView(APIView):
     ?type (alert_type), ?severity, ?entity_type, plus ?page & ?page_size.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         qs = Alert.objects.select_related(
@@ -157,8 +162,10 @@ class OpsAlertListView(APIView):
 class OpsAlertDetailView(APIView):
     """GET /api/ops/alerts/<uuid>/ — single alert."""
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request, pk):
         try:
@@ -181,8 +188,10 @@ class OpsAlertResolveView(APIView):
             "resolution_note": "..." }  (default status = resolved)
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsWriteScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsWriteScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def _update(self, request, pk):
         try:
@@ -230,8 +239,10 @@ class OpsAlertGenerateView(APIView):
     Body (optional): { "types": ["BIKE_AFTER_HOURS", ...] } to limit the run.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsWriteScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsWriteScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def post(self, request):
         from .alerts.engine import run_all_rules
@@ -250,8 +261,10 @@ class OpsAlertDashboardView(APIView):
     severity/type, regardless of date), and a recent-active list.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         start_dt, end_dt, desc = parse_filter(request)
@@ -341,8 +354,10 @@ class OpsAlertDashboardView(APIView):
 class OpsAlertRuleListView(APIView):
     """GET /api/ops/alert-rules/ — list all alert rules (thresholds)."""
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         qs = AlertRule.objects.all()
@@ -358,12 +373,14 @@ class OpsAlertRuleDetailView(APIView):
     thresholds. Writes require the ops write scope.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
-    def get_permissions(self):
-        if self.request.method == "GET":
-            return [HasOpsReadScope()]
-        return [HasOpsWriteScope()]
+    # def get_permissions(self):
+    #     if self.request.method == "GET":
+    #         return [HasOpsReadScope()]
+    #     return [HasOpsWriteScope()]
 
     def _get(self, pk):
         try:
@@ -411,8 +428,10 @@ class OpsPaymentsView(APIView):
     and status, and a cash-flow collection-timing split (§14.5).
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -440,8 +459,10 @@ class OpsPaymentOrdersView(APIView):
     ?collection_timing=prepaid|rider_collected|deferred|other, + page/page_size.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -494,8 +515,10 @@ class OpsCodDashboardView(APIView):
     COD (§14.6).
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -520,8 +543,10 @@ class OpsOrderDashboardView(APIView):
     per-rider + per-merchant). Honours the general filter (§3); cached.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -550,8 +575,10 @@ class OpsOrderListView(APIView):
     + page/page_size.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -595,8 +622,10 @@ class OpsCodOrdersView(APIView):
     ?cod_status=collected|pending, ?order_status=…, + page/page_size.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from orders.models import Order
@@ -649,8 +678,10 @@ class OpsTrackingDashboardView(APIView):
     Live state — not date-filtered. `?limit` controls the live list size.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from .metrics import tracking_metrics
@@ -670,8 +701,10 @@ class OpsFuelUploadView(APIView):
     linked to the fleet vehicle/rider by plate. Returns an import summary.
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsWriteScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsWriteScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
     parser_classes = [MultiPartParser, FormParser]
 
     def post(self, request):
@@ -705,8 +738,10 @@ class OpsFuelDashboardView(APIView):
     Honours the general dashboard filter (filtered on FuelBill.bill_date).
     """
 
-    authentication_classes = [ServiceAPIKeyAuthentication]
-    permission_classes = [HasOpsReadScope]
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
 
     def get(self, request):
         from .caching import get_cached, set_cached
