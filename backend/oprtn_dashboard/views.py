@@ -710,6 +710,8 @@ class OpsFuelUploadView(APIView):
     permission_classes = [AllowAny]  # auth disabled
     parser_classes = [MultiPartParser, FormParser]
 
+    MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
     def post(self, request):
         from .fuel_import import import_fuel_workbook
 
@@ -723,6 +725,18 @@ class OpsFuelUploadView(APIView):
             return Response(
                 {"success": False, "detail": "Upload an .xlsx file."},
                 status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        if f.size > self.MAX_UPLOAD_BYTES:
+            return Response(
+                {
+                    "success": False,
+                    "detail": (
+                        "File too large "
+                        f"({f.size / (1024 * 1024):.1f} MB). "
+                        "Maximum allowed size is 5 MB."
+                    ),
+                },
+                status=http_status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             )
         try:
             summary = import_fuel_workbook(f)
