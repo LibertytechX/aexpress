@@ -117,6 +117,7 @@ def import_fuel_workbook(file_obj):
     summary = {
         "total_rows": 0, "created": 0, "updated": 0, "skipped": 0,
         "unmatched_plates": set(),
+        "date_from": None, "date_to": None,
     }
 
     def cell(row, field):
@@ -137,6 +138,12 @@ def import_fuel_workbook(file_obj):
         if bill_dt is None:
             summary["skipped"] += 1
             continue
+
+        bill_d = bill_dt.date()
+        if summary["date_from"] is None or bill_d < summary["date_from"]:
+            summary["date_from"] = bill_d
+        if summary["date_to"] is None or bill_d > summary["date_to"]:
+            summary["date_to"] = bill_d
 
         plate = _to_text(cell(row, "vehicle_plate"))
         asset = None
@@ -178,4 +185,8 @@ def import_fuel_workbook(file_obj):
         summary["created" if created else "updated"] += 1
 
     summary["unmatched_plates"] = sorted(summary["unmatched_plates"])
+    if summary["date_from"] is not None:
+        summary["date_from"] = summary["date_from"].isoformat()
+    if summary["date_to"] is not None:
+        summary["date_to"] = summary["date_to"].isoformat()
     return summary

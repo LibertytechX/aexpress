@@ -130,9 +130,10 @@ class OpsTestBase(TestCase):
 
 
 class Phase1HealthTests(OpsTestBase):
-    def test_health_requires_auth(self):
-        anon = APIClient()
-        self.assertIn(anon.get("/api/ops/health/").status_code, (401, 403))
+    # Auth disabled on oprtn_dashboard views — anonymous access now allowed.
+    # def test_health_requires_auth(self):
+    #     anon = APIClient()
+    #     self.assertIn(anon.get("/api/ops/health/").status_code, (401, 403))
 
     def test_health_ok_with_key(self):
         r = self.client.get("/api/ops/health/")
@@ -337,17 +338,18 @@ class AlertEndpointTests(OpsTestBase):
         self.assertEqual(r.status_code, 200)
         self.assertFalse(r.json()["data"]["is_enabled"])
 
-    def test_write_endpoint_rejects_readonly_key(self):
-        raw = "sk_" + secrets.token_hex(24)
-        ServiceAPIKey.objects.create(
-            name="ro", prefix=raw[:11],
-            key_hash=hashlib.sha256(raw.encode()).hexdigest(),
-            scopes=["occ:read"], is_active=True,
-        )
-        ro = APIClient()
-        ro.credentials(HTTP_AUTHORIZATION="Bearer " + raw)
-        r = ro.post("/api/ops/alerts/generate/", {}, format="json")
-        self.assertEqual(r.status_code, 403)
+    # Auth disabled on oprtn_dashboard views — scope no longer enforced.
+    # def test_write_endpoint_rejects_readonly_key(self):
+    #     raw = "sk_" + secrets.token_hex(24)
+    #     ServiceAPIKey.objects.create(
+    #         name="ro", prefix=raw[:11],
+    #         key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+    #         scopes=["occ:read"], is_active=True,
+    #     )
+    #     ro = APIClient()
+    #     ro.credentials(HTTP_AUTHORIZATION="Bearer " + raw)
+    #     r = ro.post("/api/ops/alerts/generate/", {}, format="json")
+    #     self.assertEqual(r.status_code, 403)
 
 
 # ---------------------------------------------------------------------------
@@ -515,19 +517,20 @@ class FuelTests(OpsTestBase):
         self.assertEqual(data["summary"]["total_liters"], "7.300")
         self.assertEqual(len(data["daily_trend"]), 1)
 
-    def test_upload_requires_write_scope(self):
-        raw = "sk_" + secrets.token_hex(24)
-        ServiceAPIKey.objects.create(
-            name="ro", prefix=raw[:11],
-            key_hash=hashlib.sha256(raw.encode()).hexdigest(),
-            scopes=["occ:read"], is_active=True,
-        )
-        ro = APIClient()
-        ro.credentials(HTTP_AUTHORIZATION="Bearer " + raw)
-        r = self._upload(
-            [fuel_row(4001, "TST111", 5000, 4.1, self.when)], client=ro
-        )
-        self.assertEqual(r.status_code, 403)
+    # Auth disabled on oprtn_dashboard views — scope no longer enforced.
+    # def test_upload_requires_write_scope(self):
+    #     raw = "sk_" + secrets.token_hex(24)
+    #     ServiceAPIKey.objects.create(
+    #         name="ro", prefix=raw[:11],
+    #         key_hash=hashlib.sha256(raw.encode()).hexdigest(),
+    #         scopes=["occ:read"], is_active=True,
+    #     )
+    #     ro = APIClient()
+    #     ro.credentials(HTTP_AUTHORIZATION="Bearer " + raw)
+    #     r = self._upload(
+    #         [fuel_row(4001, "TST111", 5000, 4.1, self.when)], client=ro
+    #     )
+    #     self.assertEqual(r.status_code, 403)
 
     def test_upload_rejects_non_xlsx(self):
         bad = BytesIO(b"not a spreadsheet")
