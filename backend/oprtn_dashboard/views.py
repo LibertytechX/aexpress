@@ -713,6 +713,7 @@ class OpsFuelUploadView(APIView):
     MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
     def post(self, request):
+        from .caching import invalidate_cached
         from .fuel_import import import_fuel_workbook
 
         f = request.FILES.get("file")
@@ -765,6 +766,9 @@ class OpsFuelUploadView(APIView):
                 {"success": False, "detail": f"Failed to import file: {exc}"},
                 status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        # New bills were written — drop the cached dashboard so the next load
+        # recomputes from the freshly imported data instead of a stale snapshot.
+        invalidate_cached("fuel-dashboard")
         return ops_response(summary)
 
 
