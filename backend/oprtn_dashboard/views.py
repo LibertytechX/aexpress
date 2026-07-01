@@ -8,6 +8,7 @@ Response envelope convention (use everywhere in this app):
     { "success": bool, "data": <obj|list>, "date_range": {filter, start, end} | None }
 """
 
+import logging
 import math
 
 from django.db.models import Count, Q
@@ -28,6 +29,8 @@ from .serializers import (
     AlertSerializer,
     OrderDetailSerializer,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _pct(part, whole):
@@ -707,6 +710,8 @@ class OpsFuelUploadView(APIView):
     permission_classes = [AllowAny]  # auth disabled
     parser_classes = [MultiPartParser, FormParser]
 
+    MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
     def post(self, request):
         from .fuel_import import import_fuel_workbook
 
@@ -721,12 +726,44 @@ class OpsFuelUploadView(APIView):
                 {"success": False, "detail": "Upload an .xlsx file."},
                 status=http_status.HTTP_400_BAD_REQUEST,
             )
+        if f.size > self.MAX_UPLOAD_BYTES:
+            return Response(
+                {
+                    "success": False,
+                    "detail": (
+                        "File too large "
+                        f"({f.size / (1024 * 1024):.1f} MB). "
+                        "Maximum allowed size is 5 MB."
+                    ),
+                },
+                status=http_status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
         try:
             summary = import_fuel_workbook(f)
         except ValueError as exc:
             return Response(
                 {"success": False, "detail": str(exc)},
                 status=http_status.HTTP_400_BAD_REQUEST,
+            )
+        except ImportError as exc:
+            logger.exception("Fuel import failed: missing dependency")
+            return Response(
+                {
+                    "success": False,
+                    "detail": (
+                        "Fuel import is unavailable: a required dependency is "
+                        "not installed on the server. Run "
+                        "`pip install -r requirements.txt` and restart. "
+                        f"({exc})"
+                    ),
+                },
+                status=http_status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Fuel import failed unexpectedly")
+            return Response(
+                {"success": False, "detail": f"Failed to import file: {exc}"},
+                status=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         return ops_response(summary)
 
