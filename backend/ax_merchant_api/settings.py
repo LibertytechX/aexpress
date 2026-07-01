@@ -236,6 +236,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://axpress.net",
     "https://aexpress-staging.vercel.app",
     "https://axpress-operations-command-center.vercel.app",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -254,6 +255,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
     "https://aexpress-staging.vercel.app",
     "https://axpress-operations-command-center.vercel.app",
 ]
