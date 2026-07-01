@@ -252,6 +252,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
     "https://aexpress-staging.vercel.app",
     "https://axpress-operations-command-center.vercel.app",
 ]
