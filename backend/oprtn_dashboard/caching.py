@@ -39,3 +39,18 @@ def set_cached(name, descriptor, data, ttl=None):
     except Exception:  # noqa: BLE001
         pass
     return data
+
+
+def invalidate_cached(name):
+    """
+    Drop every cached variant of a dashboard (all filters/date ranges) so the
+    next read recomputes from the database. Call this after a write that changes
+    the underlying data (e.g. a fuel-bills upload).
+
+    Uses django-redis `delete_pattern`; degrades gracefully on other backends
+    or cache outages.
+    """
+    try:
+        cache.delete_pattern(f"ops:dash:{name}:*")
+    except Exception:  # noqa: BLE001 — never let cache issues break the write
+        pass
