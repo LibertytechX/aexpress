@@ -29,6 +29,14 @@ class AlertType(models.TextChoices):
     LOW_ACCEPTANCE = "LOW_ACCEPTANCE", "Low offer-acceptance rate"
     RIDER_INACTIVITY = "RIDER_INACTIVITY", "Rider inactive (online, no orders)"
     LOW_CSAT = "LOW_CSAT", "Low CSAT rating"
+    OVERRIDING = "OVERRIDING", "Overriding (km beyond estimate + allowance)"
+    RIDER_OFFLINE_MOVING = (
+        "RIDER_OFFLINE_MOVING",
+        "Rider offline but bike moving (attendance)",
+    )
+    LOW_REVENUE = "LOW_REVENUE", "Low rider revenue"
+    LOW_ORDER_VOLUME = "LOW_ORDER_VOLUME", "Low rider order volume"
+    FUEL_MISUSE = "FUEL_MISUSE", "Fuel collected but low output"
 
     # ── Order lifecycle ──────────────────────────────────────────────
     INCOMPLETE_ORDER = "INCOMPLETE_ORDER", "Incomplete order (accepted, not done)"
