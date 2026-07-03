@@ -18,7 +18,13 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from authentication.models import User
-from dispatcher.models import Rider, ServiceAPIKey, VehicleAsset
+from dispatcher.models import (
+    Rider,
+    RiderDutyLog,
+    ServiceAPIKey,
+    VehicleAsset,
+    VehicleTracking,
+)
 from orders.models import Order, Vehicle
 from riders.models import RiderCodRecord
 
@@ -757,3 +763,312 @@ class TrackingDashboardTests(OpsTestBase):
             it["vehicle"]["plate_number"] for it in data["live"] if it["vehicle"]
         ]
         self.assertIn("TRK1", plates)
+
+
+# ---------------------------------------------------------------------------
+# Rider behaviour — overriding / attendance / leaderboards / fuel misuse
+# ---------------------------------------------------------------------------
+
+
+class RiderBehaviorTests(OpsTestBase):
+    def setUp(self):
+        super().setUp()
+        self.vehicle = self.make_vehicle()
+        self.merchant = self.make_user(contact="Merch", business="BehMart")
+        self.asset = self.make_asset("BEH111", vehicle_type="bike")
+        self.rider = Rider.objects.create(
+            user=self.make_user(contact="Behavior"), vehicle_asset=self.asset
+        )
+        self.today = timezone.localdate()
+
+    # ── helpers ─────────────────────────────────────────────────────
+    def at(self, hour, minute=0):
+        return timezone.make_aware(
+            datetime.combine(self.today, time(hour, minute))
+        )
+
+    def track(self, when, odometer, asset=None):
+        row = VehicleTracking.objects.create(
+            vehicle_asset=asset or self.asset,
+            latitude=Decimal("6.5"),
+            longitude=Decimal("3.4"),
+            travelled=Decimal(str(odometer)),
+        )
+        VehicleTracking.objects.filter(pk=row.pk).update(created_at=when)
+        return row
+
+    def done_order(self, rider, amount, distance=None, picked=None,
+                   completed=None):
+        order = self.make_order(
+            self.merchant, self.vehicle, amount=amount, rider=rider
+        )
+        Order.objects.filter(pk=order.pk).update(
+            distance_km=distance,
+            picked_up_at=picked,
+            completed_at=completed or timezone.now(),
+        )
+        order.refresh_from_db()
+        return order
+
+    # ── Overriding ──────────────────────────────────────────────────
+    def test_overriding_report_accumulates_per_order(self):
+        from oprtn_dashboard.metrics.rider_behavior import overriding_report
+
+        now = timezone.now()
+        # Order 1: estimated 10 km, allowed 18, actual 30 → overriding 12.
+        self.done_order(
+            self.rider, 2000, distance=10,
+            picked=now - timedelta(minutes=20),
+            completed=now - timedelta(minutes=10),
+        )
+        self.track(now - timedelta(minutes=20), 1000.0)
+        self.track(now - timedelta(minutes=10), 1030.0)
+        # Order 2: estimated 5 km, allowed 13, actual 5 → within allowance.
+        self.done_order(
+            self.rider, 1000, distance=5,
+            picked=now - timedelta(minutes=9),
+            completed=now - timedelta(minutes=1),
+        )
+        self.track(now - timedelta(minutes=9), 1030.0)
+        self.track(now - timedelta(minutes=1), 1035.0)
+
+        start = timezone.make_aware(datetime.combine(self.today, time.min))
+        end = timezone.make_aware(datetime.combine(self.today, time.max))
+        report = overriding_report(start, end)
+
+        self.assertEqual(report["summary"]["orders_checked"], 2)
+        self.assertEqual(report["summary"]["orders_with_overriding"], 1)
+        row = report["top_riders"][0]
+        self.assertEqual(row["rider_id"], self.rider.rider_id)
+        self.assertEqual(row["total_overriding_km"], 12.0)
+        self.assertEqual(row["orders_over"], 1)
+        details = {o["order_number"]: o for o in row["orders"]}
+        self.assertEqual(len(details), 2)
+        self.assertIn(12.0, [o["overriding_km"] for o in row["orders"]])
+
+    def test_overriding_alert_fires_with_accumulation_context(self):
+        now = timezone.now()
+        self.done_order(
+            self.rider, 2000, distance=10,
+            picked=now - timedelta(minutes=20),
+            completed=now - timedelta(minutes=10),
+        )
+        self.track(now - timedelta(minutes=20), 1000.0)
+        self.track(now - timedelta(minutes=10), 1030.0)
+
+        run_all_rules(only_types=[AlertType.OVERRIDING])
+        alert = Alert.objects.get(alert_type=AlertType.OVERRIDING)
+        self.assertEqual(alert.rider_id, self.rider.id)
+        self.assertEqual(alert.value, Decimal("12.00"))
+        self.assertEqual(alert.severity, "high")  # 12 < crit 20
+        self.assertEqual(alert.context["total_overriding_km"], 12.0)
+        self.assertEqual(len(alert.context["orders"]), 1)
+
+    def test_overriding_dashboard_endpoint(self):
+        now = timezone.now()
+        self.done_order(
+            self.rider, 2000, distance=10,
+            picked=now - timedelta(minutes=20),
+            completed=now - timedelta(minutes=10),
+        )
+        self.track(now - timedelta(minutes=20), 1000.0)
+        self.track(now - timedelta(minutes=10), 1030.0)
+
+        r = self.client.get(
+            f"/api/ops/overriding-dashboard/?filter=single_date&date={self.today}"
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertEqual(data["summary"]["allowance_km"], 8.0)
+        self.assertEqual(
+            data["top_riders"][0]["total_overriding_km"], 12.0
+        )
+
+    # ── Attendance ──────────────────────────────────────────────────
+    def _seed_attendance(self):
+        # Online 08:00–12:00; bike moves 10 km online, 7 km offline (14–15h).
+        RiderDutyLog.objects.create(
+            rider=self.rider, went_online=self.at(8), went_offline=self.at(12)
+        )
+        self.track(self.at(9), 100.0)
+        self.track(self.at(10), 110.0)
+        self.track(self.at(14), 110.0)
+        self.track(self.at(15), 117.0)
+
+    def test_attendance_report_online_offline_split(self):
+        from oprtn_dashboard.metrics.rider_behavior import attendance_report
+
+        self._seed_attendance()
+        start = timezone.make_aware(datetime.combine(self.today, time.min))
+        end = timezone.make_aware(datetime.combine(self.today, time.max))
+        report = attendance_report(start, end)
+
+        row = next(
+            r for r in report["riders"]
+            if r["rider_id"] == self.rider.rider_id
+        )
+        self.assertEqual(row["online_minutes"], 240)
+        self.assertEqual(row["offline_minutes"], 840 - 240)
+        self.assertEqual(row["online_km"], 10.0)
+        self.assertEqual(row["offline_moving_km"], 7.0)
+        self.assertTrue(row["riders_offline_moving"])
+        self.assertEqual(
+            report["top_offline_moving"][0]["rider_id"], self.rider.rider_id
+        )
+        day = row["days"][0]
+        self.assertEqual(day["online_minutes"], 240)
+        self.assertEqual(day["offline_moving_km"], 7.0)
+
+    def test_rider_offline_moving_alert_fires(self):
+        self._seed_attendance()
+        run_all_rules(only_types=[AlertType.RIDER_OFFLINE_MOVING])
+        alert = Alert.objects.get(alert_type=AlertType.RIDER_OFFLINE_MOVING)
+        self.assertEqual(alert.rider_id, self.rider.id)
+        self.assertEqual(alert.value, Decimal("7.00"))
+        self.assertEqual(alert.severity, "high")  # 7 < crit 10
+        self.assertEqual(alert.context["offline_moving_km"], 7.0)
+
+    def test_attendance_dashboard_endpoint(self):
+        self._seed_attendance()
+        r = self.client.get(
+            f"/api/ops/attendance-dashboard/?filter=single_date&date={self.today}"
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertEqual(data["summary"]["work_window"], "08:00–22:00")
+        self.assertEqual(
+            data["top_offline_moving"][0]["offline_moving_km"], 7.0
+        )
+
+    # ── Revenue / order leaderboards ────────────────────────────────
+    def _seed_leaderboard(self):
+        self.rider_b = Rider.objects.create(user=self.make_user("LowGuy"))
+        self.rider_c = Rider.objects.create(user=self.make_user("NoShow"))
+        for _ in range(3):
+            self.done_order(self.rider, 5000)
+        self.done_order(self.rider_b, 1000)
+        # rider_b worked (duty session); rider_c never showed up.
+        RiderDutyLog.objects.create(
+            rider=self.rider_b,
+            went_online=timezone.now() - timedelta(hours=2),
+            went_offline=timezone.now() - timedelta(hours=1),
+        )
+
+    def test_revenue_leaderboard_top_and_bottom(self):
+        from oprtn_dashboard.metrics.rider_behavior import revenue_leaderboard
+
+        self._seed_leaderboard()
+        now = timezone.now()
+        report = revenue_leaderboard(now - timedelta(hours=24), now)
+
+        top = report["top_riders"]
+        self.assertEqual(top[0]["rider_id"], self.rider.rider_id)
+        self.assertEqual(top[0]["gross_revenue"], "15000.00")
+        self.assertEqual(top[0]["commission"], "3000.00")  # 20%
+        self.assertEqual(top[0]["net_revenue"], "12000.00")
+        bottoms = {r["rider_id"]: r for r in report["bottom_riders"]}
+        self.assertEqual(
+            bottoms[self.rider_c.rider_id]["net_revenue"], "0.00"
+        )
+        self.assertEqual(
+            bottoms[self.rider_b.rider_id]["net_revenue"], "800.00"
+        )
+
+    def test_low_revenue_alert_only_for_working_riders(self):
+        self._seed_leaderboard()
+        run_all_rules(only_types=[AlertType.LOW_REVENUE])
+        fired = set(
+            Alert.objects.filter(
+                alert_type=AlertType.LOW_REVENUE
+            ).values_list("rider__rider_id", flat=True)
+        )
+        self.assertIn(self.rider_b.rider_id, fired)  # ₦800 < ₦5000, worked
+        self.assertNotIn(self.rider.rider_id, fired)  # ₦12000 net
+        self.assertNotIn(self.rider_c.rider_id, fired)  # never worked
+
+    def test_order_leaderboard_and_low_volume_alert(self):
+        self._seed_leaderboard()
+        now = timezone.now()
+
+        from oprtn_dashboard.metrics.rider_behavior import order_leaderboard
+
+        report = order_leaderboard(now - timedelta(hours=24), now)
+        self.assertEqual(report["top_riders"][0]["delivered"], 3)
+        bottoms = {r["rider_id"]: r for r in report["bottom_riders"]}
+        self.assertEqual(bottoms[self.rider_c.rider_id]["delivered"], 0)
+
+        run_all_rules(only_types=[AlertType.LOW_ORDER_VOLUME])
+        fired = set(
+            Alert.objects.filter(
+                alert_type=AlertType.LOW_ORDER_VOLUME
+            ).values_list("rider__rider_id", flat=True)
+        )
+        # Both working riders are under 5 delivered; the no-show is skipped.
+        self.assertIn(self.rider.rider_id, fired)
+        self.assertIn(self.rider_b.rider_id, fired)
+        self.assertNotIn(self.rider_c.rider_id, fired)
+
+    def test_leaderboard_endpoints(self):
+        self._seed_leaderboard()
+        r = self.client.get("/api/ops/revenue-leaderboard/?filter=today")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(
+            r.json()["data"]["top_riders"][0]["net_revenue"], "12000.00"
+        )
+        r = self.client.get("/api/ops/order-leaderboard/?filter=today")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["data"]["top_riders"][0]["delivered"], 3)
+
+    # ── Fuel misuse ─────────────────────────────────────────────────
+    def _seed_fuel(self):
+        FuelBill.objects.create(
+            invoice_number="FM-1",
+            vehicle_plate="BEH111",
+            vehicle_asset=self.asset,
+            rider=self.rider,
+            cost=Decimal("5000"),
+            liters=Decimal("4.2"),
+            bill_date=self.today,
+        )
+        for _ in range(2):  # only 2 of the expected 15 orders
+            self.done_order(self.rider, 1500)
+
+    def test_fuel_misuse_report_flags_low_output(self):
+        from oprtn_dashboard.metrics.rider_behavior import fuel_misuse_report
+
+        self._seed_fuel()
+        start = timezone.make_aware(datetime.combine(self.today, time.min))
+        end = timezone.make_aware(datetime.combine(self.today, time.max))
+        report = fuel_misuse_report(start, end)
+
+        self.assertEqual(report["summary"]["flagged_days"], 1)
+        row = report["flagged"][0]
+        self.assertEqual(row["rider_id"], self.rider.rider_id)
+        self.assertEqual(row["orders_delivered"], 2)
+        self.assertEqual(row["fuel_cost"], "5000.00")
+        self.assertTrue(row["flagged"])
+
+    def test_fuel_misuse_alert_fires_after_cutoff_hour(self):
+        self._seed_fuel()
+        # Evaluate regardless of the current test-run hour.
+        AlertRule.objects.filter(alert_type=AlertType.FUEL_MISUSE).update(
+            params={"expected_orders": 15, "evaluate_after_hour": 0}
+        )
+        run_all_rules(only_types=[AlertType.FUEL_MISUSE])
+        alert = Alert.objects.get(alert_type=AlertType.FUEL_MISUSE)
+        self.assertEqual(alert.rider_id, self.rider.id)
+        self.assertEqual(alert.value, Decimal("2.00"))
+        self.assertEqual(alert.severity, "critical")  # 2 <= crit 3
+        self.assertEqual(alert.context["orders_delivered"], 2)
+
+    def test_fuel_misuse_dashboard_endpoint(self):
+        self._seed_fuel()
+        r = self.client.get(
+            f"/api/ops/fuel-misuse-dashboard/?filter=single_date&date={self.today}"
+        )
+        self.assertEqual(r.status_code, 200)
+        data = r.json()["data"]
+        self.assertEqual(data["summary"]["flagged_days"], 1)
+        self.assertEqual(
+            data["flagged"][0]["rider_id"], self.rider.rider_id
+        )

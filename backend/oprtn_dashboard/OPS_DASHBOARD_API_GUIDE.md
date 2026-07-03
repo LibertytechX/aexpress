@@ -555,6 +555,185 @@ Scope: `occ:read`. **Live snapshot — no date filter.** `?limit` controls the l
 
 ---
 
+### 4.15 Overriding dashboard — `GET /api/ops/overriding-dashboard/`
+Scope: `occ:read`. Honours the **general filter** (§3), on each order's `completed_at`.
+
+For every delivered order, the rider's **actual km** (vehicle odometer delta between pickup and
+completion, from GPS tracking) is compared to the **allowed km** = saved order estimate
+(`distance_km`) + a fixed allowance (default **8 km**, from the `OVERRIDING` rule's
+`params.allowance_km`). Anything above is **overriding km**, accumulated per rider with the
+per-order breakdown of how it built up.
+
+**Query params**: `?allowance_km=8` (override), `?top=10` (top-offenders list size).
+
+**200 Response**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "allowance_km": 8.0, "orders_delivered": 40, "orders_checked": 36,
+      "orders_no_estimate": 2, "orders_untracked": 2,
+      "orders_with_overriding": 5, "riders_with_overriding": 3,
+      "total_overriding_km": 41.5
+    },
+    "riders": [
+      {
+        "rider_id": "841149", "name": "Rider A", "plate_number": "EPE440QS",
+        "orders_checked": 6, "orders_over": 2,
+        "total_estimated_km": 51.0, "total_allowed_km": 99.0,
+        "total_actual_km": 123.5, "total_overriding_km": 24.5,
+        "orders": [
+          { "order_number": "AX123", "completed_at": "…",
+            "estimated_km": 10.0, "allowed_km": 18.0,
+            "actual_km": 30.0, "overriding_km": 12.0 }
+        ]
+      }
+    ],
+    "top_riders": [ "…the top 10 riders with overriding_km > 0…" ]
+  },
+  "date_range": { "filter": "today", "start": "…", "end": "…" }
+}
+```
+> `orders_untracked` = delivered orders with no usable GPS odometer snapshots;
+> `orders_no_estimate` = orders without a saved `distance_km`. Neither can be scored.
+
+---
+
+### 4.16 Attendance dashboard — `GET /api/ops/attendance-dashboard/`
+Scope: `occ:read`. Honours the **general filter** (§3), by calendar day (capped at the most
+recent 31 days of the range).
+
+Per rider, inside the daily **work window 08:00–22:00**: minutes **online vs offline** (from duty
+sessions) against the **km the bike moved while online vs offline** (from GPS tracking).
+Km moved while the rider was offline is flagged as **`riders_offline_moving`** — the bike is
+out and moving but the rider isn't clocked in.
+
+**Query params**: `?top=10` (top offline-moving list size).
+
+**200 Response**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "work_window": "08:00–22:00", "days": 1, "days_truncated": false,
+      "riders": 25, "riders_offline_moving": 2, "total_offline_moving_km": 12.4
+    },
+    "riders": [
+      {
+        "rider_id": "841149", "name": "Rider A", "plate_number": "EPE440QS",
+        "status": "online",
+        "online_minutes": 240, "offline_minutes": 600,
+        "online_km": 10.0, "offline_moving_km": 7.0,
+        "riders_offline_moving": true,
+        "days": [
+          { "date": "2026-07-03", "online_minutes": 240, "offline_minutes": 600,
+            "online_km": 10.0, "offline_moving_km": 7.0 }
+        ]
+      }
+    ],
+    "top_offline_moving": [ "…top 10 riders by offline_moving_km…" ]
+  },
+  "date_range": { "filter": "single_date", "date": "2026-07-03", "start": "…", "end": "…" }
+}
+```
+
+---
+
+### 4.17 Revenue leaderboard — `GET /api/ops/revenue-leaderboard/`
+Scope: `occ:read`. Honours the **general filter** (§3), on `completed_at`.
+
+Riders ranked by **net revenue** (gross delivered revenue **minus their commission**,
+rate from SystemSettings, default 20%). `top_riders` = the highest earners;
+`bottom_riders` = the lowest **including riders with zero revenue** in the window.
+`?top=20` sizes both lists.
+
+**200 Response**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "riders_with_revenue": 12, "riders_total": 25,
+      "gross_revenue": "412000.00", "commission_total": "82400.00",
+      "net_revenue": "329600.00", "commission_pct": "20"
+    },
+    "top_riders": [
+      { "rider_id": "841149", "name": "Rider A", "delivered": 30,
+        "gross_revenue": "15000.00", "commission": "3000.00", "net_revenue": "12000.00" }
+    ],
+    "bottom_riders": [
+      { "rider_id": "229883", "name": "Rider Z", "delivered": 0,
+        "gross_revenue": "0.00", "commission": "0.00", "net_revenue": "0.00" }
+    ]
+  },
+  "date_range": { "filter": "this_month", "start": "…", "end": "…" }
+}
+```
+
+---
+
+### 4.18 Order leaderboard — `GET /api/ops/order-leaderboard/`
+Scope: `occ:read`. Honours the **general filter** (§3), on `completed_at`.
+
+Riders ranked by **delivered-order volume** — `bottom_riders` = the lowest (including
+zero-order riders), `top_riders` = the highest for context. `?top=20` sizes both lists.
+
+**200 Response**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": { "riders_with_orders": 12, "riders_total": 25, "orders_delivered": 180 },
+    "top_riders": [
+      { "rider_id": "841149", "name": "Rider A", "delivered": 30, "gross_revenue": "15000.00" }
+    ],
+    "bottom_riders": [
+      { "rider_id": "229883", "name": "Rider Z", "delivered": 0, "gross_revenue": "0.00" }
+    ]
+  },
+  "date_range": { "filter": "this_month", "start": "…", "end": "…" }
+}
+```
+
+---
+
+### 4.19 Fuel misuse dashboard — `GET /api/ops/fuel-misuse-dashboard/`
+Scope: `occ:read`. Honours the **general filter** (§3), on `FuelBill.bill_date`.
+
+Riders who **collected fuel on a day** (from the daily fuel upload, §4.11) but **delivered fewer
+than `min_orders`** orders that day (default **10** of **15** expected, from the `FUEL_MISUSE`
+rule) — fuel spend with no matching output/revenue. One row per rider per fuel day.
+
+**Query params**: `?min_orders=10`, `?expected_orders=15` (overrides).
+
+**200 Response**
+```json
+{
+  "success": true,
+  "data": {
+    "summary": {
+      "min_orders": 10, "expected_orders": 15,
+      "fuel_days": 14, "flagged_days": 3,
+      "riders_fueled": 12, "riders_flagged": 3, "flagged_fuel_cost": "15400.00"
+    },
+    "rows": [ "…every rider×day fuel row, flagged first…" ],
+    "flagged": [
+      {
+        "rider_id": "841149", "name": "Rider A", "date": "2026-07-03",
+        "fuel_bills": 1, "fuel_cost": "5000.00", "liters": "4.200",
+        "orders_delivered": 2, "orders_expected": 15, "min_orders": 10,
+        "revenue": "3000.00", "flagged": true
+      }
+    ]
+  },
+  "date_range": { "filter": "this_month", "start": "…", "end": "…" }
+}
+```
+
+---
+
 ## 5. Quick endpoint index
 
 | Method | Path | Scope | Filter | Body |
@@ -576,18 +755,40 @@ Scope: `occ:read`. **Live snapshot — no date filter.** `?limit` controls the l
 | GET | `/api/ops/cod-dashboard/` | read | §3 | — |
 | POST | `/api/ops/fuel/upload/` | write | — | multipart `file` |
 | GET | `/api/ops/fuel-dashboard/` | read | §3 | — |
+| GET | `/api/ops/overriding-dashboard/` | read | §3 + allowance_km/top | — |
+| GET | `/api/ops/attendance-dashboard/` | read | §3 + top | — |
+| GET | `/api/ops/revenue-leaderboard/` | read | §3 + top | — |
+| GET | `/api/ops/order-leaderboard/` | read | §3 + top | — |
+| GET | `/api/ops/fuel-misuse-dashboard/` | read | §3 + min_orders/expected_orders | — |
 
 ---
 
 ## 6. Alert types (for `type` filter & rules)
 
 `BIKE_AFTER_HOURS`, `GHOST_RIDE`, `RIDER_IDLE`, `SPEED_VIOLATION`, `LOW_ACCEPTANCE`,
-`RIDER_INACTIVITY`, `LOW_CSAT`, `INCOMPLETE_ORDER`, `ORDER_STUCK`, `ORDER_DELAYED`,
+`RIDER_INACTIVITY`, `LOW_CSAT`, `OVERRIDING`, `RIDER_OFFLINE_MOVING`, `LOW_REVENUE`,
+`LOW_ORDER_VOLUME`, `FUEL_MISUSE`, `INCOMPLETE_ORDER`, `ORDER_STUCK`, `ORDER_DELAYED`,
 `HIGH_CANCELLATION`, `RELAY_ROUTING_FAILURE`, `COD_RETENTION`, `COD_GAP`, `COD_FEE_LEAKAGE`,
 `PAYMENT_FAILURE_SPIKE`, `HIGH_RIDER_PAYOUT`, `REVENUE_DROP`, `INSURANCE_EXPIRING`,
 `REGISTRATION_EXPIRING`, `ROADWORTHINESS_EXPIRING`, `GPS_OFFLINE`, `SYNC_FAILURE`, `WEBHOOK_FAILURE`.
 
 > Active evaluators today: `BIKE_AFTER_HOURS`, `INCOMPLETE_ORDER`, `GHOST_RIDE`, `SPEED_VIOLATION`,
 > `GPS_OFFLINE`, `SYNC_FAILURE`, `ORDER_STUCK`, `ORDER_DELAYED`, `RELAY_ROUTING_FAILURE`,
-> `COD_RETENTION`, `INSURANCE_/REGISTRATION_/ROADWORTHINESS_EXPIRING`. The rest are defined (rules +
-> dashboard counts) and will start firing as their evaluators are added — no contract change.
+> `COD_RETENTION`, `INSURANCE_/REGISTRATION_/ROADWORTHINESS_EXPIRING`, plus the rider-behaviour
+> set: `OVERRIDING`, `RIDER_OFFLINE_MOVING`, `LOW_REVENUE`, `LOW_ORDER_VOLUME`, `FUEL_MISUSE`.
+> The rest are defined (rules + dashboard counts) and will start firing as their evaluators are
+> added — no contract change.
+
+**Rider-behaviour rule defaults** (editable via `/api/ops/alert-rules/`):
+
+| Type | Fires when | warn / crit | Key params |
+|---|---|---|---|
+| `OVERRIDING` | today's overriding km ≥ warn | 5 / 20 km | `allowance_km: 8` |
+| `RIDER_OFFLINE_MOVING` | offline-moving km in 08:00–22:00 ≥ warn | 2 / 10 km | `day_start_hour: 8`, `day_end_hour: 22` |
+| `LOW_REVENUE` | working rider's net revenue over 24h < warn | ₦5000 / ₦1000 | `window_minutes: 1440` |
+| `LOW_ORDER_VOLUME` | working rider's delivered orders over 24h < warn | 5 / 2 | `window_minutes: 1440` |
+| `FUEL_MISUSE` | fueled today but delivered < warn orders | 10 / 3 | `expected_orders: 15`, `evaluate_after_hour: 17` |
+
+> "Working rider" = had a duty session, an assigned order, or a fuel bill in the window — riders
+> who simply weren't rostered don't fire `LOW_REVENUE` / `LOW_ORDER_VOLUME`.
+> `FUEL_MISUSE` only evaluates after 17:00 local so riders have the day to work.

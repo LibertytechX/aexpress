@@ -10,15 +10,20 @@ from .views import (
     OpsAlertResolveView,
     OpsAlertRuleDetailView,
     OpsAlertRuleListView,
+    OpsAttendanceDashboardView,
     OpsCodDashboardView,
     OpsCodOrdersView,
     OpsFuelDashboardView,
+    OpsFuelMisuseDashboardView,
     OpsFuelUploadView,
     OpsHealthView,
     OpsOrderDashboardView,
+    OpsOrderLeaderboardView,
     OpsOrderListView,
+    OpsOverridingDashboardView,
     OpsPaymentOrdersView,
     OpsPaymentsView,
+    OpsRevenueLeaderboardView,
     OpsTrackingDashboardView,
 )
 
@@ -96,6 +101,32 @@ urlpatterns = [
         "fuel-dashboard/",
         OpsFuelDashboardView.as_view(),
         name="ops-fuel-dashboard",
+    ),
+    # Rider behaviour dashboards (overriding / attendance / output)
+    path(
+        "overriding-dashboard/",
+        OpsOverridingDashboardView.as_view(),
+        name="ops-overriding-dashboard",
+    ),
+    path(
+        "attendance-dashboard/",
+        OpsAttendanceDashboardView.as_view(),
+        name="ops-attendance-dashboard",
+    ),
+    path(
+        "revenue-leaderboard/",
+        OpsRevenueLeaderboardView.as_view(),
+        name="ops-revenue-leaderboard",
+    ),
+    path(
+        "order-leaderboard/",
+        OpsOrderLeaderboardView.as_view(),
+        name="ops-order-leaderboard",
+    ),
+    path(
+        "fuel-misuse-dashboard/",
+        OpsFuelMisuseDashboardView.as_view(),
+        name="ops-fuel-misuse-dashboard",
     ),
     # Later phase (guide §14.9): financial-dashboard/ (cost tabs out of scope).
 ]

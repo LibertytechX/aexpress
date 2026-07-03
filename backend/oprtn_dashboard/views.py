@@ -800,3 +800,182 @@ class OpsFuelDashboardView(APIView):
             "fuel-dashboard", desc, fuel_metrics.fuel_dashboard(qs)
         )
         return ops_response(data, date_range=desc)
+
+
+# ── Rider behaviour dashboards (overriding / attendance / output) ────
+
+
+def _int_param(request, name, default, lo=1, hi=1000):
+    try:
+        return min(max(int(request.query_params.get(name, default)), lo), hi)
+    except (TypeError, ValueError):
+        return default
+
+
+def _rule_config(alert_type):
+    """(warn, crit, params) from the AlertRule, so dashboards use the same
+    thresholds the engine fires on. Missing rule → (None, None, {})."""
+    rule = AlertRule.objects.filter(alert_type=alert_type).first()
+    if rule is None:
+        return None, None, {}
+    return rule.warn_threshold, rule.critical_threshold, rule.params or {}
+
+
+class OpsOverridingDashboardView(APIView):
+    """
+    GET /api/ops/overriding-dashboard/ — per-rider overriding km (actual km
+    covered beyond each order's saved estimate + allowance, default 8 km),
+    with the per-order accumulation detail and the top offenders.
+
+    General filter (on Order.completed_at). `?allowance_km=` overrides the
+    OVERRIDING rule's allowance; `?top=` sizes the top list.
+    """
+
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
+
+    def get(self, request):
+        from .metrics.rider_behavior import (
+            DEFAULT_ALLOWANCE_KM,
+            overriding_report,
+        )
+        from .models import AlertType
+
+        start_dt, end_dt, desc = parse_filter(request)
+        _, _, params = _rule_config(AlertType.OVERRIDING)
+        try:
+            allowance = float(
+                request.query_params.get(
+                    "allowance_km",
+                    params.get("allowance_km", DEFAULT_ALLOWANCE_KM),
+                )
+            )
+        except (TypeError, ValueError):
+            allowance = DEFAULT_ALLOWANCE_KM
+        top = _int_param(request, "top", 10, 1, 100)
+        data = overriding_report(
+            start_dt, end_dt, allowance_km=allowance, top=top
+        )
+        return ops_response(data, date_range=desc)
+
+
+class OpsAttendanceDashboardView(APIView):
+    """
+    GET /api/ops/attendance-dashboard/ — per-rider online/offline minutes in
+    the 08:00–22:00 work window (RiderDutyLog) against the km their bike
+    moved while online vs offline (VehicleTracking). Offline movement is the
+    `riders_offline_moving` flag; the top offenders list ranks by it.
+
+    General filter (by calendar day). `?top=` sizes the top list.
+    """
+
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
+
+    def get(self, request):
+        from .metrics.rider_behavior import (
+            DEFAULT_DAY_END_HOUR,
+            DEFAULT_DAY_START_HOUR,
+            attendance_report,
+        )
+        from .models import AlertType
+
+        start_dt, end_dt, desc = parse_filter(request)
+        _, _, params = _rule_config(AlertType.RIDER_OFFLINE_MOVING)
+        data = attendance_report(
+            start_dt,
+            end_dt,
+            day_start_hour=int(
+                params.get("day_start_hour", DEFAULT_DAY_START_HOUR)
+            ),
+            day_end_hour=int(
+                params.get("day_end_hour", DEFAULT_DAY_END_HOUR)
+            ),
+            top=_int_param(request, "top", 10, 1, 100),
+        )
+        return ops_response(data, date_range=desc)
+
+
+class OpsRevenueLeaderboardView(APIView):
+    """
+    GET /api/ops/revenue-leaderboard/ — top and bottom riders by net revenue
+    (gross delivered revenue minus rider commission). General filter (on
+    Order.completed_at). `?top=` sizes both lists (default 20).
+    """
+
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
+
+    def get(self, request):
+        from .metrics.rider_behavior import revenue_leaderboard
+
+        start_dt, end_dt, desc = parse_filter(request)
+        data = revenue_leaderboard(
+            start_dt, end_dt, top=_int_param(request, "top", 20, 1, 100)
+        )
+        return ops_response(data, date_range=desc)
+
+
+class OpsOrderLeaderboardView(APIView):
+    """
+    GET /api/ops/order-leaderboard/ — riders ranked by delivered-order
+    volume, lowest first (plus the top list for context). General filter
+    (on Order.completed_at). `?top=` sizes both lists (default 20).
+    """
+
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
+
+    def get(self, request):
+        from .metrics.rider_behavior import order_leaderboard
+
+        start_dt, end_dt, desc = parse_filter(request)
+        data = order_leaderboard(
+            start_dt, end_dt, top=_int_param(request, "top", 20, 1, 100)
+        )
+        return ops_response(data, date_range=desc)
+
+
+class OpsFuelMisuseDashboardView(APIView):
+    """
+    GET /api/ops/fuel-misuse-dashboard/ — riders who collected fuel on a day
+    (FuelBill) but delivered fewer than the minimum orders that day (default
+    10 of 15 expected), with their revenue for the day.
+
+    General filter (on FuelBill.bill_date / Order.completed_at).
+    `?min_orders=` and `?expected_orders=` override the FUEL_MISUSE rule.
+    """
+
+    # authentication_classes = [ServiceAPIKeyAuthentication]
+    # permission_classes = [HasOpsReadScope]
+    authentication_classes = []  # auth disabled
+    permission_classes = [AllowAny]  # auth disabled
+
+    def get(self, request):
+        from .metrics.rider_behavior import fuel_misuse_report
+        from .models import AlertType
+
+        start_dt, end_dt, desc = parse_filter(request)
+        warn, _, params = _rule_config(AlertType.FUEL_MISUSE)
+        min_orders = _int_param(
+            request, "min_orders", int(warn) if warn else 10, 1, 100
+        )
+        expected = _int_param(
+            request,
+            "expected_orders",
+            int(params.get("expected_orders", 15)),
+            1,
+            100,
+        )
+        data = fuel_misuse_report(
+            start_dt, end_dt, min_orders=min_orders, expected_orders=expected
+        )
+        return ops_response(data, date_range=desc)

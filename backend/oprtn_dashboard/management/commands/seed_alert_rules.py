@@ -71,6 +71,58 @@ DEFAULTS = {
         "params": {"min_ratings": 3, "comparison": "below"},
         "description": "Average CSAT below 3.5 (warn) / 3.0 (critical).",
     },
+    AlertType.OVERRIDING: {
+        "default_severity": Severity.HIGH,
+        "warn_threshold": D("5"),
+        "critical_threshold": D("20"),
+        "params": {"allowance_km": 8},
+        "description": (
+            "Delivered orders covered 5+ km (warn) / 20+ km (crit) beyond "
+            "estimate + 8 km allowance today."
+        ),
+    },
+    AlertType.RIDER_OFFLINE_MOVING: {
+        "default_severity": Severity.HIGH,
+        "warn_threshold": D("2"),
+        "critical_threshold": D("10"),
+        "params": {"day_start_hour": 8, "day_end_hour": 22},
+        "description": (
+            "Bike moved 2+ km (warn) / 10+ km (crit) while the rider was "
+            "offline inside the 08:00–22:00 work window."
+        ),
+    },
+    AlertType.LOW_REVENUE: {
+        "default_severity": Severity.MEDIUM,
+        "warn_threshold": D("5000"),
+        "critical_threshold": D("1000"),
+        "window_minutes": 1440,
+        "params": {"comparison": "below"},
+        "description": (
+            "Working rider net revenue below ₦5000 (warn) / ₦1000 (crit) "
+            "over 24h."
+        ),
+    },
+    AlertType.LOW_ORDER_VOLUME: {
+        "default_severity": Severity.MEDIUM,
+        "warn_threshold": D("5"),
+        "critical_threshold": D("2"),
+        "window_minutes": 1440,
+        "params": {"comparison": "below"},
+        "description": (
+            "Working rider delivered fewer than 5 (warn) / 2 (crit) orders "
+            "over 24h."
+        ),
+    },
+    AlertType.FUEL_MISUSE: {
+        "default_severity": Severity.HIGH,
+        "warn_threshold": D("10"),
+        "critical_threshold": D("3"),
+        "params": {"expected_orders": 15, "evaluate_after_hour": 17},
+        "description": (
+            "Collected fuel but delivered under 10 of 15 expected orders "
+            "(evaluated from 17:00)."
+        ),
+    },
     # ── Order lifecycle ──────────────────────────────────────────────
     AlertType.INCOMPLETE_ORDER: {
         "default_severity": Severity.HIGH,
