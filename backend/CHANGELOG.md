@@ -4,6 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-07-03] — Fix Wallet process_pending_charges Idempotency
+
+### Fixed
+- **Wallet process_pending_charges Idempotency**: Fixed a bug in `Wallet.process_pending_charges` where orders/sub-orders payment status was skipped and left as `Pending` when a matching transaction had already been debited successfully but the status update was interrupted.
+- **Unit Tests**: Added `ProcessPendingChargesIdempotencyTest` in `wallet/tests.py` to verify that order and sub-orders payment status are correctly synced when a transaction already exists.
+
+---
+
 ## [2026-06-24] — Export Rider Distance Covered command
 
 ### Added

@@ -261,3 +261,70 @@ class AdminRawIdFieldsTest(TestCase):
         amortization_virtual_account_admin = AmortizationVirtualAccountAdmin(AmortizationVirtualAccount, site)
         self.assertIn("user", amortization_virtual_account_admin.raw_id_fields)
 
+
+class ProcessPendingChargesIdempotencyTest(TestCase):
+    """Test suite to verify that process_pending_charges is idempotent and correctly syncs statuses."""
+
+    def test_idempotency_syncs_order_status(self) -> None:
+        from decimal import Decimal
+        from orders.models import Order, Vehicle
+
+        user = User.objects.create_user(
+            phone="08022223333",
+            email="test_idempotency@example.com",
+            password="testpassword",
+        )
+        wallet = user.wallet
+        wallet.balance = Decimal("1000.00")
+        wallet.save()
+
+        vehicle = Vehicle.objects.create(
+            name="Bike",
+            is_active=True,
+            base_fare=500,
+            rate_per_km=100,
+            rate_per_minute=10,
+            max_weight_kg=20,
+            base_price=500,
+        )
+
+        order = Order.objects.create(
+            user=user,
+            vehicle=vehicle,
+            total_amount=Decimal("500.00"),
+            payment_status="Pending",
+        )
+
+        charge = Charge.objects.create(
+            user=user,
+            order=order,
+            amount=Decimal("500.00"),
+            status="pending",
+        )
+
+        # 1. Create the Transaction first, simulating a partial completion (e.g. system crashed after transaction created but before order/charge updated)
+        debit_ref = f"CHRG-{charge.id.hex[:12].upper()}"
+        Transaction.objects.create(
+            wallet=wallet,
+            type="debit",
+            amount=Decimal("500.00"),
+            description="Auto-debit",
+            reference=debit_ref,
+            balance_before=Decimal("1000.00"),
+            balance_after=Decimal("500.00"),
+            status="completed",
+        )
+
+        # 2. Run process_pending_charges
+        wallet.process_pending_charges()
+
+        # 3. Refresh and assert
+        charge.refresh_from_db()
+        order.refresh_from_db()
+
+        self.assertEqual(charge.status, "completed")
+        self.assertEqual(order.payment_status, "Paid")
+        # Wallet balance should NOT have changed (no double debit)
+        wallet.refresh_from_db()
+        self.assertEqual(wallet.balance, Decimal("1000.00"))
+

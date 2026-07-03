@@ -84,6 +84,19 @@ class Wallet(models.Model):
                         # update the charge and continue
                         charge.status = "completed"
                         charge.save()
+
+                        # Update order payment status
+                        order = charge.order
+                        if order.payment_status != "Paid":
+                            order.payment_status = "Paid"
+                            order.save(update_fields=["payment_status"])
+                        # also if order is relay order, update the sub_orders payment_status
+                        if order.is_relay_order:
+                            sub_orders = order.sub_orders.all()
+                            for sub_order in sub_orders:
+                                if sub_order.payment_status != "Paid":
+                                    sub_order.payment_status = "Paid"
+                                    sub_order.save(update_fields=["payment_status"])
                         continue
 
                     # Debit the wallet
