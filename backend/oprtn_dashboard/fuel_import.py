@@ -27,6 +27,8 @@ HEADER_MAP = {
     "fuel price": "fuel_price",
     "cost": "cost",
     "worker tip": "worker_tip",
+    # Newer exports rename "Worker tip" to "Service fees" (same charge).
+    "service fees": "worker_tip",
     "km/l": "km_per_l",
     "l/100 km": "l_per_100km",
     "number of liters": "liters",
@@ -97,19 +99,27 @@ def import_fuel_workbook(file_obj):
     ws = wb.active
     rows = ws.iter_rows(values_only=True)
 
-    try:
-        header = next(rows)
-    except StopIteration:
-        raise ValueError("Spreadsheet is empty.")
-
+    # Some exports prepend title/metadata rows before the real header row,
+    # so scan the first few rows for the one containing "Invoice number".
+    header = None
     col = {}
-    for i, h in enumerate(header):
-        if h is None:
-            continue
-        field = HEADER_MAP.get(str(h).strip().lower())
-        if field:
-            col[field] = i
-    if "invoice_number" not in col:
+    for _ in range(10):
+        try:
+            candidate = next(rows)
+        except StopIteration:
+            break
+        mapped = {}
+        for i, h in enumerate(candidate):
+            if h is None:
+                continue
+            field = HEADER_MAP.get(str(h).strip().lower())
+            if field:
+                mapped[field] = i
+        if "invoice_number" in mapped:
+            header = candidate
+            col = mapped
+            break
+    if header is None:
         raise ValueError(
             "Unrecognized format: an 'Invoice number' column is required."
         )
