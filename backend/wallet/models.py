@@ -77,39 +77,57 @@ class Wallet(models.Model):
         for charge in charges:
             if self.balance >= charge.amount:
                 try:
-                    with db_transaction.atomic():
-                        # Use a more specific reference for the debit
-                        debit_ref = f"CHRG-{charge.id.hex[:12].upper()}"
-
-                        # Debit the wallet
-                        self.debit(
-                            amount=charge.amount,
-                            description=f"Auto-debit for Order {charge.order.order_number}",
-                            reference=debit_ref,
-                            metadata={
-                                "charge_id": str(charge.id),
-                                "order_number": charge.order.order_number,
-                            },
-                        )
-
-                        # Update charge status
+                    # Use a more specific reference for the debit
+                    debit_ref = f"CHRG-{charge.id.hex[:12].upper()}"
+                    # check if a transaction with the ref exists
+                    if Transaction.objects.filter(reference=debit_ref).exists():
+                        # update the charge and continue
                         charge.status = "completed"
                         charge.save()
 
                         # Update order payment status
                         order = charge.order
-                        order.payment_status = "Paid"
-                        order.save(update_fields=["payment_status"])
+                        if order.payment_status != "Paid":
+                            order.payment_status = "Paid"
+                            order.save(update_fields=["payment_status"])
                         # also if order is relay order, update the sub_orders payment_status
                         if order.is_relay_order:
                             sub_orders = order.sub_orders.all()
                             for sub_order in sub_orders:
-                                sub_order.payment_status = "Paid"
-                                sub_order.save(update_fields=["payment_status"])
+                                if sub_order.payment_status != "Paid":
+                                    sub_order.payment_status = "Paid"
+                                    sub_order.save(update_fields=["payment_status"])
+                        continue
 
-                        logger.info(
-                            f"Auto-debited charge {charge.id} for order {order.order_number}"
-                        )
+                    # Debit the wallet
+                    self.debit(
+                        amount=charge.amount,
+                        description=f"Auto-debit for Order {charge.order.order_number}",
+                        reference=debit_ref,
+                        metadata={
+                            "charge_id": str(charge.id),
+                            "order_number": charge.order.order_number,
+                        },
+                    )
+
+                    # Update charge status
+                    charge.status = "completed"
+                    charge.save()
+
+                    # Update order payment status
+                    order = charge.order
+                    order.payment_status = "Paid"
+                    order.save(update_fields=["payment_status"])
+                    # also if order is relay order, update the sub_orders payment_status
+                    if order.is_relay_order:
+                        sub_orders = order.sub_orders.all()
+                        for sub_order in sub_orders:
+                            sub_order.payment_status = "Paid"
+                            sub_order.save(update_fields=["payment_status"])
+
+                    logger.info(
+                        f"Auto-debited charge {charge.id} for order {order.order_number}"
+                    )
                 except Exception as e:
                     traceback.print_exc()
                     logger.error(f"Failed to auto-debit charge {charge.id}: {e}")
