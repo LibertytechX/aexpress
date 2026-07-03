@@ -37,13 +37,26 @@ FUEL_HEADER = [
 ]
 
 
-def make_fuel_xlsx(rows):
+# Newer exports: a title row above the header, "Worker tip" renamed to
+# "Service fees", and a different column order.
+FUEL_HEADER_V2 = [
+    "Invoice number", "Branch", "Vehicle", "Vehicle brand", "Vehicle model ",
+    "Internal number", "Trip number ", "Type of fuel", "Fuel price", "Km/L",
+    "L/100 Km", "Cost", "Service fees", "Number of liters", "Odometer",
+    "Payment method", "delegate", "The station", "Station branch",
+    "Governorate - City - District", "Station location", "Date",
+]
+
+
+def make_fuel_xlsx(rows, header=FUEL_HEADER, pre_rows=()):
     """Build an in-memory .xlsx matching the fuel bills format."""
     import openpyxl
 
     wb = openpyxl.Workbook()
     ws = wb.active
-    ws.append(FUEL_HEADER)
+    for r in pre_rows:
+        ws.append(r)
+    ws.append(header)
     for r in rows:
         ws.append(r)
     bio = BytesIO()
@@ -470,9 +483,9 @@ class FuelTests(OpsTestBase):
         self.today = timezone.localdate()
         self.when = datetime.combine(self.today, time(10, 0))
 
-    def _upload(self, rows, client=None):
+    def _upload(self, rows, client=None, **make_kwargs):
         client = client or self.client
-        bio = make_fuel_xlsx(rows)
+        bio = make_fuel_xlsx(rows, **make_kwargs)
         return client.post(
             "/api/ops/fuel/upload/", {"file": bio}, format="multipart"
         )
@@ -531,6 +544,25 @@ class FuelTests(OpsTestBase):
     #         [fuel_row(4001, "TST111", 5000, 4.1, self.when)], client=ro
     #     )
     #     self.assertEqual(r.status_code, 403)
+
+    def test_upload_new_format_with_title_row_and_service_fees(self):
+        row = [
+            5001, "HQ", "TST111", "QLINK", "champ", "TST111", "-", "Petrol",
+            1200, 200, 0.5, 5000, 43.5, 4.1, 52000, "From the balance",
+            "TST111", "Station A", "SA Branch", "Lagos - Eti-Osa - VI",
+            "6.4,3.4", self.when,
+        ]
+        r = self._upload(
+            [row],
+            header=FUEL_HEADER_V2,
+            pre_rows=[["Invoices  - Company name : Assured Express"]],
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["data"]["created"], 1)
+        bill = FuelBill.objects.get(invoice_number="5001")
+        self.assertEqual(bill.worker_tip, Decimal("43.5"))
+        self.assertEqual(bill.cost, Decimal("5000"))
+        self.assertEqual(bill.vehicle_asset_id, self.asset.id)
 
     def test_upload_rejects_non_xlsx(self):
         bad = BytesIO(b"not a spreadsheet")
