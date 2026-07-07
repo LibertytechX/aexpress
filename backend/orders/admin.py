@@ -415,6 +415,9 @@ class OrderAdmin(ImportExportModelAdmin):
                     "mode",
                     "status",
                     "rider",
+                    "is_percel_order",
+                    "is_pickup_percel",
+                    "isdelivery_percel",
                     "payment_status",
                 )
             },
@@ -442,7 +445,10 @@ class OrderAdmin(ImportExportModelAdmin):
                 )
             },
         ),
-        ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
+        (
+            "Additional Information",
+            {"fields": ("notes", "scheduled_pickup_time", "percel_info")},
+        ),
         (
             "Timestamps",
             {"fields": ("created_at", "updated_at", "completed_at", "assigned_at")},
