@@ -1,5 +1,21 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-07] — Fix SmartParcel Locker Data Integration
+
+### Backend
+#### Fixed
+- **Sender Phone Number Lookup Typo**: Fixed typo in `QuickSendView.post()` dictionary lookup key for the sender's phone number (`"sender _phone"` -> `"sender_phone"`), which caused it to always map to an empty string.
+
+#### Added
+- **SmartParcel Locker Integration Tests**: Created `orders/test_quick_send_smart_parcel.py` unit test to verify integrated Quick Send order placement with locker details.
+
+### Frontend
+#### Fixed
+- **SmartParcel Locker Data Propagation**: Added locker delivery and pickup fields (`is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, `locker_size_id`) to the `apiPayload` mapped object in `dashboard/page.tsx`'s `onPlaceOrder()`.
+- **New Order Page Payload Mapping**: Restructured payload creation on the standalone `/new-order` page (`new-order/page.tsx`) to map all camelCase keys to backend-aligned snake_case equivalent fields and include locker data.
+
+---
+
 # [2026-06-04] — Fix Admin Charge Change Page Timeout
 
 ### Backend (Admin)

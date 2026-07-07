@@ -858,7 +858,7 @@ Authentication: Required (Merchant)
 ### 7. Create Parcel
 ```
 POST /api/orders/smart-parcel/parcels/
-Description: Create a new SmartParcel parcel for locker pickup/delivery.
+Description: Create a new SmartParcel parcel for locker pickup/delivery directly. Note: Quick Send orders (`POST /api/orders/quick-send/`) also support integrated SmartParcel locker pickup and delivery creation by passing `is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, and `locker_size_id` in the request body.
 Authentication: Required (Merchant)
 ```
 

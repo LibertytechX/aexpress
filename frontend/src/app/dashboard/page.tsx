@@ -1058,7 +1058,12 @@ export default function DashboardPage() {
                       notes: orderData.notes || '',
                       distance_km: orderData.distance_km || 0,
                       duration_minutes: orderData.duration_minutes || 0,
-                      mode: orderData.mode
+                      mode: orderData.mode,
+                      is_pickup_percel: orderData.is_pickup_percel || false,
+                      isdelivery_percel: orderData.isdelivery_percel || false,
+                      collect_code: orderData.collect_code,
+                      box_id: orderData.box_id,
+                      locker_size_id: orderData.locker_size_id
                     };
                     console.log(`📡 Sending to API (${orderData.mode}):`, apiPayload);
                     response = await API.Orders.createQuickSend(apiPayload);

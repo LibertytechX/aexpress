@@ -211,11 +211,11 @@ class QuickSendView(APIView):
         percel_info = None
         percel_payload = {
             "sendername": data.get("sender_name", ""),
-            "senderphone": data.get("sender _phone", ""),
+            "senderphone": data.get("sender_phone", ""),
             "senderemail": request.user.email,
             "recipientname": data.get("receiver_name", ""),
             "recipientphone": data.get("receiver_phone", ""),
-            "recipientemail": data.get("receiver_email", ""),
+            "recipientemail": request.user.email,
             "boxid": data.get("box_id", ""),
             "sizeid": data.get("locker_size_id", ""),
             "parceldescription": data.get("notes", "Parcel Delivery"),
@@ -1394,13 +1394,17 @@ def _advance_order(request, order_number, new_status, event_desc):
 
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
             origin = {"lat": lat, "lng": lng}
-            drop = {"lat": float(order.pickup_latitude), "lng": float(order.pickup_longitude)}
+            drop = {
+                "lat": float(order.pickup_latitude),
+                "lng": float(order.pickup_longitude),
+            }
             route_data = calculate_route(origin=origin, destinations=[drop])
-            
+
             if route_data:
                 dist = float(route_data["distance_km"])
             else:
                 from dispatcher.models import Zone
+
                 dist = Zone.haversine_distance(
                     lat, lng, order.pickup_latitude, order.pickup_longitude
                 )
@@ -1716,6 +1720,7 @@ class OrderCompleteView(APIView):
                 dist = float(route_data["distance_km"])
             else:
                 from dispatcher.models import Zone
+
                 dist = Zone.haversine_distance(
                     lat,
                     lng,

@@ -112,6 +112,11 @@ Create a Quick Send order with a single delivery.
 - `package_type` (optional): "Box" (default), "Envelope", "Fragile", "Food", "Document", or "Other"
 - `notes` (optional): Additional delivery instructions
 - `scheduled_pickup_time` (optional): ISO 8601 datetime for scheduled pickup
+- `is_pickup_percel` (optional): Boolean flag indicating pickup from a SmartParcel locker (default: false)
+- `isdelivery_percel` (optional): Boolean flag indicating delivery to a SmartParcel locker (default: false)
+- `collect_code` (optional): String collect code required for SmartParcel locker pickup
+- `box_id` (optional): String box/locker identifier for SmartParcel locker delivery
+- `locker_size_id` (optional): String locker size identifier for SmartParcel locker delivery
 
 **Response** (201 Created):
 ```json

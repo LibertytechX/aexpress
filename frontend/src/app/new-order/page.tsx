@@ -32,12 +32,52 @@ export default function NewOrderPage() {
   const handlePlaceOrder = async (orderData: any) => {
     try {
       let response;
-      if (orderData.mode === 'quick') {
-        response = await API.Orders.createQuickSend(orderData);
+      if (orderData.mode === 'quick' || orderData.mode === 'grouped') {
+        const apiPayload = {
+          pickup_address: orderData.pickup,
+          sender_name: orderData.senderName || user?.contact_name || '',
+          sender_phone: orderData.senderPhone || user?.phone || '',
+          dropoff_address: orderData.dropoff,
+          receiver_name: orderData.receiverName || '',
+          receiver_phone: orderData.receiverPhone || '',
+          vehicle: orderData.vehicle,
+          payment_method: orderData.payMethod,
+          package_type: orderData.packageType || 'Box',
+          notes: orderData.notes || '',
+          distance_km: orderData.distance_km || 0,
+          duration_minutes: orderData.duration_minutes || 0,
+          mode: orderData.mode,
+          is_pickup_percel: orderData.is_pickup_percel || false,
+          isdelivery_percel: orderData.isdelivery_percel || false,
+          collect_code: orderData.collect_code,
+          box_id: orderData.box_id,
+          locker_size_id: orderData.locker_size_id
+        };
+        response = await API.Orders.createQuickSend(apiPayload);
       } else if (orderData.mode === 'multi') {
-        response = await API.Orders.createMultiDrop(orderData);
+        response = await API.Orders.createMultiDrop({
+          pickup_address: orderData.pickup,
+          sender_name: orderData.senderName || user?.contact_name || '',
+          sender_phone: orderData.senderPhone || user?.phone || '',
+          vehicle: orderData.vehicle,
+          payment_method: orderData.payMethod,
+          deliveries: orderData.deliveries || [],
+          notes: orderData.notes || '',
+          distance_km: orderData.distance_km || 0,
+          duration_minutes: orderData.duration_minutes || 0
+        });
       } else if (orderData.mode === 'bulk') {
-        response = await API.Orders.createBulkImport(orderData);
+        response = await API.Orders.createBulkImport({
+          pickup_address: orderData.pickup,
+          sender_name: orderData.senderName || user?.contact_name || '',
+          sender_phone: orderData.senderPhone || user?.phone || '',
+          vehicle: orderData.vehicle,
+          payment_method: orderData.payMethod,
+          deliveries: orderData.deliveries || [],
+          notes: orderData.notes || '',
+          distance_km: orderData.distance_km || 0,
+          duration_minutes: orderData.duration_minutes || 0
+        });
       } else {
         throw new Error("Invalid order mode");
       }
