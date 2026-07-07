@@ -2331,7 +2331,7 @@ class SmartParcelResolveCollectCodeView(APIView):
             (
                 p
                 for p in parcels
-                if str(p.get("boxlockernumber")).strip().lower()
+                if str(p.get("parcelreferencenumber")).strip().lower()
                 == collect_code.strip().lower()
             ),
             None,
