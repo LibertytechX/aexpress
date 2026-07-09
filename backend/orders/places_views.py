@@ -54,13 +54,13 @@ class PlacesAutocompleteView(APIView):
                 status_code=400,
             )
 
-        geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+        geoapify_key = settings.GEOAPIFY_API_KEY
         if geoapify_key:
             suggestions = geoapify_place_autocomplete(query)
             if suggestions:
                 return service_response(
                     status="success",
-                    message="Autocomplete suggestions retrieved successfully",
+                    message="Autocomplete suggestions retrieved successfully From Geoapify",
                     data=suggestions,
                     status_code=200,
                 )
@@ -73,7 +73,7 @@ class PlacesAutocompleteView(APIView):
 
         return service_response(
             status="success",
-            message="Autocomplete suggestions retrieved successfully",
+            message="Autocomplete suggestions retrieved successfully From AWS",
             data=suggestions,
             status_code=200,
         )
@@ -249,6 +249,7 @@ class GeocodeView(APIView):
 
         geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
         if geoapify_key:
+            print("Got it from Geoapify")
             coords = geoapify_geocode_address(address)
         else:
             coords = None

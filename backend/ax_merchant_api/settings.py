@@ -322,7 +322,7 @@ AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
 AWS_LOCATION_PLACE_INDEX = os.getenv("AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
 
 # Geoapify Configuration
-GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY", "c18c5dbcc9ee4b049a2b86716bee32d9")
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY") or "c18c5dbcc9ee4b049a2b86716bee32d9"
 
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
