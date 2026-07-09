@@ -18,6 +18,7 @@
 9. [Subscription Endpoints](#subscription-endpoints)
 10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
 11. [Dispatcher Orders](#dispatcher-orders)
+12. [Google Places AWS Fallback](#google-places-aws-fallback)
 
 ---
 
@@ -1135,5 +1136,78 @@ Response:
       "pending_cod": 0.0,
       "withdrawable_balance": 5000.0
     }
+  }
+```
+
+---
+
+## Google Places AWS Fallback
+
+### 1. Places Autocomplete
+```
+GET /api/orders/places/autocomplete/
+Description: Retrieves location autocomplete suggestions using AWS Location Service.
+Authentication: Required (Merchant)
+Query Parameters:
+  - q (required): The partial query text to search for.
+Response:
+  {
+    "status": "success",
+    "message": "Autocomplete suggestions retrieved successfully",
+    "data": [
+      {
+        "place_id": "AQAEAKEA...",
+        "description": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
+        "is_aws": true,
+        "structured_formatting": {
+          "main_text": "15a Kunle Ogunba St",
+          "secondary_text": "Lekki, Lagos, NGA"
+        }
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+---
+
+### 2. Place Details
+```
+GET /api/orders/places/details/
+Description: Retrieves details (formatted address and coordinates) for an AWS PlaceId.
+Authentication: Required (Merchant)
+Query Parameters:
+  - place_id (required): The PlaceId returned by the autocomplete suggestion.
+Response:
+  {
+    "status": "success",
+    "message": "Place details retrieved successfully",
+    "data": {
+      "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
+      "lat": 6.4399005,
+      "lng": 3.4701005
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 3. Reverse Geocode Coordinates
+```
+GET /api/orders/places/reverse-geocode/
+Description: Reverse geocodes coordinates to a human-readable address.
+Authentication: Required (Merchant)
+Query Parameters:
+  - lat (required): Latitude float.
+  - lng (required): Longitude float.
+Response:
+  {
+    "status": "success",
+    "message": "Coordinates reverse geocoded successfully",
+    "data": {
+      "address": "Lekki Peninsula, Victoria Island, Lagos, NGA"
+    },
+    "status_code": 200
   }
 ```

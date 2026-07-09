@@ -499,3 +499,83 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 ### 6. Notification Settings
 **Endpoint:** `GET/PATCH /settings/`  
 **Description:** Retrieve or update notification toggle preferences (push_enabled, order_assigned, etc.).
+
+---
+
+## Google Places AWS Fallback Endpoints
+**Base URL:** `/api/orders/places/`
+
+### 1. Places Autocomplete
+**Endpoint:** `GET /autocomplete/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Get location autocomplete suggestions using AWS Location Service.
+
+**Query Parameters:**
+- `q` (required): The partial query text to search for.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Autocomplete suggestions retrieved successfully",
+  "data": [
+    {
+      "place_id": "AQAEAKEA...",
+      "description": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
+      "is_aws": true,
+      "structured_formatting": {
+        "main_text": "15a Kunle Ogunba St",
+        "secondary_text": "Lekki, Lagos, NGA"
+      }
+    }
+  ],
+  "status_code": 200
+}
+```
+
+---
+
+### 2. Place Details
+**Endpoint:** `GET /details/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Retrieve the detailed formatted address and coordinates for an AWS PlaceId.
+
+**Query Parameters:**
+- `place_id` (required): The PlaceId returned by the autocomplete suggestion.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Place details retrieved successfully",
+  "data": {
+    "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
+    "lat": 6.4399005,
+    "lng": 3.4701005
+  },
+  "status_code": 200
+}
+```
+
+---
+
+### 3. Reverse Geocode Coordinates
+**Endpoint:** `GET /reverse-geocode/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Reverse geocode coordinates to a human-readable address.
+
+**Query Parameters:**
+- `lat` (required): Latitude float.
+- `lng` (required): Longitude float.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Coordinates reverse geocoded successfully",
+  "data": {
+    "address": "Lekki Peninsula, Victoria Island, Lagos, NGA"
+  },
+  "status_code": 200
+}
+```

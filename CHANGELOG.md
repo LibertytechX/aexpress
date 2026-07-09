@@ -1,5 +1,25 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-09] — Google Places Fallback with AWS Location Service
+
+### Backend
+#### Added
+- **AWS Location Service helpers**: Added AWS Location Service helper functions in `orders/utils.py` (`get_aws_location_client`, `aws_place_autocomplete`, `aws_place_details`, `aws_reverse_geocode`).
+- **AWS Place Autocomplete, Details, and Reverse Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, and `ReverseGeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
+- **Endpoints routing**: Registered the new proxy endpoints in `orders/urls.py`.
+- **AWS Places integration tests**: Added `orders/test_places.py` to cover helpers, proxy views, and geocoding fallbacks.
+
+#### Fixed
+- **Geocoding graceful degradation fallback**: Modified `geocode_address` in `orders/utils.py` to fall back to AWS Location Service geocoding if Google Maps Geocoding API fails or throws an exception.
+
+### Frontend
+#### Added
+- **AWS Places API client calls**: Added backend proxy client endpoints (`PlacesAPI.autocomplete`, `PlacesAPI.details`, `PlacesAPI.reverseGeocode`) to `frontend/src/lib/api.ts`.
+- **Address Autocomplete AWS Fallback**: Integrated AWS Location Service fallback in `AddressAutocompleteInput.tsx` to handle autocomplete queries and details resolution when Google Maps fails or times out.
+- **Map Picker AWS Fallback**: Integrated AWS Location Service fallback in `MapPickerModal.tsx` for place autocomplete, details resolution, and reverse geocoding on coordinates.
+
+---
+
 # [2026-07-07] — Fix SmartParcel Locker Data Integration
 
 ### Backend

@@ -5,6 +5,7 @@ Includes Google Maps integration for geocoding and route calculation.
 
 import hashlib
 import requests
+import boto3
 from typing import Dict, List, Optional
 from django.conf import settings
 from django.core.cache import cache
@@ -75,7 +76,7 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
         response.raise_for_status()
         data = response.json()
 
-        if data["status"] == "OK" and len(data["results"]) > 0:
+        if data.get("status") == "OK" and len(data.get("results", [])) > 0:
             location = data["results"][0]["geometry"]["location"]
             result = {"lat": location["lat"], "lng": location["lng"]}
             try:
@@ -84,10 +85,24 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
                 pass
             return result
         else:
+            result = aws_geocode_address(address)
+            if result:
+                try:
+                    cache.set(cache_key, result, timeout=GEOCODE_CACHE_TIMEOUT_SECONDS)
+                except Exception:
+                    pass
+                return result
             return None
 
     except Exception as e:
         print(f"Geocoding error: {str(e)}")
+        result = aws_geocode_address(address)
+        if result:
+            try:
+                cache.set(cache_key, result, timeout=GEOCODE_CACHE_TIMEOUT_SECONDS)
+            except Exception:
+                pass
+            return result
         return None
 
 
@@ -235,5 +250,117 @@ def _calculate_route_google(
     except Exception as e:
         print(f"Google route calculation error: {str(e)}")
         return None
+
+
+def get_aws_location_client():
+    """Get AWS Location client."""
+    return boto3.client(
+        "location",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=getattr(settings, "AWS_S3_REGION_NAME", "us-east-1"),
+    )
+
+
+def aws_geocode_address(address: str) -> Optional[Dict[str, float]]:
+    """Geocode address using AWS Location Service search_place_index_for_text."""
+    try:
+        client = get_aws_location_client()
+        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        response = client.search_place_index_for_text(
+            IndexName=place_index,
+            Text=address,
+            FilterCountries=["NGA"],
+            MaxResults=1,
+        )
+        results = response.get("Results", [])
+        if results:
+            point = results[0]["Place"]["Geometry"]["Point"]
+            return {"lat": point[1], "lng": point[0]}
+    except Exception as e:
+        print(f"AWS Geocoding error: {str(e)}")
+    return None
+
+
+def aws_place_autocomplete(query: str, max_results: int = 8) -> List[Dict]:
+    """Get place suggestions using AWS Location Service search_place_index_for_suggestions."""
+    try:
+        client = get_aws_location_client()
+        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        
+        response = client.search_place_index_for_suggestions(
+            IndexName=place_index,
+            Text=query,
+            FilterCountries=["NGA"],
+            BiasPosition=[3.3792, 6.5244],  # Bias towards Lagos
+            MaxResults=max_results,
+        )
+        
+        results = response.get("Results", [])
+        suggestions = []
+        for res in results:
+            text = res.get("Text", "")
+            place_id = res.get("PlaceId", "")
+            
+            # Extract main/secondary text similar to Google's structured_formatting
+            parts = text.split(",", 1)
+            main_text = parts[0].strip()
+            secondary_text = parts[1].strip() if len(parts) > 1 else ""
+            
+            suggestions.append({
+                "place_id": place_id,
+                "description": text,
+                "is_aws": True,
+                "structured_formatting": {
+                    "main_text": main_text,
+                    "secondary_text": secondary_text
+                }
+            })
+        return suggestions
+    except Exception as e:
+        print(f"AWS Autocomplete error: {str(e)}")
+        return []
+
+
+def aws_place_details(place_id: str) -> Optional[Dict]:
+    """Get place details using AWS Location Service get_place."""
+    try:
+        client = get_aws_location_client()
+        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        response = client.get_place(
+            IndexName=place_index,
+            PlaceId=place_id,
+        )
+        place = response.get("Place", {})
+        if place:
+            point = place.get("Geometry", {}).get("Point", [])
+            if len(point) == 2:
+                return {
+                    "formatted_address": place.get("Label", ""),
+                    "lat": point[1],
+                    "lng": point[0]
+                }
+    except Exception as e:
+        print(f"AWS Place Details error: {str(e)}")
+    return None
+
+
+def aws_reverse_geocode(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates using AWS Location Service search_place_index_for_position."""
+    try:
+        client = get_aws_location_client()
+        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        response = client.search_place_index_for_position(
+            IndexName=place_index,
+            Position=[lng, lat],  # [longitude, latitude]
+            MaxResults=1,
+        )
+        results = response.get("Results", [])
+        if results:
+            return results[0]["Place"].get("Label", "")
+    except Exception as e:
+        print(f"AWS Reverse Geocoding error: {str(e)}")
+    return None
+
 
 
