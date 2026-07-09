@@ -579,3 +579,26 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
   "status_code": 200
 }
 ```
+
+---
+
+### 4. Geocode Address
+**Endpoint:** `GET /geocode/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Geocode an address string to coordinates.
+
+**Query Parameters:**
+- `address` (required): The address string to geocode.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Address geocoded successfully",
+  "data": {
+    "lat": 6.5244,
+    "lng": 3.3792
+  },
+  "status_code": 200
+}
+```

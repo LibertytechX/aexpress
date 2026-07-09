@@ -8,7 +8,7 @@ All notable changes to the AXpress backend are documented in this file.
 
 ### Added
 - **AWS Location Service helpers**: Added AWS Location Service helper functions in `orders/utils.py` (`get_aws_location_client`, `aws_place_autocomplete`, `aws_place_details`, `aws_reverse_geocode`).
-- **AWS Place Autocomplete, Details, and Reverse Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, and `ReverseGeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
+- **AWS Place Autocomplete, Details, Reverse Geocode, and Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, `ReverseGeocodeView`, and `GeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
 - **Endpoints routing**: Registered the new proxy endpoints in `orders/urls.py`.
 - **AWS Places integration tests**: Added `orders/test_places.py` to cover helpers, proxy views, and geocoding fallbacks.
 

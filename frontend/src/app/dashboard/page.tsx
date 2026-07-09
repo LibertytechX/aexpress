@@ -223,10 +223,26 @@ const STATUS_COLORS = {
 // ─── UTILS ─────────────────────────────────────────────────────
 const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } | null> => {
   return new Promise((resolve) => {
+    const handleAwsGeocode = () => {
+      API.Places.geocode(address)
+        .then((res: any) => {
+          if (res.status === 'success' && res.data) {
+            resolve({ lat: res.data.lat, lng: res.data.lng });
+          } else {
+            resolve(null);
+          }
+        })
+        .catch((err) => {
+          console.error('[Geocode fallback] AWS geocoding error:', err);
+          resolve(null);
+        });
+    };
+
     if (!window.google?.maps?.Geocoder) {
-      resolve(null);
+      handleAwsGeocode();
       return;
     }
+
     const geocoder = new window.google.maps.Geocoder();
     // Bias towards Lagos context
     const lagosAddress = address.toLowerCase().includes('lagos') ? address : `${address}, Lagos, Nigeria`;
@@ -235,7 +251,8 @@ const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } |
         const loc = results[0].geometry.location;
         resolve({ lat: loc.lat(), lng: loc.lng() });
       } else {
-        resolve(null);
+        console.warn('[Geocode] Google geocoding failed with status:', status, 'falling back to AWS');
+        handleAwsGeocode();
       }
     });
   });

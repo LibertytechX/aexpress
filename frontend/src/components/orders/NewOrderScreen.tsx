@@ -57,11 +57,13 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
 
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
   const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
 
   // ─── Quick Send state ───
   const [dropoffAddress, setDropoffAddress] = useState("");
+  const [dropoffCoords, setDropoffCoords] = useState<{ lat: number, lng: number } | null>(null);
   const [receiverName, setReceiverName] = useState("");
   const [receiverPhone, setReceiverPhone] = useState("");
   const [notes, setNotes] = useState("");
@@ -229,15 +231,69 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
     setRouteError(null);
     setCalculatingRoute(true);
 
+    const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } | null> => {
+      return new Promise((resolve) => {
+        const handleAwsGeocode = () => {
+          API.Places.geocode(address)
+            .then((res: any) => {
+              if (res.status === 'success' && res.data) {
+                resolve({ lat: res.data.lat, lng: res.data.lng });
+              } else {
+                resolve(null);
+              }
+            })
+            .catch((err) => {
+              console.error('[Geocode fallback] AWS geocoding error:', err);
+              resolve(null);
+            });
+        };
+
+        if (!window.google?.maps?.Geocoder) {
+          handleAwsGeocode();
+          return;
+        }
+
+        const geocoder = new window.google.maps.Geocoder();
+        const lagosAddress = address.toLowerCase().includes('lagos') ? address : `${address}, Lagos, Nigeria`;
+        geocoder.geocode({ address: lagosAddress }, (results, status) => {
+          if (status === 'OK' && results?.[0]?.geometry?.location) {
+            const loc = results[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else {
+            console.warn('[Geocode] Google geocoding failed with status:', status, 'falling back to AWS');
+            handleAwsGeocode();
+          }
+        });
+      });
+    };
+
     const calculateEarlyRoute = async () => {
       console.log('🔄 Starting early route calculation (Backend)...', { pickupAddress, dropoffAddress });
       setRouteError(null);
 
       try {
+        let currentPickup = pickupCoords || pickupAddress;
+        let currentDropoff = dropoffCoords || dropoffAddress;
+
+        if (!pickupCoords && pickupAddress && pickupAddress.length > 5) {
+          const coords = await geocodeAddress(pickupAddress);
+          if (coords) {
+            setPickupCoords(coords);
+            currentPickup = coords;
+          }
+        }
+        if (!dropoffCoords && dropoffAddress && dropoffAddress.length > 5) {
+          const coords = await geocodeAddress(dropoffAddress);
+          if (coords) {
+            setDropoffCoords(coords);
+            currentDropoff = coords;
+          }
+        }
+
         const payload = {
           mode: mode === 'grouped' ? 'quick' : mode,
-          pickup: pickupAddress,
-          deliveries: [dropoffAddress]
+          pickup: currentPickup,
+          deliveries: [currentDropoff]
         };
 
         const res = await API.Orders.bulkCalculateFare(payload);
@@ -610,7 +666,19 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
             {/* Pickup */}
             <div>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Pickup From</label>
-              <AddressAutocompleteInput value={pickupAddress} onChange={setPickupAddress} placeholder="Enter pickup address" style={{ width: "100%", height: 48, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
+              <AddressAutocompleteInput
+                value={pickupAddress}
+                onChange={(val: string) => {
+                  setPickupAddress(val);
+                  setPickupCoords(null);
+                }}
+                onSelect={(addr: string, coords: any) => {
+                  setPickupAddress(addr);
+                  setPickupCoords(coords);
+                }}
+                placeholder="Enter pickup address"
+                style={{ width: "100%", height: 48, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }}
+              />
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
                 <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender Name" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
                 <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender Phone" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
@@ -659,7 +727,14 @@ export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: N
                 <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Deliver To</label>
                 <AddressAutocompleteInput
                   value={dropoffAddress}
-                  onChange={setDropoffAddress}
+                  onChange={(val: string) => {
+                    setDropoffAddress(val);
+                    setDropoffCoords(null);
+                  }}
+                  onSelect={(addr: string, coords: any) => {
+                    setDropoffAddress(addr);
+                    setDropoffCoords(coords);
+                  }}
                   placeholder="Enter delivery address"
                   style={{
                     width: "100%", height: 48, padding: "0 16px", borderRadius: 10, fontSize: 14,

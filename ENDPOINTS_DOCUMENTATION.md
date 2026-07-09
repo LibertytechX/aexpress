@@ -1211,3 +1211,24 @@ Response:
     "status_code": 200
   }
 ```
+
+---
+
+### 4. Geocode Address
+```
+GET /api/orders/places/geocode/
+Description: Geocodes an address string to coordinates.
+Authentication: Required (Merchant)
+Query Parameters:
+  - address (required): The address string to geocode.
+Response:
+  {
+    "status": "success",
+    "message": "Address geocoded successfully",
+    "data": {
+      "lat": 6.5244,
+      "lng": 3.3792
+    },
+    "status_code": 200
+  }
+```

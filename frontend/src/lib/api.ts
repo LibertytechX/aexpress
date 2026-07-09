@@ -401,6 +401,7 @@ export const PlacesAPI = {
   autocomplete: async (q: string) => apiRequest(`/orders/places/autocomplete/?q=${encodeURIComponent(q)}`, { method: 'GET' }),
   details: async (placeId: string) => apiRequest(`/orders/places/details/?place_id=${encodeURIComponent(placeId)}`, { method: 'GET' }),
   reverseGeocode: async (lat: number, lng: number) => apiRequest(`/orders/places/reverse-geocode/?lat=${lat}&lng=${lng}`, { method: 'GET' }),
+  geocode: async (address: string) => apiRequest(`/orders/places/geocode/?address=${encodeURIComponent(address)}`, { method: 'GET' }),
 };
 
 // Default export matching original usage
