@@ -51,6 +51,7 @@ from .places_views import (
     PlacesAutocompleteView,
     PlaceDetailsView,
     ReverseGeocodeView,
+    GeocodeView,
 )
 
 app_name = "orders"
@@ -60,6 +61,7 @@ urlpatterns = [
     path("places/autocomplete/", PlacesAutocompleteView.as_view(), name="places_autocomplete"),
     path("places/details/", PlaceDetailsView.as_view(), name="places_details"),
     path("places/reverse-geocode/", ReverseGeocodeView.as_view(), name="places_reverse_geocode"),
+    path("places/geocode/", GeocodeView.as_view(), name="places_geocode"),
     # Vehicle endpoints
     path("vehicles/", VehicleListView.as_view(), name="vehicle_list"),
     path("vehicles/<int:id>/", VehicleUpdateView.as_view(), name="vehicle_update"),

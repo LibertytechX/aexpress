@@ -8,7 +8,7 @@ from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
 from sparky_utils.advice import exception_advice
 from sparky_utils.response import service_response
-from orders.utils import aws_place_autocomplete, aws_place_details, aws_reverse_geocode
+from orders.utils import aws_place_autocomplete, aws_place_details, aws_reverse_geocode, aws_geocode_address
 
 
 class PlacesAutocompleteView(APIView):
@@ -161,5 +161,55 @@ class ReverseGeocodeView(APIView):
             status="success",
             message="Coordinates reverse geocoded successfully",
             data={"address": address},
+            status_code=200,
+        )
+
+
+class GeocodeView(APIView):
+    """API endpoint to geocode an address string using AWS Location Service.
+
+    GET /api/orders/places/geocode/?address=...
+    """
+
+    authentication_classes = [
+        MerchantAPIKeyAuthentication,
+        *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
+    ]
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        """Handle geocoding request.
+
+        Args:
+            request: The incoming request containing 'address' parameter.
+            *args: Additional positional arguments.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            Service response with coordinates.
+        """
+        address: str = request.query_params.get("address", "")
+        if not address:
+            return service_response(
+                status="error",
+                message="Query parameter 'address' is required",
+                data={},
+                status_code=400,
+            )
+
+        coords = aws_geocode_address(address)
+        if not coords:
+            return service_response(
+                status="error",
+                message="Could not geocode address",
+                data={},
+                status_code=404,
+            )
+
+        return service_response(
+            status="success",
+            message="Address geocoded successfully",
+            data=coords,
             status_code=200,
         )

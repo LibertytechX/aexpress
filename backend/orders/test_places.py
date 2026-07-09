@@ -139,6 +139,26 @@ class PlacesProxyViewsTests(APITestCase):
         self.assertEqual(response.data["status"], "success")
         self.assertEqual(response.data["data"]["address"], "Lekki, Lagos")
 
+    @patch("orders.places_views.aws_geocode_address")
+    def test_geocode_view(self, mock_geocode):
+        mock_geocode.return_value = {"lat": 6.5, "lng": 3.3}
+
+        url = reverse("orders:places_geocode")
+        response = self.client.get(url, {"address": "Ojota"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["lat"], 6.5)
+        self.assertEqual(response.data["data"]["lng"], 3.3)
+
+        # Mock geocode failure
+        mock_geocode.return_value = None
+        response = self.client.get(url, {"address": "InvalidPlaceName"})
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+        # Missing query parameter
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
 
 @override_settings(
     AWS_ACCESS_KEY_ID="fake-id",
