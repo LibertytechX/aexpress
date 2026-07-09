@@ -8,11 +8,21 @@ from dispatcher.authentication import MerchantAPIKeyAuthentication
 from devs.models import ErrorLog
 from sparky_utils.advice import exception_advice
 from sparky_utils.response import service_response
-from orders.utils import aws_place_autocomplete, aws_place_details, aws_reverse_geocode, aws_geocode_address
+from django.conf import settings
+from orders.utils import (
+    aws_place_autocomplete,
+    aws_place_details,
+    aws_reverse_geocode,
+    aws_geocode_address,
+    geoapify_place_autocomplete,
+    geoapify_place_details,
+    geoapify_reverse_geocode,
+    geoapify_geocode_address,
+)
 
 
 class PlacesAutocompleteView(APIView):
-    """API endpoint to get place suggestions using AWS Location Service.
+    """API endpoint to get place suggestions using AWS Location or Geoapify.
 
     GET /api/orders/places/autocomplete/?q=...
     """
@@ -44,7 +54,23 @@ class PlacesAutocompleteView(APIView):
                 status_code=400,
             )
 
+        geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+        if geoapify_key:
+            suggestions = geoapify_place_autocomplete(query)
+            if suggestions:
+                return service_response(
+                    status="success",
+                    message="Autocomplete suggestions retrieved successfully",
+                    data=suggestions,
+                    status_code=200,
+                )
+
+        # Fallback to AWS
         suggestions = aws_place_autocomplete(query)
+        for s in suggestions:
+            s["place_id"] = f"aws:{s['place_id']}"
+            s["is_aws"] = True
+
         return service_response(
             status="success",
             message="Autocomplete suggestions retrieved successfully",
@@ -86,7 +112,22 @@ class PlaceDetailsView(APIView):
                 status_code=400,
             )
 
-        details = aws_place_details(place_id)
+        if place_id.startswith("geoapify:"):
+            real_id = place_id.split(":", 1)[1]
+            details = geoapify_place_details(real_id)
+        elif place_id.startswith("aws:"):
+            real_id = place_id.split(":", 1)[1]
+            details = aws_place_details(real_id)
+        else:
+            # Backward compatibility / fallback: try Geoapify first if configured, else AWS
+            geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+            if geoapify_key:
+                details = geoapify_place_details(place_id)
+            else:
+                details = None
+            if not details:
+                details = aws_place_details(place_id)
+
         if not details:
             return service_response(
                 status="error",
@@ -104,7 +145,7 @@ class PlaceDetailsView(APIView):
 
 
 class ReverseGeocodeView(APIView):
-    """API endpoint to reverse geocode coordinates using AWS Location Service.
+    """API endpoint to reverse geocode coordinates.
 
     GET /api/orders/places/reverse-geocode/?lat=...&lng=...
     """
@@ -148,7 +189,15 @@ class ReverseGeocodeView(APIView):
                 status_code=400,
             )
 
-        address = aws_reverse_geocode(lat, lng)
+        geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+        if geoapify_key:
+            address = geoapify_reverse_geocode(lat, lng)
+        else:
+            address = None
+
+        if not address:
+            address = aws_reverse_geocode(lat, lng)
+
         if not address:
             return service_response(
                 status="error",
@@ -166,7 +215,7 @@ class ReverseGeocodeView(APIView):
 
 
 class GeocodeView(APIView):
-    """API endpoint to geocode an address string using AWS Location Service.
+    """API endpoint to geocode an address string.
 
     GET /api/orders/places/geocode/?address=...
     """
@@ -198,7 +247,15 @@ class GeocodeView(APIView):
                 status_code=400,
             )
 
-        coords = aws_geocode_address(address)
+        geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+        if geoapify_key:
+            coords = geoapify_geocode_address(address)
+        else:
+            coords = None
+
+        if not coords:
+            coords = aws_geocode_address(address)
+
         if not coords:
             return service_response(
                 status="error",

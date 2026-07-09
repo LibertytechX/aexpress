@@ -85,7 +85,7 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
                 pass
             return result
         else:
-            result = aws_geocode_address(address)
+            result = _geocode_fallback(address)
             if result:
                 try:
                     cache.set(cache_key, result, timeout=GEOCODE_CACHE_TIMEOUT_SECONDS)
@@ -96,7 +96,7 @@ def geocode_address(address: str) -> Optional[Dict[str, float]]:
 
     except Exception as e:
         print(f"Geocoding error: {str(e)}")
-        result = aws_geocode_address(address)
+        result = _geocode_fallback(address)
         if result:
             try:
                 cache.set(cache_key, result, timeout=GEOCODE_CACHE_TIMEOUT_SECONDS)
@@ -361,6 +361,173 @@ def aws_reverse_geocode(lat: float, lng: float) -> Optional[str]:
     except Exception as e:
         print(f"AWS Reverse Geocoding error: {str(e)}")
     return None
+
+
+def geoapify_place_autocomplete(query: str) -> List[Dict]:
+    """Get location autocomplete suggestions from Geoapify."""
+    api_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+    if not api_key:
+        return []
+
+    # Bias to Lagos, Nigeria if not present
+    lower = query.lower()
+    search_query = query if "lagos" in lower or "nigeria" in lower else f"{query}, Lagos, Nigeria"
+
+    url = "https://api.geoapify.com/v1/geocode/autocomplete"
+    params = {
+        "text": search_query,
+        "filter": "countrycode:ng",
+        "bias": "rect:2.70,6.25,3.95,6.75",
+        "limit": 5,
+        "apiKey": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        suggestions = []
+        for result in data.get("results", []):
+            place_id = result.get("place_id")
+            formatted = result.get("formatted", "")
+            
+            # Extract main/secondary formatting
+            parts = [p.strip() for p in formatted.split(",")]
+            main_text = parts[0] if parts else formatted
+            secondary_text = ", ".join(parts[1:]) if len(parts) > 1 else ""
+
+            suggestions.append({
+                "place_id": f"geoapify:{place_id}",
+                "description": formatted,
+                "is_geoapify": True,
+                "lat": result.get("lat"),
+                "lng": result.get("lon"),
+                "structured_formatting": {
+                    "main_text": main_text,
+                    "secondary_text": secondary_text,
+                }
+            })
+        return suggestions
+    except Exception as e:
+        print(f"[Geoapify Autocomplete] Error: {str(e)}")
+        return []
+
+
+def geoapify_place_details(place_id: str) -> Optional[Dict]:
+    """Retrieve details for a Geoapify place ID."""
+    api_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+    if not api_key:
+        return None
+
+    url = "https://api.geoapify.com/v2/place-details"
+    params = {
+        "id": place_id,
+        "apiKey": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        features = data.get("features", [])
+        if not features:
+            return None
+            
+        properties = features[0].get("properties", {})
+        formatted = properties.get("formatted")
+        lat = properties.get("lat")
+        lng = properties.get("lon")
+        
+        if formatted and lat is not None and lng is not None:
+            return {
+                "formatted_address": formatted,
+                "lat": lat,
+                "lng": lng,
+            }
+        return None
+    except Exception as e:
+        print(f"[Geoapify Details] Error: {str(e)}")
+        return None
+
+
+def geoapify_geocode_address(address: str) -> Optional[Dict[str, float]]:
+    """Geocode address string to lat/lng coordinates using Geoapify."""
+    api_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+    if not api_key:
+        return None
+
+    lower = address.lower()
+    search_query = address if "lagos" in lower or "nigeria" in lower else f"{address}, Lagos, Nigeria"
+
+    url = "https://api.geoapify.com/v1/geocode/search"
+    params = {
+        "text": search_query,
+        "filter": "countrycode:ng",
+        "limit": 1,
+        "apiKey": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        results = data.get("results", [])
+        if not results:
+            return None
+            
+        lat = results[0].get("lat")
+        lng = results[0].get("lon")
+        
+        if lat is not None and lng is not None:
+            return {
+                "lat": lat,
+                "lng": lng,
+            }
+        return None
+    except Exception as e:
+        print(f"[Geoapify Geocode] Error: {str(e)}")
+        return None
+
+
+def geoapify_reverse_geocode(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates using Geoapify."""
+    api_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+    if not api_key:
+        return None
+
+    url = "https://api.geoapify.com/v1/geocode/reverse"
+    params = {
+        "lat": lat,
+        "lon": lng,
+        "format": "json",
+        "apiKey": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        
+        results = data.get("results", [])
+        if results:
+            return results[0].get("formatted")
+        return None
+    except Exception as e:
+        print(f"[Geoapify Reverse Geocode] Error: {str(e)}")
+        return None
+
+
+def _geocode_fallback(address: str) -> Optional[Dict[str, float]]:
+    """Helper to try Geoapify geocode, then fallback to AWS geocode."""
+    geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
+    if geoapify_key:
+        result = geoapify_geocode_address(address)
+        if result:
+            return result
+    return aws_geocode_address(address)
 
 
 
