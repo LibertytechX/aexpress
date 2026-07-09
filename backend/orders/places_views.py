@@ -60,7 +60,7 @@ class PlacesAutocompleteView(APIView):
             if suggestions:
                 return service_response(
                     status="success",
-                    message="Autocomplete suggestions retrieved successfully",
+                    message="Autocomplete suggestions retrieved successfully From Geoapify",
                     data=suggestions,
                     status_code=200,
                 )
@@ -73,7 +73,7 @@ class PlacesAutocompleteView(APIView):
 
         return service_response(
             status="success",
-            message="Autocomplete suggestions retrieved successfully",
+            message="Autocomplete suggestions retrieved successfully From AWS",
             data=suggestions,
             status_code=200,
         )
