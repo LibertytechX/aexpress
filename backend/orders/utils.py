@@ -379,6 +379,7 @@ def geoapify_place_autocomplete(query: str) -> List[Dict]:
         "filter": "countrycode:ng",
         "bias": "rect:2.70,6.25,3.95,6.75",
         "limit": 5,
+        "format": "json",
         "apiKey": api_key,
     }
 
@@ -466,6 +467,7 @@ def geoapify_geocode_address(address: str) -> Optional[Dict[str, float]]:
         "text": search_query,
         "filter": "countrycode:ng",
         "limit": 1,
+        "format": "json",
         "apiKey": api_key,
     }
 
