@@ -232,7 +232,7 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
     latestPredictionRequestIdRef.current += 1;
     setLoading(true);
 
-    if (suggestion.is_aws || useAwsFallback || !placesService.current) {
+    if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesService.current) {
       API.Places.details(suggestion.place_id)
         .then((res: any) => {
           setLoading(false);

@@ -336,7 +336,7 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
     setResolving(true);
 
-    if (suggestion.is_aws || useAwsFallback || !placesServiceRef.current) {
+    if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesServiceRef.current) {
       API.Places.details(suggestion.place_id)
         .then((res: any) => {
           resetAutocompleteSession();

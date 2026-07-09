@@ -321,6 +321,9 @@ AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
 AWS_LOCATION_PLACE_INDEX = os.getenv("AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
 
+# Geoapify Configuration
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY", "")
+
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 

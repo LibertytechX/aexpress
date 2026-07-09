@@ -9,6 +9,10 @@ from orders.utils import (
     aws_place_details,
     aws_reverse_geocode,
     geocode_address,
+    geoapify_place_autocomplete,
+    geoapify_place_details,
+    geoapify_geocode_address,
+    geoapify_reverse_geocode,
 )
 
 
@@ -113,7 +117,7 @@ class PlacesProxyViewsTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "success")
         self.assertEqual(len(response.data["data"]), 1)
-        self.assertEqual(response.data["data"][0]["place_id"], "fake-id")
+        self.assertEqual(response.data["data"][0]["place_id"], "aws:fake-id")
 
     @patch("orders.places_views.aws_place_details")
     def test_place_details_view(self, mock_details):
@@ -200,3 +204,154 @@ class GeocodeFallbackTests(APITestCase):
         res = geocode_address("Some query that times out")
         self.assertEqual(res, {"lat": 6.4, "lng": 3.4})
         self.assertEqual(mock_aws_geocode.call_count, 1)
+
+
+@override_settings(GEOAPIFY_API_KEY="test-geoapify-key")
+class GeoapifyTests(APITestCase):
+    @patch("orders.utils.requests.get")
+    def test_geoapify_place_autocomplete(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "place_id": "test_place_123",
+                    "formatted": "Lekki Phase 1, Lagos, Nigeria",
+                    "lat": 6.43,
+                    "lon": 3.48
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = geoapify_place_autocomplete("Lekki")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["place_id"], "geoapify:test_place_123")
+        self.assertEqual(res[0]["description"], "Lekki Phase 1, Lagos, Nigeria")
+        self.assertEqual(res[0]["lat"], 6.43)
+        self.assertEqual(res[0]["lng"], 3.48)
+        self.assertEqual(res[0]["structured_formatting"]["main_text"], "Lekki Phase 1")
+
+    @patch("orders.utils.requests.get")
+    def test_geoapify_place_details(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "features": [
+                {
+                    "properties": {
+                        "formatted": "Lekki Phase 1, Lagos, Nigeria",
+                        "lat": 6.43,
+                        "lon": 3.48
+                    }
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = geoapify_place_details("test_place_123")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["formatted_address"], "Lekki Phase 1, Lagos, Nigeria")
+        self.assertEqual(res["lat"], 6.43)
+        self.assertEqual(res["lng"], 3.48)
+
+    @patch("orders.utils.requests.get")
+    def test_geoapify_geocode_address(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "lat": 6.43,
+                    "lon": 3.48
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = geoapify_geocode_address("Lekki Phase 1")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["lat"], 6.43)
+        self.assertEqual(res["lng"], 3.48)
+
+    @patch("orders.utils.requests.get")
+    def test_geoapify_reverse_geocode(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "results": [
+                {
+                    "formatted": "Lekki Phase 1, Lagos, Nigeria"
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = geoapify_reverse_geocode(6.43, 3.48)
+        self.assertEqual(res, "Lekki Phase 1, Lagos, Nigeria")
+
+
+@override_settings(GEOAPIFY_API_KEY="test-geoapify-key")
+class PlacesProxyViewsGeoapifyTests(APITestCase):
+    def setUp(self):
+        self.merchant = User.objects.create_user(
+            email="merchant_geo@test.com",
+            password="password123",
+            phone="08098765432",
+            first_name="Geo",
+            last_name="Apify",
+        )
+        self.client.force_authenticate(user=self.merchant)
+
+    @patch("orders.places_views.geoapify_place_autocomplete")
+    def test_autocomplete_geoapify_success(self, mock_autocomplete):
+        mock_autocomplete.return_value = [
+            {
+                "place_id": "geoapify:test_123",
+                "description": "Lekki",
+                "is_geoapify": True,
+                "lat": 6.4,
+                "lng": 3.4,
+                "structured_formatting": {
+                    "main_text": "Lekki",
+                    "secondary_text": "Lagos"
+                }
+            }
+        ]
+        url = reverse("orders:places_autocomplete")
+        response = self.client.get(url, {"q": "Lekki"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(len(response.data["data"]), 1)
+        self.assertEqual(response.data["data"][0]["place_id"], "geoapify:test_123")
+
+    @patch("orders.places_views.geoapify_place_details")
+    def test_details_geoapify_success(self, mock_details):
+        mock_details.return_value = {
+            "formatted_address": "Lekki",
+            "lat": 6.4,
+            "lng": 3.4
+        }
+        url = reverse("orders:places_details")
+        response = self.client.get(url, {"place_id": "geoapify:test_123"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["lat"], 6.4)
+
+    @patch("orders.places_views.geoapify_reverse_geocode")
+    def test_reverse_geocode_geoapify_success(self, mock_rev):
+        mock_rev.return_value = "Lekki"
+        url = reverse("orders:places_reverse_geocode")
+        response = self.client.get(url, {"lat": "6.4", "lng": "3.4"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["address"], "Lekki")
+
+    @patch("orders.places_views.geoapify_geocode_address")
+    def test_geocode_geoapify_success(self, mock_geocode):
+        mock_geocode.return_value = {"lat": 6.4, "lng": 3.4}
+        url = reverse("orders:places_geocode")
+        response = self.client.get(url, {"address": "Lekki"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["lat"], 6.4)
