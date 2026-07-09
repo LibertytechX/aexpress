@@ -2394,14 +2394,19 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [error, setError] = useState(null);
+  const [useAwsFallback, setUseAwsFallback] = useState(false);
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
   const placesService = useRef(null);
+  const latestPredictionRequestIdRef = useRef(0);
+  const lastPredictionQueryRef = useRef('');
 
   // Initialize Google Maps services
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
     const initServices = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
@@ -2409,16 +2414,31 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
         setError(null);
+        setUseAwsFallback(false);
+        if (timeoutId) clearTimeout(timeoutId);
       } else {
-        setError('Google Maps not loaded');
+        console.warn('[AC Dashboard] Google Maps not loaded, enabling AWS fallback');
+        setUseAwsFallback(true);
       }
     };
 
     if (window.googleMapsLoaded) {
       initServices();
     } else {
+      console.log('[AC Dashboard] Waiting for google-maps-loaded event...');
       window.addEventListener('google-maps-loaded', initServices);
-      return () => window.removeEventListener('google-maps-loaded', initServices);
+      
+      timeoutId = setTimeout(() => {
+        if (!window.googleMapsLoaded) {
+          console.warn('[AC Dashboard] Google Maps load timed out, enabling AWS fallback');
+          setUseAwsFallback(true);
+        }
+      }, 4000);
+
+      return () => {
+        window.removeEventListener('google-maps-loaded', initServices);
+        clearTimeout(timeoutId);
+      };
     }
   }, []);
 
@@ -2440,11 +2460,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     if (!input || input.length < 3) {
       setSuggestions([]);
       setShowDropdown(false);
-      return;
-    }
-
-    if (!autocompleteService.current) {
-      setError('Google Maps not ready');
+      setLoading(false);
       return;
     }
 
@@ -2456,22 +2472,57 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
       clearTimeout(debounceTimer.current);
     }
 
-    debounceTimer.current = setTimeout(() => {
-      // Bias results towards Lagos using both bounds and component restrictions
-      const lagosBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(6.25, 2.70),
-        new window.google.maps.LatLng(6.75, 3.95)
-      );
+    const requestId = ++latestPredictionRequestIdRef.current;
 
-      // Append "Lagos, Nigeria" to the raw input when not already present.
-      // Bare street names like "15A Kunle Ogunba street lekki phase 1" are only
-      // resolved correctly by the Places Autocomplete API when state/country
-      // context is included in the query (same fix as the geocoding layer).
+    debounceTimer.current = setTimeout(() => {
       const lower = input.toLowerCase();
       const searchInput =
         lower.includes('lagos') || lower.includes('nigeria')
           ? input
           : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
+      const normalizedQuery = searchInput.trim().toLowerCase();
+      if (normalizedQuery === lastPredictionQueryRef.current) {
+        setLoading(false);
+        return;
+      }
+      lastPredictionQueryRef.current = normalizedQuery;
+
+      const handleAwsAutocomplete = () => {
+        API.Places.autocomplete(searchInput)
+          .then((res: any) => {
+            if (requestId !== latestPredictionRequestIdRef.current) return;
+            setLoading(false);
+            if (res.status === 'success' && res.data?.length > 0) {
+              setSuggestions(res.data);
+              setShowDropdown(true);
+              setError(null);
+            } else {
+              setSuggestions([]);
+              setShowDropdown(false);
+              setError('Address not found in Lagos — we only deliver within Lagos State.');
+            }
+          })
+          .catch((err: any) => {
+            if (requestId !== latestPredictionRequestIdRef.current) return;
+            setLoading(false);
+            console.error('[AC Dashboard] AWS autocomplete error:', err);
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('Failed to fetch suggestions');
+          });
+      };
+
+      if (useAwsFallback || !autocompleteService.current) {
+        handleAwsAutocomplete();
+        return;
+      }
+
+      // Bias results towards Lagos using both bounds and component restrictions
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
 
       const request = {
         input: searchInput,
@@ -2480,23 +2531,22 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
       };
 
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
-        setLoading(false);
+        if (requestId !== latestPredictionRequestIdRef.current) return;
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Results are already scoped to Nigeria + Lagos area via componentRestrictions + bounds.
-          // Don't filter by the word "lagos" in the description — Google Maps frequently omits it
-          // for local area names (e.g. "15a Kunle Ogunba St, Lekki Phase I, Lekki").
+          setLoading(false);
           setSuggestions(predictions.slice(0, 8));
           setShowDropdown(true);
           setError(null);
         } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          setLoading(false);
           setError('No addresses found in Lagos');
           setSuggestions([]);
           setShowDropdown(false);
         } else {
-          setError('Failed to fetch suggestions');
-          setSuggestions([]);
-          setShowDropdown(false);
+          console.warn('[AC Dashboard] Google places prediction failed with status:', status, 'falling back to AWS');
+          setUseAwsFallback(true);
+          handleAwsAutocomplete();
         }
       });
     }, 550); // 550ms debounce
