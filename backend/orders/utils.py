@@ -550,7 +550,9 @@ def _geocode_fallback(address: str) -> Optional[Dict[str, float]]:
     return aws_geocode_address(address)
 
 
-def mapbox_place_autocomplete(query: str, session_token: Optional[str] = None) -> List[Dict]:
+def mapbox_place_autocomplete(
+    query: str, session_token: Optional[str] = None
+) -> List[Dict]:
     """Get location autocomplete suggestions from Mapbox Search Box API.
 
     Args:
@@ -599,11 +601,14 @@ def mapbox_place_autocomplete(query: str, session_token: Optional[str] = None) -
             )
         return suggestions
     except Exception as e:
+        print("Error Response: ", response.json())
         print(f"[Mapbox Autocomplete] Error: {str(e)}")
         return []
 
 
-def mapbox_place_details(place_id: str, session_token: Optional[str] = None) -> Optional[Dict]:
+def mapbox_place_details(
+    place_id: str, session_token: Optional[str] = None
+) -> Optional[Dict]:
     """Retrieve details for a Mapbox place ID using Search Box Retrieve API.
 
     Args:
@@ -649,4 +654,3 @@ def mapbox_place_details(place_id: str, session_token: Optional[str] = None) -> 
     except Exception as e:
         print(f"[Mapbox Details] Error: {str(e)}")
         return None
-
