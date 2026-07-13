@@ -266,7 +266,9 @@ def aws_geocode_address(address: str) -> Optional[Dict[str, float]]:
     """Geocode address using AWS Location Service search_place_index_for_text."""
     try:
         client = get_aws_location_client()
-        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        place_index = getattr(
+            settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index"
+        )
         response = client.search_place_index_for_text(
             IndexName=place_index,
             Text=address,
@@ -286,8 +288,10 @@ def aws_place_autocomplete(query: str, max_results: int = 8) -> List[Dict]:
     """Get place suggestions using AWS Location Service search_place_index_for_suggestions."""
     try:
         client = get_aws_location_client()
-        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
-        
+        place_index = getattr(
+            settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index"
+        )
+
         response = client.search_place_index_for_suggestions(
             IndexName=place_index,
             Text=query,
@@ -295,27 +299,29 @@ def aws_place_autocomplete(query: str, max_results: int = 8) -> List[Dict]:
             BiasPosition=[3.3792, 6.5244],  # Bias towards Lagos
             MaxResults=max_results,
         )
-        
+
         results = response.get("Results", [])
         suggestions = []
         for res in results:
             text = res.get("Text", "")
             place_id = res.get("PlaceId", "")
-            
+
             # Extract main/secondary text similar to Google's structured_formatting
             parts = text.split(",", 1)
             main_text = parts[0].strip()
             secondary_text = parts[1].strip() if len(parts) > 1 else ""
-            
-            suggestions.append({
-                "place_id": place_id,
-                "description": text,
-                "is_aws": True,
-                "structured_formatting": {
-                    "main_text": main_text,
-                    "secondary_text": secondary_text
+
+            suggestions.append(
+                {
+                    "place_id": place_id,
+                    "description": text,
+                    "is_aws": True,
+                    "structured_formatting": {
+                        "main_text": main_text,
+                        "secondary_text": secondary_text,
+                    },
                 }
-            })
+            )
         return suggestions
     except Exception as e:
         print(f"AWS Autocomplete error: {str(e)}")
@@ -326,7 +332,9 @@ def aws_place_details(place_id: str) -> Optional[Dict]:
     """Get place details using AWS Location Service get_place."""
     try:
         client = get_aws_location_client()
-        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        place_index = getattr(
+            settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index"
+        )
         response = client.get_place(
             IndexName=place_index,
             PlaceId=place_id,
@@ -338,7 +346,7 @@ def aws_place_details(place_id: str) -> Optional[Dict]:
                 return {
                     "formatted_address": place.get("Label", ""),
                     "lat": point[1],
-                    "lng": point[0]
+                    "lng": point[0],
                 }
     except Exception as e:
         print(f"AWS Place Details error: {str(e)}")
@@ -349,7 +357,9 @@ def aws_reverse_geocode(lat: float, lng: float) -> Optional[str]:
     """Reverse geocode coordinates using AWS Location Service search_place_index_for_position."""
     try:
         client = get_aws_location_client()
-        place_index = getattr(settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+        place_index = getattr(
+            settings, "AWS_LOCATION_PLACE_INDEX", "aexpress-place-index"
+        )
         response = client.search_place_index_for_position(
             IndexName=place_index,
             Position=[lng, lat],  # [longitude, latitude]
@@ -371,7 +381,9 @@ def geoapify_place_autocomplete(query: str) -> List[Dict]:
 
     # Bias to Lagos, Nigeria if not present
     lower = query.lower()
-    search_query = query if "lagos" in lower or "nigeria" in lower else f"{query}, Lagos, Nigeria"
+    search_query = (
+        query if "lagos" in lower or "nigeria" in lower else f"{query}, Lagos, Nigeria"
+    )
 
     url = "https://api.geoapify.com/v1/geocode/autocomplete"
     params = {
@@ -387,28 +399,30 @@ def geoapify_place_autocomplete(query: str) -> List[Dict]:
         response = requests.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
-        
+
         suggestions = []
         for result in data.get("results", []):
             place_id = result.get("place_id")
             formatted = result.get("formatted", "")
-            
+
             # Extract main/secondary formatting
             parts = [p.strip() for p in formatted.split(",")]
             main_text = parts[0] if parts else formatted
             secondary_text = ", ".join(parts[1:]) if len(parts) > 1 else ""
 
-            suggestions.append({
-                "place_id": f"geoapify:{place_id}",
-                "description": formatted,
-                "is_geoapify": True,
-                "lat": result.get("lat"),
-                "lng": result.get("lon"),
-                "structured_formatting": {
-                    "main_text": main_text,
-                    "secondary_text": secondary_text,
+            suggestions.append(
+                {
+                    "place_id": f"geoapify:{place_id}",
+                    "description": formatted,
+                    "is_geoapify": True,
+                    "lat": result.get("lat"),
+                    "lng": result.get("lon"),
+                    "structured_formatting": {
+                        "main_text": main_text,
+                        "secondary_text": secondary_text,
+                    },
                 }
-            })
+            )
         return suggestions
     except Exception as e:
         print(f"[Geoapify Autocomplete] Error: {str(e)}")
@@ -431,16 +445,16 @@ def geoapify_place_details(place_id: str) -> Optional[Dict]:
         response = requests.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
-        
+
         features = data.get("features", [])
         if not features:
             return None
-            
+
         properties = features[0].get("properties", {})
         formatted = properties.get("formatted")
         lat = properties.get("lat")
         lng = properties.get("lon")
-        
+
         if formatted and lat is not None and lng is not None:
             return {
                 "formatted_address": formatted,
@@ -460,7 +474,11 @@ def geoapify_geocode_address(address: str) -> Optional[Dict[str, float]]:
         return None
 
     lower = address.lower()
-    search_query = address if "lagos" in lower or "nigeria" in lower else f"{address}, Lagos, Nigeria"
+    search_query = (
+        address
+        if "lagos" in lower or "nigeria" in lower
+        else f"{address}, Lagos, Nigeria"
+    )
 
     url = "https://api.geoapify.com/v1/geocode/search"
     params = {
@@ -475,14 +493,14 @@ def geoapify_geocode_address(address: str) -> Optional[Dict[str, float]]:
         response = requests.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
-        
+
         results = data.get("results", [])
         if not results:
             return None
-            
+
         lat = results[0].get("lat")
         lng = results[0].get("lon")
-        
+
         if lat is not None and lng is not None:
             return {
                 "lat": lat,
@@ -512,7 +530,7 @@ def geoapify_reverse_geocode(lat: float, lng: float) -> Optional[str]:
         response = requests.get(url, params=params, timeout=5)
         response.raise_for_status()
         data = response.json()
-        
+
         results = data.get("results", [])
         if results:
             return results[0].get("formatted")
@@ -532,4 +550,103 @@ def _geocode_fallback(address: str) -> Optional[Dict[str, float]]:
     return aws_geocode_address(address)
 
 
+def mapbox_place_autocomplete(query: str, session_token: Optional[str] = None) -> List[Dict]:
+    """Get location autocomplete suggestions from Mapbox Search Box API.
+
+    Args:
+        query: The partial search query string.
+        session_token: Optional UUID session token to group requests.
+
+    Returns:
+        List of dictionaries with normalized location suggestions.
+    """
+    api_key: str = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+    if not api_key:
+        return []
+
+    url = "https://api.mapbox.com/search/searchbox/v1/suggest"
+    params = {
+        "q": query,
+        "country": "ng",
+        "proximity": "3.3792,6.5244",  # Bias towards Lagos
+        "access_token": api_key,
+    }
+    if session_token:
+        params["session_token"] = session_token
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        suggestions: List[Dict] = []
+        for result in data.get("suggestions", []):
+            mapbox_id = result.get("mapbox_id")
+            name = result.get("name", "")
+            place_formatted = result.get("place_formatted", "")
+            full_address = result.get("full_address") or f"{name}, {place_formatted}"
+
+            suggestions.append(
+                {
+                    "place_id": f"mapbox:{mapbox_id}",
+                    "description": full_address,
+                    "is_mapbox": True,
+                    "structured_formatting": {
+                        "main_text": name,
+                        "secondary_text": place_formatted,
+                    },
+                }
+            )
+        return suggestions
+    except Exception as e:
+        print(f"[Mapbox Autocomplete] Error: {str(e)}")
+        return []
+
+
+def mapbox_place_details(place_id: str, session_token: Optional[str] = None) -> Optional[Dict]:
+    """Retrieve details for a Mapbox place ID using Search Box Retrieve API.
+
+    Args:
+        place_id: The Mapbox feature ID (without prefix).
+        session_token: Optional UUID session token used in autocomplete step.
+
+    Returns:
+        Dictionary containing formatted address, lat, and lng, or None.
+    """
+    api_key: str = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+    if not api_key:
+        return None
+
+    url = f"https://api.mapbox.com/search/searchbox/v1/retrieve/{place_id}"
+    params = {
+        "access_token": api_key,
+    }
+    if session_token:
+        params["session_token"] = session_token
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        features = data.get("features", [])
+        if not features:
+            return None
+
+        properties = features[0].get("properties", {})
+        geometry = features[0].get("geometry", {})
+        coordinates = geometry.get("coordinates", [])
+
+        full_address = properties.get("full_address") or properties.get("name", "")
+
+        if len(coordinates) == 2:
+            return {
+                "formatted_address": full_address,
+                "lat": coordinates[1],
+                "lng": coordinates[0],
+            }
+        return None
+    except Exception as e:
+        print(f"[Mapbox Details] Error: {str(e)}")
+        return None
 

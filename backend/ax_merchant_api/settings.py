@@ -323,7 +323,7 @@ AWS_LOCATION_PLACE_INDEX = os.getenv("AWS_LOCATION_PLACE_INDEX", "aexpress-place
 
 # Geoapify Configuration
 GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY") or "c18c5dbcc9ee4b049a2b86716bee32d9"
-
+MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 
