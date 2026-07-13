@@ -1,3 +1,4 @@
+import uuid
 from typing import Any
 from rest_framework.views import APIView
 from rest_framework import permissions
@@ -75,8 +76,10 @@ class PlacesAutocompleteView(APIView):
         mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
         if mapbox_token:
             try:
-                session_token = request.query_params.get("session_token", "")
-                suggestions = mapbox_place_autocomplete(query, session_token=session_token)
+                session_token = request.query_params.get("session_token", uuid.uuid4())
+                suggestions = mapbox_place_autocomplete(
+                    query, session_token=session_token
+                )
                 if suggestions:
                     return service_response(
                         status="success",
@@ -169,7 +172,9 @@ class PlaceDetailsView(APIView):
                 mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
                 if mapbox_token:
                     try:
-                        details = mapbox_place_details(place_id, session_token=session_token)
+                        details = mapbox_place_details(
+                            place_id, session_token=session_token
+                        )
                     except Exception:
                         details = None
 
