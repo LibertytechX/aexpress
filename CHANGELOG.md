@@ -1,6 +1,19 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-13] — Mapbox Autocomplete Integration
+
+### Backend
+#### Added
+- **Mapbox Search Box API helpers**: Added `mapbox_place_autocomplete` and `mapbox_place_details` helper functions in `orders/utils.py`.
+- **Mapbox Autocomplete Support**: Integrated Mapbox autocomplete into `PlacesAutocompleteView` with support for session tokens.
+- **Mapbox Place Details Support**: Updated `PlaceDetailsView` to retrieve feature details from Mapbox using prefix `mapbox:` and session tokens.
+- **Fallback Chain**: Configured autocomplete to use Geoapify first, falling back to Mapbox, and finally falling back to AWS Location Service.
+- **Unit Tests**: Added integration tests in `orders/test_places.py` to cover Mapbox helpers, autocomplete, details, and fallback behaviors.
+
+---
+
 # [2026-07-09] — Google Places Fallback with AWS Location Service
+
 
 ### Backend
 #### Added

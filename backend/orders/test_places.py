@@ -13,6 +13,8 @@ from orders.utils import (
     geoapify_place_details,
     geoapify_geocode_address,
     geoapify_reverse_geocode,
+    mapbox_place_autocomplete,
+    mapbox_place_details,
 )
 
 
@@ -355,3 +357,111 @@ class PlacesProxyViewsGeoapifyTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["status"], "success")
         self.assertEqual(response.data["data"]["lat"], 6.4)
+
+
+@override_settings(MAPBOX_ACCESS_TOKEN="test-mapbox-token")
+class MapboxTests(APITestCase):
+    @patch("orders.utils.requests.get")
+    def test_mapbox_place_autocomplete_success(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "suggestions": [
+                {
+                    "mapbox_id": "mapbox_123",
+                    "name": "Kunle Ogunba St",
+                    "place_formatted": "Lekki, Lagos, Nigeria",
+                    "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = mapbox_place_autocomplete("Kunle Ogunba")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["place_id"], "mapbox:mapbox_123")
+        self.assertEqual(res[0]["description"], "15a Kunle Ogunba St, Lekki, Lagos, Nigeria")
+        self.assertEqual(res[0]["structured_formatting"]["main_text"], "Kunle Ogunba St")
+        self.assertEqual(res[0]["structured_formatting"]["secondary_text"], "Lekki, Lagos, Nigeria")
+        self.assertTrue(res[0]["is_mapbox"])
+
+    @patch("orders.utils.requests.get")
+    def test_mapbox_place_details_success(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [3.456, 6.45]  # [lng, lat]
+                    },
+                    "properties": {
+                        "name": "Kunle Ogunba St",
+                        "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                    }
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = mapbox_place_details("mapbox_123")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["formatted_address"], "15a Kunle Ogunba St, Lekki, Lagos, Nigeria")
+        self.assertEqual(res["lat"], 6.45)
+        self.assertEqual(res["lng"], 3.456)
+
+
+@override_settings(GEOAPIFY_API_KEY="test-geoapify-key", MAPBOX_ACCESS_TOKEN="test-mapbox-token")
+class PlacesProxyViewsMapboxTests(APITestCase):
+    def setUp(self):
+        self.merchant = User.objects.create_user(
+            email="merchant_mapbox@test.com",
+            password="password123",
+            phone="08098765433",
+            first_name="Map",
+            last_name="Box",
+        )
+        self.client.force_authenticate(user=self.merchant)
+
+    @patch("orders.places_views.geoapify_place_autocomplete")
+    @patch("orders.places_views.mapbox_place_autocomplete")
+    def test_autocomplete_fallback_to_mapbox(self, mock_mapbox, mock_geoapify):
+        mock_geoapify.return_value = []
+        mock_mapbox.return_value = [
+            {
+                "place_id": "mapbox:test_123",
+                "description": "Lekki, Lagos",
+                "is_mapbox": True,
+                "structured_formatting": {
+                    "main_text": "Lekki",
+                    "secondary_text": "Lagos"
+                }
+            }
+        ]
+
+        url = reverse("orders:places_autocomplete")
+        response = self.client.get(url, {"q": "Lekki"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(len(response.data["data"]), 1)
+        self.assertEqual(response.data["data"][0]["place_id"], "mapbox:test_123")
+        mock_geoapify.assert_called_once()
+        mock_mapbox.assert_called_once()
+
+    @patch("orders.places_views.mapbox_place_details")
+    def test_details_mapbox_success(self, mock_details):
+        mock_details.return_value = {
+            "formatted_address": "Lekki, Lagos",
+            "lat": 6.4,
+            "lng": 3.4
+        }
+        url = reverse("orders:places_details")
+        response = self.client.get(url, {"place_id": "mapbox:test_123"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["lat"], 6.4)
+        mock_details.assert_called_once_with("test_123", session_token="")
+

@@ -18,6 +18,8 @@ from orders.utils import (
     geoapify_place_details,
     geoapify_reverse_geocode,
     geoapify_geocode_address,
+    mapbox_place_autocomplete,
+    mapbox_place_details,
 )
 
 
@@ -54,28 +56,58 @@ class PlacesAutocompleteView(APIView):
                 status_code=400,
             )
 
-        geoapify_key = settings.GEOAPIFY_API_KEY
+        # 1. Geoapify autocomplete first
+        geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
         if geoapify_key:
-            suggestions = geoapify_place_autocomplete(query)
-            if suggestions:
-                return service_response(
-                    status="success",
-                    message="Autocomplete suggestions retrieved successfully From Geoapify",
-                    data=suggestions,
-                    status_code=200,
-                )
+            try:
+                suggestions = geoapify_place_autocomplete(query)
+                if suggestions:
+                    return service_response(
+                        status="success",
+                        message="Autocomplete suggestions retrieved successfully From Geoapify",
+                        data=suggestions,
+                        status_code=200,
+                    )
+            except Exception as e:
+                print(f"[PlacesAutocompleteView] Geoapify error: {str(e)}")
 
-        # Fallback to AWS
-        suggestions = aws_place_autocomplete(query)
-        for s in suggestions:
-            s["place_id"] = f"aws:{s['place_id']}"
-            s["is_aws"] = True
+        # 2. Mapbox autocomplete fallback
+        mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+        if mapbox_token:
+            try:
+                session_token = request.query_params.get("session_token", "")
+                suggestions = mapbox_place_autocomplete(query, session_token=session_token)
+                if suggestions:
+                    return service_response(
+                        status="success",
+                        message="Autocomplete suggestions retrieved successfully From Mapbox",
+                        data=suggestions,
+                        status_code=200,
+                    )
+            except Exception as e:
+                print(f"[PlacesAutocompleteView] Mapbox error: {str(e)}")
+
+        # 3. AWS Location Service fallback
+        try:
+            suggestions = aws_place_autocomplete(query)
+            for s in suggestions:
+                s["place_id"] = f"aws:{s['place_id']}"
+                s["is_aws"] = True
+
+            return service_response(
+                status="success",
+                message="Autocomplete suggestions retrieved successfully From AWS",
+                data=suggestions,
+                status_code=200,
+            )
+        except Exception as e:
+            print(f"[PlacesAutocompleteView] AWS error: {str(e)}")
 
         return service_response(
-            status="success",
-            message="Autocomplete suggestions retrieved successfully From AWS",
-            data=suggestions,
-            status_code=200,
+            status="error",
+            message="All autocomplete providers failed to yield suggestions",
+            data=[],
+            status_code=500,
         )
 
 
@@ -112,21 +144,40 @@ class PlaceDetailsView(APIView):
                 status_code=400,
             )
 
+        session_token = request.query_params.get("session_token", "")
+
         if place_id.startswith("geoapify:"):
             real_id = place_id.split(":", 1)[1]
             details = geoapify_place_details(real_id)
+        elif place_id.startswith("mapbox:"):
+            real_id = place_id.split(":", 1)[1]
+            details = mapbox_place_details(real_id, session_token=session_token)
         elif place_id.startswith("aws:"):
             real_id = place_id.split(":", 1)[1]
             details = aws_place_details(real_id)
         else:
-            # Backward compatibility / fallback: try Geoapify first if configured, else AWS
+            # Backward compatibility / fallback: try Geoapify first, then Mapbox, then AWS
+            details = None
             geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
             if geoapify_key:
-                details = geoapify_place_details(place_id)
-            else:
-                details = None
+                try:
+                    details = geoapify_place_details(place_id)
+                except Exception:
+                    details = None
+
             if not details:
-                details = aws_place_details(place_id)
+                mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+                if mapbox_token:
+                    try:
+                        details = mapbox_place_details(place_id, session_token=session_token)
+                    except Exception:
+                        details = None
+
+            if not details:
+                try:
+                    details = aws_place_details(place_id)
+                except Exception:
+                    details = None
 
         if not details:
             return service_response(

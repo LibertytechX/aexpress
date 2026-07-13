@@ -502,30 +502,31 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 
 ---
 
-## Google Places AWS Fallback Endpoints
+## Places API (Geoapify / Mapbox / AWS Fallback Endpoints)
 **Base URL:** `/api/orders/places/`
 
 ### 1. Places Autocomplete
 **Endpoint:** `GET /autocomplete/`  
 **Authentication:** Required (Merchant Token or API Key)  
-**Description:** Get location autocomplete suggestions using AWS Location Service.
+**Description:** Get location autocomplete suggestions using a fallback chain: Geoapify -> Mapbox -> AWS Location Service.
 
 **Query Parameters:**
 - `q` (required): The partial query text to search for.
+- `session_token` (optional): A UUID string to group suggestions and details retrieve requests for Mapbox billing.
 
 **Success Response (200 OK):**
 ```json
 {
   "status": "success",
-  "message": "Autocomplete suggestions retrieved successfully",
+  "message": "Autocomplete suggestions retrieved successfully From Mapbox",
   "data": [
     {
-      "place_id": "AQAEAKEA...",
-      "description": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
-      "is_aws": true,
+      "place_id": "mapbox:dXJuOm1ieHB...",
+      "description": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+      "is_mapbox": true,
       "structured_formatting": {
-        "main_text": "15a Kunle Ogunba St",
-        "secondary_text": "Lekki, Lagos, NGA"
+        "main_text": "Kunle Ogunba St",
+        "secondary_text": "Lekki, Lagos, Nigeria"
       }
     }
   ],
@@ -538,10 +539,11 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 ### 2. Place Details
 **Endpoint:** `GET /details/`  
 **Authentication:** Required (Merchant Token or API Key)  
-**Description:** Retrieve the detailed formatted address and coordinates for an AWS PlaceId.
+**Description:** Retrieve the detailed formatted address and coordinates for a given PlaceId (supports `geoapify:`, `mapbox:`, or `aws:` prefixes).
 
 **Query Parameters:**
 - `place_id` (required): The PlaceId returned by the autocomplete suggestion.
+- `session_token` (optional): A UUID string matching the autocomplete session_token.
 
 **Success Response (200 OK):**
 ```json
@@ -549,7 +551,7 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
   "status": "success",
   "message": "Place details retrieved successfully",
   "data": {
-    "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, NGA",
+    "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
     "lat": 6.4399005,
     "lng": 3.4701005
   },
