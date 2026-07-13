@@ -553,28 +553,30 @@ def _geocode_fallback(address: str) -> Optional[Dict[str, float]]:
 def mapbox_place_autocomplete(
     query: str, session_token: Optional[str] = None
 ) -> List[Dict]:
-    """Get location autocomplete suggestions from Mapbox Search Box API.
+    """Get location autocomplete suggestions from Mapbox Geocoding v6 API.
 
     Args:
         query: The partial search query string.
-        session_token: Optional UUID session token to group requests.
+        session_token: Optional UUID session token.
 
     Returns:
-        List of dictionaries with normalized location suggestions.
+        List of dictionaries with normalized location suggestions containing lat/lng.
     """
     api_key: str = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
     if not api_key:
         return []
 
-    url = "https://api.mapbox.com/search/searchbox/v1/suggest"
+    url = "https://api.mapbox.com/search/geocode/v6/forward"
     params = {
         "q": query,
         "country": "ng",
         "proximity": "3.3792,6.5244",  # Bias towards Lagos
+        "autocomplete": "true",
+        "limit": 5,
         "access_token": api_key,
     }
     if session_token:
-        params["session_token"] = session_token
+        params["session_token"] = str(session_token)
 
     try:
         response = requests.get(url, params=params, timeout=5)
@@ -582,27 +584,38 @@ def mapbox_place_autocomplete(
         data = response.json()
 
         suggestions: List[Dict] = []
-        for result in data.get("suggestions", []):
-            mapbox_id = result.get("mapbox_id")
-            name = result.get("name", "")
-            place_formatted = result.get("place_formatted", "")
-            full_address = result.get("full_address") or f"{name}, {place_formatted}"
+        for feature in data.get("features", []):
+            properties = feature.get("properties", {})
+            mapbox_id = properties.get("mapbox_id") or feature.get("id", "")
+            name = properties.get("name", "")
+            place_formatted = properties.get("place_formatted", "")
+            full_address = properties.get("full_address") or f"{name}, {place_formatted}"
 
-            suggestions.append(
-                {
-                    "place_id": f"mapbox:{mapbox_id}",
-                    "description": full_address,
-                    "is_mapbox": True,
-                    "structured_formatting": {
-                        "main_text": name,
-                        "secondary_text": place_formatted,
-                    },
-                }
-            )
+            geometry = feature.get("geometry", {})
+            coordinates = geometry.get("coordinates", [])
+
+            suggestion_dict = {
+                "place_id": f"mapbox:{mapbox_id}",
+                "description": full_address,
+                "is_mapbox": True,
+                "structured_formatting": {
+                    "main_text": name,
+                    "secondary_text": place_formatted,
+                },
+            }
+
+            if len(coordinates) == 2:
+                suggestion_dict["lat"] = coordinates[1]
+                suggestion_dict["lng"] = coordinates[0]
+
+            suggestions.append(suggestion_dict)
         return suggestions
     except Exception as e:
-        print("Error Response: ", response.json())
-        print(f"[Mapbox Autocomplete] Error: {str(e)}")
+        try:
+            print("Error Response: ", response.json())
+        except Exception:
+            pass
+        print(f"[Mapbox Geocoding Autocomplete] Error: {str(e)}")
         return []
 
 
@@ -627,7 +640,7 @@ def mapbox_place_details(
         "access_token": api_key,
     }
     if session_token:
-        params["session_token"] = session_token
+        params["session_token"] = str(session_token)
 
     try:
         response = requests.get(url, params=params, timeout=5)

@@ -4,11 +4,12 @@ All notable changes to the AXpress project are documented in this file.
 
 ### Backend
 #### Added
-- **Mapbox Search Box API helpers**: Added `mapbox_place_autocomplete` and `mapbox_place_details` helper functions in `orders/utils.py`.
+- **Mapbox Geocoding v6 API integration**: Switched from Mapbox Search Box Suggest to the Geocoding v6 API forward search (`/search/geocode/v6/forward`) with `autocomplete=true` to fetch suggestions and geographic coordinates (`lat`/`lng`) in a single request.
 - **Mapbox Autocomplete Support**: Integrated Mapbox autocomplete into `PlacesAutocompleteView` with support for session tokens.
 - **Mapbox Place Details Support**: Updated `PlaceDetailsView` to retrieve feature details from Mapbox using prefix `mapbox:` and session tokens.
 - **Fallback Chain**: Configured autocomplete to use Geoapify first, falling back to Mapbox, and finally falling back to AWS Location Service.
-- **Unit Tests**: Added integration tests in `orders/test_places.py` to cover Mapbox helpers, autocomplete, details, and fallback behaviors.
+- **Autocomplete Coordinates Mapping**: Added support to map and return latitude and longitude coordinates directly in Geoapify and Mapbox autocomplete suggestions if present in the API response.
+- **Unit Tests**: Updated integration tests in `orders/test_places.py` to cover Mapbox Geocoding v6 helpers, autocomplete, details, and fallback behaviors.
 
 ---
 

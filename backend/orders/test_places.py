@@ -366,12 +366,21 @@ class MapboxTests(APITestCase):
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
         mock_response.json.return_value = {
-            "suggestions": [
+            "type": "FeatureCollection",
+            "features": [
                 {
-                    "mapbox_id": "mapbox_123",
-                    "name": "Kunle Ogunba St",
-                    "place_formatted": "Lekki, Lagos, Nigeria",
-                    "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                    "type": "Feature",
+                    "id": "mapbox_123",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [3.456, 6.45]
+                    },
+                    "properties": {
+                        "mapbox_id": "mapbox_123",
+                        "name": "Kunle Ogunba St",
+                        "place_formatted": "Lekki, Lagos, Nigeria",
+                        "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                    }
                 }
             ]
         }
@@ -384,6 +393,40 @@ class MapboxTests(APITestCase):
         self.assertEqual(res[0]["structured_formatting"]["main_text"], "Kunle Ogunba St")
         self.assertEqual(res[0]["structured_formatting"]["secondary_text"], "Lekki, Lagos, Nigeria")
         self.assertTrue(res[0]["is_mapbox"])
+        self.assertEqual(res[0]["lat"], 6.45)
+        self.assertEqual(res[0]["lng"], 3.456)
+
+    @patch("orders.utils.requests.get")
+    def test_mapbox_place_autocomplete_with_coordinates(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "id": "mapbox_123",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [3.456, 6.45]
+                    },
+                    "properties": {
+                        "mapbox_id": "mapbox_123",
+                        "name": "Kunle Ogunba St",
+                        "place_formatted": "Lekki, Lagos, Nigeria",
+                        "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                    }
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        res = mapbox_place_autocomplete("Kunle Ogunba")
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["place_id"], "mapbox:mapbox_123")
+        self.assertEqual(res[0]["lat"], 6.45)
+        self.assertEqual(res[0]["lng"], 3.456)
+
 
     @patch("orders.utils.requests.get")
     def test_mapbox_place_details_success(self, mock_get):
