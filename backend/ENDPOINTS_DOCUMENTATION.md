@@ -419,7 +419,20 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 {
   "status": "success",
   "message": "SmartParcel parcel created successfully.",
-  "data": { "tracking_number": "SP-XXXXXXXXXX", ... }
+  "data": {
+    "parcel": { ... },
+    "statuscode": "00",
+    "statusmessage": "New parcel request successful. Locker Number (5) has been reserved for you at (SmartParcel Sterling Bank Adeola Odeku)."
+  }
+}
+```
+
+**Error Response (502 Bad Gateway - API Error / Validation Error / Business Logic Error):**
+```json
+{
+  "status": "error",
+  "message": "No (Medium) locker available at (SmartParcel Sterling Bank Adeola Odeku).",
+  "data": {}
 }
 ```
 

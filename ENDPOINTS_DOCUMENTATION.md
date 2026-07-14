@@ -861,6 +861,24 @@ Authentication: Required (Merchant)
 POST /api/orders/smart-parcel/parcels/
 Description: Create a new SmartParcel parcel for locker pickup/delivery directly. Note: Quick Send orders (`POST /api/orders/quick-send/`) also support integrated SmartParcel locker pickup and delivery creation by passing `is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, and `locker_size_id` in the request body.
 Authentication: Required (Merchant)
+
+Response (201 Created):
+  {
+    "status": "success",
+    "message": "SmartParcel parcel created successfully.",
+    "data": {
+      "parcel": { ... },
+      "statuscode": "00",
+      "statusmessage": "New parcel request successful. Locker Number (5) has been reserved for you at (SmartParcel Sterling Bank Adeola Odeku)."
+    }
+  }
+
+Response (502 Bad Gateway - API Error / Validation Error / Business Logic Error):
+  {
+    "status": "error",
+    "message": "No (Medium) locker available at (SmartParcel Sterling Bank Adeola Odeku).",
+    "data": {}
+  }
 ```
 
 ### 8. List Pending Pickups

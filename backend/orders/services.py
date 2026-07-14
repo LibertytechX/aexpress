@@ -194,7 +194,14 @@ class SmartPercelIntegration:
 
     def create_parcel(self, payload: dict) -> tuple[bool, Any]:
         """Create a new parcel on the network (Uses Secret Key)."""
-        return self._post("parcels/create/", payload, use_public_key=False)
+        ok, response = self._post("parcels/create/", payload, use_public_key=False)
+        if not ok:
+            return False, response
+        if isinstance(response, dict):
+            status_code = response.get("statuscode")
+            if status_code and status_code != "00":
+                return False, response.get("statusmessage") or "New parcel request failed"
+        return True, response
 
     def get_parcel_details(self, tracking_number: str) -> tuple[bool, Any]:
         """Retrieve details of a parcel by tracking number (Uses Secret Key)."""
