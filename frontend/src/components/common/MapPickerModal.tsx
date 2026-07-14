@@ -334,6 +334,35 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
     setSuggestions([]);
     latestSearchRequestIdRef.current += 1;
 
+    // Check if the suggestion already has valid lat and lng coordinates
+    const lat = suggestion.lat !== undefined && suggestion.lat !== null ? parseFloat(suggestion.lat) : NaN;
+    const lng = suggestion.lng !== undefined && suggestion.lng !== null ? parseFloat(suggestion.lng) : NaN;
+
+    if (!isNaN(lat) && !isNaN(lng)) {
+      resetAutocompleteSession();
+      if (!isInLagos(lat, lng)) {
+        setOutsideLagos(true);
+        setResolvedAddress('');
+        setSearchQuery(suggestion.description);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.panTo({ lat, lng });
+        }
+        return;
+      }
+
+      setSearchQuery(suggestion.description);
+      setOutsideLagos(false);
+      setResolvedAddress(suggestion.description);
+      lastReverseGeocodeCenterRef.current = { lat, lng };
+      reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), suggestion.description);
+      
+      if (mapInstanceRef.current) {
+        skipNextIdleReverseGeocodeRef.current = true;
+        mapInstanceRef.current.panTo({ lat, lng });
+      }
+      return;
+    }
+
     setResolving(true);
 
     if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesServiceRef.current) {

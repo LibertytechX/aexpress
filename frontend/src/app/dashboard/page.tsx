@@ -2406,7 +2406,12 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
 }
 
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: any) {
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat: number, lng: number) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+
+function AddressAutocompleteInput({ value, onChange, onSelect, placeholder, style, disabled, onOpenMapPicker }: any) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -2576,10 +2581,82 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   };
 
   const handleSelectSuggestion = (suggestion) => {
-    onChange(suggestion.description);
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
+
+    latestPredictionRequestIdRef.current += 1;
+
+    // Check if the suggestion already has valid lat and lng coordinates
+    const lat = suggestion.lat !== undefined && suggestion.lat !== null ? parseFloat(suggestion.lat) : NaN;
+    const lng = suggestion.lng !== undefined && suggestion.lng !== null ? parseFloat(suggestion.lng) : NaN;
+
+    if (!isNaN(lat) && !isNaN(lng)) {
+      if (!isInLagos(lat, lng)) {
+        onChange('');
+        setError('⚠️ Outside service area — we only deliver within Lagos State.');
+      } else {
+        onChange(suggestion.description);
+        if (onSelect) {
+          onSelect(suggestion.description, lat, lng);
+        }
+      }
+      return;
+    }
+
+    setLoading(true);
+
+    if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesService.current) {
+      API.Places.details(suggestion.place_id)
+        .then((res: any) => {
+          setLoading(false);
+          if (res.status === 'success' && res.data) {
+            const { formatted_address, lat, lng } = res.data;
+            if (!isInLagos(lat, lng)) {
+              onChange('');
+              setError('⚠️ Outside service area — we only deliver within Lagos State.');
+            } else {
+              onChange(formatted_address);
+              if (onSelect) {
+                onSelect(formatted_address, lat, lng);
+              }
+            }
+          } else {
+            onChange(suggestion.description);
+          }
+        })
+        .catch((err: any) => {
+          setLoading(false);
+          console.error('[AC Dashboard] AWS details lookup error:', err);
+          onChange(suggestion.description);
+        });
+      return;
+    }
+
+    placesService.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['formatted_address', 'geometry.location'],
+      },
+      (place, status) => {
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const loc = place.geometry.location;
+          if (!isInLagos(loc.lat(), loc.lng())) {
+            onChange('');
+            setError('⚠️ Outside service area — we only deliver within Lagos State.');
+          } else {
+            const addr = place.formatted_address || suggestion.description;
+            onChange(addr);
+            if (onSelect) {
+              onSelect(addr, loc.lat(), loc.lng());
+            }
+          }
+          return;
+        }
+        onChange(suggestion.description);
+      }
+    );
   };
 
   return (
