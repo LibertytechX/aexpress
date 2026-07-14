@@ -230,6 +230,25 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
     setError(null);
 
     latestPredictionRequestIdRef.current += 1;
+
+    // Check if the suggestion already has valid lat and lng coordinates
+    const lat = suggestion.lat !== undefined && suggestion.lat !== null ? parseFloat(suggestion.lat) : NaN;
+    const lng = suggestion.lng !== undefined && suggestion.lng !== null ? parseFloat(suggestion.lng) : NaN;
+
+    if (!isNaN(lat) && !isNaN(lng)) {
+      resetAutocompleteSession();
+      if (!isInLagos(lat, lng)) {
+        onChange('');
+        setError('⚠️ Outside service area — we only deliver within Lagos State.');
+      } else {
+        onChange(suggestion.description);
+        if (onSelect) {
+          onSelect(suggestion.description, lat, lng);
+        }
+      }
+      return;
+    }
+
     setLoading(true);
 
     if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesService.current) {

@@ -1,5 +1,14 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-14] — Autocomplete Coordinates Bypass
+
+### Frontend
+#### Improved
+- **Autocomplete Coordinate Bypass**: Updated the shared `AddressAutocompleteInput.tsx`, inline `AddressAutocompleteInput` in `page.tsx`, and `MapPickerModal.tsx` components to check for coordinates (`lat` and `lng`) directly on the selected autocomplete suggestion. When coordinates are present, the frontend bypasses details lookup (geocoding), checks boundaries, and updates states/fires callbacks directly, reducing unnecessary API requests.
+- **Inline Component Synchronization**: Corrected the inline `AddressAutocompleteInput` component in the main dashboard `page.tsx` to properly destructure and execute the `onSelect` prop when suggestions are chosen, and added standard details lookup fallback logic.
+
+---
+
 # [2026-07-13] — Mapbox Autocomplete Integration
 
 ### Backend
