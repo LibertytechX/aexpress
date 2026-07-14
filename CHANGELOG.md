@@ -1,5 +1,15 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-14] — SmartParcel API Error Handling
+
+### Backend
+#### Fixed
+- **SmartParcel API Error Parsing**: Updated `SmartPercelIntegration.create_parcel` in [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) to check the inner `statuscode` inside the SmartParcel JSON response. If `statuscode` is not `"00"`, the request is now treated as a failure and returns `False` along with the descriptive `statusmessage` (e.g. locker unavailable, insufficient balance).
+- **Locker Delivery Creation Service**: Simplified and fortified error handling in `process_parcel_delivery` within [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) and `SmartParcelCreateParcelView` within [views.py](file:///Users/mac/Liberty/aexpress/backend/orders/views.py) to raise `ServiceException` when the underlying locker creation fails.
+- **Unit Tests**: Added integration tests to verify successful and failed parcel creation behavior.
+
+---
+
 # [2026-07-14] — Autocomplete Coordinates Bypass
 
 ### Frontend
