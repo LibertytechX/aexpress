@@ -270,24 +270,24 @@ class OrderViewSet(viewsets.ModelViewSet):
         is_all = self.request.query_params.get("all") == "true"
 
         # if the dispatcher role is zone_lead
-        if role == "zone_lead" and not is_all:
-            try:
-                zone_lead = VerticalLead.objects.get(user=user)
-                zones = zone_lead.area_zones.all()
-                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+        # if role == "zone_lead" and not is_all:
+        #     try:
+        #         zone_lead = VerticalLead.objects.get(user=user)
+        #         zones = zone_lead.area_zones.all()
+        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
 
-                # Filter orders:
-                # 1. Status is Pending
-                # 2. Assigned rider's hub is in my zones
-                # 3. Any relay leg starts/ends in my zones
-                qs = qs.filter(
-                    Q(status="Pending")
-                    | Q(rider__hub__in=relay_nodes)
-                    | Q(legs__start_relay_node__in=relay_nodes)
-                    | Q(legs__end_relay_node__in=relay_nodes)
-                ).distinct()
-            except VerticalLead.DoesNotExist:
-                pass
+        #         # Filter orders:
+        #         # 1. Status is Pending
+        #         # 2. Assigned rider's hub is in my zones
+        #         # 3. Any relay leg starts/ends in my zones
+        #         qs = qs.filter(
+        #             Q(status="Pending")
+        #             | Q(rider__hub__in=relay_nodes)
+        #             | Q(legs__start_relay_node__in=relay_nodes)
+        #             | Q(legs__end_relay_node__in=relay_nodes)
+        #         ).distinct()
+        #     except VerticalLead.DoesNotExist:
+        #         pass
 
         paid_complete = self.request.query_params.get("paid_complete")
         unpaid_complete = self.request.query_params.get("unpaid_complete")
