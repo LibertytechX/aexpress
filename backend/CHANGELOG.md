@@ -4,13 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-07-23] — Dispatcher New Order Email Notification
+## [2026-07-23] — Dispatcher New Order Email Notification & MailNow Fallback
 
 ### Added
 - **New Order Dispatcher Email Template**: Added `templates/emails/marketing/new_order_dispatcher.html` to render detailed information of newly created orders (including pricing, customer info, pickup and dropoff addresses).
 - **Dispatcher Email Celery Task**: Added `send_new_order_dispatcher_email_task` in `orders/tasks.py` to send email alerts via Mailgun to all active dispatcher users when an order is created.
 - **Dispatcher Email Signal**: Registered `notify_dispatchers_on_new_order` post_save signal in `orders/signals.py` to trigger the dispatcher notification email task upon order creation.
-- **Unit Tests**: Added `orders/test_dispatcher_notification.py` to verify that order creation triggers the signal and notifies all active dispatchers (while ignoring inactive users, riders, or customers).
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` that sends emails via Mailgun first, falling back to MailNow API (`POST https://api.mailnow.xyz/v1/email/send`) if Mailgun fails.
+- **Unit Tests**: Added unit and integration tests in `orders/test_dispatcher_notification.py` to verify both the dispatcher order notifications and the MailNow email fallback resilience.
 
 ---
 

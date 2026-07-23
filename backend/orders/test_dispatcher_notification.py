@@ -143,3 +143,50 @@ class DispatcherNotificationEmailTests(TestCase):
             status="Pending",
         )
         mock_task_delay.assert_called_once_with(str(order.id))
+
+    @patch("authentication.emails.requests.post")
+    @patch.dict("os.environ", {
+        "MAILGUN_APIKEY": "fake-api-key",
+        "MAILGUN_DOMAIN": "fake-domain.com",
+    })
+    def test_send_email_fallback_to_mailnow_on_mailgun_failure(self, mock_post: MagicMock) -> None:
+        """Verify that if Mailgun fails, the sending falls back to MailNow."""
+        from django.test import override_settings
+        
+        # First call (Mailgun) returns 500, second call (MailNow) returns 200
+        mock_response_mailgun = MagicMock()
+        mock_response_mailgun.status_code = 500
+        mock_response_mailgun.text = "Mailgun Service Unavailable"
+
+        mock_response_mailnow = MagicMock()
+        mock_response_mailnow.status_code = 200
+
+        mock_post.side_effect = [mock_response_mailgun, mock_response_mailnow]
+
+        from authentication.emails import send_email_with_fallback
+        
+        with override_settings(
+            MAILNOW_API_URL="https://api.mailnow.xyz/v1/email/send",
+            MAILNOW_API_KEY="mn_live_d980ae8376a4486095be5e09280e436c",
+        ):
+            success = send_email_with_fallback(
+                to_email="dispatcher@example.com",
+                subject="Test Subject",
+                html_content="<p>Test</p>",
+                text_content="Test",
+            )
+        
+        self.assertTrue(success)
+        # Assert requests.post was called twice (first for Mailgun, second for MailNow)
+        self.assertEqual(mock_post.call_count, 2)
+        
+        # Verify Mailgun call
+        mailgun_args = mock_post.call_args_list[0]
+        self.assertIn("api.mailgun.net", mailgun_args.args[0])
+        
+        # Verify MailNow call
+        mailnow_args = mock_post.call_args_list[1]
+        self.assertEqual(mailnow_args.args[0], "https://api.mailnow.xyz/v1/email/send")
+        self.assertEqual(mailnow_args.kwargs["headers"]["X-API-Key"], "mn_live_d980ae8376a4486095be5e09280e436c")
+        self.assertEqual(mailnow_args.kwargs["json"]["to"], "dispatcher@example.com")
+

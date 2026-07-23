@@ -18,22 +18,110 @@ def generate_verification_token():
     return secrets.token_urlsafe(32)
 
 
+def send_email_with_fallback(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    text_content: str,
+    from_name: str = "Assured Express",
+    from_email: str = "noreply@mg.axpress.net",
+) -> bool:
+    """Sends an email using Mailgun, and falls back to MailNow if it fails.
+
+    Args:
+        to_email (str): Recipient email address.
+        subject (str): Email subject.
+        html_content (str): HTML body of the email.
+        text_content (str): Plain text body of the email.
+        from_name (str): Sender display name. Defaults to "Assured Express".
+        from_email (str): Sender email address. Defaults to "noreply@mg.axpress.net".
+
+    Returns:
+        bool: True if sent successfully via either provider, False otherwise.
+    """
+    api_key = os.getenv("MAILGUN_APIKEY") or os.getenv("MAILGUN_API_KEY")
+    domain = os.getenv("MAILGUN_DOMAIN")
+
+    if api_key and domain:
+        try:
+            response = requests.post(
+                f"https://api.mailgun.net/v3/{domain}/messages",
+                auth=("api", api_key),
+                data={
+                    "from": f"{from_name} <{from_email}>",
+                    "to": [to_email],
+                    "subject": subject,
+                    "html": html_content,
+                    "text": text_content,
+                },
+                timeout=15,
+            )
+            if response.status_code == 200:
+                logger.info(f"Email sent successfully to {to_email} via Mailgun")
+                return True
+            else:
+                logger.warning(
+                    f"Mailgun failed with status {response.status_code}: {response.text}"
+                )
+        except Exception as e:
+            logger.warning(
+                f"Exception sending email to {to_email} via Mailgun: {str(e)}"
+            )
+    else:
+        logger.warning(
+            "Mailgun credentials not fully configured, skipping Mailgun attempt."
+        )
+
+    # Fallback to MailNow
+    mailnow_url = getattr(
+        settings, "MAILNOW_API_URL", "https://api.mailnow.xyz/v1/email/send"
+    )
+    mailnow_key = getattr(settings, "MAILNOW_API_KEY", "")
+
+    if not mailnow_key:
+        logger.error("MailNow credentials not configured. Cannot fall back.")
+        return False
+
+    logger.info(f"Attempting fallback to MailNow for {to_email}")
+    payload = {
+        "from": f"{from_name} <{from_email}>",
+        "to": to_email,
+        "subject": subject,
+        "text": text_content,
+        "html": html_content,
+    }
+    try:
+        response = requests.post(
+            mailnow_url,
+            headers={
+                "Content-Type": "application/json",
+                "X-API-Key": mailnow_key,
+            },
+            json=payload,
+            timeout=15,
+        )
+        if response.status_code in (200, 201):
+            logger.info(f"Email sent successfully to {to_email} via MailNow")
+            return True
+        else:
+            logger.error(
+                f"MailNow failed with status {response.status_code}: {response.text}"
+            )
+            return False
+    except Exception as e:
+        logger.error(f"Exception sending email to {to_email} via MailNow: {str(e)}")
+        return False
+
+
 def send_verification_email(user, otp=None):
     """
     Sends a verification email to the user with a token-based link
     and an optional 6-digit OTP.
     """
     try:
-        # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
-        domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
         frontend_url = settings.FRONTEND_URL
-
-        if not api_key or not domain:
-            logger.error("Mailgun credentials not configured")
-            return False
 
         # Generate (or get) verification token
         token = generate_verification_token()
@@ -61,25 +149,14 @@ def send_verification_email(user, otp=None):
         text_content += "\n\nThis link will expire in 24 hours."
         text_content += "\n\nBest regards,\nThe Assured Express Team"
 
-        # Send email via Mailgun
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [user.email],
-                "subject": "Welcome to Assured Express - Verify Your Email",
-                "html": html_content,
-                "text": text_content,
-            },
+        return send_email_with_fallback(
+            to_email=user.email,
+            subject="Welcome to Assured Express - Verify Your Email",
+            html_content=html_content,
+            text_content=text_content,
+            from_name=from_name,
+            from_email=from_email,
         )
-
-        if response.status_code == 200:
-            logger.info(f"Verification email sent to {user.email}")
-            return True
-        else:
-            logger.error(f"Mailgun error: {response.text}")
-            return False
 
     except Exception as e:
         logger.error(f"Error sending verification email: {str(e)}")
@@ -146,9 +223,6 @@ def send_password_reset_email(user):
     Send password reset email to user via Mailgun.
     """
     try:
-        # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
-        domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
 
@@ -158,10 +232,6 @@ def send_password_reset_email(user):
         else:
             frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
             portal_name = "MERCHANT PORTAL"
-
-        if not api_key or not domain:
-            logger.error("Mailgun credentials not configured")
-            return False
 
         # Generate reset token
         token = generate_verification_token()
@@ -184,29 +254,19 @@ def send_password_reset_email(user):
             portal_name=portal_name,
         )
 
-        # Send email via Mailgun
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [user.email],
-                "subject": "Reset Your Password - Assured Express",
-                "html": html_content,
-                "text": f"Reset your password by visiting: {reset_link}\n\nThis link will expire in 1 hour.",
-            },
+        return send_email_with_fallback(
+            to_email=user.email,
+            subject="Reset Your Password - Assured Express",
+            html_content=html_content,
+            text_content=f"Reset your password by visiting: {reset_link}\n\nThis link will expire in 1 hour.",
+            from_name=from_name,
+            from_email=from_email,
         )
-
-        if response.status_code == 200:
-            logger.info(f"Password reset email sent to {user.email}")
-            return True
-        else:
-            logger.error(f"Failed to send password reset email: {response.text}")
-            return False
 
     except Exception as e:
         logger.error(f"Error sending password reset email: {str(e)}")
         return False
+
 
 
 def get_password_reset_email_template(
@@ -274,15 +334,8 @@ def send_mobile_password_reset_email(user, otp):
     Send OTP-based password reset email to user via Mailgun for the mobile app.
     """
     try:
-        # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
-        domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
-
-        if not api_key or not domain:
-            logger.error("Mailgun credentials not configured")
-            return False
 
         # Create HTML email template
         html_content = get_mobile_password_reset_email_template(
@@ -292,29 +345,19 @@ def send_mobile_password_reset_email(user, otp):
             portal_name="MOBILE APP",
         )
 
-        # Send email via Mailgun
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [user.email],
-                "subject": "Your Password Reset Code - Assured Express",
-                "html": html_content,
-                "text": f"Your password reset code is: {otp}\n\nThis code will expire in 10 minutes.",
-            },
+        return send_email_with_fallback(
+            to_email=user.email,
+            subject="Your Password Reset Code - Assured Express",
+            html_content=html_content,
+            text_content=f"Your password reset code is: {otp}\n\nThis code will expire in 10 minutes.",
+            from_name=from_name,
+            from_email=from_email,
         )
-
-        if response.status_code == 200:
-            logger.info(f"Mobile password reset email sent to {user.email}")
-            return True
-        else:
-            logger.error(f"Failed to send mobile password reset email: {response.text}")
-            return False
 
     except Exception as e:
         logger.error(f"Error sending mobile password reset email: {str(e)}")
         return False
+
 
 
 def get_mobile_password_reset_email_template(
@@ -379,15 +422,8 @@ def send_onboarding_email(user):
     Sends a premium onboarding email to the user after successful OTP verification.
     """
     try:
-        # Get Mailgun credentials from environment
-        api_key = os.getenv("MAILGUN_APIKEY")
-        domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
-
-        if not api_key or not domain:
-            logger.error("Mailgun credentials not configured")
-            return False
 
         # Create HTML email template
         # Use first_name if available, else contact_name
@@ -399,29 +435,19 @@ def send_onboarding_email(user):
         # Create text email content
         text_content = f"Hi {first_name},\n\nWelcome to Assured Express! We're thrilled to have you on board. Your account is live and your dashboard is ready — you can start requesting deliveries right now.\n\nBest regards,\nThe Assured Express Team"
 
-        # Send email via Mailgun
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [user.email],
-                "subject": "Welcome to Assured Express 🎉",
-                "html": html_content,
-                "text": text_content,
-            },
+        return send_email_with_fallback(
+            to_email=user.email,
+            subject="Welcome to Assured Express 🎉",
+            html_content=html_content,
+            text_content=text_content,
+            from_name=from_name,
+            from_email=from_email,
         )
-
-        if response.status_code == 200:
-            logger.info(f"Onboarding email sent to {user.email}")
-            return True
-        else:
-            logger.error(f"Mailgun error sending onboarding email: {response.text}")
-            return False
 
     except Exception as e:
         logger.error(f"Error sending onboarding email: {str(e)}")
         return False
+
 
 
 def get_onboarding_email_template(name):

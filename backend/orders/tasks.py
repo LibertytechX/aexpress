@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.db.models import Count, Sum, Max, Prefetch
 from django.template.loader import render_to_string
 from authentication.models import User, MerchantEmailLog
+from authentication.emails import send_email_with_fallback
 from .models import Delivery
 
 from decimal import Decimal
@@ -220,46 +221,27 @@ def _send_marketing_email(merchant, template_code, subject, context=None):
 
     html_message = render_to_string(f"emails/marketing/{template_code}.html", context)
 
-    # Get Mailgun credentials from environment
-    api_key = os.getenv("MAILGUN_API_KEY") or os.getenv("MAILGUN_APIKEY")
-    domain = os.getenv("MAILGUN_DOMAIN")
     from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
     from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
 
-    if not api_key or not domain:
-        logger.error("Mailgun credentials not configured")
-        return False
+    success = send_email_with_fallback(
+        to_email=merchant.email,
+        subject=subject,
+        html_content=html_message,
+        text_content="Please view this email in an HTML-compatible client.",
+        from_name=from_name,
+        from_email=from_email,
+    )
 
-    try:
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [merchant.email],
-                "subject": subject,
-                "html": html_message,
-                "text": "Please view this email in an HTML-compatible client.",
-            },
+    if success:
+        MerchantEmailLog.objects.create(
+            merchant=merchant, template_code=template_code
         )
+        logger.info(
+            f"Successfully sent {template_code} via fallback utility to {merchant.email}"
+        )
+    return success
 
-        if response.status_code == 200:
-            # Log success
-            MerchantEmailLog.objects.create(
-                merchant=merchant, template_code=template_code
-            )
-            logger.info(
-                f"Successfully sent {template_code} via Mailgun to {merchant.email}"
-            )
-            return True
-        else:
-            logger.error(
-                f"Failed to send {template_code} via Mailgun to {merchant.email}: {response.text}"
-            )
-            return False
-    except Exception as e:
-        logger.error(f"Error sending {template_code} to {merchant.email}: {str(e)}")
-        return False
 
 
 @shared_task
@@ -583,37 +565,29 @@ def send_new_order_dispatcher_email_task(order_id: str) -> bool:
             f"Please login to the dispatcher dashboard to review it."
         )
 
-        api_key = os.getenv("MAILGUN_API_KEY") or os.getenv("MAILGUN_APIKEY")
-        domain = os.getenv("MAILGUN_DOMAIN")
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
-
-        if not api_key or not domain:
-            logger.error("Mailgun credentials not configured for send_new_order_dispatcher_email_task")
-            return False
 
         recipient_emails = list(dispatchers.values_list("email", flat=True))
         success = True
 
         for recipient in recipient_emails:
-            response = requests.post(
-                f"https://api.mailgun.net/v3/{domain}/messages",
-                auth=("api", api_key),
-                data={
-                    "from": f"{from_name} <{from_email}>",
-                    "to": [recipient],
-                    "subject": f"New Order Alert: Order #{order.order_number} 🚨",
-                    "html": html_message,
-                    "text": text_message,
-                },
+            email_sent = send_email_with_fallback(
+                to_email=recipient,
+                subject=f"New Order Alert: Order #{order.order_number} 🚨",
+                html_content=html_message,
+                text_content=text_message,
+                from_name=from_name,
+                from_email=from_email,
             )
-            if response.status_code == 200:
+            if email_sent:
                 logger.info(f"New order notification email sent to dispatcher {recipient}")
             else:
-                logger.error(f"Mailgun error sending new order notification to {recipient}: {response.text}")
+                logger.error(f"Failed to send new order notification email to dispatcher {recipient}")
                 success = False
 
         return success
+
     except Order.DoesNotExist:
         logger.error(f"send_new_order_dispatcher_email_task: Order {order_id} not found.")
         return False
