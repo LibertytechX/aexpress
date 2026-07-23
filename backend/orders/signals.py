@@ -1,3 +1,4 @@
+from typing import Any
 from dispatcher.models import SystemSettings
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
@@ -15,6 +16,24 @@ def create_order_offer(sender, instance, created, **kwargs):
 
         # Trigger background task for geocoding and zone assignment
         process_order_proximity.delay(instance.id)
+
+
+@receiver(post_save, sender=Order)
+def notify_dispatchers_on_new_order(
+    sender: Any, instance: Order, created: bool, **kwargs: Any
+) -> None:
+    """Signal receiver to trigger email notifications to all active dispatchers when an order is created.
+
+    Args:
+        sender (Any): The model class.
+        instance (Order): The actual order instance being saved.
+        created (bool): A boolean; True if a new record was created.
+        **kwargs (Any): Additional keyword arguments.
+    """
+    if created:
+        from .tasks import send_new_order_dispatcher_email_task
+
+        send_new_order_dispatcher_email_task.delay(str(instance.id))
 
 
 @receiver(pre_save, sender=Order)
