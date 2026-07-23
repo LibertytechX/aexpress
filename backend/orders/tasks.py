@@ -548,3 +548,76 @@ def send_transactional_email(template_code, order_id):
             f"Failed to send transactional email {template_code} for order {order_id}: {e}"
         )
         return False
+
+
+@shared_task
+def send_new_order_dispatcher_email_task(order_id: str) -> bool:
+    """Sends a notification email with new order details to all active dispatchers.
+
+    Args:
+        order_id (str): The ID of the newly created order.
+
+    Returns:
+        bool: True if the notification email process completed successfully, False otherwise.
+    """
+    try:
+        order = Order.objects.get(id=order_id)
+        dispatchers = User.objects.filter(usertype="Dispatcher", is_active=True)
+        if not dispatchers.exists():
+            logger.info("No active dispatchers found. Skipping dispatcher notification email.")
+            return False
+
+        deliveries = order.deliveries.all()
+        context = {
+            "order": order,
+            "deliveries": deliveries,
+        }
+
+        html_message = render_to_string("emails/marketing/new_order_dispatcher.html", context)
+        text_message = (
+            f"Hello,\n\n"
+            f"A new order #{order.order_number} has been created.\n\n"
+            f"Pickup Address: {order.pickup_address}\n"
+            f"Total Amount: ₦{order.total_amount}\n"
+            f"Payment Method: {order.get_payment_method_display()}\n\n"
+            f"Please login to the dispatcher dashboard to review it."
+        )
+
+        api_key = os.getenv("MAILGUN_API_KEY") or os.getenv("MAILGUN_APIKEY")
+        domain = os.getenv("MAILGUN_DOMAIN")
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+
+        if not api_key or not domain:
+            logger.error("Mailgun credentials not configured for send_new_order_dispatcher_email_task")
+            return False
+
+        recipient_emails = list(dispatchers.values_list("email", flat=True))
+        success = True
+
+        for recipient in recipient_emails:
+            response = requests.post(
+                f"https://api.mailgun.net/v3/{domain}/messages",
+                auth=("api", api_key),
+                data={
+                    "from": f"{from_name} <{from_email}>",
+                    "to": [recipient],
+                    "subject": f"New Order Alert: Order #{order.order_number} 🚨",
+                    "html": html_message,
+                    "text": text_message,
+                },
+            )
+            if response.status_code == 200:
+                logger.info(f"New order notification email sent to dispatcher {recipient}")
+            else:
+                logger.error(f"Mailgun error sending new order notification to {recipient}: {response.text}")
+                success = False
+
+        return success
+    except Order.DoesNotExist:
+        logger.error(f"send_new_order_dispatcher_email_task: Order {order_id} not found.")
+        return False
+    except Exception as e:
+        logger.exception(f"Error in send_new_order_dispatcher_email_task: {e}")
+        return False
+
