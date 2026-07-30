@@ -102,6 +102,8 @@ def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
 
         status_template_map = {
             "Assigned": "F_Assigned",
+            "AssignmentAccepted": "F_AssignmentAccepted",
+            "AssignmentRejected": "F_AssignmentRejected",
             "Started": "F1",
             "Pickup": "F_PickedUp",
             "PickedUp": "F_PickedUp",

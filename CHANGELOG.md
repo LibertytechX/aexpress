@@ -1,5 +1,18 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-30] — Add OrderEvent to Django Admin
+
+### Backend
+#### Added
+- **OrderEvent Admin Registration**: Registered the `OrderEvent` model in Django admin (`orders/admin.py`) as a standalone model with raw_id_fields, search, and list filters.
+- **OrderEvent Admin Inline**: Added `OrderEventInline` inside `OrderAdmin` to display all event logs directly within the parent Order view in Django admin.
+- **Admin Unit Tests**: Added verification tests in `orders/tests.py` to ensure `OrderEventAdmin` has optimized `raw_id_fields` for performance.
+
+#### Fixed
+- **Status Template Map Mappings**: Fixed missing `AssignmentAccepted` and `AssignmentRejected` status entries in `status_template_map` inside `orders/signals.py`, fixing test failures in `test_merchant_emails.py`.
+
+---
+
 # [2026-07-30] — Merchant Email Notifications on Order Progression Stages
 
 ### Backend

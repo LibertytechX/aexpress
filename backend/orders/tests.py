@@ -7,6 +7,7 @@ from orders.models import (
     Order,
     Delivery,
     OrderLeg,
+    OrderEvent,
 )
 from orders.admin import (
     MerchantPricingOverrideAdmin,
@@ -15,6 +16,7 @@ from orders.admin import (
     OrderAdmin,
     DeliveryAdmin,
     OrderLegAdmin,
+    OrderEventAdmin,
 )
 
 
@@ -47,6 +49,10 @@ class OrdersAdminRawIdFieldsTest(TestCase):
         self.assertIn("order", leg_admin.raw_id_fields)
         self.assertIn("rider", leg_admin.raw_id_fields)
         self.assertIn("suggested_rider", leg_admin.raw_id_fields)
+
+        event_admin = OrderEventAdmin(OrderEvent, site)
+        self.assertIn("order", event_admin.raw_id_fields)
+        self.assertIn("created_by", event_admin.raw_id_fields)
 
 
 from django.contrib.auth import get_user_model
