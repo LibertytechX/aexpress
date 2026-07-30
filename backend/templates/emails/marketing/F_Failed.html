@@ -1,0 +1,23 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Delivery failed 🚨</p>
+
+<p>Unfortunately, the delivery attempt for your order has failed.</p>
+
+<h3>📦 Order Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Reason: <strong>{{ order.cancellation_reason|default:"No reason provided" }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+</ul>
+
+<p>Please review the order details in your dashboard or contact support for help resolving this delivery issue.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Order Status</a>
+</div>
+{% endblock %}

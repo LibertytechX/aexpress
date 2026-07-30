@@ -1,0 +1,23 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Your package is out for delivery! 🚚</p>
+
+<p>The rider is currently in transit delivering your package to the recipient.</p>
+
+<h3>📦 Delivery Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Rider: <strong>{{ order.rider.user.get_full_name }} — {{ order.rider.user.phone }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+    <li>Recipient: <strong>{{ delivery.receiver_name }} — {{ delivery.receiver_phone }}</strong></li>
+</ul>
+
+<p>You can track the rider in real-time from your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📍 Track Delivery Live</a>
+</div>
+{% endblock %}

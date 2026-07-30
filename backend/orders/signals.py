@@ -82,3 +82,38 @@ def update_merchant_pricelist_flag(sender, instance, created, **kwargs):
 
         # Find the merchant profile for this user
         Merchant.objects.filter(user=instance.merchant).update(has_price_list=True)
+
+
+@receiver(post_save, sender=Order)
+def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
+    """
+    Triggers email notifications to the merchant on order progression stages.
+    """
+    if created:
+        from .tasks import send_transactional_email
+        send_transactional_email.delay("F_Pending", str(instance.id))
+        return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    current_status = instance.status
+
+    if previous_status != current_status:
+        from .tasks import send_transactional_email
+
+        status_template_map = {
+            "Assigned": "F_Assigned",
+            "Started": "F1",
+            "Pickup": "F_PickedUp",
+            "PickedUp": "F_PickedUp",
+            "Fulfilling": "F_Fulfilling",
+            "Arrived": "F_Arrived",
+            "Done": "F2",
+            "CustomerCanceled": "F_CustomerCanceled",
+            "RiderCanceled": "F_RiderCanceled",
+            "Failed": "F_Failed",
+        }
+
+        template_code = status_template_map.get(current_status)
+        if template_code:
+            send_transactional_email.delay(template_code, str(instance.id))
+

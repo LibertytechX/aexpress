@@ -1,0 +1,23 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>A rider has been assigned to your delivery request! 🏍️</p>
+
+<p>Your order is now assigned to the rider, who is reviewing the delivery details.</p>
+
+<h3>📦 Delivery Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Rider: <strong>{{ order.rider.user.get_full_name }} — {{ order.rider.user.phone }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+</ul>
+
+<p>You can track the progress of this order directly from your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Order Status</a>
+</div>
+{% endblock %}
