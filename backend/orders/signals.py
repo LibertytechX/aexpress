@@ -91,6 +91,7 @@ def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
     """
     if created:
         from .tasks import send_transactional_email
+
         send_transactional_email.delay("F_Pending", str(instance.id))
         return
 
@@ -102,8 +103,6 @@ def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
 
         status_template_map = {
             "Assigned": "F_Assigned",
-            "AssignmentAccepted": "F_AssignmentAccepted",
-            "AssignmentRejected": "F_AssignmentRejected",
             "Started": "F1",
             "Pickup": "F_PickedUp",
             "PickedUp": "F_PickedUp",
@@ -118,4 +117,3 @@ def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
         template_code = status_template_map.get(current_status)
         if template_code:
             send_transactional_email.delay(template_code, str(instance.id))
-
