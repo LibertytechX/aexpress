@@ -13,6 +13,10 @@ All notable changes to the AXpress backend are documented in this file.
 - **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` that sends emails via Mailgun first, falling back to MailNow API (`POST https://api.mailnow.xyz/v1/email/send`) if Mailgun fails.
 - **Unit Tests**: Added unit and integration tests in `orders/test_dispatcher_notification.py` to verify both the dispatcher order notifications and the MailNow email fallback resilience.
 
+### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
 ---
 
 ## [2026-07-13] — Mapbox Autocomplete Integration

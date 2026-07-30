@@ -1,5 +1,19 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-23] — Dispatcher Notifications & Order Charge Task Serialization Fix
+
+### Backend
+#### Added
+- **New Order Dispatcher Email Template**: Added HTML template to render detailed information of newly created orders for dispatcher alerts.
+- **Dispatcher Email Celery Task & Signal**: Added task `send_new_order_dispatcher_email_task` and registered post_save signal `notify_dispatchers_on_new_order` to trigger notifications on order creation.
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` falling back to MailNow API if Mailgun fails.
+
+#### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
+---
+
 # [2026-07-14] — SmartParcel API Error Handling
 
 ### Backend

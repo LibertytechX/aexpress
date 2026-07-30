@@ -118,7 +118,19 @@ def process_order_proximity(self, order_id):
 
 
 @shared_task
-def create_order_charge(order_id):
+def create_order_charge(order_id: str) -> str:
+    """Create a pending charge for the specified order.
+
+    Args:
+        order_id: The unique identifier (UUID string) of the order.
+
+    Returns:
+        The unique identifier (UUID string) of the created charge.
+
+    Raises:
+        Order.DoesNotExist: If the order with the specified ID does not exist.
+        Exception: For any other database or creation error.
+    """
     try:
         order = Order.objects.get(id=order_id)
         charge = Charge.objects.create(
@@ -127,11 +139,12 @@ def create_order_charge(order_id):
             amount=order.total_amount,
             status="pending",
         )
-        return charge
+        return str(charge.id)
     except Exception as e:
         logger.error(
             f"create_order_charge: Failed to create charge for Order {order_id}: {e}"
         )
+        raise
 
 
 @shared_task
