@@ -22,6 +22,7 @@ from .models import (
     MerchantPricingOverride,
     MerchantPriceList,
     MerchantPriceListItem,
+    OrderEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,23 @@ class OrderLegInline(admin.TabularInline):
         "hub_pin",
     ]
     readonly_fields = ["leg_number", "hub_pin"]
+
+
+class OrderEventInline(admin.TabularInline):
+    """Inline admin for order events within an order."""
+
+    model = OrderEvent
+    extra = 0
+    fields = [
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by",
+        "created_at",
+    ]
+    readonly_fields = ["created_at"]
+    raw_id_fields = ["created_by"]
 
 
 @admin.register(Vehicle)
@@ -455,7 +473,7 @@ class OrderAdmin(ImportExportModelAdmin):
         ),
     )
 
-    inlines = [DeliveryInline, OrderLegInline]
+    inlines = [DeliveryInline, OrderLegInline, OrderEventInline]
 
     @admin.display(description="Rider ID")
     def get_rider_id(self, obj):
@@ -549,3 +567,32 @@ class OrderLegAdmin(admin.ModelAdmin):
     readonly_fields = ["id", "hub_pin", "created_at"]
     raw_id_fields = ["order", "rider", "suggested_rider"]
     ordering = ["order", "leg_number"]
+
+
+@admin.register(OrderEvent)
+class OrderEventAdmin(admin.ModelAdmin):
+    """Admin configuration for OrderEvent model."""
+
+    list_display = [
+        "order",
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by",
+        "created_at",
+    ]
+    list_filter = ["event", "created_at"]
+    search_fields = [
+        "order__order_number",
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by__phone",
+        "created_by__email",
+    ]
+    raw_id_fields = ["order", "created_by"]
+    readonly_fields = ["created_at"]
+    ordering = ["-created_at"]
+

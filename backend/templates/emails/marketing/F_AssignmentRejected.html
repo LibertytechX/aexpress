@@ -1,0 +1,22 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Order assignment rejected ❌</p>
+
+<p>The rider was unable to accept your order assignment. Our dispatch system is actively finding another rider for your delivery request.</p>
+
+<h3>📦 Delivery Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+</ul>
+
+<p>No action is needed on your part. We will notify you once a new rider is assigned.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Order Dashboard</a>
+</div>
+{% endblock %}

@@ -1,5 +1,46 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-07-30] — Add OrderEvent to Django Admin
+
+### Backend
+#### Added
+- **OrderEvent Admin Registration**: Registered the `OrderEvent` model in Django admin (`orders/admin.py`) as a standalone model with raw_id_fields, search, and list filters.
+- **OrderEvent Admin Inline**: Added `OrderEventInline` inside `OrderAdmin` to display all event logs directly within the parent Order view in Django admin.
+- **Admin Unit Tests**: Added verification tests in `orders/tests.py` to ensure `OrderEventAdmin` has optimized `raw_id_fields` for performance.
+
+#### Fixed
+- **Status Template Map Mappings**: Fixed missing `AssignmentAccepted` and `AssignmentRejected` status entries in `status_template_map` inside `orders/signals.py`, fixing test failures in `test_merchant_emails.py`.
+
+---
+
+# [2026-07-30] — Merchant Email Notifications on Order Progression Stages
+
+### Backend
+#### Added
+- **Order Progression Email Templates**: Designed and added 10 premium, brand-aligned email templates under `backend/templates/emails/marketing/` (extending `base.html` with Outfit typography) for order lifecycle states: Pending, Assigned, Assignment Accepted, Assignment Rejected, Picked Up, Fulfilling, Arrived, Customer Canceled, Rider Canceled, and Failed.
+- **Order Status Signal Receiver**: Registered `send_merchant_email_on_status_change` receiver for the `post_save` signal on the `Order` model in `orders/signals.py`. It tracks status transitions from the previous value (populated by `pre_save`) and triggers the corresponding transactional email.
+- **Email Signal Unit Tests**: Created `orders/test_merchant_emails.py` containing the `MerchantProgressionEmailsTest` class to verify transactional email triggers, idempotency check bypasses, and transition boundaries.
+
+#### Improved
+- **Celery Transactional Task Route**: Updated the `_send_marketing_email` helper and `send_transactional_email` task in `orders/tasks.py` to support a `skip_daily_check` flag. This allows transactional order progression emails to bypass the daily campaign rate-limiting check while preserving per-order-and-stage idempotency.
+- **Controller Cleanup**: Removed redundant manual Celery task dispatches from `_advance_order` and `DeliveryCompleteView` in `orders/views.py`, delegating all progression emails to Django model signals.
+
+---
+
+# [2026-07-23] — Dispatcher Notifications & Order Charge Task Serialization Fix
+
+### Backend
+#### Added
+- **New Order Dispatcher Email Template**: Added HTML template to render detailed information of newly created orders for dispatcher alerts.
+- **Dispatcher Email Celery Task & Signal**: Added task `send_new_order_dispatcher_email_task` and registered post_save signal `notify_dispatchers_on_new_order` to trigger notifications on order creation.
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` falling back to MailNow API if Mailgun fails.
+
+#### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
+---
+
 # [2026-07-14] — SmartParcel API Error Handling
 
 ### Backend

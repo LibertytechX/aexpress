@@ -118,7 +118,19 @@ def process_order_proximity(self, order_id):
 
 
 @shared_task
-def create_order_charge(order_id):
+def create_order_charge(order_id: str) -> str:
+    """Create a pending charge for the specified order.
+
+    Args:
+        order_id: The unique identifier (UUID string) of the order.
+
+    Returns:
+        The unique identifier (UUID string) of the created charge.
+
+    Raises:
+        Order.DoesNotExist: If the order with the specified ID does not exist.
+        Exception: For any other database or creation error.
+    """
     try:
         order = Order.objects.get(id=order_id)
         charge = Charge.objects.create(
@@ -127,11 +139,12 @@ def create_order_charge(order_id):
             amount=order.total_amount,
             status="pending",
         )
-        return charge
+        return str(charge.id)
     except Exception as e:
         logger.error(
             f"create_order_charge: Failed to create charge for Order {order_id}: {e}"
         )
+        raise
 
 
 @shared_task
@@ -205,16 +218,17 @@ def handle_order_completion_tasks(order_id):
 SENDER_EMAIL = "assuredxpressng@gmail.com"
 
 
-def _send_marketing_email(merchant, template_code, subject, context=None):
+def _send_marketing_email(merchant, template_code, subject, context=None, skip_daily_check=False):
     """Helper to render and send marketing emails, logging to prevent duplicates."""
 
     # Check if already sent for the date
-    today = timezone.now().date()
-    if MerchantEmailLog.objects.filter(
-        merchant=merchant, template_code=template_code, sent_at__date=today
-    ).exists():
-        logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
-        return False
+    if not skip_daily_check:
+        today = timezone.now().date()
+        if MerchantEmailLog.objects.filter(
+            merchant=merchant, template_code=template_code, sent_at__date=today
+        ).exists():
+            logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
+            return False
 
     context = context or {}
     context["merchant"] = merchant
@@ -508,8 +522,18 @@ def send_transactional_email(template_code, order_id):
         context = {"order": order, "delivery": delivery}
 
         subject_map = {
+            "F_Pending": f"📥 Order Received — Order #{order.order_number}",
+            "F_Assigned": f"🏍️ Rider Assigned — Order #{order.order_number}",
+            "F_AssignmentAccepted": f"✅ Rider Accepted — Order #{order.order_number}",
+            "F_AssignmentRejected": f"❌ Rider Rejected Assignment — Order #{order.order_number}",
             "F1": f"Your delivery is on the move! — Order #{order.order_number} 🚚",
+            "F_PickedUp": f"📦 Package Picked Up — Order #{order.order_number}",
+            "F_Fulfilling": f"🚚 Out for Delivery — Order #{order.order_number}",
+            "F_Arrived": f"📍 Rider has Arrived — Order #{order.order_number}",
             "F2": f"✅ Delivery Completed! — Order #{order.order_number} has arrived",
+            "F_CustomerCanceled": f"⚠️ Order Canceled by Customer — Order #{order.order_number}",
+            "F_RiderCanceled": f"⚠️ Order Canceled by Rider — Order #{order.order_number}",
+            "F_Failed": f"🚨 Delivery Failed — Order #{order.order_number}",
         }
 
         success = _send_marketing_email(
@@ -517,6 +541,7 @@ def send_transactional_email(template_code, order_id):
             template_code,
             subject_map.get(template_code, f"Update on Order #{order.order_number}"),
             context,
+            skip_daily_check=True,
         )
 
         if success:

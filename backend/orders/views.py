@@ -1435,14 +1435,6 @@ def _advance_order(request, order_number, new_status, event_desc):
 
     order.save(update_fields=update_fields)
 
-    # Trigger transactional emails
-    from orders.tasks import send_transactional_email
-
-    if new_status == "Started":
-        send_transactional_email.delay("F1", str(order.id))
-    elif new_status == "Done":
-        send_transactional_email.delay("F2", str(order.id))
-
     # Trigger order-completed webhook in background if status is Done
     if new_status == "Done":
 
@@ -2025,10 +2017,6 @@ class DeliveryCompleteView(APIView):
             order.status = "Done"
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
-
-            from orders.tasks import send_transactional_email
-
-            send_transactional_email.delay("F2", str(order.id))
 
             # Trigger order-completed webhook in background
             def _trigger_delivery_completed():
