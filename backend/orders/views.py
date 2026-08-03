@@ -16,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from .models import Order, Delivery, Vehicle, OrderEvent
+from .signals import order_event_signal
 from .utils import calculate_route
 from .pricing import calculate_effective_fare
 from .serializers import (
@@ -1474,13 +1475,8 @@ def _advance_order(request, order_number, new_status, event_desc):
             ]
         )
 
-    OrderEvent.objects.create(
-        order=order,
-        event=event_desc,
-        description=f"By rider {request.user.contact_name or request.user.phone}",
-    )
-
     return Response({"status": new_status, "previous": old_status})
+
 
 
 class OrderPickupView(APIView):
@@ -1902,12 +1898,6 @@ def cancel_order(request, order_id):
     rider.status = Rider.Status.ONLINE
     rider.save(update_fields=["current_order", "status"])
 
-    OrderEvent.objects.create(
-        order=order,
-        event="Driver Canceled",
-        description=f"Canceled by {request.user.contact_name or request.user.phone}: {ser.validated_data['reason']}",
-    )
-
     return Response({"status": "canceled"})
 
 
@@ -1955,13 +1945,16 @@ class DeliveryStartView(APIView):
                 ]
             )
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="Delivery Started",
             description=f"Delivery to {delivery.receiver_name} started by rider {request.user.contact_name or request.user.phone}",
+            created_by=request.user,
         )
 
         return Response({"status": "InTransit", "previous": old_status})
+
 
 
 class DeliveryCompleteView(APIView):
@@ -2041,12 +2034,6 @@ class DeliveryCompleteView(APIView):
 
             threading.Thread(target=_trigger_delivery_completed, daemon=True).start()
 
-            OrderEvent.objects.create(
-                order=order,
-                event="Order Completed",
-                description="All deliveries completed.",
-            )
-
         # Update rider location if provided
         rider_profile = getattr(request.user, "rider_profile", None)
         if rider_profile and ser.validated_data.get("latitude"):
@@ -2061,13 +2048,16 @@ class DeliveryCompleteView(APIView):
                 ]
             )
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="Delivery Completed",
             description=f"Delivery to {delivery.receiver_name} completed by rider {request.user.contact_name or request.user.phone}",
+            created_by=request.user,
         )
 
         return Response({"status": "Delivered", "previous": old_status})
+
 
 
 class MergeGroupedOrdersView(APIView):

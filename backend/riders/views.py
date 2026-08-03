@@ -203,15 +203,8 @@ class OrderOfferAcceptView(APIView):
             ]
         )
 
-        # 3.5 Log Event
-        OrderEvent.objects.create(
-            order=order,
-            event="assignment_accepted",
-            description=f"Rider {rider.rider_id} accepted the offer. Order status updated to AssignmentAccepted.",
-            created_by=request.user,
-        )
-
         # 4. COD Logic
+
         if order.collect_on_delivery:
             RiderCodRecord.objects.create(
                 rider=rider,
@@ -1123,15 +1116,8 @@ class RiderAssignmentActionView(APIView):
 
         order.save(update_fields=["status", "rider", "updated_at"])
 
-        # Log Event
-        OrderEvent.objects.create(
-            order=order,
-            event=f"assignment_{action}ed",
-            description=event_msg,
-            created_by=request.user,
-        )
-
         # Emit Activity
+
         emit_activity(
             event_type=f"assignment_{action}ed",
             order_id=order.order_number,

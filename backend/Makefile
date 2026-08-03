@@ -11,3 +11,6 @@ migrate:
 
 test:
 	@.venv/bin/pytest || pytest
+
+test_isolate:
+	@./test.sh

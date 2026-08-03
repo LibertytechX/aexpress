@@ -36,16 +36,8 @@ class Command(BaseCommand):
                     old_status = order.status
                     order.status = "Assigned"
                     order.save(update_fields=["status", "updated_at"])
-
-                    # Create an OrderEvent for audit trail
-                    OrderEvent.objects.create(
-                        order=order,
-                        event="status_fixed",
-                        description=f"Automated status fix: Changed from {old_status} to Assigned.",
-                        old_value=old_status,
-                        new_value="Assigned",
-                    )
                     updated_count += 1
+
 
             self.stdout.write(
                 self.style.SUCCESS(f"Successfully updated {updated_count} orders to 'Assigned'.")
