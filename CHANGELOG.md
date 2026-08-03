@@ -1,6 +1,31 @@
 All notable changes to the AXpress project are documented in this file.
 
-# [2026-07-30] — Add OrderEvent to Django Admin
+# [2026-08-03] — Fix Test Failures Across Dispatcher & Orders Modules
+
+### Backend
+#### Fixed
+- **Dispatcher & Order Test Fixes**:
+  - `dispatcher/tests.py`: Added `refresh_from_db()` to `test_compute_distance_today_reset_missing` so the updated database value is reflected on the model instance. Added default pickup coordinates to `_create_orders` in `OrderViewSetListTests` to prevent background tasks from invoking external geocoding HTTP requests.
+  - `orders/signals.py`: Added `"AssignmentAccepted": "F_AssignmentAccepted"` mapping in `send_merchant_email_on_status_change` to ensure progression emails fire correctly on assignment acceptance.
+  - `orders/test_rider_order_updates.py`: Updated `OrderEvent` filter assertions to match signal-generated event names (`order_status_started`, `order_status_arrived`, `order_status_done`).
+
+---
+
+# [2026-08-03] — Refactor OrderEvent Creation to Django Signals
+
+### Backend
+#### Added
+- **OrderEvent Signal Receivers**:
+  - `log_order_event_on_created`: Automatically creates an `OrderEvent` (`event="order_created"`) on `post_save` whenever a new `Order` instance is created.
+  - `log_order_event_on_status_change`: Automatically creates an `OrderEvent` (`event="order_status_<status>"`) on `post_save` when an order transitions to a new status.
+  - `order_event_signal`: Custom signal for dispatching custom order events (e.g., `price_change`, delivery status updates).
+- **Unit Tests**: Created `orders/test_order_events_signals.py` to test automatic `OrderEvent` creation on order creation, status changes, and custom signal dispatches.
+
+#### Refactored
+- **Views & Commands Event Cleanup**: Removed direct `OrderEvent.objects.create()` calls across `orders/views.py`, `riders/views.py`, `dispatcher/views.py`, and management commands, delegating all event creation to signals.
+
+---
+
 
 ### Backend
 #### Added

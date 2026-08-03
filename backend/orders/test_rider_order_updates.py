@@ -82,7 +82,7 @@ class RiderOrderEndpointsTests(TestCase):
         self.assertEqual(self.order.status, "Started")
 
         # Verify event logged
-        self.assertTrue(self.order.events.filter(event="Order Started").exists())
+        self.assertTrue(self.order.events.filter(event="order_status_started").exists())
 
     def test_order_arrived_endpoint(self):
         self.order.status = "Started"
@@ -103,7 +103,7 @@ class RiderOrderEndpointsTests(TestCase):
 
         # Verify event logged
         self.assertTrue(
-            self.order.events.filter(event="Rider Arrived at Pickup").exists()
+            self.order.events.filter(event="order_status_arrived").exists()
         )
 
     def test_order_complete_endpoint(self):
@@ -130,5 +130,5 @@ class RiderOrderEndpointsTests(TestCase):
 
         # Verify event logged
         self.assertTrue(
-            self.order.events.filter(event="Order Completed (All Deliveries)").exists()
+            self.order.events.filter(event="order_status_done").exists()
         )

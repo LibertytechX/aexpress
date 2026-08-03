@@ -496,6 +496,7 @@ class VehicleDistanceTodayCommandTests(TestCase):
             date=day.isoformat(),
             reset_missing=True,
         )
+        asset_no_data.refresh_from_db()
         self.assertEqual(asset_no_data.distance_today, Decimal("0.00"))
 
 
@@ -1391,6 +1392,8 @@ class OrderViewSetListTests(TestCase):
                 user=self.user,
                 vehicle=self.vehicle,
                 pickup_address=f"Pickup {i}",
+                pickup_latitude=Decimal("6.45"),
+                pickup_longitude=Decimal("3.39"),
                 sender_name=f"Sender {i}",
                 sender_phone=f"080{i:08d}",
                 total_amount=Decimal("1000.00"),

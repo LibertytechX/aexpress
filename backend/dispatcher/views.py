@@ -646,9 +646,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.save(update_fields=["total_amount", "updated_at"])
 
         # Record audit event
-        from orders.models import OrderEvent
+        from orders.signals import order_event_signal
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="price_change",
             description=f"Price changed from ₦{old_amount} to ₦{new_amount}",
@@ -656,6 +657,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             new_value=str(new_amount),
             created_by=request.user if request.user.is_authenticated else None,
         )
+
 
         # If this is a relay order, recalculate leg payouts as a proportional
         # share of the new total_amount weighted by each leg's distance.
