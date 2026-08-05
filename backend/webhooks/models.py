@@ -1,5 +1,7 @@
 from django.db import models
 import uuid
+from .enums import WebhookEventEnum
+from django.contrib.postgres.fields import ArrayField
 
 
 class Webhook(models.Model):
@@ -10,10 +12,12 @@ class Webhook(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     event_name = models.CharField(
         max_length=100,
-        unique=True,
-        db_index=True,
+        null=True,
+        blank=True,
+        choices=WebhookEventEnum.choices(),
         help_text="Unique name for the event (e.g., order-created)",
     )
+    events: list = ArrayField(default=list, help_text="List of subscribed events")
     url = models.URLField(
         max_length=500, help_text="External URL to send the POST request to"
     )
