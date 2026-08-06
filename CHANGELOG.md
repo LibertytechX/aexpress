@@ -1,5 +1,205 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-08-06] — Fix Webhook Model ArrayField Base Field
+
+### Backend
+#### Fixed
+- **Webhook Model ArrayField**: Added required positional argument `base_field=models.CharField(max_length=100)` and `blank=True` to `events` `ArrayField` in `webhooks/models.py`.
+
+---
+
+# [2026-08-03] — Fix Test Failures Across Dispatcher & Orders Modules
+
+### Backend
+#### Fixed
+- **Dispatcher & Order Test Fixes**:
+  - `dispatcher/tests.py`: Added `refresh_from_db()` to `test_compute_distance_today_reset_missing` so the updated database value is reflected on the model instance. Added default pickup coordinates to `_create_orders` in `OrderViewSetListTests` to prevent background tasks from invoking external geocoding HTTP requests.
+  - `orders/signals.py`: Added `"AssignmentAccepted": "F_AssignmentAccepted"` mapping in `send_merchant_email_on_status_change` to ensure progression emails fire correctly on assignment acceptance.
+  - `orders/test_rider_order_updates.py`: Updated `OrderEvent` filter assertions to match signal-generated event names (`order_status_started`, `order_status_arrived`, `order_status_done`).
+
+---
+
+# [2026-08-03] — Refactor OrderEvent Creation to Django Signals
+
+### Backend
+#### Added
+- **OrderEvent Signal Receivers**:
+  - `log_order_event_on_created`: Automatically creates an `OrderEvent` (`event="order_created"`) on `post_save` whenever a new `Order` instance is created.
+  - `log_order_event_on_status_change`: Automatically creates an `OrderEvent` (`event="order_status_<status>"`) on `post_save` when an order transitions to a new status.
+  - `order_event_signal`: Custom signal for dispatching custom order events (e.g., `price_change`, delivery status updates).
+- **Unit Tests**: Created `orders/test_order_events_signals.py` to test automatic `OrderEvent` creation on order creation, status changes, and custom signal dispatches.
+
+#### Refactored
+- **Views & Commands Event Cleanup**: Removed direct `OrderEvent.objects.create()` calls across `orders/views.py`, `riders/views.py`, `dispatcher/views.py`, and management commands, delegating all event creation to signals.
+
+---
+
+
+### Backend
+#### Added
+- **OrderEvent Admin Registration**: Registered the `OrderEvent` model in Django admin (`orders/admin.py`) as a standalone model with raw_id_fields, search, and list filters.
+- **OrderEvent Admin Inline**: Added `OrderEventInline` inside `OrderAdmin` to display all event logs directly within the parent Order view in Django admin.
+- **Admin Unit Tests**: Added verification tests in `orders/tests.py` to ensure `OrderEventAdmin` has optimized `raw_id_fields` for performance.
+
+#### Fixed
+- **Status Template Map Mappings**: Fixed missing `AssignmentAccepted` and `AssignmentRejected` status entries in `status_template_map` inside `orders/signals.py`, fixing test failures in `test_merchant_emails.py`.
+
+---
+
+# [2026-07-30] — Merchant Email Notifications on Order Progression Stages
+
+### Backend
+#### Added
+- **Order Progression Email Templates**: Designed and added 10 premium, brand-aligned email templates under `backend/templates/emails/marketing/` (extending `base.html` with Outfit typography) for order lifecycle states: Pending, Assigned, Assignment Accepted, Assignment Rejected, Picked Up, Fulfilling, Arrived, Customer Canceled, Rider Canceled, and Failed.
+- **Order Status Signal Receiver**: Registered `send_merchant_email_on_status_change` receiver for the `post_save` signal on the `Order` model in `orders/signals.py`. It tracks status transitions from the previous value (populated by `pre_save`) and triggers the corresponding transactional email.
+- **Email Signal Unit Tests**: Created `orders/test_merchant_emails.py` containing the `MerchantProgressionEmailsTest` class to verify transactional email triggers, idempotency check bypasses, and transition boundaries.
+
+#### Improved
+- **Celery Transactional Task Route**: Updated the `_send_marketing_email` helper and `send_transactional_email` task in `orders/tasks.py` to support a `skip_daily_check` flag. This allows transactional order progression emails to bypass the daily campaign rate-limiting check while preserving per-order-and-stage idempotency.
+- **Controller Cleanup**: Removed redundant manual Celery task dispatches from `_advance_order` and `DeliveryCompleteView` in `orders/views.py`, delegating all progression emails to Django model signals.
+
+---
+
+# [2026-07-23] — Dispatcher Notifications & Order Charge Task Serialization Fix
+
+### Backend
+#### Added
+- **New Order Dispatcher Email Template**: Added HTML template to render detailed information of newly created orders for dispatcher alerts.
+- **Dispatcher Email Celery Task & Signal**: Added task `send_new_order_dispatcher_email_task` and registered post_save signal `notify_dispatchers_on_new_order` to trigger notifications on order creation.
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` falling back to MailNow API if Mailgun fails.
+
+#### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
+---
+
+# [2026-07-14] — SmartParcel API Error Handling
+
+### Backend
+#### Fixed
+- **SmartParcel API Error Parsing**: Updated `SmartPercelIntegration.create_parcel` in [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) to check the inner `statuscode` inside the SmartParcel JSON response. If `statuscode` is not `"00"`, the request is now treated as a failure and returns `False` along with the descriptive `statusmessage` (e.g. locker unavailable, insufficient balance).
+- **Locker Delivery Creation Service**: Simplified and fortified error handling in `process_parcel_delivery` within [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) and `SmartParcelCreateParcelView` within [views.py](file:///Users/mac/Liberty/aexpress/backend/orders/views.py) to raise `ServiceException` when the underlying locker creation fails.
+- **Unit Tests**: Added integration tests to verify successful and failed parcel creation behavior.
+
+---
+
+# [2026-07-14] — Autocomplete Coordinates Bypass
+
+### Frontend
+#### Improved
+- **Autocomplete Coordinate Bypass**: Updated the shared `AddressAutocompleteInput.tsx`, inline `AddressAutocompleteInput` in `page.tsx`, and `MapPickerModal.tsx` components to check for coordinates (`lat` and `lng`) directly on the selected autocomplete suggestion. When coordinates are present, the frontend bypasses details lookup (geocoding), checks boundaries, and updates states/fires callbacks directly, reducing unnecessary API requests.
+- **Inline Component Synchronization**: Corrected the inline `AddressAutocompleteInput` component in the main dashboard `page.tsx` to properly destructure and execute the `onSelect` prop when suggestions are chosen, and added standard details lookup fallback logic.
+
+---
+
+# [2026-07-13] — Mapbox Autocomplete Integration
+
+### Backend
+#### Added
+- **Mapbox Geocoding v6 API integration**: Switched from Mapbox Search Box Suggest to the Geocoding v6 API forward search (`/search/geocode/v6/forward`) with `autocomplete=true` to fetch suggestions and geographic coordinates (`lat`/`lng`) in a single request.
+- **Mapbox Autocomplete Support**: Integrated Mapbox autocomplete into `PlacesAutocompleteView` with support for session tokens.
+- **Mapbox Place Details Support**: Updated `PlaceDetailsView` to retrieve feature details from Mapbox using prefix `mapbox:` and session tokens.
+- **Fallback Chain**: Configured autocomplete to use Geoapify first, falling back to Mapbox, and finally falling back to AWS Location Service.
+- **Autocomplete Coordinates Mapping**: Added support to map and return latitude and longitude coordinates directly in Geoapify and Mapbox autocomplete suggestions if present in the API response.
+- **Unit Tests**: Updated integration tests in `orders/test_places.py` to cover Mapbox Geocoding v6 helpers, autocomplete, details, and fallback behaviors.
+
+---
+
+# [2026-07-09] — Google Places Fallback with AWS Location Service
+
+
+### Backend
+#### Added
+- **AWS Location Service helpers**: Added AWS Location Service helper functions in `orders/utils.py` (`get_aws_location_client`, `aws_place_autocomplete`, `aws_place_details`, `aws_reverse_geocode`).
+- **AWS Place Autocomplete, Details, Reverse Geocode, and Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, `ReverseGeocodeView`, and `GeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
+- **Endpoints routing**: Registered the new proxy endpoints in `orders/urls.py`.
+- **AWS Places integration tests**: Added `orders/test_places.py` to cover helpers, proxy views, and geocoding fallbacks.
+
+#### Fixed
+- **Geocoding graceful degradation fallback**: Modified `geocode_address` in `orders/utils.py` to fall back to AWS Location Service geocoding if Google Maps Geocoding API fails or throws an exception.
+
+### Frontend
+#### Added
+- **AWS Places API client calls**: Added backend proxy client endpoints (`PlacesAPI.autocomplete`, `PlacesAPI.details`, `PlacesAPI.reverseGeocode`, `PlacesAPI.geocode`) to `frontend/src/lib/api.ts`.
+- **Address Autocomplete AWS Fallback**: Integrated AWS Location Service fallback in `AddressAutocompleteInput.tsx` and the dashboard page's inline `AddressAutocompleteInput` to handle autocomplete queries and details resolution when Google Maps fails or times out.
+- **Map Picker AWS Fallback**: Integrated AWS Location Service fallback in `MapPickerModal.tsx` for place autocomplete, details resolution, and reverse geocoding on coordinates.
+- **Geocoding Coords Fallback**: Configured `geocodeAddress` utility in both the dashboard and shared `NewOrderScreen` components to fallback to `API.Places.geocode` backend proxy when client-side Google geocoder fails, preventing raw string addresses in fare calculation payloads.
+
+---
+
+# [2026-07-07] — Fix SmartParcel Locker Data Integration
+
+### Backend
+#### Fixed
+- **Sender Phone Number Lookup Typo**: Fixed typo in `QuickSendView.post()` dictionary lookup key for the sender's phone number (`"sender _phone"` -> `"sender_phone"`), which caused it to always map to an empty string.
+
+#### Added
+- **SmartParcel Locker Integration Tests**: Created `orders/test_quick_send_smart_parcel.py` unit test to verify integrated Quick Send order placement with locker details.
+
+### Frontend
+#### Fixed
+- **SmartParcel Locker Data Propagation**: Added locker delivery and pickup fields (`is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, `locker_size_id`) to the `apiPayload` mapped object in `dashboard/page.tsx`'s `onPlaceOrder()`.
+- **New Order Page Payload Mapping**: Restructured payload creation on the standalone `/new-order` page (`new-order/page.tsx`) to map all camelCase keys to backend-aligned snake_case equivalent fields and include locker data.
+
+---
+
+# [2026-06-04] — Fix Admin Charge Change Page Timeout
+
+### Backend (Admin)
+#### Fixed
+- **Order representation N+1 query optimization**: Optimized the `Order` model's `__str__` method to return only the order number (`f"Order {self.order_number}"`), avoiding heavy database query loops on related user objects when rendering list choices.
+- **Admin models raw_id_fields optimization**: Added `raw_id_fields` to foreign key relationships in all `wallet` and `orders` admin modules (`ChargeAdmin`, `WalletAdmin`, `TransactionAdmin`, `VirtualAccountAdmin`, `WebhookLogAdmin`, `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, `AmortizationVirtualAccountAdmin`, `OrderAdmin`, `DeliveryAdmin`, `OrderLegAdmin`, `MerchantPricingOverrideAdmin`, `MerchantPriceListAdmin`, `MerchantPriceListItemAdmin`). This completely prevents Django admin from executing N+1 select list queries or rendering massive dropdown lists, fixing the gunicorn timeout crash when displaying admin change pages.
+
+### Backend
+#### Added
+- **Makefile Update**: Added a `test` target to run the pytest test suite via `.venv/bin/pytest` or system fallback.
+
+---
+
+# [2026-05-20] — Backend Test Suite Failure Resolution
+
+### Backend
+#### Added
+- **Rider Home Zone Filter**: Implemented home-zone filtering on rider order offers to ensure riders only view jobs that originate from or are routed to their designated zones.
+- **Relay Coordinates Validation**: Enforced strict coordinate validation in `create_dispatcher_order` when relay leg generation is requested, raising standard validation errors on missing coordinates.
+
+#### Fixed
+- **Rider Wallet Balance Aggregation**: Restored available balance retrieval in `RiderWalletInfoSerializer` to sum the current wallet balance and pending Cash On Delivery (COD) amounts. Queried the `Wallet` model directly to bypass stale in-memory cached relationships.
+- **Today's Trips Route Resolution**: Fixed dynamic pattern capturing collision in `riders/urls.py` by re-ordering the `"orders/today/"` pattern before the dynamic `"orders/<str:order_id>/"` pattern, resolving a false "Order not found" 404 response.
+- **Wallet Escrow Balance Verification**: Updated escrow tests to force refresh the wallet database state before asserting balances, avoiding stale assert failures.
+- **Merchant Subscription Creation Conflicts**: Adjusted subscription test setup to fetch pre-existing model instances automatically spawned by Django signals, preventing unique constraint violations.
+- **Proximity Checks Graceful Bypass**: Modified delivery completion views to skip proximity validation checks when geolocation coordinates are omitted from the client payload.
+- **Rider Admin Metadata**: Added `short_description` properties to custom model methods in `Rider` model to pass admin view validation checks in the test harness.
+- **Rider Duty Switch Standard choices**: Integrated `"online"` and `"offline"` choice options to the `DutyToggleSerializer` class to gracefully bridge mobile app toggle payloads.
+
+---
+
+# [2026-05-19] — Transaction Admin User Phone Search
+
+### Backend (Admin)
+#### Added
+- **Transaction User Phone Search**: Added user `phone` search field (`wallet__user__phone`) to `TransactionAdmin` to enable administrative users to search/filter wallet transactions by the associated user's phone number.
+
+---
+
+# [2026-05-18] — Amortization Admin Search Bug Fix
+
+### Backend (Admin)
+#### Fixed
+- **Amortization Admin User Search**: Resolved a Django `FieldError` (unsupported lookup 'full_name') by replacing the invalid Python `@property` lookup with actual database fields (`first_name`, `last_name`, `contact_name`) across `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, and `AmortizationVirtualAccountAdmin`.
+- **Search Robustness**: Standardized user search across amortization admin views to allow querying by first name, last name, or contact name.
+
+---
+
+# [2026-05-16] — Partner Order Count Flexibility
+
+### Frontend (Dispatcher Portal)
+#### Changed
+- **Number of Orders Flexibility**: Modified the "Number of Orders" input in the Partner Bulk creation flow to accept any integer value.
+- **Input Clearing**: Enabled the ability to clear the "Number of Orders" input field during editing for a better user experience.
+- **Robust Calculations**: Updated pricing calculations and order submission logic to handle empty or non-numeric input values gracefully.
+
 # [2026-05-15] — Transaction Admin Date Hierarchy
 
 ### Backend (Admin)

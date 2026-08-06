@@ -67,16 +67,21 @@ class CryptoPaymentSerializer(serializers.Serializer):
 - For every new updates (features, bugs, chores) let's update the `CHANGELOG.md` file in the root of the project to keep track of what has been done and when, and also update the `ENDPOINTS_DOCUMENTATION.md` file to reflect the changes in the API endpoints. 
 
 
-### 3. Running Commands
+### 4. Testing
+- For every new implementations/features let's write a unittest and e2e for the implementation/feature
+
+
+### 5. Running Commands
 - Active venv in the backend directory `/Users/ayo/Liberty/aexpress/backend` using `source venv/bin/activate`
 
 
 ## ClickUp Task Logging
-
-Log dev work to ClickUp so the PM and QA team can track it.
+- Log dev work to ClickUp so the PM and QA team can track it.
 
 ### Credentials
-Load from ⁠ .claude/clickup.env ⁠ (gitignored). See ⁠ .claude/clickup.env.example ⁠ for the full list of required values.
+- Load from ⁠ .claude/clickup.env ⁠ (gitignored). See ⁠ .claude/clickup.env.example ⁠ for the full list of required values.
+
+
 
 ### When to log
 •⁠  ⁠*End of session*: Log everything done in the session automatically.

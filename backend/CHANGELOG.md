@@ -3,6 +3,102 @@
 All notable changes to the AXpress backend are documented in this file.
 
 ---
+
+## [2026-08-06] — Fix Webhook Model ArrayField Base Field
+
+### Fixed
+- **Webhook Model ArrayField**: Added required positional argument `base_field=models.CharField(max_length=100)` and `blank=True` to `events` `ArrayField` in `webhooks/models.py`.
+
+---
+
+## [2026-07-23] — Dispatcher New Order Email Notification & MailNow Fallback
+
+### Added
+- **New Order Dispatcher Email Template**: Added `templates/emails/marketing/new_order_dispatcher.html` to render detailed information of newly created orders (including pricing, customer info, pickup and dropoff addresses).
+- **Dispatcher Email Celery Task**: Added `send_new_order_dispatcher_email_task` in `orders/tasks.py` to send email alerts via Mailgun to all active dispatcher users when an order is created.
+- **Dispatcher Email Signal**: Registered `notify_dispatchers_on_new_order` post_save signal in `orders/signals.py` to trigger the dispatcher notification email task upon order creation.
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` that sends emails via Mailgun first, falling back to MailNow API (`POST https://api.mailnow.xyz/v1/email/send`) if Mailgun fails.
+- **Unit Tests**: Added unit and integration tests in `orders/test_dispatcher_notification.py` to verify both the dispatcher order notifications and the MailNow email fallback resilience.
+
+### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
+---
+
+## [2026-07-13] — Mapbox Autocomplete Integration
+
+### Added
+- **Mapbox Geocoding v6 API integration**: Switched from Mapbox Search Box Suggest to the Geocoding v6 API forward search (`/search/geocode/v6/forward`) with `autocomplete=true` to fetch suggestions and geographic coordinates (`lat`/`lng`) in a single request.
+- **Mapbox Autocomplete Support**: Integrated Mapbox autocomplete into `PlacesAutocompleteView` with support for session tokens.
+- **Mapbox Place Details Support**: Updated `PlaceDetailsView` to retrieve feature details from Mapbox using prefix `mapbox:` and session tokens.
+- **Fallback Chain**: Configured autocomplete to use Geoapify first, falling back to Mapbox, and finally falling back to AWS Location Service.
+- **Autocomplete Coordinates Mapping**: Added support to map and return latitude and longitude coordinates directly in Geoapify and Mapbox autocomplete suggestions if present in the API response.
+- **Unit Tests**: Updated integration tests in `orders/test_places.py` to cover Mapbox Geocoding v6 helpers, autocomplete, details, and fallback behaviors.
+
+---
+
+## [2026-07-09] — Google Places Fallback with AWS Location Service
+
+### Added
+- **AWS Location Service helpers**: Added AWS Location Service helper functions in `orders/utils.py` (`get_aws_location_client`, `aws_place_autocomplete`, `aws_place_details`, `aws_reverse_geocode`).
+- **AWS Place Autocomplete, Details, Reverse Geocode, and Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, `ReverseGeocodeView`, and `GeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
+- **Endpoints routing**: Registered the new proxy endpoints in `orders/urls.py`.
+- **AWS Places integration tests**: Added `orders/test_places.py` to cover helpers, proxy views, and geocoding fallbacks.
+
+### Fixed
+- **Geocoding graceful degradation fallback**: Modified `geocode_address` in `orders/utils.py` to fall back to AWS Location Service geocoding if Google Maps Geocoding API fails or throws an exception.
+
+---
+
+## [2026-07-03] — Fix Wallet process_pending_charges Idempotency
+
+### Fixed
+- **Wallet process_pending_charges Idempotency**: Fixed a bug in `Wallet.process_pending_charges` where orders/sub-orders payment status was skipped and left as `Pending` when a matching transaction had already been debited successfully but the status update was interrupted.
+- **Unit Tests**: Added `ProcessPendingChargesIdempotencyTest` in `wallet/tests.py` to verify that order and sub-orders payment status are correctly synced when a transaction already exists.
+
+---
+
+## [2026-06-24] — Export Rider Distance Covered command
+
+### Added
+- **Rider Distance Export Command**: Added `export_rider_distances` management command under `dispatcher` app. It calculates rider distance covered for a specified date range based on `VehicleTracking` odometer logs and outputs a styled Excel sheet with zebra-striping, custom alignments, and auto-fitted column widths.
+- **Unit Tests**: Added `ExportRiderDistancesCommandTests` in `dispatcher/tests.py` to assert correct distance calculations, Excel headers, formatting, and file generation.
+
+---
+
+## [2026-06-08] — Amortization Transaction Import/Export Support
+
+### Added
+- **Amortization Transaction Import/Export**: Integrated `django-import-export` into `AmortizationTransactionAdmin` in `wallet/admin.py`, defining `AmortizationTransactionResource` to support CSV/Excel import and export of bike hire-purchase transactions. Includes customized fields for User Name and User Phone.
+
+---
+
+## [2026-06-04] — Fix Admin Charge Change Page Timeout
+
+### Added
+- **Makefile Update**: Added a `test` target to run the pytest test suite via `.venv/bin/pytest` or system fallback.
+
+### Fixed
+- **Order representation N+1 query optimization**: Optimized the `Order` model's `__str__` method to return only the order number (`f"Order {self.order_number}"`), avoiding heavy database query loops on related user objects when rendering list choices.
+- **Admin models raw_id_fields optimization**: Added `raw_id_fields` to foreign key relationships in all `wallet` and `orders` admin modules (`ChargeAdmin`, `WalletAdmin`, `TransactionAdmin`, `VirtualAccountAdmin`, `WebhookLogAdmin`, `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, `AmortizationVirtualAccountAdmin`, `OrderAdmin`, `DeliveryAdmin`, `OrderLegAdmin`, `MerchantPricingOverrideAdmin`, `MerchantPriceListAdmin`, `MerchantPriceListItemAdmin`). This completely prevents Django admin from executing N+1 select list queries or rendering massive dropdown lists, fixing the gunicorn timeout crash when displaying admin change pages.
+
+---
+
+## [2026-05-19] — Route-Based Proximity & Wallet Test Fixes
+
+### Added
+- **Rider Earning Signal Handler**: Implemented a Django model signal in `riders/signals.py` (`credit_rider_wallet_on_earning`) that listens to the `post_save` event on `RiderEarning`. It automatically and atomically credits the rider's wallet with the correct `net_earning` amount, generating a clean `EARN-` transaction reference and description.
+
+### Changed
+- **Transaction Pagination Layout**: Overrode the `get_paginated_response` method of `TransactionPagination` in `wallet/views.py`. This resolves layout conflicts between API users by conditionally pulling the `"success"` and `"data"` fields to the top-level format when requested, satisfying unit tests and backward compatibility.
+- **Rider Proximity Check (Pickup & Completion)**: Replaced straight-line `Zone.haversine_distance` calculation with real route-based distance calculation using Google Maps/OSRM-based `calculate_route` helper in both the order status advance logic (`_advance_order` in `orders/views.py`) and the order completion logic (`OrderCompleteView` in `orders/views.py`). Included a defensive fallback to `haversine_distance` if the routing service is offline or unavailable.
+- **Proximity Restriction Tests**: Overhauled `orders/test_proximity_restrictions.py` to correctly initialize rider coordinates, mock routing API responses via `unittest.mock.patch`, and verify both successful routing API results and graceful haversine fallbacks for both pickup and completion views.
+
+### Fixed
+- **Vehicle Asset Orders Today Count**: Corrected `orders_today` field on `VehicleAssetSerializer` in `dispatcher/serializers.py` to be a `SerializerMethodField` rather than mapping to telemetry/distance. Added `get_orders_today` helper to accurately sum completed orders today with robust local timezone-aware fallbacks for missing completion and delivery timestamps, resolving multiple failing test assertions.
+
+---
 ## [2026-05-06] — Bike Amortization System (Phase 1)
 
 ### Added

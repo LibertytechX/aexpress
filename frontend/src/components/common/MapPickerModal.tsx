@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import API from '@/lib/api';
 
 declare global {
   interface Window {
@@ -64,6 +65,7 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
   const [suggestions, setSuggestions] = useState<any[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [useAwsFallback, setUseAwsFallback] = useState(false);
 
   const resetAutocompleteSession = () => {
     sessionTokenRef.current = null;
@@ -79,8 +81,17 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
   // ── Initialise map once panel is mounted ──────────────────────
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
     const init = () => {
-      if (!mapContainerRef.current || !window.google?.maps) return;
+      if (!mapContainerRef.current || !window.google?.maps) {
+        console.warn('[MP] Google Maps not loaded, enabling AWS fallback');
+        setUseAwsFallback(true);
+        if (timeoutId) clearTimeout(timeoutId);
+        return;
+      }
+      setUseAwsFallback(false);
+      if (timeoutId) clearTimeout(timeoutId);
 
       const map = new window.google.maps.Map(mapContainerRef.current, {
         center: LAGOS_CENTER,
@@ -145,19 +156,45 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
           setOutsideLagos(false);
           setResolving(true);
 
+          const handleAwsReverseGeocode = () => {
+            API.Places.reverseGeocode(lat, lng)
+              .then((res: any) => {
+                setResolving(false);
+                if (res.status === 'success' && res.data?.address) {
+                  const formattedAddress = res.data.address;
+                  lastReverseGeocodeCenterRef.current = centerPoint;
+                  reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), formattedAddress);
+                  setResolvedAddress(formattedAddress);
+                } else {
+                  lastReverseGeocodeCenterRef.current = centerPoint;
+                  setResolvedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                }
+              })
+              .catch((err) => {
+                setResolving(false);
+                console.error('[MP] AWS reverse geocode error:', err);
+                lastReverseGeocodeCenterRef.current = centerPoint;
+                setResolvedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+              });
+          };
+
+          if (!geocoderRef.current) {
+            handleAwsReverseGeocode();
+            return;
+          }
+
           geocoderRef.current.geocode(
             { location: { lat, lng } },
             (results: any[], status: string) => {
-              setResolving(false);
               if (status === 'OK' && results[0]) {
+                setResolving(false);
                 const formattedAddress = results[0].formatted_address;
                 lastReverseGeocodeCenterRef.current = centerPoint;
                 reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), formattedAddress);
                 setResolvedAddress(formattedAddress);
               } else {
-                // Fallback to lat/lng string
-                lastReverseGeocodeCenterRef.current = centerPoint;
-                setResolvedAddress(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+                console.warn('[MP] Google geocoding failed with status:', status, 'falling back to AWS');
+                handleAwsReverseGeocode();
               }
             }
           );
@@ -169,11 +206,18 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
       init();
     } else {
       window.addEventListener('google-maps-loaded', init, { once: true });
+      timeoutId = setTimeout(() => {
+        if (!window.google?.maps) {
+          console.warn('[MP] Google Maps load timed out, enabling AWS fallback');
+          setUseAwsFallback(true);
+        }
+      }, 4000);
     }
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 
@@ -186,7 +230,7 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
 
   const handleConfirm = () => {
     if (!resolvedAddress || outsideLagos) return;
-    const center = mapInstanceRef.current.getCenter();
+    const center = mapInstanceRef.current?.getCenter();
     if (center) {
       onConfirm(resolvedAddress, center.lat(), center.lng());
     } else {
@@ -206,19 +250,12 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
       return;
     }
 
-    if (!autocompleteServiceRef.current) return;
-
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
 
     const requestId = ++latestSearchRequestIdRef.current;
 
     searchDebounceRef.current = setTimeout(() => {
       setIsSearching(true);
-
-      const lagosBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(LAGOS_BOUNDS.minLat, LAGOS_BOUNDS.minLng),
-        new window.google.maps.LatLng(LAGOS_BOUNDS.maxLat, LAGOS_BOUNDS.maxLng)
-      );
 
       const lower = value.toLowerCase();
       const query = lower.includes('lagos') || lower.includes('nigeria')
@@ -231,6 +268,38 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
         return;
       }
       lastSearchQueryRef.current = normalizedQuery;
+
+      const handleAwsAutocomplete = () => {
+        API.Places.autocomplete(query)
+          .then((res: any) => {
+            if (requestId !== latestSearchRequestIdRef.current) return;
+            setIsSearching(false);
+            if (res.status === 'success' && res.data) {
+              setSuggestions(res.data.slice(0, 5));
+              setShowSuggestions(true);
+            } else {
+              setSuggestions([]);
+              setShowSuggestions(false);
+            }
+          })
+          .catch((err) => {
+            if (requestId !== latestSearchRequestIdRef.current) return;
+            setIsSearching(false);
+            console.error('[MP] AWS autocomplete error:', err);
+            setSuggestions([]);
+            setShowSuggestions(false);
+          });
+      };
+
+      if (useAwsFallback || !autocompleteServiceRef.current) {
+        handleAwsAutocomplete();
+        return;
+      }
+
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(LAGOS_BOUNDS.minLat, LAGOS_BOUNDS.minLng),
+        new window.google.maps.LatLng(LAGOS_BOUNDS.maxLat, LAGOS_BOUNDS.maxLng)
+      );
 
       const sessionToken = ensureSessionToken();
 
@@ -247,9 +316,13 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
           if (status === 'OK' && predictions) {
             setSuggestions(predictions.slice(0, 5));
             setShowSuggestions(true);
-          } else {
+          } else if (status === 'ZERO_RESULTS') {
             setSuggestions([]);
             setShowSuggestions(false);
+          } else {
+            console.warn('[MP] Google autocomplete failed with status:', status, 'falling back to AWS');
+            setUseAwsFallback(true);
+            handleAwsAutocomplete();
           }
         }
       );
@@ -261,13 +334,83 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
     setSuggestions([]);
     latestSearchRequestIdRef.current += 1;
 
-    if (!placesServiceRef.current || !mapInstanceRef.current) {
+    // Check if the suggestion already has valid lat and lng coordinates
+    const lat = suggestion.lat !== undefined && suggestion.lat !== null ? parseFloat(suggestion.lat) : NaN;
+    const lng = suggestion.lng !== undefined && suggestion.lng !== null ? parseFloat(suggestion.lng) : NaN;
+
+    if (!isNaN(lat) && !isNaN(lng)) {
       resetAutocompleteSession();
+      if (!isInLagos(lat, lng)) {
+        setOutsideLagos(true);
+        setResolvedAddress('');
+        setSearchQuery(suggestion.description);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.panTo({ lat, lng });
+        }
+        return;
+      }
+
       setSearchQuery(suggestion.description);
+      setOutsideLagos(false);
+      setResolvedAddress(suggestion.description);
+      lastReverseGeocodeCenterRef.current = { lat, lng };
+      reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), suggestion.description);
+      
+      if (mapInstanceRef.current) {
+        skipNextIdleReverseGeocodeRef.current = true;
+        mapInstanceRef.current.panTo({ lat, lng });
+      }
       return;
     }
 
     setResolving(true);
+
+    if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesServiceRef.current) {
+      API.Places.details(suggestion.place_id)
+        .then((res: any) => {
+          resetAutocompleteSession();
+          setResolving(false);
+
+          if (res.status === 'success' && res.data) {
+            const { formatted_address, lat, lng } = res.data;
+
+            if (!isInLagos(lat, lng)) {
+              setOutsideLagos(true);
+              setResolvedAddress('');
+              setSearchQuery(formatted_address);
+              return;
+            }
+
+            setSearchQuery(formatted_address);
+            setOutsideLagos(false);
+            setResolvedAddress(formatted_address);
+            lastReverseGeocodeCenterRef.current = { lat, lng };
+            reverseGeocodeCacheRef.current.set(reverseGeocodeCacheKey(lat, lng), formatted_address);
+            
+            if (mapInstanceRef.current) {
+              skipNextIdleReverseGeocodeRef.current = true;
+              mapInstanceRef.current.panTo({ lat, lng });
+            }
+          } else {
+            setSearchQuery(suggestion.description);
+          }
+        })
+        .catch((err) => {
+          resetAutocompleteSession();
+          setResolving(false);
+          console.error('[MP] AWS details error:', err);
+          setSearchQuery(suggestion.description);
+        });
+      return;
+    }
+
+    if (!mapInstanceRef.current) {
+      resetAutocompleteSession();
+      setSearchQuery(suggestion.description);
+      setResolving(false);
+      return;
+    }
+
     const sessionToken = sessionTokenRef.current;
 
     placesServiceRef.current.getDetails(

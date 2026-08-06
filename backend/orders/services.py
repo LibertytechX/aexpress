@@ -13,6 +13,7 @@ from wallet.models import Charge, Wallet
 from wallet.escrow import EscrowManager
 
 import requests
+from rest_framework import serializers
 from django.conf import settings
 from abc import ABC, abstractmethod
 from typing import Tuple
@@ -193,7 +194,14 @@ class SmartPercelIntegration:
 
     def create_parcel(self, payload: dict) -> tuple[bool, Any]:
         """Create a new parcel on the network (Uses Secret Key)."""
-        return self._post("parcels/create/", payload, use_public_key=False)
+        ok, response = self._post("parcels/create/", payload, use_public_key=False)
+        if not ok:
+            return False, response
+        if isinstance(response, dict):
+            status_code = response.get("statuscode")
+            if status_code and status_code != "00":
+                return False, response.get("statusmessage") or "New parcel request failed"
+        return True, response
 
     def get_parcel_details(self, tracking_number: str) -> tuple[bool, Any]:
         """Retrieve details of a parcel by tracking number (Uses Secret Key)."""
@@ -447,13 +455,21 @@ class IOrderService(OrderService):
                     return False, response
                 wallet = wallet.first()
                 try:
-                    EscrowManager.hold_funds(
-                        wallet=wallet,
+                    reference = uuid.uuid4().hex
+                    reference = f"WP-{reference[:12].upper()}"
+                    _ = wallet.debit(
                         amount=order.total_amount,
-                        order_number=order.order_number,
-                        description=f"Escrow hold for Quick Send order #{order.order_number}",
+                        description=f"Order {order.order_number}",
+                        reference=reference,
                     )
-                    order.escrow_held = True
+                    # EscrowManager.hold_funds(
+                    #     wallet=wallet,
+                    #     amount=order.total_amount,
+                    #     order_number=order.order_number,
+                    #     description=f"Escrow hold for Quick Send order #{order.order_number}",
+                    # )
+
+                    order.payment_status = "Paid"
                     order.save()
                 except ValueError as e:
                     response["message"] = str(e)
@@ -520,7 +536,7 @@ class IOrderService(OrderService):
         vehicle_name = validated_data.get("vehicle")
         package_type = validated_data.get("packageType")
         price = validated_data.get("price")
-        manual_price = bool(validated_data.get("manual_price"))
+        manual_price = bool(validated_data.get("price"))
         rider_id = (validated_data.get("riderId", "") or "").strip()
         merchant_id = (validated_data.get("merchantId", "") or "").strip()
         distance_km = validated_data.get("distance_km")
@@ -563,8 +579,11 @@ class IOrderService(OrderService):
                     status_code=400,
                     message="partner_order_count is required for partner orders",
                 )
-
-            total_amount = merchant_profile.partner_base_price * partner_order_count
+            # TODO: Add partner pricing logic
+            if price is not None:
+                total_amount = price
+            else:
+                total_amount = merchant_profile.partner_base_price * partner_order_count
 
             # Default values for missing data
             pickup = pickup or "Partner Pickup"
@@ -607,6 +626,17 @@ class IOrderService(OrderService):
                 if geo:
                     dropoff_lat = geo.get("lat")
                     dropoff_lng = geo.get("lng")
+
+        if is_relay_order:
+            if (
+                pickup_lat is None
+                or pickup_lng is None
+                or dropoff_lat is None
+                or dropoff_lng is None
+            ):
+                raise serializers.ValidationError(
+                    "Relay orders require geocoded coordinates for both pickup and dropoff."
+                )
 
         try:
             total_amount = Decimal(str(total_amount)).quantize(Decimal("0.01"))

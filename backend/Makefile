@@ -1,4 +1,4 @@
-.PHONY: run mms
+.PHONY: run mms migrate test
 
 run:
 	@python manage.py runserver
@@ -8,3 +8,9 @@ mms:
 
 migrate:
 	@python manage.py migrate
+
+test:
+	@.venv/bin/pytest || pytest
+
+test_isolate:
+	@./test.sh

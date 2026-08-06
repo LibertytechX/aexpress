@@ -1,4 +1,5 @@
 from django.test import TestCase
+from dispatcher.models import Rider, VehicleAsset
 from unittest.mock import patch
 from decimal import Decimal
 import datetime
@@ -497,6 +498,101 @@ class VehicleDistanceTodayCommandTests(TestCase):
         )
         asset_no_data.refresh_from_db()
         self.assertEqual(asset_no_data.distance_today, Decimal("0.00"))
+
+
+class ExportRiderDistancesCommandTests(TestCase):
+    """Tests for the export_rider_distances management command."""
+
+    def setUp(self) -> None:
+        """Set up test data including a rider, a vehicle asset, and tracking points."""
+        from authentication.models import User
+        from dispatcher.models import Rider, VehicleAsset
+
+        self.user = User.objects.create_user(
+            phone="08012345678",
+            email="test_rider_export@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Sunday Adakole",
+        )
+        self.asset = VehicleAsset.objects.create(
+            plate_number="EPE 433 QS (LIBERTY)",
+            vehicle_type="bike",
+            unit_of_distance="km",
+        )
+        self.rider = Rider.objects.create(
+            user=self.user,
+            vehicle_asset=self.asset,
+            rider_id="123456",
+        )
+        self.output_file: str = "test_export_rider_distances.xlsx"
+
+    def tearDown(self) -> None:
+        """Clean up generated files."""
+        import os
+        if os.path.exists(self.output_file):
+            try:
+                os.remove(self.output_file)
+            except OSError:
+                pass
+
+    def _mk_tracking(self, asset: VehicleAsset, travelled: Decimal, created_at: datetime.datetime) -> None:
+        """Create a VehicleTracking entry with custom created_at timestamp.
+
+        Args:
+            asset: The vehicle asset to associate tracking with.
+            travelled: Odometer reading.
+            created_at: Timestamp.
+        """
+        from dispatcher.models import VehicleTracking
+        row = VehicleTracking.objects.create(
+            vehicle_asset=asset,
+            latitude=Decimal("6.5000000"),
+            longitude=Decimal("3.3000000"),
+            travelled=travelled,
+            unit_of_distance="km",
+        )
+        VehicleTracking.objects.filter(id=row.id).update(created_at=created_at)
+
+    def test_export_rider_distances_success(self) -> None:
+        """Test successfully exporting rider distances to an Excel file."""
+        import openpyxl
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(
+            datetime.datetime.combine(day, datetime.time.min), tz
+        )
+
+        # Create tracking entries for today: delta of 15.5 km
+        self._mk_tracking(self.asset, Decimal("100.00"), start + datetime.timedelta(hours=1))
+        self._mk_tracking(self.asset, Decimal("115.50"), start + datetime.timedelta(hours=5))
+
+        call_command(
+            "export_rider_distances",
+            start_date=day.isoformat(),
+            end_date=day.isoformat(),
+            output=self.output_file,
+        )
+
+        # Verify Excel file exists and contains correct data
+        wb = openpyxl.load_workbook(self.output_file)
+        ws = wb.active
+        self.assertIsNotNone(ws)
+        
+        # Check header
+        headers = [cell.value for cell in ws[1]]
+        self.assertEqual(
+            headers,
+            ["Driver Name", "Vehicle Plate", None, "Date", "Distance Covered (km)"],
+        )
+
+        # Check first data row (row 2)
+        row2 = [cell.value for cell in ws[2]]
+        self.assertEqual(row2[0], "Sunday Adakole")
+        self.assertEqual(row2[1], "EPE 433 QS (LIBERTY)")
+        self.assertIsNone(row2[2])
+        self.assertEqual(row2[3], f"{day.month}/{day.day}/{day.year}")
+        self.assertEqual(row2[4], 15.50)
 
 
 class VehicleAssetOrdersTodayEndpointTests(TestCase):
@@ -1232,6 +1328,7 @@ class RiderAssignmentTaskTests(TestCase):
             pickup_address="Origin",
             pickup_latitude=6.4,
             pickup_longitude=3.2,
+            total_amount=Decimal("1000.00"),
         )
         sub_order = Order.objects.create(
             order_number="S101",
@@ -1242,6 +1339,7 @@ class RiderAssignmentTaskTests(TestCase):
             pickup_longitude=3.3,
             status="Pending",
             pickup_address="Hub Address",
+            total_amount=Decimal("1000.00"),
         )
         leg = OrderLeg.objects.create(
             order=parent, leg_number=2, start_relay_node=self.hub, status="Pending"
@@ -1294,6 +1392,8 @@ class OrderViewSetListTests(TestCase):
                 user=self.user,
                 vehicle=self.vehicle,
                 pickup_address=f"Pickup {i}",
+                pickup_latitude=Decimal("6.45"),
+                pickup_longitude=Decimal("3.39"),
                 sender_name=f"Sender {i}",
                 sender_phone=f"080{i:08d}",
                 total_amount=Decimal("1000.00"),

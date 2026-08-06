@@ -1,4 +1,6 @@
 from django.contrib import admin
+from import_export.admin import ImportExportModelAdmin
+from import_export import resources, fields
 from .models import (
     Wallet,
     Transaction,
@@ -21,6 +23,7 @@ class WalletAdmin(admin.ModelAdmin):
         "updated_at",
     ]
     search_fields = ["user__business_name", "user__phone", "user__email"]
+    raw_id_fields = ["user"]
     readonly_fields = ["id", "created_at", "updated_at"]
     list_filter = ["created_at"]
     actions = ["settle_pending_charges"]
@@ -84,11 +87,13 @@ class TransactionAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
+    raw_id_fields = ["wallet"]
     search_fields = [
         "reference",
         "paystack_reference",
         "description",
         "wallet__user__business_name",
+        "wallet__user__phone",
         "wallet__user__virtual_account__account_number",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
@@ -129,6 +134,7 @@ class VirtualAccountAdmin(admin.ModelAdmin):
         "is_active",
         "created_at",
     ]
+    raw_id_fields = ["user"]
     list_filter = ["is_active", "bank_name", "created_at"]
     search_fields = [
         "user__business_name",
@@ -167,6 +173,7 @@ class WebhookLogAdmin(admin.ModelAdmin):
         "recipient_account_number",
         "signature_valid",
     ]
+    raw_id_fields = ["transaction"]
     list_filter = ["source", "status", "signature_valid", "created_at"]
     search_fields = [
         "transaction_reference",
@@ -232,6 +239,7 @@ class ChargeAdmin(admin.ModelAdmin):
         "id",
     ]
     readonly_fields = ["id", "created_at", "updated_at"]
+    raw_id_fields = ["user", "order"]
     ordering = ["-created_at"]
     actions = ["debit_and_complete_charge", "soft_delete_charges"]
 
@@ -337,8 +345,11 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         "created_at",
         "is_active",
     ]
+    raw_id_fields = ["user"]
     search_fields = [
-        "user__full_name",
+        "user__first_name",
+        "user__last_name",
+        "user__contact_name",
         "user__phone",
         "user__email",
     ]
@@ -378,8 +389,43 @@ class AmortizationWalletAdmin(admin.ModelAdmin):
         )
 
 
+class AmortizationTransactionResource(resources.ModelResource):
+    user_name: fields.Field = fields.Field(column_name="User Name")
+    user_phone: fields.Field = fields.Field(column_name="User Phone")
+
+    class Meta:
+        model = AmortizationTransaction
+        fields = (
+            "id",
+            "reference",
+            "amortization_wallet",
+            "user_name",
+            "user_phone",
+            "entry_type",
+            "amount",
+            "balance_before",
+            "balance_after",
+            "status",
+            "description",
+            "created_at",
+            "updated_at",
+        )
+        export_order = fields
+
+    def dehydrate_user_name(self, obj: AmortizationTransaction) -> str:
+        if obj.amortization_wallet and obj.amortization_wallet.user:
+            return str(obj.amortization_wallet.user.full_name)
+        return "-"
+
+    def dehydrate_user_phone(self, obj: AmortizationTransaction) -> str:
+        if obj.amortization_wallet and obj.amortization_wallet.user:
+            return str(obj.amortization_wallet.user.phone)
+        return "-"
+
+
 @admin.register(AmortizationTransaction)
-class AmortizationTransactionAdmin(admin.ModelAdmin):
+class AmortizationTransactionAdmin(ImportExportModelAdmin):
+    resource_classes = [AmortizationTransactionResource]
     list_display = [
         "reference",
         "amortization_wallet",
@@ -390,7 +436,14 @@ class AmortizationTransactionAdmin(admin.ModelAdmin):
         "status",
         "created_at",
     ]
-    search_fields = ["reference", "description", "amortization_wallet__user__full_name"]
+    raw_id_fields = ["amortization_wallet"]
+    search_fields = [
+        "reference",
+        "description",
+        "amortization_wallet__user__first_name",
+        "amortization_wallet__user__last_name",
+        "amortization_wallet__user__contact_name",
+    ]
     readonly_fields = [
         "entry_type",
         "amount",
@@ -434,8 +487,11 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         "is_active",
         "created_at",
     ]
+    raw_id_fields = ["user"]
     search_fields = [
-        "user__full_name",
+        "user__first_name",
+        "user__last_name",
+        "user__contact_name",
         "user__phone",
         "user__email",
         "account_number",

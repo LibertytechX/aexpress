@@ -110,6 +110,10 @@ class OrderOfferListView(APIView):
             .order_by("-created_at")
         )
 
+        rider = getattr(request.user, "rider_profile", None)
+        if rider and rider.home_zone:
+            offers = offers.filter(zone=rider.home_zone)
+
         serializer = OrderOfferListSerializer(offers, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -199,15 +203,8 @@ class OrderOfferAcceptView(APIView):
             ]
         )
 
-        # 3.5 Log Event
-        OrderEvent.objects.create(
-            order=order,
-            event="assignment_accepted",
-            description=f"Rider {rider.rider_id} accepted the offer. Order status updated to AssignmentAccepted.",
-            created_by=request.user,
-        )
-
         # 4. COD Logic
+
         if order.collect_on_delivery:
             RiderCodRecord.objects.create(
                 rider=rider,
@@ -548,7 +545,7 @@ class RiderToggleDutyView(APIView):
 
             # Update status
             request_status = serializer.validated_data["status"]
-            new_status = "online" if request_status == "on_duty" else "offline"
+            new_status = "online" if request_status in ["on_duty", "online"] else "offline"
             rider.status = new_status
 
             # Update location if provided
@@ -565,6 +562,7 @@ class RiderToggleDutyView(APIView):
 
             return Response(
                 {
+                    "success": True,
                     "status": request_status,
                     "timestamp": timezone.now().strftime("%Y-%m-%dT%H:%M:%SZ"),
                 },
@@ -1118,15 +1116,8 @@ class RiderAssignmentActionView(APIView):
 
         order.save(update_fields=["status", "rider", "updated_at"])
 
-        # Log Event
-        OrderEvent.objects.create(
-            order=order,
-            event=f"assignment_{action}ed",
-            description=event_msg,
-            created_by=request.user,
-        )
-
         # Emit Activity
+
         emit_activity(
             event_type=f"assignment_{action}ed",
             order_id=order.order_number,

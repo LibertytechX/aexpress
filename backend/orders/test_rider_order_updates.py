@@ -20,6 +20,9 @@ class RiderOrderEndpointsTests(TestCase):
             contact_name="Rider One",
         )
         self.rider_profile = Rider.objects.create(user=self.rider_user)
+        self.rider_profile.current_latitude = 6.45
+        self.rider_profile.current_longitude = 3.39
+        self.rider_profile.save()
         self.client.force_authenticate(user=self.rider_user)
 
         # Create a merchant user
@@ -79,7 +82,7 @@ class RiderOrderEndpointsTests(TestCase):
         self.assertEqual(self.order.status, "Started")
 
         # Verify event logged
-        self.assertTrue(self.order.events.filter(event="Order Started").exists())
+        self.assertTrue(self.order.events.filter(event="order_status_started").exists())
 
     def test_order_arrived_endpoint(self):
         self.order.status = "Started"
@@ -100,14 +103,14 @@ class RiderOrderEndpointsTests(TestCase):
 
         # Verify event logged
         self.assertTrue(
-            self.order.events.filter(event="Rider Arrived at Pickup").exists()
+            self.order.events.filter(event="order_status_arrived").exists()
         )
 
     def test_order_complete_endpoint(self):
         self.order.status = "PickedUp"
         self.order.save()
 
-        url = reverse("orders:order_complete")
+        url = f"/orders/{self.order.order_number}/complete/"
         data = {
             "order_number": self.order.order_number,
             "latitude": 6.45,
@@ -127,5 +130,5 @@ class RiderOrderEndpointsTests(TestCase):
 
         # Verify event logged
         self.assertTrue(
-            self.order.events.filter(event="Order Completed (All Deliveries)").exists()
+            self.order.events.filter(event="order_status_done").exists()
         )

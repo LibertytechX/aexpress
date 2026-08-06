@@ -223,10 +223,26 @@ const STATUS_COLORS = {
 // ─── UTILS ─────────────────────────────────────────────────────
 const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } | null> => {
   return new Promise((resolve) => {
+    const handleAwsGeocode = () => {
+      API.Places.geocode(address)
+        .then((res: any) => {
+          if (res.status === 'success' && res.data) {
+            resolve({ lat: res.data.lat, lng: res.data.lng });
+          } else {
+            resolve(null);
+          }
+        })
+        .catch((err) => {
+          console.error('[Geocode fallback] AWS geocoding error:', err);
+          resolve(null);
+        });
+    };
+
     if (!window.google?.maps?.Geocoder) {
-      resolve(null);
+      handleAwsGeocode();
       return;
     }
+
     const geocoder = new window.google.maps.Geocoder();
     // Bias towards Lagos context
     const lagosAddress = address.toLowerCase().includes('lagos') ? address : `${address}, Lagos, Nigeria`;
@@ -235,7 +251,8 @@ const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } |
         const loc = results[0].geometry.location;
         resolve({ lat: loc.lat(), lng: loc.lng() });
       } else {
-        resolve(null);
+        console.warn('[Geocode] Google geocoding failed with status:', status, 'falling back to AWS');
+        handleAwsGeocode();
       }
     });
   });
@@ -368,13 +385,13 @@ export default function DashboardPage() {
       // Handle both {success: true} and {status: 'success'}
       if (response.success || response.status === 'success') {
         showNotif(response.message, 'success');
-        
+
         // Extract refund info from top-level or data object
         const refund = response.refund || response.data?.refund;
         if (refund && refund.processed) {
           showNotif(`₦${refund.amount.toLocaleString()} refunded to wallet`, 'success');
         }
-        
+
         await loadOrders();
         await loadWalletBalance();
         await loadTransactions();
@@ -468,7 +485,7 @@ export default function DashboardPage() {
   };
 
   const toggleMenu = (id) => {
-    setExpandedMenus(prev => 
+    setExpandedMenus(prev =>
       prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
@@ -566,10 +583,10 @@ export default function DashboardPage() {
     { id: "newOrder", label: "New Order", icon: Icons.newOrder },
     { id: "orders", label: "Orders", icon: Icons.orders },
     { id: "wallet", label: "Wallet", icon: Icons.wallet },
-    { 
-      id: "subscription", 
-      label: "Subscription", 
-      icon: Icons.subscription, 
+    {
+      id: "subscription",
+      label: "Subscription",
+      icon: Icons.subscription,
       badge: "NEW",
       subItems: [
         { id: "subscription", label: "Plan", icon: Icons.plan },
@@ -760,10 +777,10 @@ export default function DashboardPage() {
             const hasSubItems = item.subItems && item.subItems.length > 0;
             const isExpanded = expandedMenus.includes(item.id);
             const isParentActive = screen === item.id || (hasSubItems && item.subItems.some(sub => screen === sub.id));
-            
+
             return (
               <div key={item.id} className="flex flex-col gap-1">
-                <button 
+                <button
                   onClick={() => {
                     if (hasSubItems && !collapsed) {
                       toggleMenu(item.id);
@@ -806,8 +823,8 @@ export default function DashboardPage() {
                         }}>{item.badge}</span>
                       )}
                       {hasSubItems && (
-                        <span style={{ 
-                          marginLeft: item.badge ? 8 : "auto", 
+                        <span style={{
+                          marginLeft: item.badge ? 8 : "auto",
                           transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
                           transition: "transform 0.3s ease",
                           opacity: 0.7
@@ -1058,7 +1075,12 @@ export default function DashboardPage() {
                       notes: orderData.notes || '',
                       distance_km: orderData.distance_km || 0,
                       duration_minutes: orderData.duration_minutes || 0,
-                      mode: orderData.mode
+                      mode: orderData.mode,
+                      is_pickup_percel: orderData.is_pickup_percel || false,
+                      isdelivery_percel: orderData.isdelivery_percel || false,
+                      collect_code: orderData.collect_code,
+                      box_id: orderData.box_id,
+                      locker_size_id: orderData.locker_size_id
                     };
                     console.log(`📡 Sending to API (${orderData.mode}):`, apiPayload);
                     response = await API.Orders.createQuickSend(apiPayload);
@@ -1124,9 +1146,9 @@ export default function DashboardPage() {
             />
           )}
           {screen === "subscription" && (
-            <SubscriptionScreen 
-              currentUser={currentUser} 
-              onShowNotif={showNotif} 
+            <SubscriptionScreen
+              currentUser={currentUser}
+              onShowNotif={showNotif}
               balance={walletBalance}
               onRefreshBalance={loadWalletBalance}
             />
@@ -2384,19 +2406,29 @@ function DashboardScreen({ balance, orders, onNewOrder, onFund, onViewOrder, onG
 }
 
 // ─── ADDRESS AUTOCOMPLETE INPUT COMPONENT ───────────────────────
-function AddressAutocompleteInput({ value, onChange, placeholder, style, disabled, onOpenMapPicker }: any) {
+const LAGOS_BOUNDS = { minLat: 6.25, maxLat: 6.75, minLng: 2.70, maxLng: 3.95 };
+const isInLagos = (lat: number, lng: number) =>
+  lat >= LAGOS_BOUNDS.minLat && lat <= LAGOS_BOUNDS.maxLat &&
+  lng >= LAGOS_BOUNDS.minLng && lng <= LAGOS_BOUNDS.maxLng;
+
+function AddressAutocompleteInput({ value, onChange, onSelect, placeholder, style, disabled, onOpenMapPicker }: any) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [error, setError] = useState(null);
+  const [useAwsFallback, setUseAwsFallback] = useState(false);
   const inputRef = useRef(null);
   const dropdownRef = useRef(null);
   const debounceTimer = useRef(null);
   const autocompleteService = useRef(null);
   const placesService = useRef(null);
+  const latestPredictionRequestIdRef = useRef(0);
+  const lastPredictionQueryRef = useRef('');
 
   // Initialize Google Maps services
   useEffect(() => {
+    let timeoutId: NodeJS.Timeout;
+
     const initServices = () => {
       if (window.google && window.google.maps && window.google.maps.places) {
         autocompleteService.current = new window.google.maps.places.AutocompleteService();
@@ -2404,16 +2436,31 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
         const dummyDiv = document.createElement('div');
         placesService.current = new window.google.maps.places.PlacesService(dummyDiv);
         setError(null);
+        setUseAwsFallback(false);
+        if (timeoutId) clearTimeout(timeoutId);
       } else {
-        setError('Google Maps not loaded');
+        console.warn('[AC Dashboard] Google Maps not loaded, enabling AWS fallback');
+        setUseAwsFallback(true);
       }
     };
 
     if (window.googleMapsLoaded) {
       initServices();
     } else {
+      console.log('[AC Dashboard] Waiting for google-maps-loaded event...');
       window.addEventListener('google-maps-loaded', initServices);
-      return () => window.removeEventListener('google-maps-loaded', initServices);
+      
+      timeoutId = setTimeout(() => {
+        if (!window.googleMapsLoaded) {
+          console.warn('[AC Dashboard] Google Maps load timed out, enabling AWS fallback');
+          setUseAwsFallback(true);
+        }
+      }, 4000);
+
+      return () => {
+        window.removeEventListener('google-maps-loaded', initServices);
+        clearTimeout(timeoutId);
+      };
     }
   }, []);
 
@@ -2435,11 +2482,7 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
     if (!input || input.length < 3) {
       setSuggestions([]);
       setShowDropdown(false);
-      return;
-    }
-
-    if (!autocompleteService.current) {
-      setError('Google Maps not ready');
+      setLoading(false);
       return;
     }
 
@@ -2451,22 +2494,57 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
       clearTimeout(debounceTimer.current);
     }
 
-    debounceTimer.current = setTimeout(() => {
-      // Bias results towards Lagos using both bounds and component restrictions
-      const lagosBounds = new window.google.maps.LatLngBounds(
-        new window.google.maps.LatLng(6.25, 2.70),
-        new window.google.maps.LatLng(6.75, 3.95)
-      );
+    const requestId = ++latestPredictionRequestIdRef.current;
 
-      // Append "Lagos, Nigeria" to the raw input when not already present.
-      // Bare street names like "15A Kunle Ogunba street lekki phase 1" are only
-      // resolved correctly by the Places Autocomplete API when state/country
-      // context is included in the query (same fix as the geocoding layer).
+    debounceTimer.current = setTimeout(() => {
       const lower = input.toLowerCase();
       const searchInput =
         lower.includes('lagos') || lower.includes('nigeria')
           ? input
           : input.trimEnd().replace(/,\s*$/, '') + ', Lagos, Nigeria';
+
+      const normalizedQuery = searchInput.trim().toLowerCase();
+      if (normalizedQuery === lastPredictionQueryRef.current) {
+        setLoading(false);
+        return;
+      }
+      lastPredictionQueryRef.current = normalizedQuery;
+
+      const handleAwsAutocomplete = () => {
+        API.Places.autocomplete(searchInput)
+          .then((res: any) => {
+            if (requestId !== latestPredictionRequestIdRef.current) return;
+            setLoading(false);
+            if (res.status === 'success' && res.data?.length > 0) {
+              setSuggestions(res.data);
+              setShowDropdown(true);
+              setError(null);
+            } else {
+              setSuggestions([]);
+              setShowDropdown(false);
+              setError('Address not found in Lagos — we only deliver within Lagos State.');
+            }
+          })
+          .catch((err: any) => {
+            if (requestId !== latestPredictionRequestIdRef.current) return;
+            setLoading(false);
+            console.error('[AC Dashboard] AWS autocomplete error:', err);
+            setSuggestions([]);
+            setShowDropdown(false);
+            setError('Failed to fetch suggestions');
+          });
+      };
+
+      if (useAwsFallback || !autocompleteService.current) {
+        handleAwsAutocomplete();
+        return;
+      }
+
+      // Bias results towards Lagos using both bounds and component restrictions
+      const lagosBounds = new window.google.maps.LatLngBounds(
+        new window.google.maps.LatLng(6.25, 2.70),
+        new window.google.maps.LatLng(6.75, 3.95)
+      );
 
       const request = {
         input: searchInput,
@@ -2475,23 +2553,22 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
       };
 
       autocompleteService.current.getPlacePredictions(request, (predictions, status) => {
-        setLoading(false);
+        if (requestId !== latestPredictionRequestIdRef.current) return;
 
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          // Results are already scoped to Nigeria + Lagos area via componentRestrictions + bounds.
-          // Don't filter by the word "lagos" in the description — Google Maps frequently omits it
-          // for local area names (e.g. "15a Kunle Ogunba St, Lekki Phase I, Lekki").
+          setLoading(false);
           setSuggestions(predictions.slice(0, 8));
           setShowDropdown(true);
           setError(null);
         } else if (status === window.google.maps.places.PlacesServiceStatus.ZERO_RESULTS) {
+          setLoading(false);
           setError('No addresses found in Lagos');
           setSuggestions([]);
           setShowDropdown(false);
         } else {
-          setError('Failed to fetch suggestions');
-          setSuggestions([]);
-          setShowDropdown(false);
+          console.warn('[AC Dashboard] Google places prediction failed with status:', status, 'falling back to AWS');
+          setUseAwsFallback(true);
+          handleAwsAutocomplete();
         }
       });
     }, 550); // 550ms debounce
@@ -2504,10 +2581,82 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style, disable
   };
 
   const handleSelectSuggestion = (suggestion) => {
-    onChange(suggestion.description);
     setSuggestions([]);
     setShowDropdown(false);
     setError(null);
+
+    latestPredictionRequestIdRef.current += 1;
+
+    // Check if the suggestion already has valid lat and lng coordinates
+    const lat = suggestion.lat !== undefined && suggestion.lat !== null ? parseFloat(suggestion.lat) : NaN;
+    const lng = suggestion.lng !== undefined && suggestion.lng !== null ? parseFloat(suggestion.lng) : NaN;
+
+    if (!isNaN(lat) && !isNaN(lng)) {
+      if (!isInLagos(lat, lng)) {
+        onChange('');
+        setError('⚠️ Outside service area — we only deliver within Lagos State.');
+      } else {
+        onChange(suggestion.description);
+        if (onSelect) {
+          onSelect(suggestion.description, lat, lng);
+        }
+      }
+      return;
+    }
+
+    setLoading(true);
+
+    if (suggestion.is_aws || suggestion.is_geoapify || useAwsFallback || !placesService.current) {
+      API.Places.details(suggestion.place_id)
+        .then((res: any) => {
+          setLoading(false);
+          if (res.status === 'success' && res.data) {
+            const { formatted_address, lat, lng } = res.data;
+            if (!isInLagos(lat, lng)) {
+              onChange('');
+              setError('⚠️ Outside service area — we only deliver within Lagos State.');
+            } else {
+              onChange(formatted_address);
+              if (onSelect) {
+                onSelect(formatted_address, lat, lng);
+              }
+            }
+          } else {
+            onChange(suggestion.description);
+          }
+        })
+        .catch((err: any) => {
+          setLoading(false);
+          console.error('[AC Dashboard] AWS details lookup error:', err);
+          onChange(suggestion.description);
+        });
+      return;
+    }
+
+    placesService.current.getDetails(
+      {
+        placeId: suggestion.place_id,
+        fields: ['formatted_address', 'geometry.location'],
+      },
+      (place, status) => {
+        setLoading(false);
+        if (status === window.google.maps.places.PlacesServiceStatus.OK && place?.geometry?.location) {
+          const loc = place.geometry.location;
+          if (!isInLagos(loc.lat(), loc.lng())) {
+            onChange('');
+            setError('⚠️ Outside service area — we only deliver within Lagos State.');
+          } else {
+            const addr = place.formatted_address || suggestion.description;
+            onChange(addr);
+            if (onSelect) {
+              onSelect(addr, loc.lat(), loc.lng());
+            }
+          }
+          return;
+        }
+        onChange(suggestion.description);
+      }
+    );
   };
 
   return (
@@ -2825,15 +2974,15 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
         if (pickupLocation && dropoffLocations.length > 0 && directionsRendererRef.current) {
           const distanceMatrixService = new window.google.maps.DistanceMatrixService();
           const allLocations = [pickupLocation, ...dropoffLocations.map(d => d.location)];
-          
+
           // Draw standard straight line
           directionsRendererRef.current.setPath(allLocations);
           directionsRendererRef.current.setMap(mapInstanceRef.current);
-          
+
           // Generate origin-destination pairs for each leg
           const origins = allLocations.slice(0, -1);
           const destinations = allLocations.slice(1);
-          
+
           distanceMatrixService.getDistanceMatrix({
             origins: origins,
             destinations: destinations,
@@ -2842,7 +2991,7 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
             if (status === window.google.maps.DistanceMatrixStatus.OK && response) {
               let totalDistanceMeters = 0;
               let totalDurationSeconds = 0;
-              
+
               for (let i = 0; i < origins.length; i++) {
                 const element = response.rows[i]?.elements[i];
                 if (element && element.status === 'OK') {
@@ -2850,18 +2999,18 @@ function DeliveryMapView({ pickupAddress, dropoffs, vehicle, totalDeliveries, to
                   totalDurationSeconds += element.duration.value;
                 }
               }
-              
+
               const distanceKm = (totalDistanceMeters / 1000).toFixed(1);
               const durationMin = Math.round(totalDurationSeconds / 60);
-              
+
               setRouteDistance(parseFloat(distanceKm));
               setRouteDuration(durationMin);
               setRouteDurationInTraffic(null); // Basic Matrix API doesn't support live traffic details
-              
+
               if (onRouteCalculated && totalDistanceMeters > 0) {
                 onRouteCalculated(parseFloat(distanceKm), durationMin);
               }
-              
+
               startPulseAnimation();
             } else {
               console.warn('Distance Matrix request failed:', status);
@@ -3041,7 +3190,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   // Load SP states & sizes once
   useEffect(() => {
-    API.SmartParcel.listStates().then(r => { 
+    API.SmartParcel.listStates().then(r => {
       if (r.status === 'success') {
         const raw = r.data;
         let arr = [];
@@ -3049,11 +3198,11 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         else if (raw?.states && Array.isArray(raw.states)) arr = raw.states;
         else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
         else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
-        setSpStates(arr); 
+        setSpStates(arr);
       }
-    }).catch(() => {});
-    
-    API.SmartParcel.listLockerSizes().then(r => { 
+    }).catch(() => { });
+
+    API.SmartParcel.listLockerSizes().then(r => {
       if (r.status === 'success') {
         const raw = r.data;
         let arr = [];
@@ -3061,16 +3210,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         else if (raw?.sizes && Array.isArray(raw.sizes)) arr = raw.sizes;
         else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
         else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
-        setSpSizes(arr); 
+        setSpSizes(arr);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   useEffect(() => {
     if (!selectedSpStateId) { setSpCities([]); return; }
     setLoadingSpCities(true);
     setSpCities([]);
-    API.SmartParcel.listCities(selectedSpStateId).then(r => { 
+    API.SmartParcel.listCities(selectedSpStateId).then(r => {
       if (r.status === 'success') {
         const raw = r.data;
         let arr = [];
@@ -3078,16 +3227,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         else if (raw?.cities && Array.isArray(raw.cities)) arr = raw.cities;
         else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
         else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
-        setSpCities(arr); 
+        setSpCities(arr);
       }
-    }).catch(() => {}).finally(() => setLoadingSpCities(false));
+    }).catch(() => { }).finally(() => setLoadingSpCities(false));
   }, [selectedSpStateId]);
 
   useEffect(() => {
     if (!selectedSpCityId) { setSpBoxes([]); return; }
     setLoadingSpBoxes(true);
     setSpBoxes([]);
-    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => { 
+    API.SmartParcel.listAssignedBoxes(selectedSpCityId).then(r => {
       if (r.status === 'success') {
         const raw = r.data;
         let arr = [];
@@ -3095,9 +3244,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         else if (raw?.boxes && Array.isArray(raw.boxes)) arr = raw.boxes;
         else if (raw?.data && Array.isArray(raw.data)) arr = raw.data;
         else if (raw?.result && Array.isArray(raw.result)) arr = raw.result;
-        setSpBoxes(arr); 
+        setSpBoxes(arr);
       }
-    }).catch(() => {}).finally(() => setLoadingSpBoxes(false));
+    }).catch(() => { }).finally(() => setLoadingSpBoxes(false));
   }, [selectedSpCityId]);
 
   const handleResolveCollectCode = async () => {
@@ -3249,7 +3398,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         const res = await API.Orders.bulkCalculateFare(payload);
         if (res.success && res.vehicles) {
           setMultiFares(res); // Store result in multiFares to share pricing logic
-          
+
           const vehicleData = res.vehicles[vehicle];
           if (vehicleData) {
             setEarlyRouteDistance(vehicleData.distance_km);
@@ -3308,9 +3457,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (drops.length > 1) setDrops(drops.filter(d => d.id !== id));
   };
   const updateDrop = (id, field, value, coords?: { lat: number, lng: number }) => {
-    setDrops(drops.map(d => d.id === id ? { 
-      ...d, 
-      [field]: value, 
+    setDrops(drops.map(d => d.id === id ? {
+      ...d,
+      [field]: value,
       ...(field === "address" ? { coords: coords || null } : (coords ? { coords } : {}))
     } : d));
   };
@@ -3323,9 +3472,9 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const fileRef = useRef(null);
 
   const updateBulkRow = (id, field, value, coords?: { lat: number, lng: number }) => {
-    setBulkRows(bulkRows.map(r => r.id === id ? { 
-      ...r, 
-      [field]: value, 
+    setBulkRows(bulkRows.map(r => r.id === id ? {
+      ...r,
+      [field]: value,
       ...(field === "address" ? { coords: coords || null } : (coords ? { coords } : {}))
     } : r));
   };
@@ -3372,7 +3521,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
     const currentDrops = mode === 'bulk' ? bulkRows : drops;
     const validDrops = currentDrops.filter(d => d.address && d.address.trim() && d.address.length > 5);
-    
+
     if (validDrops.length === 0) {
       setMultiFares(null);
       setMultiRouteError(null);
@@ -3514,10 +3663,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (!pricing) return null;
 
     const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-    
+
     // Apply 30% discount for grouped orders after calculating full estimate (simple or tiered)
-    const rawPrice = tiered !== null 
-      ? tiered 
+    const rawPrice = tiered !== null
+      ? tiered
       : (pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
 
     return mode === 'grouped' ? Math.round(rawPrice * 0.7) : Math.round(rawPrice);
@@ -3557,7 +3706,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   let unitCost = calculateCost();
-  
+
   // Apply 30% discount for grouped orders to both unit and total
   if (mode === 'grouped') {
     unitCost = Math.round(unitCost * 0.7);
@@ -3568,14 +3717,14 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   // Use backend-calculated fares as source of truth for all modes if available
   if ((mode === 'multi' || mode === 'quick' || mode === 'grouped') && multiFares?.vehicles?.[vehicle]) {
     totalCost = multiFares.vehicles[vehicle].price;
-    
+
     // For grouped mode, the backend might already apply discounts or we might need to apply it here
     // In our case, the backend BulkCalculateFareView doesn't seem to know about 'grouped' discount specifically
     // unless calculate_effective_fare handles it.
     if (mode === 'grouped') {
-       totalCost = Math.round(totalCost * 0.7);
+      totalCost = Math.round(totalCost * 0.7);
     }
-    
+
     unitCost = totalDeliveries > 0 ? Math.round(totalCost / totalDeliveries) : 0;
   }
 
@@ -3740,13 +3889,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
           {(mode === 'quick' || mode === 'grouped') && (
             <div style={{ marginBottom: 20 }}>
               <label style={{ ...labelStyle, marginBottom: 10 }}>Order Mode</label>
-              <div style={{ 
-                display: "flex", 
-                gap: isMobile ? 10 : 16, 
-                flexDirection: isMobile ? "column" : "row" 
+              <div style={{
+                display: "flex",
+                gap: isMobile ? 10 : 16,
+                flexDirection: isMobile ? "column" : "row"
               }}>
                 {/* Quick Send Card */}
-                <div 
+                <div
                   onClick={() => setMode('quick')}
                   style={{
                     flex: 1,
@@ -3764,10 +3913,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     overflow: "hidden"
                   }}
                 >
-                  <div style={{ 
-                    width: 44, 
-                    height: 44, 
-                    borderRadius: 12, 
+                  <div style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
                     background: mode === 'quick' ? S.gold : "#f1f5f9",
                     display: "flex",
                     alignItems: "center",
@@ -3782,15 +3931,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     <div style={{ fontSize: 12, color: S.grayLight, fontWeight: 500 }}>Single delivery, instant processing</div>
                   </div>
                   {mode === 'quick' && (
-                    <div style={{ 
-                      position: "absolute", bottom: -8, right: -8, width: 32, height: 32, 
-                      background: S.gold, borderRadius: "50%", opacity: 0.1 
+                    <div style={{
+                      position: "absolute", bottom: -8, right: -8, width: 32, height: 32,
+                      background: S.gold, borderRadius: "50%", opacity: 0.1
                     }} />
                   )}
                 </div>
 
                 {/* Grouped Order Card */}
-                <div 
+                <div
                   onClick={() => setMode('grouped')}
                   style={{
                     flex: 1,
@@ -3824,10 +3973,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                   }}>
                     30% DISCOUNT
                   </div>
-                  <div style={{ 
-                    width: 44, 
-                    height: 44, 
-                    borderRadius: 12, 
+                  <div style={{
+                    width: 44,
+                    height: 44,
+                    borderRadius: 12,
                     background: mode === 'grouped' ? S.gold : "#f1f5f9",
                     display: "flex",
                     alignItems: "center",
@@ -3886,13 +4035,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
             </label>
             {isPickupParcel && (
               <div style={{ marginTop: 10, background: '#f8fafc', padding: 14, borderRadius: 12, border: '1.5px solid #e2e8f0' }}>
-                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Enter Collect Code</div>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase' }}>Enter Percel Reference Number</div>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input
                     value={collectCode}
                     onChange={e => setCollectCode(e.target.value)}
                     onKeyDown={e => e.key === 'Enter' && handleResolveCollectCode()}
-                    placeholder="e.g. TBKJ"
+                    placeholder="e.g. 5995150812"
                     style={{ ...inputStyle, flex: 1 }}
                   />
                   <button
@@ -5902,7 +6051,7 @@ function BankTransferModal({ amount, onClose, onSuccess }) {
     <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif" }}>
       <div onClick={handleClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)" }} />
       <div style={{ position: "relative", background: "#fff", borderRadius: 18, width: 440, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.3s ease" }}>
-        
+
         {/* Header */}
         <div style={{ padding: "20px 24px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h3 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>
@@ -6057,8 +6206,8 @@ function SubscriptionDetailsModal({ subscription, onClose, onShowNotif }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", animation: "fadeIn 0.2s ease" }}>
       <div onClick={onClose} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }} />
-      <div style={{ 
-        position: "relative", background: "#fff", borderRadius: 24, width: 500, maxHeight: "85vh", 
+      <div style={{
+        position: "relative", background: "#fff", borderRadius: 24, width: 500, maxHeight: "85vh",
         overflow: "hidden", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)", display: "flex", flexDirection: "column"
       }}>
         {/* Header */}
@@ -6086,7 +6235,7 @@ function SubscriptionDetailsModal({ subscription, onClose, onShowNotif }) {
                 <div style={{ fontSize: 24, fontWeight: 800 }}>₦{parseFloat(plan.price).toLocaleString()}</div>
               </div>
             </div>
-            
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", marginBottom: 4 }}>START DATE</div>
@@ -6186,9 +6335,9 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
   const [plans, setPlans] = useState([]);
   const [activeSub, setActiveSub] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [subscribing, setSubscribing] = useState(null); 
+  const [subscribing, setSubscribing] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [activeTab, setActiveTab] = useState("manual"); 
+  const [activeTab, setActiveTab] = useState("manual");
   const [postpaidPlans, setPostpaidPlans] = useState([]);
   const [activePostpaidSub, setActivePostpaidSub] = useState(null);
   const [activatingPostpaid, setActivatingPostpaid] = useState(null);
@@ -6210,7 +6359,7 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
       if (plansRes.status === "success" || plansRes.success) setPlans(plansRes.data || []);
       if (activeRes.status === "success" || activeRes.success) setActiveSub(activeRes.data?.current_active || null);
       if (postpaidPlansRes.status === "success" || postpaidPlansRes.success) setPostpaidPlans(postpaidPlansRes.data || []);
-      
+
       if (activePostpaidRes.status === "success" || activePostpaidRes.success) {
         const data = activePostpaidRes.data;
         if (data?.current_active) {
@@ -6303,7 +6452,7 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
               Status: <span style={{ color: S.green }}>{(currentActive.status || "active").toUpperCase()}</span>
             </div>
             {activeTab === "manual" && (
-              <button 
+              <button
                 onClick={() => setShowDetailsModal(true)}
                 style={{
                   background: "rgba(255,255,255,0.15)", color: "#fff", border: "none",
@@ -6319,8 +6468,8 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
       )}
 
       {showDetailsModal && activeSub && activeTab === "manual" && (
-        <SubscriptionDetailsModal 
-          subscription={activeSub} 
+        <SubscriptionDetailsModal
+          subscription={activeSub}
           onClose={() => setShowDetailsModal(false)}
           onShowNotif={onShowNotif}
         />
@@ -6353,7 +6502,7 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
         {currentPlans.map((plan) => {
           const isActive = (activeTab === "manual" ? activeSub?.plan?.id : activePostpaidSub?.plan?.id) === plan.id;
           const isEnterprise = plan.name === "Enterprise" || plan.name.includes("Monthly");
-          
+
           return (
             <div key={plan.id} style={{
               background: "#fff", borderRadius: 24, padding: "40px 30px",
@@ -6396,7 +6545,7 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
                 </div>
               </div>
 
-              <button 
+              <button
                 onClick={() => activeTab === "manual" ? handleSubscribe(plan) : handleActivatePostpaid(plan)}
                 disabled={(activeTab === "manual" ? (subscribing === plan.id || isActive) : (activatingPostpaid === plan.id || isActive))}
                 style={{
@@ -6408,7 +6557,7 @@ function SubscriptionScreen({ currentUser, onShowNotif, balance, onRefreshBalanc
                 }}
               >
                 {(subscribing === plan.id || activatingPostpaid === plan.id) ? (
-                   <div style={{ width: 20, height: 20, border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid currentColor", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
+                  <div style={{ width: 20, height: 20, border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid currentColor", borderRadius: "50%", animation: "spin 0.6s linear infinite" }} />
                 ) : isActive ? "Active" : "Activate Plan"}
               </button>
             </div>

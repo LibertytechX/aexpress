@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
+from unittest.mock import patch
 from authentication.models import User
 from orders.models import Order, Vehicle
 from dispatcher.models import Rider
@@ -54,60 +55,93 @@ class PickupProximityTests(TestCase):
         from wallet.models import Wallet
 
         SystemSettings.objects.get_or_create(
-            defaults={"commission_pct": 20, "min_withdrawal_amount": 1000}
+            defaults={"commission_pct": 20}
         )
         Wallet.objects.get_or_create(user=self.rider_user)
 
-    def test_pickup_allowed_within_range(self):
-        """Test pickup is allowed when within 500m (e.g. 100m away)."""
+    @patch("orders.views.calculate_route")
+    def test_pickup_allowed_within_range(self, mock_calc):
+        """Test pickup is allowed when within 2km via route."""
+        mock_calc.return_value = {"distance_km": 0.5, "duration_mins": 2.5}
         url = reverse("orders:order_pickup")
-        # 6.4501 is roughly 11m north of 6.45
+        # Set coordinates on rider profile since the view uses profile coordinates
+        self.rider_profile.current_latitude = 6.4501
+        self.rider_profile.current_longitude = 3.4001
+        self.rider_profile.save()
         data = {
             "order_number": self.order.order_number,
-            "latitude": 6.4501,
-            "longitude": 3.4001,
+        }
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "PickedUp")
+        mock_calc.assert_called_once()
+
+    @patch("orders.views.calculate_route")
+    def test_pickup_denied_out_of_range(self, mock_calc):
+        """Test pickup is denied when too far via route (> 2km)."""
+        mock_calc.return_value = {"distance_km": 3.2, "duration_mins": 10.0}
+        url = reverse("orders:order_pickup")
+        # Set coordinates on rider profile since the view uses profile coordinates
+        self.rider_profile.current_latitude = 6.47
+        self.rider_profile.current_longitude = 3.40
+        self.rider_profile.save()
+        data = {
+            "order_number": self.order.order_number,
+        }
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        error_msg = response.data.get("error", response.data.get("message", ""))
+        self.assertIn("too far", error_msg)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "Assigned")
+        mock_calc.assert_called_once()
+
+    @patch("orders.views.calculate_route")
+    def test_pickup_allowed_fallback(self, mock_calc):
+        """Test pickup is allowed via haversine fallback when routing API fails."""
+        mock_calc.return_value = None  # Force fallback
+        url = reverse("orders:order_pickup")
+        self.rider_profile.current_latitude = 6.4501
+        self.rider_profile.current_longitude = 3.4001
+        self.rider_profile.save()
+        data = {
+            "order_number": self.order.order_number,
         }
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, "PickedUp")
 
-    def test_pickup_denied_out_of_range(self):
-        """Test pickup is denied when too far (e.g. 1km away)."""
-        url = reverse("orders:order_pickup")
-        # 6.46 is roughly 1.1km north of 6.45
-        data = {
-            "order_number": self.order.order_number,
-            "latitude": 6.46,
-            "longitude": 3.40,
-        }
-        response = self.client.post(url, data, format="json")
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("too far", response.data["error"])
-        self.order.refresh_from_db()
-        self.assertEqual(self.order.status, "Assigned")
-
     def test_pickup_denied_missing_coordinates(self):
         """Test coordinates are required for pickup."""
         url = reverse("orders:order_pickup")
+        self.rider_profile.current_latitude = None
+        self.rider_profile.current_longitude = None
+        self.rider_profile.save()
         data = {"order_number": self.order.order_number}
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("Latitude and longitude are required", response.data["error"])
+        error_msg = response.data.get("error", response.data.get("message", ""))
+        self.assertIn("Latitude and longitude are required", error_msg)
 
-    def test_status_change_pickup_proximity(self):
+    @patch("orders.views.calculate_route")
+    def test_status_change_pickup_proximity(self, mock_calc):
         """Test OrderStatusChangeView also enforces proximity for 'pickup' action."""
+        mock_calc.return_value = {"distance_km": 4.5, "duration_mins": 12.0}
         url = reverse("orders:order_status_change")
         # Too far
+        self.rider_profile.current_latitude = 6.47
+        self.rider_profile.current_longitude = 3.40
+        self.rider_profile.save()
         data = {
             "order_number": self.order.order_number,
             "action": "pickup",
-            "latitude": 6.47,
-            "longitude": 3.40,
         }
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("too far", response.data["error"])
+        error_msg = response.data.get("error", response.data.get("message", ""))
+        self.assertIn("too far", error_msg)
 
     def test_delivery_complete_proximity(self):
         """Test DeliveryCompleteView proximity enforcement."""
@@ -127,17 +161,18 @@ class PickupProximityTests(TestCase):
         data = {"latitude": 6.45, "longitude": 3.40}
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("too far", response.data["error"])
+        error_msg = response.data.get("error", response.data.get("message", ""))
+        self.assertIn("too far", error_msg)
 
         # Close enough
         data = {"latitude": 6.4501, "longitude": 3.5001}
         response = self.client.post(url, data, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
-    def test_order_complete_proximity(self):
-        """Test OrderCompleteView proximity enforcement."""
+    @patch("orders.views.calculate_route")
+    def test_order_complete_proximity(self, mock_calc):
+        """Test OrderCompleteView proximity enforcement via route."""
         from orders.models import Delivery
-        from riders.models import RiderLocation
 
         # Update existing order to have a dropoff location
         self.order.status = "PickedUp"
@@ -158,14 +193,58 @@ class PickupProximityTests(TestCase):
         )
 
         # 1. Too far
+        mock_calc.return_value = {"distance_km": 5.2, "duration_mins": 15.0}
         self.rider_profile.current_latitude = 6.45
         self.rider_profile.current_longitude = 3.40
         self.rider_profile.save()
         response = self.client.post(url, {}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("too far", response.data["error"])
+        error_msg = response.data.get("error", response.data.get("message", ""))
+        self.assertIn("too far", error_msg)
 
         # 2. Close enough
+        mock_calc.return_value = {"distance_km": 0.2, "duration_mins": 1.5}
+        self.rider_profile.current_latitude = 6.5001
+        self.rider_profile.current_longitude = 3.5001
+        self.rider_profile.save()
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+
+    @patch("orders.views.calculate_route")
+    def test_order_complete_proximity_fallback(self, mock_calc):
+        """Test OrderCompleteView proximity enforcement fallback when routing fails."""
+        from orders.models import Delivery
+
+        # Force routing API to return None (triggering fallback)
+        mock_calc.return_value = None
+
+        # Reset order status
+        self.order.status = "PickedUp"
+        self.order.save()
+
+        # Re-fetch or reuse order number with sequence=2 delivery
+        Delivery.objects.create(
+            order=self.order,
+            dropoff_address="Final Dropoff",
+            dropoff_latitude=6.50,
+            dropoff_longitude=3.50,
+            receiver_name="Recv2",
+            receiver_phone="081",
+            sequence=3,
+        )
+
+        url = reverse(
+            "order_complete", kwargs={"order_number": self.order.order_number}
+        )
+
+        # 1. Too far via fallback (haversine)
+        self.rider_profile.current_latitude = 6.45
+        self.rider_profile.current_longitude = 3.40
+        self.rider_profile.save()
+        response = self.client.post(url, {}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # 2. Close enough via fallback (haversine)
         self.rider_profile.current_latitude = 6.5001
         self.rider_profile.current_longitude = 3.5001
         self.rider_profile.save()

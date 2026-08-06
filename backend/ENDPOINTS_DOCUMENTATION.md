@@ -53,6 +53,51 @@
 
 ---
 
+### 3. Rider Wallet Transactions
+**Endpoint:** `GET /wallet/transactions/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Returns a paginated list of wallet transaction history for the authenticated rider.
+
+**Query Parameters:**
+- `page` (optional): Page number.
+- `page_size` (optional): Results per page (default: 20, max: 100).
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "data": [
+    {
+      "id": "uuid",
+      "type": "debit",
+      "amount": "500.00",
+      "description": "Test Debit",
+      "reference": "TXN-XXXXXX",
+      "balance_before": "1000.00",
+      "balance_after": "500.00",
+      "status": "completed",
+      "created_at": "2026-05-19T14:00:00Z"
+    },
+    {
+      "id": "uuid",
+      "type": "credit",
+      "amount": "1000.00",
+      "description": "Test Credit",
+      "reference": "TXN-YYYYYY",
+      "balance_before": "0.00",
+      "balance_after": "1000.00",
+      "status": "completed",
+      "created_at": "2026-05-19T13:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/
@@ -189,6 +234,18 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 - If a rider's vehicle is unassigned: `from_rider=Rider`, `to_rider=null`.
 - If a rider moves from Vehicle Y to Vehicle X: Records unassignment of Y and assignment of X.
 - The record captures the `admin` user who initiated the request.
+
+---
+
+### 3. List Vehicle Assets
+**Endpoint:** `GET /vehicle-assets/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Returns a list of all vehicle assets including their assignment, distance covered yesterday, and orders completed today.
+
+**Key Response Fields:**
+- `orders_today` (integer): Count of completed orders today for the assigned rider(s) calculated dynamically using local timezone boundaries and fallback mechanisms.
+- `yesterday_distance` (decimal): Travelled distance (in km or specified units) covered by the asset yesterday.
+- `assigned_rider` (object|null): Details of the currently assigned rider.
 
 ---
 
@@ -362,7 +419,20 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 {
   "status": "success",
   "message": "SmartParcel parcel created successfully.",
-  "data": { "tracking_number": "SP-XXXXXXXXXX", ... }
+  "data": {
+    "parcel": { ... },
+    "statuscode": "00",
+    "statusmessage": "New parcel request successful. Locker Number (5) has been reserved for you at (SmartParcel Sterling Bank Adeola Odeku)."
+  }
+}
+```
+
+**Error Response (502 Bad Gateway - API Error / Validation Error / Business Logic Error):**
+```json
+{
+  "status": "error",
+  "message": "No (Medium) locker available at (SmartParcel Sterling Bank Adeola Odeku).",
+  "data": {}
 }
 ```
 
@@ -442,3 +512,108 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 ### 6. Notification Settings
 **Endpoint:** `GET/PATCH /settings/`  
 **Description:** Retrieve or update notification toggle preferences (push_enabled, order_assigned, etc.).
+
+---
+
+## Places API (Geoapify / Mapbox / AWS Fallback Endpoints)
+**Base URL:** `/api/orders/places/`
+
+### 1. Places Autocomplete
+**Endpoint:** `GET /autocomplete/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Get location autocomplete suggestions using a fallback chain: Geoapify -> Mapbox -> AWS Location Service.
+
+**Query Parameters:**
+- `q` (required): The partial query text to search for.
+- `session_token` (optional): A UUID string to group suggestions and details retrieve requests for Mapbox billing.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Autocomplete suggestions retrieved successfully From Mapbox",
+  "data": [
+    {
+      "place_id": "mapbox:dXJuOm1ieHB...",
+      "description": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+      "is_mapbox": true,
+      "structured_formatting": {
+        "main_text": "Kunle Ogunba St",
+        "secondary_text": "Lekki, Lagos, Nigeria"
+      }
+    }
+  ],
+  "status_code": 200
+}
+```
+
+---
+
+### 2. Place Details
+**Endpoint:** `GET /details/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Retrieve the detailed formatted address and coordinates for a given PlaceId (supports `geoapify:`, `mapbox:`, or `aws:` prefixes).
+
+**Query Parameters:**
+- `place_id` (required): The PlaceId returned by the autocomplete suggestion.
+- `session_token` (optional): A UUID string matching the autocomplete session_token.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Place details retrieved successfully",
+  "data": {
+    "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+    "lat": 6.4399005,
+    "lng": 3.4701005
+  },
+  "status_code": 200
+}
+```
+
+---
+
+### 3. Reverse Geocode Coordinates
+**Endpoint:** `GET /reverse-geocode/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Reverse geocode coordinates to a human-readable address.
+
+**Query Parameters:**
+- `lat` (required): Latitude float.
+- `lng` (required): Longitude float.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Coordinates reverse geocoded successfully",
+  "data": {
+    "address": "Lekki Peninsula, Victoria Island, Lagos, NGA"
+  },
+  "status_code": 200
+}
+```
+
+---
+
+### 4. Geocode Address
+**Endpoint:** `GET /geocode/`  
+**Authentication:** Required (Merchant Token or API Key)  
+**Description:** Geocode an address string to coordinates.
+
+**Query Parameters:**
+- `address` (required): The address string to geocode.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Address geocoded successfully",
+  "data": {
+    "lat": 6.5244,
+    "lng": 3.3792
+  },
+  "status_code": 200
+}
+```

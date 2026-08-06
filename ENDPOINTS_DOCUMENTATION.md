@@ -18,6 +18,7 @@
 9. [Subscription Endpoints](#subscription-endpoints)
 10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
 11. [Dispatcher Orders](#dispatcher-orders)
+12. [Google Places AWS Fallback](#google-places-aws-fallback)
 
 ---
 
@@ -800,9 +801,9 @@ To test webhook integration:
 
 ---
 
-**Last Updated:** May 11, 2026
-**Version:** 1.2
-**Recent Changes:** Implemented multi-drop route visualization in the Dispatcher Portal, including sequential stop rendering and expanded order serialization.
+**Last Updated:** May 20, 2026
+**Version:** 1.4
+**Recent Changes:** Added comprehensive Rider App Endpoints section covering Today's Trips period list, Rider Wallet Info balance aggregation, and duty toggle endpoints.
 **Document Type:** API Reference Documentation
 
 For more information, refer to individual view implementations in the source files listed above.
@@ -858,8 +859,26 @@ Authentication: Required (Merchant)
 ### 7. Create Parcel
 ```
 POST /api/orders/smart-parcel/parcels/
-Description: Create a new SmartParcel parcel for locker pickup/delivery.
+Description: Create a new SmartParcel parcel for locker pickup/delivery directly. Note: Quick Send orders (`POST /api/orders/quick-send/`) also support integrated SmartParcel locker pickup and delivery creation by passing `is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, and `locker_size_id` in the request body.
 Authentication: Required (Merchant)
+
+Response (201 Created):
+  {
+    "status": "success",
+    "message": "SmartParcel parcel created successfully.",
+    "data": {
+      "parcel": { ... },
+      "statuscode": "00",
+      "statusmessage": "New parcel request successful. Locker Number (5) has been reserved for you at (SmartParcel Sterling Bank Adeola Odeku)."
+    }
+  }
+
+Response (502 Bad Gateway - API Error / Validation Error / Business Logic Error):
+  {
+    "status": "error",
+    "message": "No (Medium) locker available at (SmartParcel Sterling Bank Adeola Odeku).",
+    "data": {}
+  }
 ```
 
 ### 8. List Pending Pickups
@@ -1070,4 +1089,166 @@ Query Parameters:
   - vehicle: VEHICLE_ID
   - active: true|false
 Response: Paginated list of Pricing Override objects.
+```
+
+---
+
+## RIDER APP ENDPOINTS
+
+These endpoints support rider mobile application interactions:
+
+### 1. Toggle Duty Status
+```
+POST /api/riders/duty/
+Description: Toggles the online/offline duty status of the rider.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "status": "online" | "offline"
+  }
+Response:
+  {
+    "success": true,
+    "data": {
+      "status": "online",
+      "working_type": "freelancer",
+      "is_authorized": true
+    }
+  }
+```
+
+### 2. Today's Trips
+```
+GET /api/riders/orders/today/
+Description: Retrieves completed trips (orders) for the authenticated rider during the active period (today, week, month).
+Authentication: Required (Rider)
+Query Parameters:
+  - period: today (default), week, month
+Response:
+  {
+    "success": true,
+    "data": [
+      {
+        "id": "ORDER001",
+        "route": "Surulere -> V.I.",
+        "time": "7:16 AM",
+        "distance": "12.40km",
+        "earned": 2500.0,
+        "cod": 8037.0
+      },
+      ...
+    ]
+  }
+```
+
+### 3. Rider Wallet Info
+```
+GET /api/riders/wallet/info/
+Description: Retrieves available balance, pending COD, and withdrawable balance details for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "success": true,
+    "data": {
+      "available_balance": 5000.0,
+      "pending_cod": 0.0,
+      "withdrawable_balance": 5000.0
+    }
+  }
+```
+
+---
+
+## Places API (Geoapify / Mapbox / AWS Fallback)
+
+### 1. Places Autocomplete
+```
+GET /api/orders/places/autocomplete/
+Description: Retrieves location autocomplete suggestions using a fallback chain: Geoapify -> Mapbox -> AWS Location Service.
+Authentication: Required (Merchant)
+Query Parameters:
+  - q (required): The partial query text to search for.
+  - session_token (optional): A UUID string to group suggestions and details retrieve requests for Mapbox billing.
+Response:
+  {
+    "status": "success",
+    "message": "Autocomplete suggestions retrieved successfully From Mapbox",
+    "data": [
+      {
+        "place_id": "mapbox:dXJuOm1ieHB...",
+        "description": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+        "is_mapbox": true,
+        "structured_formatting": {
+          "main_text": "Kunle Ogunba St",
+          "secondary_text": "Lekki, Lagos, Nigeria"
+        }
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+---
+
+### 2. Place Details
+```
+GET /api/orders/places/details/
+Description: Retrieves details (formatted address and coordinates) for a given PlaceId (supports geoapify:, mapbox:, or aws: prefixes, or fallback).
+Authentication: Required (Merchant)
+Query Parameters:
+  - place_id (required): The PlaceId returned by the autocomplete suggestion.
+  - session_token (optional): A UUID string matching the autocomplete session_token.
+Response:
+  {
+    "status": "success",
+    "message": "Place details retrieved successfully",
+    "data": {
+      "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+      "lat": 6.4399005,
+      "lng": 3.4701005
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 3. Reverse Geocode Coordinates
+```
+GET /api/orders/places/reverse-geocode/
+Description: Reverse geocodes coordinates to a human-readable address.
+Authentication: Required (Merchant)
+Query Parameters:
+  - lat (required): Latitude float.
+  - lng (required): Longitude float.
+Response:
+  {
+    "status": "success",
+    "message": "Coordinates reverse geocoded successfully",
+    "data": {
+      "address": "Lekki Peninsula, Victoria Island, Lagos, NGA"
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 4. Geocode Address
+```
+GET /api/orders/places/geocode/
+Description: Geocodes an address string to coordinates.
+Authentication: Required (Merchant)
+Query Parameters:
+  - address (required): The address string to geocode.
+Response:
+  {
+    "status": "success",
+    "message": "Address geocoded successfully",
+    "data": {
+      "lat": 6.5244,
+      "lng": 3.3792
+    },
+    "status_code": 200
+  }
 ```

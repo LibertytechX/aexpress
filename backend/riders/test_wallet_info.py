@@ -23,9 +23,9 @@ def rider_user(db):
         first_name="Wallet",
         last_name="Test",
     )
-    rider = Rider.objects.create(user=user, rider_id="RID-WALLET", status="online")
-    # Ensure wallet exists
-    Wallet.objects.get_or_create(user=user, defaults={"balance": Decimal("5000.00")})
+    rider = Rider.objects.create(user=user, rider_id="RIDWLT", status="online")
+    # Ensure wallet exists with balance 5000.00
+    Wallet.objects.update_or_create(user=user, defaults={"balance": Decimal("5000.00")})
     return user, rider
 
 

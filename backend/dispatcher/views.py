@@ -270,24 +270,24 @@ class OrderViewSet(viewsets.ModelViewSet):
         is_all = self.request.query_params.get("all") == "true"
 
         # if the dispatcher role is zone_lead
-        if role == "zone_lead" and not is_all:
-            try:
-                zone_lead = VerticalLead.objects.get(user=user)
-                zones = zone_lead.area_zones.all()
-                relay_nodes = RelayNode.objects.filter(zone__in=zones)
+        # if role == "zone_lead" and not is_all:
+        #     try:
+        #         zone_lead = VerticalLead.objects.get(user=user)
+        #         zones = zone_lead.area_zones.all()
+        #         relay_nodes = RelayNode.objects.filter(zone__in=zones)
 
-                # Filter orders:
-                # 1. Status is Pending
-                # 2. Assigned rider's hub is in my zones
-                # 3. Any relay leg starts/ends in my zones
-                qs = qs.filter(
-                    Q(status="Pending")
-                    | Q(rider__hub__in=relay_nodes)
-                    | Q(legs__start_relay_node__in=relay_nodes)
-                    | Q(legs__end_relay_node__in=relay_nodes)
-                ).distinct()
-            except VerticalLead.DoesNotExist:
-                pass
+        #         # Filter orders:
+        #         # 1. Status is Pending
+        #         # 2. Assigned rider's hub is in my zones
+        #         # 3. Any relay leg starts/ends in my zones
+        #         qs = qs.filter(
+        #             Q(status="Pending")
+        #             | Q(rider__hub__in=relay_nodes)
+        #             | Q(legs__start_relay_node__in=relay_nodes)
+        #             | Q(legs__end_relay_node__in=relay_nodes)
+        #         ).distinct()
+        #     except VerticalLead.DoesNotExist:
+        #         pass
 
         paid_complete = self.request.query_params.get("paid_complete")
         unpaid_complete = self.request.query_params.get("unpaid_complete")
@@ -646,9 +646,10 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.save(update_fields=["total_amount", "updated_at"])
 
         # Record audit event
-        from orders.models import OrderEvent
+        from orders.signals import order_event_signal
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="price_change",
             description=f"Price changed from ₦{old_amount} to ₦{new_amount}",
@@ -656,6 +657,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             new_value=str(new_amount),
             created_by=request.user if request.user.is_authenticated else None,
         )
+
 
         # If this is a relay order, recalculate leg payouts as a proportional
         # share of the new total_amount weighted by each leg's distance.

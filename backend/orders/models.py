@@ -411,7 +411,7 @@ class Order(models.Model):
         ]
 
     def __str__(self):
-        return f"Order {self.order_number} - {self.user.business_name}"
+        return f"Order {self.order_number}"
 
     @property
     def vertical_lead_name(self) -> str | None:

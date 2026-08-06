@@ -16,6 +16,7 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 from .models import Order, Delivery, Vehicle, OrderEvent
+from .signals import order_event_signal
 from .utils import calculate_route
 from .pricing import calculate_effective_fare
 from .serializers import (
@@ -211,11 +212,11 @@ class QuickSendView(APIView):
         percel_info = None
         percel_payload = {
             "sendername": data.get("sender_name", ""),
-            "senderphone": data.get("sender _phone", ""),
+            "senderphone": data.get("sender_phone", ""),
             "senderemail": request.user.email,
             "recipientname": data.get("receiver_name", ""),
             "recipientphone": data.get("receiver_phone", ""),
-            "recipientemail": data.get("receiver_email", ""),
+            "recipientemail": request.user.email,
             "boxid": data.get("box_id", ""),
             "sizeid": data.get("locker_size_id", ""),
             "parceldescription": data.get("notes", "Parcel Delivery"),
@@ -384,7 +385,7 @@ class QuickSendView(APIView):
 
         threading.Thread(target=_trigger_created, daemon=True).start()
 
-        if data.get("payment_method") in ["cash", "cash_on_pickup", "receiver_pays"]:
+        if payment_method in ["cash", "cash_on_pickup", "receiver_pays"]:
             from .tasks import create_order_charge
 
             create_order_charge.delay(order.id)
@@ -1393,12 +1394,23 @@ def _advance_order(request, order_number, new_status, event_desc):
         lat, lng = float(lat), float(lng)
 
         if order.pickup_latitude is not None and order.pickup_longitude is not None:
-            from dispatcher.models import Zone
+            origin = {"lat": lat, "lng": lng}
+            drop = {
+                "lat": float(order.pickup_latitude),
+                "lng": float(order.pickup_longitude),
+            }
+            route_data = calculate_route(origin=origin, destinations=[drop])
 
-            dist = Zone.haversine_distance(
-                lat, lng, order.pickup_latitude, order.pickup_longitude
-            )
-            if dist > 2.0:  # 2000 kmeters
+            if route_data:
+                dist = float(route_data["distance_km"])
+            else:
+                from dispatcher.models import Zone
+
+                dist = Zone.haversine_distance(
+                    lat, lng, order.pickup_latitude, order.pickup_longitude
+                )
+
+            if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
                     message=f"You are too far from the pickup location ({dist:.2f}km). Please move closer.",
@@ -1423,14 +1435,6 @@ def _advance_order(request, order_number, new_status, event_desc):
         update_fields.append("completed_at")
 
     order.save(update_fields=update_fields)
-
-    # Trigger transactional emails
-    from orders.tasks import send_transactional_email
-
-    if new_status == "Started":
-        send_transactional_email.delay("F1", str(order.id))
-    elif new_status == "Done":
-        send_transactional_email.delay("F2", str(order.id))
 
     # Trigger order-completed webhook in background if status is Done
     if new_status == "Done":
@@ -1471,13 +1475,8 @@ def _advance_order(request, order_number, new_status, event_desc):
             ]
         )
 
-    OrderEvent.objects.create(
-        order=order,
-        event=event_desc,
-        description=f"By rider {request.user.contact_name or request.user.phone}",
-    )
-
     return Response({"status": new_status, "previous": old_status})
+
 
 
 class OrderPickupView(APIView):
@@ -1698,14 +1697,25 @@ class OrderCompleteView(APIView):
             and final_delivery.dropoff_latitude is not None
             and final_delivery.dropoff_longitude is not None
         ):
-            from dispatcher.models import Zone
+            origin = {"lat": lat, "lng": lng}
+            drop = {
+                "lat": float(final_delivery.dropoff_latitude),
+                "lng": float(final_delivery.dropoff_longitude),
+            }
+            route_data = calculate_route(origin=origin, destinations=[drop])
 
-            dist = Zone.haversine_distance(
-                lat,
-                lng,
-                final_delivery.dropoff_latitude,
-                final_delivery.dropoff_longitude,
-            )
+            if route_data:
+                dist = float(route_data["distance_km"])
+            else:
+                from dispatcher.models import Zone
+
+                dist = Zone.haversine_distance(
+                    lat,
+                    lng,
+                    final_delivery.dropoff_latitude,
+                    final_delivery.dropoff_longitude,
+                )
+
             if dist > 2.0:  # 2000 meters
                 return service_response(
                     status="error",
@@ -1888,12 +1898,6 @@ def cancel_order(request, order_id):
     rider.status = Rider.Status.ONLINE
     rider.save(update_fields=["current_order", "status"])
 
-    OrderEvent.objects.create(
-        order=order,
-        event="Driver Canceled",
-        description=f"Canceled by {request.user.contact_name or request.user.phone}: {ser.validated_data['reason']}",
-    )
-
     return Response({"status": "canceled"})
 
 
@@ -1941,13 +1945,16 @@ class DeliveryStartView(APIView):
                 ]
             )
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="Delivery Started",
             description=f"Delivery to {delivery.receiver_name} started by rider {request.user.contact_name or request.user.phone}",
+            created_by=request.user,
         )
 
         return Response({"status": "InTransit", "previous": old_status})
+
 
 
 class DeliveryCompleteView(APIView):
@@ -1974,28 +1981,23 @@ class DeliveryCompleteView(APIView):
         lat = ser.validated_data.get("latitude")
         lng = ser.validated_data.get("longitude")
 
-        if lat is None or lng is None:
-            return Response(
-                {"error": "Latitude and longitude are required to complete delivery."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        if lat is not None and lng is not None:
+            if (
+                delivery.dropoff_latitude is not None
+                and delivery.dropoff_longitude is not None
+            ):
+                from dispatcher.models import Zone
 
-        if (
-            delivery.dropoff_latitude is not None
-            and delivery.dropoff_longitude is not None
-        ):
-            from dispatcher.models import Zone
-
-            dist = Zone.haversine_distance(
-                lat, lng, delivery.dropoff_latitude, delivery.dropoff_longitude
-            )
-            if dist > 0.5:  # 500 meters
-                return Response(
-                    {
-                        "error": f"You are too far from the delivery location ({dist:.2f}km). Please move closer."
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                dist = Zone.haversine_distance(
+                    lat, lng, delivery.dropoff_latitude, delivery.dropoff_longitude
                 )
+                if dist > 0.5:  # 500 meters
+                    return Response(
+                        {
+                            "error": f"You are too far from the delivery location ({dist:.2f}km). Please move closer."
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
         old_status = delivery.status
         delivery.status = "Delivered"
@@ -2008,10 +2010,6 @@ class DeliveryCompleteView(APIView):
             order.status = "Done"
             order.completed_at = order.completed_at or timezone.now()
             order.save(update_fields=["status", "updated_at", "completed_at"])
-
-            from orders.tasks import send_transactional_email
-
-            send_transactional_email.delay("F2", str(order.id))
 
             # Trigger order-completed webhook in background
             def _trigger_delivery_completed():
@@ -2036,12 +2034,6 @@ class DeliveryCompleteView(APIView):
 
             threading.Thread(target=_trigger_delivery_completed, daemon=True).start()
 
-            OrderEvent.objects.create(
-                order=order,
-                event="Order Completed",
-                description="All deliveries completed.",
-            )
-
         # Update rider location if provided
         rider_profile = getattr(request.user, "rider_profile", None)
         if rider_profile and ser.validated_data.get("latitude"):
@@ -2056,13 +2048,16 @@ class DeliveryCompleteView(APIView):
                 ]
             )
 
-        OrderEvent.objects.create(
+        order_event_signal.send(
+            sender=self.__class__,
             order=order,
             event="Delivery Completed",
             description=f"Delivery to {delivery.receiver_name} completed by rider {request.user.contact_name or request.user.phone}",
+            created_by=request.user,
         )
 
         return Response({"status": "Delivered", "previous": old_status})
+
 
 
 class MergeGroupedOrdersView(APIView):
@@ -2314,7 +2309,7 @@ class SmartParcelResolveCollectCodeView(APIView):
             (
                 p
                 for p in parcels
-                if str(p.get("boxlockernumber")).strip().lower()
+                if str(p.get("parcelreferencenumber")).strip().lower()
                 == collect_code.strip().lower()
             ),
             None,

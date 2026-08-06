@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.db.models import Count, Sum, Max, Prefetch
 from django.template.loader import render_to_string
 from authentication.models import User, MerchantEmailLog
+from authentication.emails import send_email_with_fallback
 from .models import Delivery
 
 from decimal import Decimal
@@ -117,7 +118,19 @@ def process_order_proximity(self, order_id):
 
 
 @shared_task
-def create_order_charge(order_id):
+def create_order_charge(order_id: str) -> str:
+    """Create a pending charge for the specified order.
+
+    Args:
+        order_id: The unique identifier (UUID string) of the order.
+
+    Returns:
+        The unique identifier (UUID string) of the created charge.
+
+    Raises:
+        Order.DoesNotExist: If the order with the specified ID does not exist.
+        Exception: For any other database or creation error.
+    """
     try:
         order = Order.objects.get(id=order_id)
         charge = Charge.objects.create(
@@ -126,11 +139,12 @@ def create_order_charge(order_id):
             amount=order.total_amount,
             status="pending",
         )
-        return charge
+        return str(charge.id)
     except Exception as e:
         logger.error(
             f"create_order_charge: Failed to create charge for Order {order_id}: {e}"
         )
+        raise
 
 
 @shared_task
@@ -204,62 +218,44 @@ def handle_order_completion_tasks(order_id):
 SENDER_EMAIL = "assuredxpressng@gmail.com"
 
 
-def _send_marketing_email(merchant, template_code, subject, context=None):
+def _send_marketing_email(merchant, template_code, subject, context=None, skip_daily_check=False):
     """Helper to render and send marketing emails, logging to prevent duplicates."""
 
     # Check if already sent for the date
-    today = timezone.now().date()
-    if MerchantEmailLog.objects.filter(
-        merchant=merchant, template_code=template_code, sent_at__date=today
-    ).exists():
-        logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
-        return False
+    if not skip_daily_check:
+        today = timezone.now().date()
+        if MerchantEmailLog.objects.filter(
+            merchant=merchant, template_code=template_code, sent_at__date=today
+        ).exists():
+            logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
+            return False
 
     context = context or {}
     context["merchant"] = merchant
 
     html_message = render_to_string(f"emails/marketing/{template_code}.html", context)
 
-    # Get Mailgun credentials from environment
-    api_key = os.getenv("MAILGUN_API_KEY") or os.getenv("MAILGUN_APIKEY")
-    domain = os.getenv("MAILGUN_DOMAIN")
     from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
     from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
 
-    if not api_key or not domain:
-        logger.error("Mailgun credentials not configured")
-        return False
+    success = send_email_with_fallback(
+        to_email=merchant.email,
+        subject=subject,
+        html_content=html_message,
+        text_content="Please view this email in an HTML-compatible client.",
+        from_name=from_name,
+        from_email=from_email,
+    )
 
-    try:
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{domain}/messages",
-            auth=("api", api_key),
-            data={
-                "from": f"{from_name} <{from_email}>",
-                "to": [merchant.email],
-                "subject": subject,
-                "html": html_message,
-                "text": "Please view this email in an HTML-compatible client.",
-            },
+    if success:
+        MerchantEmailLog.objects.create(
+            merchant=merchant, template_code=template_code
         )
+        logger.info(
+            f"Successfully sent {template_code} via fallback utility to {merchant.email}"
+        )
+    return success
 
-        if response.status_code == 200:
-            # Log success
-            MerchantEmailLog.objects.create(
-                merchant=merchant, template_code=template_code
-            )
-            logger.info(
-                f"Successfully sent {template_code} via Mailgun to {merchant.email}"
-            )
-            return True
-        else:
-            logger.error(
-                f"Failed to send {template_code} via Mailgun to {merchant.email}: {response.text}"
-            )
-            return False
-    except Exception as e:
-        logger.error(f"Error sending {template_code} to {merchant.email}: {str(e)}")
-        return False
 
 
 @shared_task
@@ -526,8 +522,18 @@ def send_transactional_email(template_code, order_id):
         context = {"order": order, "delivery": delivery}
 
         subject_map = {
+            "F_Pending": f"📥 Order Received — Order #{order.order_number}",
+            "F_Assigned": f"🏍️ Rider Assigned — Order #{order.order_number}",
+            "F_AssignmentAccepted": f"✅ Rider Accepted — Order #{order.order_number}",
+            "F_AssignmentRejected": f"❌ Rider Rejected Assignment — Order #{order.order_number}",
             "F1": f"Your delivery is on the move! — Order #{order.order_number} 🚚",
+            "F_PickedUp": f"📦 Package Picked Up — Order #{order.order_number}",
+            "F_Fulfilling": f"🚚 Out for Delivery — Order #{order.order_number}",
+            "F_Arrived": f"📍 Rider has Arrived — Order #{order.order_number}",
             "F2": f"✅ Delivery Completed! — Order #{order.order_number} has arrived",
+            "F_CustomerCanceled": f"⚠️ Order Canceled by Customer — Order #{order.order_number}",
+            "F_RiderCanceled": f"⚠️ Order Canceled by Rider — Order #{order.order_number}",
+            "F_Failed": f"🚨 Delivery Failed — Order #{order.order_number}",
         }
 
         success = _send_marketing_email(
@@ -535,6 +541,7 @@ def send_transactional_email(template_code, order_id):
             template_code,
             subject_map.get(template_code, f"Update on Order #{order.order_number}"),
             context,
+            skip_daily_check=True,
         )
 
         if success:
@@ -548,3 +555,68 @@ def send_transactional_email(template_code, order_id):
             f"Failed to send transactional email {template_code} for order {order_id}: {e}"
         )
         return False
+
+
+@shared_task
+def send_new_order_dispatcher_email_task(order_id: str) -> bool:
+    """Sends a notification email with new order details to all active dispatchers.
+
+    Args:
+        order_id (str): The ID of the newly created order.
+
+    Returns:
+        bool: True if the notification email process completed successfully, False otherwise.
+    """
+    try:
+        order = Order.objects.get(id=order_id)
+        dispatchers = User.objects.filter(usertype="Dispatcher", is_active=True)
+        if not dispatchers.exists():
+            logger.info("No active dispatchers found. Skipping dispatcher notification email.")
+            return False
+
+        deliveries = order.deliveries.all()
+        context = {
+            "order": order,
+            "deliveries": deliveries,
+        }
+
+        html_message = render_to_string("emails/marketing/new_order_dispatcher.html", context)
+        text_message = (
+            f"Hello,\n\n"
+            f"A new order #{order.order_number} has been created.\n\n"
+            f"Pickup Address: {order.pickup_address}\n"
+            f"Total Amount: ₦{order.total_amount}\n"
+            f"Payment Method: {order.get_payment_method_display()}\n\n"
+            f"Please login to the dispatcher dashboard to review it."
+        )
+
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+
+        recipient_emails = list(dispatchers.values_list("email", flat=True))
+        success = True
+
+        for recipient in recipient_emails:
+            email_sent = send_email_with_fallback(
+                to_email=recipient,
+                subject=f"New Order Alert: Order #{order.order_number} 🚨",
+                html_content=html_message,
+                text_content=text_message,
+                from_name=from_name,
+                from_email=from_email,
+            )
+            if email_sent:
+                logger.info(f"New order notification email sent to dispatcher {recipient}")
+            else:
+                logger.error(f"Failed to send new order notification email to dispatcher {recipient}")
+                success = False
+
+        return success
+
+    except Order.DoesNotExist:
+        logger.error(f"send_new_order_dispatcher_email_task: Order {order_id} not found.")
+        return False
+    except Exception as e:
+        logger.exception(f"Error in send_new_order_dispatcher_email_task: {e}")
+        return False
+

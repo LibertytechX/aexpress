@@ -234,6 +234,8 @@ CORS_ALLOWED_ORIGINS = [
     "https://axpress.net",
     "https://axpress.net",
     "https://aexpress-staging.vercel.app",
+    "https://axpress-operations-command-center.vercel.app",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -252,7 +254,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
     "https://aexpress-staging.vercel.app",
+    "https://axpress-operations-command-center.vercel.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -314,7 +318,11 @@ AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
+AWS_LOCATION_PLACE_INDEX = os.getenv("AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
 
+# Geoapify Configuration
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY") or "c18c5dbcc9ee4b049a2b86716bee32d9"
+MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
 

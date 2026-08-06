@@ -6971,7 +6971,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   };
 
   const displayPrice = isPartnerOrder
-    ? (selectedMerchant?.partnerBasePrice || 0) * partnerOrderCount
+    ? (selectedMerchant?.partnerBasePrice || 0) * (Number(partnerOrderCount) || 0)
     : (priceOverride ? parseInt(priceOverride) : calcPrice(vehicle));
 
   // Local helpers for reliable coordinate capture
@@ -7070,7 +7070,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         dropoff_lat: finalDropoffLat,
         dropoff_lng: finalDropoffLng,
         is_partner_order: isPartnerOrder,
-        partner_order_count: partnerOrderCount,
+        partner_order_count: Number(partnerOrderCount) || 0,
         file_uploaded_urls: fileUploadedUrls,
       };
       const created = await OrdersAPI.create(payload);
@@ -7144,9 +7144,11 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
                 <label style={lSt}>Number of Orders</label>
                 <input
                   type="number"
-                  min="1"
                   value={partnerOrderCount}
-                  onChange={e => setPartnerOrderCount(parseInt(e.target.value) || 1)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setPartnerOrderCount(val === '' ? '' : parseInt(val));
+                  }}
                   style={{ ...iSt, fontSize: 16, fontWeight: 700 }}
                 />
               </div>

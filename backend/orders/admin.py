@@ -22,6 +22,7 @@ from .models import (
     MerchantPricingOverride,
     MerchantPriceList,
     MerchantPriceListItem,
+    OrderEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -225,6 +226,23 @@ class OrderLegInline(admin.TabularInline):
     readonly_fields = ["leg_number", "hub_pin"]
 
 
+class OrderEventInline(admin.TabularInline):
+    """Inline admin for order events within an order."""
+
+    model = OrderEvent
+    extra = 0
+    fields = [
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by",
+        "created_at",
+    ]
+    readonly_fields = ["created_at"]
+    raw_id_fields = ["created_by"]
+
+
 @admin.register(Vehicle)
 class VehicleAdmin(admin.ModelAdmin):
     """Admin configuration for Vehicle model."""
@@ -247,6 +265,7 @@ class MerchantPricingOverrideAdmin(admin.ModelAdmin):
     ]
     list_filter = ["is_active", "vehicle", "created_at"]
     search_fields = ["merchant__id", "merchant__business_name", "merchant__phone"]
+    raw_id_fields = ["merchant"]
     ordering = ["-created_at"]
 
 
@@ -260,6 +279,7 @@ class MerchantPriceListAdmin(admin.ModelAdmin):
     list_display = ["name", "merchant", "vehicle", "is_active", "created_at"]
     list_filter = ["is_active", "vehicle", "created_at"]
     search_fields = ["name", "merchant__business_name", "merchant__phone"]
+    raw_id_fields = ["merchant"]
     inlines = [MerchantPriceListItemInline]
     ordering = ["-created_at"]
 
@@ -277,6 +297,7 @@ class MerchantPriceListItemAdmin(ImportExportModelAdmin):
     list_display = ["label", "price_list", "min_km", "max_km", "fixed_fee"]
     list_filter = ["price_list"]
     search_fields = ["label", "price_list__name"]
+    raw_id_fields = ["price_list"]
     ordering = ["min_km"]
 
 
@@ -382,6 +403,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "status",
         "mode",
         "is_relay_order",
+        "escrow_held",
         "payment_method",
         "is_partner_order",
         AssignedRiderFilter,
@@ -398,6 +420,7 @@ class OrderAdmin(ImportExportModelAdmin):
         "pickup_address",
     ]
     readonly_fields = ["order_number", "get_rider_earning", "created_at", "updated_at"]
+    raw_id_fields = ["user", "rider", "parent_order", "suggested_rider"]
     ordering = ["-created_at"]
 
     fieldsets = (
@@ -410,6 +433,9 @@ class OrderAdmin(ImportExportModelAdmin):
                     "mode",
                     "status",
                     "rider",
+                    "is_percel_order",
+                    "is_pickup_percel",
+                    "isdelivery_percel",
                     "payment_status",
                 )
             },
@@ -437,14 +463,17 @@ class OrderAdmin(ImportExportModelAdmin):
                 )
             },
         ),
-        ("Additional Information", {"fields": ("notes", "scheduled_pickup_time")}),
+        (
+            "Additional Information",
+            {"fields": ("notes", "scheduled_pickup_time", "percel_info")},
+        ),
         (
             "Timestamps",
             {"fields": ("created_at", "updated_at", "completed_at", "assigned_at")},
         ),
     )
 
-    inlines = [DeliveryInline, OrderLegInline]
+    inlines = [DeliveryInline, OrderLegInline, OrderEventInline]
 
     @admin.display(description="Rider ID")
     def get_rider_id(self, obj):
@@ -484,6 +513,7 @@ class DeliveryAdmin(admin.ModelAdmin):
         "dropoff_address",
     ]
     readonly_fields = ["created_at", "delivered_at"]
+    raw_id_fields = ["order"]
     ordering = ["order", "sequence"]
 
     fieldsets = (
@@ -535,4 +565,34 @@ class OrderLegAdmin(admin.ModelAdmin):
     list_filter = ["status", "created_at"]
     search_fields = ["order__order_number", "rider__rider_id", "hub_pin"]
     readonly_fields = ["id", "hub_pin", "created_at"]
+    raw_id_fields = ["order", "rider", "suggested_rider"]
     ordering = ["order", "leg_number"]
+
+
+@admin.register(OrderEvent)
+class OrderEventAdmin(admin.ModelAdmin):
+    """Admin configuration for OrderEvent model."""
+
+    list_display = [
+        "order",
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by",
+        "created_at",
+    ]
+    list_filter = ["event", "created_at"]
+    search_fields = [
+        "order__order_number",
+        "event",
+        "description",
+        "old_value",
+        "new_value",
+        "created_by__phone",
+        "created_by__email",
+    ]
+    raw_id_fields = ["order", "created_by"]
+    readonly_fields = ["created_at"]
+    ordering = ["-created_at"]
+
