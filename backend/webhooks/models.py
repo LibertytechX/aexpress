@@ -10,6 +10,13 @@ class Webhook(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        "dispatcher.Merchant",
+        on_delete=models.SET_NULL,
+        related_name="webhooks",
+        null=True,
+        blank=True,
+    )
     event_name = models.CharField(
         max_length=100,
         null=True,
@@ -17,7 +24,12 @@ class Webhook(models.Model):
         choices=WebhookEventEnum.choices(),
         help_text="Unique name for the event (e.g., order-created)",
     )
-    events: list = ArrayField(default=list, help_text="List of subscribed events")
+    events: list = ArrayField(
+        models.CharField(max_length=100),
+        default=list,
+        blank=True,
+        help_text="List of event names this webhook subscribes to",
+    )
     url = models.URLField(
         max_length=500, help_text="External URL to send the POST request to"
     )

@@ -1,5 +1,13 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-08-06] — Fix Webhook Model ArrayField Base Field
+
+### Backend
+#### Fixed
+- **Webhook Model ArrayField**: Added required positional argument `base_field=models.CharField(max_length=100)` and `blank=True` to `events` `ArrayField` in `webhooks/models.py`.
+
+---
+
 # [2026-08-03] — Fix Test Failures Across Dispatcher & Orders Modules
 
 ### Backend

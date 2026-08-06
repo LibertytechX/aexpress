@@ -11,6 +11,7 @@ class WebhookSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "event_name",
+            "merchant",
             "url",
             "secret_key",
             "is_active",
@@ -80,4 +81,3 @@ class WebhookSerializer(serializers.ModelSerializer):
                     message=f"Invalid event: {event}",
                 )
         return value
-

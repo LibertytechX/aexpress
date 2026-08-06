@@ -18,3 +18,4 @@ class WebhookEventEnum(EnumBaseClass, Enum):
     ORDER_DELIVERED = "order-delivered"
     ORDER_CANCELLED = "order-cancelled"
     ORDER_UPDATED = "order-updated"
+    ORDER_COMPLETED = "order-completed"
