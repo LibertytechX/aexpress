@@ -1115,8 +1115,11 @@ class BulkCalculateFareView(APIView):
                     )
 
                 for vehicle in vehicles:
+                    price = drop_fares[vehicle.name]
+                    if price > 20000:
+                        price = 20000
                     results[vehicle.name] = {
-                        "price": drop_fares[vehicle.name],
+                        "price": price,
                         "distance_km": round(total_distances, 2),
                         "duration_minutes": total_durations,
                         "drop_details": drop_details,
