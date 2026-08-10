@@ -379,7 +379,10 @@ class QuickSendView(APIView):
                     "timestamp": order.created_at.isoformat(),
                     "data": order_serializer.data,
                 }
-                trigger_webhook("order-created", payload)
+                user = request.user
+                if user.is_merchant:
+                    merchant_profile = user.merchant_profile
+                    trigger_webhook("order-created", payload, merchant_profile)
             except Exception as e:
                 logger.error(f"Failed to trigger order-created webhook: {e}")
 
@@ -1094,13 +1097,6 @@ class BulkCalculateFareView(APIView):
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
-                # for vehicle in vehicles:
-                #     fare = calculate_effective_fare(
-                #         request.user, vehicle, total_distances, total_durations
-                #     )
-                #     drop_fares[vehicle.name] = fare
-                #     # drop_info["fares"][vehicle.name] = fare
-                # # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
@@ -1112,8 +1108,11 @@ class BulkCalculateFareView(APIView):
                     )
 
                 for vehicle in vehicles:
+                    price = drop_fares[vehicle.name]
+                    if price > 20000:
+                        price = 20000
                     results[vehicle.name] = {
-                        "price": drop_fares[vehicle.name],
+                        "price": price,
                         "distance_km": round(total_distances, 2),
                         "duration_minutes": total_durations,
                         "drop_details": drop_details,

@@ -135,3 +135,26 @@ class BulkCalculateFareViewTests(APITestCase):
         response = self.client.post(self.url, payload, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertFalse(response.data["success"])
+
+    @patch("orders.views.calculate_route")
+    def test_multi_drop_price_guardrail_cap(self, mock_calculate_route):
+        # Simulate long distance resulting in fare > 20000
+        mock_calculate_route.return_value = {
+            "distance_km": 250.0,
+            "duration_minutes": 500,
+        }
+
+        payload = {
+            "mode": "multi",
+            "pickup": {"lat": 6.0, "long": 3.0},
+            "deliveries": [
+                {"lat": 6.1, "long": 3.1},
+            ],
+        }
+
+        response = self.client.post(self.url, payload, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        data = response.data
+        self.assertTrue(data["success"])
+        self.assertEqual(data["vehicles"]["Bike"]["price"], 20000)
+

@@ -1,5 +1,13 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-08-07] — Multi/Bulk Drop Fare Price Guardrail
+
+### Backend
+#### Added
+- **Fare Price Guardrail**: Added guardrail in `orders/views.py` (`BulkCalculateFareView`) for `multi`/`bulk` modes to cap individual vehicle delivery prices at 20,000 if the calculated price exceeds 20,000. Added unit test `test_multi_drop_price_guardrail_cap` in `orders/test_bulk_calculate_fare.py`.
+
+---
+
 # [2026-08-06] — Fix Webhook Model ArrayField Base Field
 
 ### Backend
