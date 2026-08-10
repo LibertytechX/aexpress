@@ -135,6 +135,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     def get_short_name(self):
         return self.business_name
 
+    @property
+    def is_merchant(self):
+        """Check if user is a merchant."""
+        return hasattr(self, "merchant_profile")
+
 
 class Address(models.Model):
     """Model for storing multiple addresses per user."""

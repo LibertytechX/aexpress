@@ -923,6 +923,36 @@ Response:
 
 ---
 
+### 2. Bulk / Multi-Drop Calculate Fare
+```
+POST /api/orders/bulk-calculate-fare/
+Description: Calculates route distance, duration, and fare across available vehicles for quick, multi, or bulk delivery modes. For multi and bulk modes, price per vehicle is capped at 20,000 as a guardrail.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "mode": "multi",
+    "pickup": {"lat": 6.5244, "long": 3.3792},
+    "deliveries": [
+      {"lat": 6.6018, "long": 3.3515}
+    ]
+  }
+Response:
+  {
+    "success": true,
+    "mode": "multi",
+    "vehicles": {
+      "Bike": {
+        "price": 4100.0,
+        "distance_km": 19.0,
+        "duration_minutes": 60,
+        "drop_details": [...]
+      }
+    }
+  }
+```
+
+---
+
 ## DISPATCHER ORDERS
 
 ### 1. Create Order

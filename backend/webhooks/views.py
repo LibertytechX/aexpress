@@ -3,6 +3,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import Webhook
 from .serializers import WebhookSerializer
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from sparky_utils.response import service_response
 
 
 class WebhookCreateUpdateView(APIView):
@@ -18,42 +21,32 @@ class WebhookCreateUpdateView(APIView):
 
     permission_classes = [permissions.IsAuthenticated]
 
+    @exception_advice()
     def post(self, request):
-        event_name = request.data.get("event_name")
-        if not event_name:
-            return Response(
-                {
-                    "success": False,
-                    "errors": {"event_name": ["This field is required."]},
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+        # check if the request from a merchant
+        if not request.user.is_merchant:
+            raise ServiceException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                message="Only merchants can create webhooks.",
             )
 
-        event_name = event_name.lower()
+        merchant = request.user.merchant_profile
 
         # Try to get existing webhook for this event
-        try:
-            webhook = Webhook.objects.get(event_name=event_name)
-            serializer = WebhookSerializer(webhook, data=request.data, partial=True)
-        except Webhook.DoesNotExist:
-            serializer = WebhookSerializer(data=request.data)
+        serializer = WebhookSerializer(data=request.data)
 
         if serializer.is_valid():
-            serializer.save()
-            return Response(
-                {
-                    "success": True,
-                    "message": f"Webhook for '{event_name}' configured successfully.",
-                    "data": serializer.data,
-                },
-                status=(
-                    status.HTTP_201_CREATED
-                    if "webhook" not in locals()
-                    else status.HTTP_200_OK
-                ),
+            serializer.save(merchant=merchant)
+            return service_response(
+                status="success",
+                data=serializer.data,
+                message="Webhook configured successfully!",
+                status_code=201,
             )
 
-        return Response(
-            {"success": False, "errors": serializer.errors},
-            status=status.HTTP_400_BAD_REQUEST,
+        return service_response(
+            status="error",
+            data=serializer.errors,
+            message="Webhook configuration failed!",
+            status_code=400,
         )

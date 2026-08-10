@@ -4,6 +4,13 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-08-06] — Fix Webhook Model ArrayField Base Field
+
+### Fixed
+- **Webhook Model ArrayField**: Added required positional argument `base_field=models.CharField(max_length=100)` and `blank=True` to `events` `ArrayField` in `webhooks/models.py`.
+
+---
+
 ## [2026-07-23] — Dispatcher New Order Email Notification & MailNow Fallback
 
 ### Added
