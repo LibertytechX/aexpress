@@ -1097,13 +1097,6 @@ class BulkCalculateFareView(APIView):
                         drop_fares[vehicle.name] += fare
                         drop_info["fares"][vehicle.name] = fare
                     drop_details.append(drop_info)
-                # for vehicle in vehicles:
-                #     fare = calculate_effective_fare(
-                #         request.user, vehicle, total_distances, total_durations
-                #     )
-                #     drop_fares[vehicle.name] = fare
-                #     # drop_info["fares"][vehicle.name] = fare
-                # # drop_details.append(drop_info)
 
                 if not drop_details:
                     return Response(
