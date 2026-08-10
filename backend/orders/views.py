@@ -382,7 +382,7 @@ class QuickSendView(APIView):
                 user = request.user
                 if user.is_merchant:
                     merchant_profile = user.merchant_profile
-                    trigger_webhook("order-created", payload, merchant_profile)
+                    trigger_webhook("order-created", payload, merchant=merchant_profile)
             except Exception as e:
                 logger.error(f"Failed to trigger order-created webhook: {e}")
 
