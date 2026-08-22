@@ -21,6 +21,7 @@ from orders.utils import (
     geoapify_geocode_address,
     mapbox_place_autocomplete,
     mapbox_place_details,
+    mapbox_reverse_geocode,
 )
 
 
@@ -245,8 +246,12 @@ class ReverseGeocodeView(APIView):
                 status_code=400,
             )
 
+        mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+        if mapbox_token:
+            address = mapbox_reverse_geocode(lat, lng)
+
         geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
-        if geoapify_key:
+        if not address and geoapify_key:
             address = geoapify_reverse_geocode(lat, lng)
         else:
             address = None

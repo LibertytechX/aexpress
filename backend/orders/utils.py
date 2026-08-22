@@ -667,3 +667,34 @@ def mapbox_place_details(
     except Exception as e:
         print(f"[Mapbox Details] Error: {str(e)}")
         return None
+
+
+def mapbox_reverse_geocode(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates using the Mapbox Geocoding v6 API."""
+    api_key: str = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+    if not api_key:
+        return None
+
+    url = "https://api.mapbox.com/search/geocode/v6/reverse"
+    params = {
+        "longitude": lng,
+        "latitude": lat,
+        "access_token": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        features = response.json().get("features", [])
+        if not features:
+            return None
+
+        properties = features[0].get("properties", {})
+        return (
+            properties.get("full_address")
+            or properties.get("place_formatted")
+            or properties.get("name")
+        )
+    except Exception as e:
+        print(f"[Mapbox Reverse Geocode] Error: {str(e)}")
+        return None

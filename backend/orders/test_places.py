@@ -15,6 +15,7 @@ from orders.utils import (
     geoapify_reverse_geocode,
     mapbox_place_autocomplete,
     mapbox_place_details,
+    mapbox_reverse_geocode,
 )
 
 
@@ -362,6 +363,35 @@ class PlacesProxyViewsGeoapifyTests(APITestCase):
 @override_settings(MAPBOX_ACCESS_TOKEN="test-mapbox-token")
 class MapboxTests(APITestCase):
     @patch("orders.utils.requests.get")
+    def test_mapbox_reverse_geocode_success(self, mock_get):
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "properties": {
+                        "full_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
+                    }
+                }
+            ],
+        }
+        mock_get.return_value = mock_response
+
+        address = mapbox_reverse_geocode(6.45, 3.456)
+
+        self.assertEqual(address, "15a Kunle Ogunba St, Lekki, Lagos, Nigeria")
+        mock_get.assert_called_once_with(
+            "https://api.mapbox.com/search/geocode/v6/reverse",
+            params={
+                "longitude": 3.456,
+                "latitude": 6.45,
+                "access_token": "test-mapbox-token",
+            },
+            timeout=5,
+        )
+
+    @patch("orders.utils.requests.get")
     def test_mapbox_place_autocomplete_success(self, mock_get):
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
@@ -494,6 +524,24 @@ class PlacesProxyViewsMapboxTests(APITestCase):
         mock_geoapify.assert_called_once()
         mock_mapbox.assert_called_once()
 
+    @patch("orders.places_views.aws_reverse_geocode")
+    @patch("orders.places_views.mapbox_reverse_geocode")
+    @patch("orders.places_views.geoapify_reverse_geocode")
+    def test_reverse_geocode_fallback_to_mapbox(
+        self, mock_geoapify, mock_mapbox, mock_aws
+    ):
+        mock_geoapify.return_value = None
+        mock_mapbox.return_value = "Lekki, Lagos"
+
+        url = reverse("orders:places_reverse_geocode")
+        response = self.client.get(url, {"lat": "6.4", "lng": "3.4"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["address"], "Lekki, Lagos")
+        mock_geoapify.assert_called_once_with(6.4, 3.4)
+        mock_mapbox.assert_called_once_with(6.4, 3.4)
+        mock_aws.assert_not_called()
+
     @patch("orders.places_views.mapbox_place_details")
     def test_details_mapbox_success(self, mock_details):
         mock_details.return_value = {
@@ -507,4 +555,3 @@ class PlacesProxyViewsMapboxTests(APITestCase):
         self.assertEqual(response.data["status"], "success")
         self.assertEqual(response.data["data"]["lat"], 6.4)
         mock_details.assert_called_once_with("test_123", session_token="")
-
