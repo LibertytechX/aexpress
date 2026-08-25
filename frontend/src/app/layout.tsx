@@ -14,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <head>
+        {/* 
         <script
           dangerouslySetInnerHTML={{
             __html: `
@@ -30,6 +31,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           async
           defer
         ></script>
+        */}
         <script src="https://js.paystack.co/v1/inline.js" async defer></script>
         <script
           src="https://api.whisper360.io/widget.js"
