@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 import asyncio
 from celery import shared_task
@@ -7,6 +9,24 @@ from .models import OrderOffer
 from .serializers import OrderOfferListSerializer
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def upload_rider_document_to_s3_task(self, file_data, filename, doc_type):
+    """
+    Uploads a single rider KYC document to S3 and returns the resulting URL.
+    file_data is base64-encoded file bytes — Celery tasks can't accept file-like objects.
+    """
+    from dispatcher.s3_utils import upload_document_to_s3
+
+    file_content = base64.b64decode(file_data)
+    file_obj = io.BytesIO(file_content)
+    return upload_document_to_s3(file_obj, filename, "riders", doc_type)
 
 
 @shared_task

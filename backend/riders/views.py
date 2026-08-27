@@ -54,11 +54,11 @@ from .models import (
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
-from dispatcher.s3_utils import upload_document_to_s3
 from orders.models import Order, OrderEvent
 from orders.permissions import IsRider
 from dispatcher.utils import emit_activity
 from .notifications import notify_rider
+from .tasks import upload_rider_document_to_s3_task
 
 logger = logging.getLogger(__name__)
 
@@ -1146,6 +1146,30 @@ class RiderAssignmentActionView(APIView):
         )
 
 
+def _upload_rider_document(file_obj, doc_type):
+    """
+    Uploads a rider KYC document to S3 via a Celery task and blocks for the result.
+    Returns (file_url, error_response) — error_response is None on success.
+    """
+    import base64
+
+    file_data = base64.b64encode(file_obj.read()).decode("utf-8")
+    try:
+        file_url = upload_rider_document_to_s3_task.apply_async(
+            args=[file_data, file_obj.name, doc_type]
+        ).get(timeout=30)
+    except Exception as exc:
+        logger.error(f"RiderDocument S3 upload task failed: {exc}")
+        file_url = None
+
+    if not file_url:
+        return None, Response(
+            {"success": False, "message": "Failed to upload document. Please try again."},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+    return file_url, None
+
+
 class RiderDocumentListCreateView(APIView):
     """
     API endpoint for listing a rider's KYC documents and uploading new ones.
@@ -1197,8 +1221,6 @@ class RiderDocumentListCreateView(APIView):
         data = serializer.validated_data
         doc_type = data["doc_type"]
 
-        # A rider shouldn't be able to submit a duplicate for a doc type that's
-        # already pending review or approved — they should update it instead.
         if RiderDocument.objects.filter(
             rider=rider,
             doc_type=doc_type,
@@ -1216,12 +1238,9 @@ class RiderDocumentListCreateView(APIView):
             )
 
         file_obj = data["file"]
-        file_url = upload_document_to_s3(file_obj, file_obj.name, "riders", doc_type)
-        if not file_url:
-            return Response(
-                {"success": False, "message": "Failed to upload document. Please try again."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
+        file_url, error = _upload_rider_document(file_obj, doc_type)
+        if error:
+            return error
 
         document = RiderDocument.objects.create(
             rider=rider,
@@ -1302,14 +1321,9 @@ class RiderDocumentDetailView(APIView):
 
         file_obj = data.get("file")
         if file_obj:
-            file_url = upload_document_to_s3(
-                file_obj, file_obj.name, "riders", document.doc_type
-            )
-            if not file_url:
-                return Response(
-                    {"success": False, "message": "Failed to upload document. Please try again."},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
+            file_url, error = _upload_rider_document(file_obj, document.doc_type)
+            if error:
+                return error
             document.file_url = file_url
             document.status = RiderDocument.Status.PENDING
             document.rejection_reason = ""
