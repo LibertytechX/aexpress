@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "wallet",
     "bot",
     "dispatcher",
+    "operations",
     "riders",
     "webhooks",
     "referrals",

@@ -327,6 +327,14 @@ All notable changes to the AXpress project are documented in this file.
 
 ---
 
+## [2026-08-20] — Whisper360 Integration
+
+### Frontend
+#### Added
+- **Whisper360 Widget**: Installed the Whisper360 widget script into the root layout's `<head>` to enable the user support widget across the portal.
+
+---
+
 ## [2026-04-16] — SmartParcel Toggle Fix
 
 ### Frontend
