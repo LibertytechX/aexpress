@@ -62,12 +62,14 @@ INSTALLED_APPS = [
     "wallet",
     "bot",
     "dispatcher",
+    "operations",
     "riders",
     "webhooks",
     "referrals",
     "chats",
     "whatsapp_messaging",
     "subscriptions",
+    "oprtn_dashboard",
     "devs",
 ]
 
@@ -383,6 +385,22 @@ CELERY_BEAT_SCHEDULE = {
         "task": "subscriptions.tasks.process_postpaid_billing_cycles",
         "schedule": crontab(hour=0, minute=0),  # Daily at midnight
     },
+    # Ops Dashboard alert engine (full rule set)
+    "generate-ops-alerts": {
+        "task": "oprtn_dashboard.tasks.generate_alerts",
+        "schedule": crontab(minute="*/30"),
+    },
+    # Pre-warm payments/COD/fuel dashboard snapshots for fast reads.
+    "refresh-ops-dashboard-cache": {
+        "task": "oprtn_dashboard.tasks.refresh_dashboard_cache",
+        "schedule": crontab(minute="*/30"),
+    },
+    # Optional fast lane (uncomment once telemetry sync is on beat, guide §14.8):
+    # "generate-ops-alerts-fast": {
+    #     "task": "oprtn_dashboard.tasks.generate_alerts",
+    #     "schedule": crontab(minute="*/2"),
+    #     "kwargs": {"only_types": ["BIKE_AFTER_HOURS", "SPEED_VIOLATION", "GHOST_RIDE"]},
+    # },
 }
 
 # Production Security Settings

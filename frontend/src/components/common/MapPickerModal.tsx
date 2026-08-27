@@ -79,8 +79,14 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
     return sessionTokenRef.current;
   };
 
-  // ── Initialise map once panel is mounted ──────────────────────
+  // ── Initialise map once panel is mounted (Commented out to force AWS fallback)
   useEffect(() => {
+    console.warn('[MP] Google Maps disabled, forcing AWS fallback');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUseAwsFallback(true);
+    setMapReady(false); // Map will never be ready, so we show the fallback UI
+    
+    /*
     let timeoutId: NodeJS.Timeout;
 
     const init = () => {
@@ -219,6 +225,7 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
       if (timeoutId) clearTimeout(timeoutId);
     };
+    */
   }, []);
 
   // Block body scroll while modal is open
@@ -635,19 +642,18 @@ export default function MapPickerModal({ onConfirm, onClose }: MapPickerModalPro
             </div>
           )}
 
-          {/* "Not loaded" fallback */}
+          {/* "Not loaded" fallback (Map is disabled) */}
           {!mapReady && (
             <div style={{
               position: 'absolute', inset: 0, background: '#f8fafc',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexDirection: 'column', gap: 12,
+              flexDirection: 'column', gap: 12, padding: 24, textAlign: 'center'
             }}>
-              <div style={{
-                width: 36, height: 36,
-                border: '3px solid #E8A838', borderTopColor: 'transparent',
-                borderRadius: '50%', animation: 'mpSpin 0.7s linear infinite',
-              }} />
-              <span style={{ fontSize: 13, color: '#94a3b8' }}>Loading map…</span>
+              <div style={{ fontSize: 32 }}>🗺️</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1e293b' }}>Interactive Map Unavailable</div>
+              <span style={{ fontSize: 13, color: '#64748b', maxWidth: 300 }}>
+                Map rendering is currently disabled. Please use the search bar above to find and select your location.
+              </span>
             </div>
           )}
         </div>
