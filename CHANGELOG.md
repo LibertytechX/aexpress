@@ -1,5 +1,23 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-08-26] — Google Places Autocomplete Session Usage Tracking & Place Details DB Caching
+
+### Backend
+#### Added
+- **Google Autocomplete Session Usage Tracking**:
+  - Model `GoogleAutoCompleteSessionUsage` (`orders/models.py`) to record session usage, pricing at $0.005 per session, query hits count, place resolution, and status lifecycle (`IN_PROGRESS`, `RESOLVED`, `EXPIRED`).
+  - Recorded session token hits in `google_place_autocomplete` and session resolution in `google_place_details` (`orders/utils.py`).
+  - Registered `GoogleAutoCompleteSessionUsageAdmin` in Django Admin (`orders/admin.py`) with filters, search, and raw ID fields.
+  - Added migration `orders/migrations/0015_googleautocompletesessionusage.py`.
+- **Google Place Details Database Caching (`GooglePlace`)**:
+  - Model `GooglePlace` (`orders/models.py`) to cache seen place details by `place_id`, saving `formatted_address`, `lat`, and `lng`.
+  - Updated `google_place_details` (`orders/utils.py`) to check `GooglePlace` in the database first, avoiding external Google Places API requests for previously seen places while still maintaining session resolution.
+  - Registered `GooglePlaceAdmin` in Django Admin (`orders/admin.py`).
+  - Added migration `orders/migrations/0016_googleplace_and_more.py`.
+  - Added comprehensive unit and E2E caching tests in `orders/test_google_autocomplete_session_usage.py`.
+
+---
+
 # [2026-08-07] — Multi/Bulk Drop Fare Price Guardrail
 
 ### Backend
