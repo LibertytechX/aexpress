@@ -13,6 +13,7 @@ from .models import (
     AreaDemand,
     RiderEarning,
     RiderNotification,
+    RiderDocument,
 )
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
@@ -520,4 +521,173 @@ class RiderNotificationSerializer(serializers.ModelSerializer):
             "data",
             "is_read",
             "created_at",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Rider Document (KYC) Serializers
+# ---------------------------------------------------------------------------
+
+RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "application/pdf",
+}
+RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+class RiderDocumentListSerializer(serializers.ModelSerializer):
+    """
+    Output serializer for the rider's document list screen.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "created_at",
+        ]
+
+
+class RiderDocumentDetailSerializer(serializers.ModelSerializer):
+    """
+    Output serializer for a single rider document, including rejection reason.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class RiderDocumentCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for uploading a new KYC document.
+    """
+
+    doc_type = serializers.ChoiceField(choices=RiderDocument.DocType.choices)
+    file = serializers.FileField()
+    expires_at = serializers.DateField(required=False, allow_null=True)
+
+    def validate_file(self, file_obj):
+        if file_obj.size > RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES:
+            raise serializers.ValidationError("File size must not exceed 10MB.")
+        content_type = getattr(file_obj, "content_type", "")
+        if content_type not in RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError(
+                "Unsupported file type. Only JPEG, PNG, and PDF files are allowed."
+            )
+        return file_obj
+
+    def validate_expires_at(self, value):
+        if value and value <= timezone.now().date():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
+
+
+class RiderDocumentCreateResponseSerializer(serializers.ModelSerializer):
+    """
+    Output serializer returned after a document is uploaded.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "created_at",
+        ]
+
+
+class RiderDocumentUpdateSerializer(serializers.Serializer):
+    """
+    Input serializer for updating an existing document: re-upload the file
+    and/or change the expiry date. At least one of the two must be provided.
+    """
+
+    file = serializers.FileField(required=False)
+    expires_at = serializers.DateField(required=False, allow_null=True)
+
+    def validate_file(self, file_obj):
+        if file_obj.size > RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES:
+            raise serializers.ValidationError("File size must not exceed 10MB.")
+        content_type = getattr(file_obj, "content_type", "")
+        if content_type not in RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError(
+                "Unsupported file type. Only JPEG, PNG, and PDF files are allowed."
+            )
+        return file_obj
+
+    def validate_expires_at(self, value):
+        if value and value <= timezone.now().date():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
+
+    def validate(self, data):
+        if "file" not in data and "expires_at" not in data:
+            raise serializers.ValidationError(
+                "Provide at least a file or an expiry date to update."
+            )
+        return data
+
+
+class RiderDocumentUpdateResponseSerializer(serializers.ModelSerializer):
+    """
+    Output serializer returned after a document is updated.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "rejection_reason",
+            "updated_at",
         ]
