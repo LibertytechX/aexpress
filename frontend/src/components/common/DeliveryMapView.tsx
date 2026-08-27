@@ -87,10 +87,14 @@ export default function DeliveryMapView({
     }, 50); // Update every 50ms for smooth animation (~20 fps)
   };
 
+  const [mapDisabled, setMapDisabled] = useState(false);
+
   useEffect(() => {
     // Wait for Google Maps to load
     if (!window.google || !window.google.maps) {
-      console.error('Google Maps not loaded');
+      console.warn('[DMV] Google Maps disabled, showing placeholder');
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMapDisabled(true);
       return;
     }
 
@@ -335,7 +339,22 @@ export default function DeliveryMapView({
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 520, borderRadius: 14, overflow: "hidden", position: "relative", border: "1px solid #e2e8f0" }}>
       {/* Google Map Container */}
-      <div ref={mapRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0 }} />
+      <div ref={mapRef} style={{ width: "100%", height: "100%", position: "absolute", inset: 0, display: mapDisabled ? 'none' : 'block' }} />
+
+      {/* Map Disabled Placeholder */}
+      {mapDisabled && (
+        <div style={{
+          position: 'absolute', inset: 0, background: '#f8fafc',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 12, padding: 24, textAlign: 'center'
+        }}>
+          <div style={{ fontSize: 40, opacity: 0.8 }}>🗺️</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: '#1e293b' }}>Route Visualization Unavailable</div>
+          <span style={{ fontSize: 14, color: '#64748b', maxWidth: 400, lineHeight: 1.5 }}>
+            Interactive map rendering is currently disabled. <br/> Your route and pricing will still be calculated correctly below.
+          </span>
+        </div>
+      )}
 
       {/* Summary card on map */}
       {totalDeliveries > 0 && totalCost > 0 && (

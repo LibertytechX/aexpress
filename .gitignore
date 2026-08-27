@@ -87,3 +87,6 @@ Desktop.ini
 *.bak
 *.backup
 
+
+# Operations dashboard frontend — cloned locally for audit only, never commit
+/operations-frontend/

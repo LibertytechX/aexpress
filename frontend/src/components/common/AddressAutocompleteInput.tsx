@@ -54,8 +54,14 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
     return sessionTokenRef.current;
   };
 
-  // Initialize Google Maps services
+  // Initialize Google Maps services (Commented out to force AWS fallback)
   useEffect(() => {
+    // Force AWS fallback immediately
+    console.warn('[AC] Google Maps disabled, forcing AWS fallback');
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUseAwsFallback(true);
+
+    /*
     let timeoutId: NodeJS.Timeout;
 
     const initServices = () => {
@@ -91,6 +97,7 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
         clearTimeout(timeoutId);
       };
     }
+    */
   }, []);
 
   useEffect(() => {
@@ -396,6 +403,8 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
           <div style={{ fontSize: 11, color: '#ef4444', marginBottom: onOpenMapPicker ? 6 : 0 }}>
             {error} — you can still type it manually.
           </div>
+          {/* Pick on Map button disabled because Google Maps is commented out */}
+          {/*
           {onOpenMapPicker && (
             <button
               type="button"
@@ -415,6 +424,7 @@ export default function AddressAutocompleteInput({ value, onChange, onSelect, pl
               📍 Pick on Map
             </button>
           )}
+          */}
         </div>
       )}
     </div>
