@@ -17,16 +17,35 @@ logger = logging.getLogger(__name__)
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def upload_rider_document_to_s3_task(self, file_data, filename, doc_type):
+def finalize_rider_document_upload_task(self, document_id, file_data, filename):
     """
-    Uploads a single rider KYC document to S3 and returns the resulting URL.
+    Background task: uploads a rider KYC document to S3 and attaches the resulting
+    URL to the already-created RiderDocument record. Runs after the view has
+    already responded, so the caller never waits on this.
     file_data is base64-encoded file bytes — Celery tasks can't accept file-like objects.
     """
     from dispatcher.s3_utils import upload_document_to_s3
+    from .models import RiderDocument
+
+    try:
+        document = RiderDocument.objects.get(pk=document_id)
+    except RiderDocument.DoesNotExist:
+        logger.error(
+            f"finalize_rider_document_upload_task: document {document_id} not found"
+        )
+        return
 
     file_content = base64.b64decode(file_data)
     file_obj = io.BytesIO(file_content)
-    return upload_document_to_s3(file_obj, filename, "riders", doc_type)
+    file_url = upload_document_to_s3(file_obj, filename, "riders", document.doc_type)
+    if not file_url:
+        logger.error(
+            f"finalize_rider_document_upload_task: S3 upload failed for document {document_id}"
+        )
+        raise RuntimeError(f"S3 upload failed for document {document_id}")
+
+    document.file_url = file_url
+    document.save(update_fields=["file_url", "updated_at"])
 
 
 @shared_task

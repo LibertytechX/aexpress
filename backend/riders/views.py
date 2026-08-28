@@ -2,6 +2,7 @@ import traceback
 import traceback
 from devs.models import ErrorLog
 import asyncio
+import base64
 import logging
 from datetime import timedelta
 from django.utils import timezone
@@ -58,7 +59,7 @@ from orders.models import Order, OrderEvent
 from orders.permissions import IsRider
 from dispatcher.utils import emit_activity
 from .notifications import notify_rider
-from .tasks import upload_rider_document_to_s3_task
+from .tasks import finalize_rider_document_upload_task
 
 logger = logging.getLogger(__name__)
 
@@ -1146,30 +1147,6 @@ class RiderAssignmentActionView(APIView):
         )
 
 
-def _upload_rider_document(file_obj, doc_type):
-    """
-    Uploads a rider KYC document to S3 via a Celery task and blocks for the result.
-    Returns (file_url, error_response) — error_response is None on success.
-    """
-    import base64
-
-    file_data = base64.b64encode(file_obj.read()).decode("utf-8")
-    try:
-        file_url = upload_rider_document_to_s3_task.apply_async(
-            args=[file_data, file_obj.name, doc_type]
-        ).get(timeout=30)
-    except Exception as exc:
-        logger.error(f"RiderDocument S3 upload task failed: {exc}")
-        file_url = None
-
-    if not file_url:
-        return None, Response(
-            {"success": False, "message": "Failed to upload document. Please try again."},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-    return file_url, None
-
-
 class RiderDocumentListCreateView(APIView):
     """
     API endpoint for listing a rider's KYC documents and uploading new ones.
@@ -1238,22 +1215,26 @@ class RiderDocumentListCreateView(APIView):
             )
 
         file_obj = data["file"]
-        file_url, error = _upload_rider_document(file_obj, doc_type)
-        if error:
-            return error
+        file_data = base64.b64encode(file_obj.read()).decode("utf-8")
 
+        # Created immediately with an empty file_url — the background task fills
+        # it in once the S3 upload completes, so the view doesn't wait on it.
         document = RiderDocument.objects.create(
             rider=rider,
             doc_type=doc_type,
-            file_url=file_url,
+            file_url="",
             expires_at=data.get("expires_at"),
+        )
+
+        finalize_rider_document_upload_task.delay(
+            str(document.id), file_data, file_obj.name
         )
 
         response_serializer = RiderDocumentCreateResponseSerializer(document)
         return Response(
             {
                 "success": True,
-                "message": "Document uploaded successfully.",
+                "message": "Document received and is being uploaded. It will be available shortly.",
                 "data": response_serializer.data,
             },
             status=status.HTTP_201_CREATED,
@@ -1320,27 +1301,38 @@ class RiderDocumentDetailView(APIView):
         update_fields = []
 
         file_obj = data.get("file")
+        file_data = None
         if file_obj:
-            file_url, error = _upload_rider_document(file_obj, document.doc_type)
-            if error:
-                return error
-            document.file_url = file_url
+            file_data = base64.b64encode(file_obj.read()).decode("utf-8")
+            # Metadata resets immediately; the actual file_url update happens
+            # in the background task once the S3 upload completes.
             document.status = RiderDocument.Status.PENDING
             document.rejection_reason = ""
-            update_fields += ["file_url", "status", "rejection_reason"]
+            update_fields += ["status", "rejection_reason"]
 
         if "expires_at" in data:
             document.expires_at = data["expires_at"]
             update_fields.append("expires_at")
 
-        update_fields.append("updated_at")
-        document.save(update_fields=update_fields)
+        if update_fields:
+            update_fields.append("updated_at")
+            document.save(update_fields=update_fields)
+
+        if file_obj:
+            finalize_rider_document_upload_task.delay(
+                str(document.id), file_data, file_obj.name
+            )
 
         response_serializer = RiderDocumentUpdateResponseSerializer(document)
+        message = (
+            "Document received and is being uploaded. It will be available shortly."
+            if file_obj
+            else "Document updated successfully."
+        )
         return Response(
             {
                 "success": True,
-                "message": "Document updated successfully.",
+                "message": message,
                 "data": response_serializer.data,
             },
             status=status.HTTP_200_OK,
