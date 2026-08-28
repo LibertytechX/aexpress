@@ -6,12 +6,13 @@ Includes Google Maps integration for geocoding and route calculation.
 import hashlib
 import requests
 import boto3
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from django.conf import settings
 from django.core.cache import cache
-
+from django.utils import timezone
 
 GEOCODE_CACHE_TIMEOUT_SECONDS = 60 * 60 * 24 * 30
+PLACE_AUTOCOMPLETE_CACHE_TIMEOUT_SECONDS = 60 * 60 * 24
 
 
 def _address_with_lagos_context(address: str) -> str:
@@ -373,6 +374,206 @@ def aws_reverse_geocode(lat: float, lng: float) -> Optional[str]:
     return None
 
 
+def google_place_autocomplete(
+    query: str,
+    session_token: Optional[str] = None,
+    user: Optional[Any] = None,
+) -> List[Dict]:
+    """Get Google Places autocomplete suggestions, caching repeated queries.
+
+    Args:
+        query: Search string for place predictions.
+        session_token: Optional UUID session token for Google autocomplete billing.
+        user: Optional user or merchant making the request.
+
+    Returns:
+        List of autocomplete suggestion dictionaries.
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    print("here")
+    if not api_key:
+        return []
+
+    cleaned_query = query.strip()
+    if not cleaned_query:
+        print("Empty query")
+        return []
+
+    lower_query = cleaned_query.lower()
+    # Record autocomplete session usage hit if session_token is provided
+    if session_token:
+        try:
+            from orders.models import GoogleAutoCompleteSessionUsage
+
+            GoogleAutoCompleteSessionUsage.record_hit(
+                session_token=str(session_token),
+                user=(
+                    user if user and getattr(user, "is_authenticated", False) else None
+                ),
+            )
+        except Exception as e:
+            print(f"[Google Autocomplete] Error recording session hit: {str(e)}")
+
+    url = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+    params = {
+        "input": lower_query,
+        "components": "country:ng",
+        "key": api_key,
+    }
+    if session_token:
+        params["sessiontoken"] = str(session_token)
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        print("let's see google data: ", data)
+        if data.get("status") not in {"OK", "ZERO_RESULTS"}:
+            return []
+
+        suggestions = []
+        for prediction in data.get("predictions", []):
+            suggestions.append(
+                {
+                    "place_id": f"google:{prediction.get('place_id', '')}",
+                    "description": prediction.get("description", ""),
+                    "is_google": True,
+                    "structured_formatting": prediction.get(
+                        "structured_formatting", {}
+                    ),
+                }
+            )
+
+        return suggestions
+    except Exception as e:
+        print(f"[Google Autocomplete] Error: {str(e)}")
+        return []
+
+
+def google_place_details(
+    place_id: str, session_token: Optional[str] = None
+) -> Optional[Dict]:
+    """Retrieve Google Place details for a Google autocomplete place ID.
+
+    Checks the database first for previously recorded places with this place_id.
+    If not found, queries the Google Places Details API and caches the result in the database.
+
+    Args:
+        place_id: The Google Place ID.
+        session_token: Optional UUID session token to resolve.
+
+    Returns:
+        Dictionary containing formatted_address, lat, and lng, or None.
+    """
+    # 1. Check if place is already recorded in our database
+    try:
+        from orders.models import GooglePlace, GoogleAutoCompleteSessionUsage
+
+        cached_place = GooglePlace.objects.filter(place_id=place_id).first()
+        if cached_place:
+            if session_token:
+                try:
+                    session_usage = GoogleAutoCompleteSessionUsage.objects.filter(
+                        session_token=str(session_token)
+                    ).first()
+                    if session_usage:
+                        session_usage.mark_resolved(place_id=place_id)
+                    else:
+                        GoogleAutoCompleteSessionUsage.objects.create(
+                            session_token=str(session_token),
+                            status=GoogleAutoCompleteSessionUsage.Status.RESOLVED,
+                            place_id=place_id,
+                            resolved_at=timezone.now(),
+                        )
+                except Exception as err:
+                    print(
+                        f"[Google Details] Error recording session resolution: {str(err)}"
+                    )
+
+            return {
+                "formatted_address": cached_place.formatted_address,
+                "lat": float(cached_place.lat),
+                "lng": float(cached_place.lng),
+            }
+    except Exception as e:
+        print(f"[Google Details] Error querying cached place from database: {str(e)}")
+
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if not api_key:
+        return None
+
+    params = {
+        "place_id": place_id,
+        "fields": "formatted_address,geometry",
+        "key": api_key,
+    }
+    if session_token:
+        params["sessiontoken"] = str(session_token)
+
+    try:
+        response = requests.get(
+            "https://maps.googleapis.com/maps/api/place/details/json",
+            params=params,
+            timeout=5,
+        )
+        response.raise_for_status()
+        data = response.json()
+        result = data.get("result", {})
+        location = result.get("geometry", {}).get("location", {})
+        if data.get("status") == "OK" and all(
+            (
+                result.get("formatted_address"),
+                location.get("lat") is not None,
+                location.get("lng") is not None,
+            )
+        ):
+            # Save the resolved place to the database for future lookups
+            try:
+                from orders.models import GooglePlace
+
+                GooglePlace.objects.update_or_create(
+                    place_id=place_id,
+                    defaults={
+                        "formatted_address": result["formatted_address"],
+                        "lat": location["lat"],
+                        "lng": location["lng"],
+                    },
+                )
+            except Exception as e:
+                print(f"[Google Details] Error saving place to database: {str(e)}")
+
+            # Mark the session usage as RESOLVED
+            if session_token:
+                try:
+                    from orders.models import GoogleAutoCompleteSessionUsage
+
+                    session_usage = GoogleAutoCompleteSessionUsage.objects.filter(
+                        session_token=str(session_token)
+                    ).first()
+                    if session_usage:
+                        session_usage.mark_resolved(place_id=place_id)
+                    else:
+                        GoogleAutoCompleteSessionUsage.objects.create(
+                            session_token=str(session_token),
+                            status=GoogleAutoCompleteSessionUsage.Status.RESOLVED,
+                            place_id=place_id,
+                            resolved_at=timezone.now(),
+                        )
+                except Exception as e:
+                    print(
+                        f"[Google Details] Error recording session resolution: {str(e)}"
+                    )
+
+            return {
+                "formatted_address": result["formatted_address"],
+                "lat": location["lat"],
+                "lng": location["lng"],
+            }
+    except Exception as e:
+        print(f"[Google Details] Error: {str(e)}")
+    return None
+
+
 def geoapify_place_autocomplete(query: str) -> List[Dict]:
     """Get location autocomplete suggestions from Geoapify."""
     api_key = getattr(settings, "GEOAPIFY_API_KEY", "")
@@ -589,7 +790,9 @@ def mapbox_place_autocomplete(
             mapbox_id = properties.get("mapbox_id") or feature.get("id", "")
             name = properties.get("name", "")
             place_formatted = properties.get("place_formatted", "")
-            full_address = properties.get("full_address") or f"{name}, {place_formatted}"
+            full_address = (
+                properties.get("full_address") or f"{name}, {place_formatted}"
+            )
 
             geometry = feature.get("geometry", {})
             coordinates = geometry.get("coordinates", [])
@@ -666,4 +869,35 @@ def mapbox_place_details(
         return None
     except Exception as e:
         print(f"[Mapbox Details] Error: {str(e)}")
+        return None
+
+
+def mapbox_reverse_geocode(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates using the Mapbox Geocoding v6 API."""
+    api_key: str = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+    if not api_key:
+        return None
+
+    url = "https://api.mapbox.com/search/geocode/v6/reverse"
+    params = {
+        "longitude": lng,
+        "latitude": lat,
+        "access_token": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        features = response.json().get("features", [])
+        if not features:
+            return None
+
+        properties = features[0].get("properties", {})
+        return (
+            properties.get("full_address")
+            or properties.get("place_formatted")
+            or properties.get("name")
+        )
+    except Exception as e:
+        print(f"[Mapbox Reverse Geocode] Error: {str(e)}")
         return None

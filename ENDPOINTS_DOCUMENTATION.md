@@ -1189,27 +1189,27 @@ Response:
 
 ---
 
-## Places API (Geoapify / Mapbox / AWS Fallback)
+## Places API (Google Places / Fallbacks & Session Usage Tracking)
 
 ### 1. Places Autocomplete
 ```
 GET /api/orders/places/autocomplete/
-Description: Retrieves location autocomplete suggestions using a fallback chain: Geoapify -> Mapbox -> AWS Location Service.
+Description: Retrieves location autocomplete suggestions using Google Places API (with fallback chain: Geoapify -> Mapbox -> AWS Location Service). Automatically records session token usage in GoogleAutoCompleteSessionUsage (status: IN_PROGRESS, price per session: $0.005).
 Authentication: Required (Merchant)
 Query Parameters:
   - q (required): The partial query text to search for.
-  - session_token (optional): A UUID string to group suggestions and details retrieve requests for Mapbox billing.
+  - session_token (optional): A UUID string to group suggestions and details retrieve requests for Google / Mapbox session billing.
 Response:
   {
     "status": "success",
-    "message": "Autocomplete suggestions retrieved successfully From Mapbox",
+    "message": "Autocomplete suggestions retrieved successfully From Google",
     "data": [
       {
-        "place_id": "mapbox:dXJuOm1ieHB...",
+        "place_id": "google:ChIJb_google_place_id",
         "description": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
-        "is_mapbox": true,
+        "is_google": true,
         "structured_formatting": {
-          "main_text": "Kunle Ogunba St",
+          "main_text": "15a Kunle Ogunba St",
           "secondary_text": "Lekki, Lagos, Nigeria"
         }
       }
@@ -1223,10 +1223,10 @@ Response:
 ### 2. Place Details
 ```
 GET /api/orders/places/details/
-Description: Retrieves details (formatted address and coordinates) for a given PlaceId (supports geoapify:, mapbox:, or aws: prefixes, or fallback).
+Description: Retrieves details (formatted address and coordinates) for a given PlaceId (supports google:, geoapify:, mapbox:, or aws: prefixes). When called with session_token for a Google place, marks the GoogleAutoCompleteSessionUsage as RESOLVED with the resolved place_id and timestamp.
 Authentication: Required (Merchant)
 Query Parameters:
-  - place_id (required): The PlaceId returned by the autocomplete suggestion.
+  - place_id (required): The PlaceId returned by the autocomplete suggestion (e.g. google:ChIJ...).
   - session_token (optional): A UUID string matching the autocomplete session_token.
 Response:
   {

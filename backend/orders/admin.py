@@ -23,6 +23,8 @@ from .models import (
     MerchantPriceList,
     MerchantPriceListItem,
     OrderEvent,
+    GoogleAutoCompleteSessionUsage,
+    GooglePlace,
 )
 
 logger = logging.getLogger(__name__)
@@ -596,3 +598,44 @@ class OrderEventAdmin(admin.ModelAdmin):
     readonly_fields = ["created_at"]
     ordering = ["-created_at"]
 
+
+@admin.register(GoogleAutoCompleteSessionUsage)
+class GoogleAutoCompleteSessionUsageAdmin(admin.ModelAdmin):
+    """Admin configuration for GoogleAutoCompleteSessionUsage model."""
+
+    list_display = [
+        "session_token",
+        "user",
+        "status",
+        "price_per_session",
+        "request_count",
+        "place_id",
+        "resolved_at",
+        "created_at",
+    ]
+    list_filter = ["status", "created_at", "resolved_at"]
+    search_fields = [
+        "session_token",
+        "place_id",
+        "user__phone",
+        "user__email",
+    ]
+    raw_id_fields = ["user"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+
+@admin.register(GooglePlace)
+class GooglePlaceAdmin(admin.ModelAdmin):
+    """Admin configuration for GooglePlace model."""
+
+    list_display = [
+        "place_id",
+        "formatted_address",
+        "lat",
+        "lng",
+        "created_at",
+    ]
+    search_fields = ["place_id", "formatted_address"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["-created_at"]

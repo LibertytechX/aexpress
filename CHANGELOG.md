@@ -1,5 +1,45 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-08-27] — Standardized Testing Framework & Tests Folder Organization (Unit & Integration)
+
+### Backend & Tooling
+#### Added
+- **Standardized Tests Directory Layout (`<app>/tests/unit/` & `<app>/tests/integration/`)**:
+  - Restructured all tests across apps (`orders`, `riders`, `dispatcher`, `wallet`, `oprtn_dashboard`, `operations`, `subscriptions`, `authentication`, etc.) into dedicated `tests/unit/` and `tests/integration/` suites.
+  - Added `__init__.py` package files across all test directories.
+  - Cleaned up root loose test scripts, moving them to `scratch/`.
+- **Standardized Test Runner Script (`backend/run_tests.sh`)**:
+  - Script for automated test execution that auto-detects active virtual environments (`venv` or `.venv`) and runs `pytest` with coverage reporting (`--cov=. --cov-report=xml --cov-report=term-missing`).
+- **Coverage Configuration (`backend/.coveragerc`)**:
+  - Configured test coverage rules, omitting migrations, tests, management commands, factories, wsgi/asgi entry points, scripts, and utilities.
+- **Pytest Configuration Alignment (`backend/pytest.ini`)**:
+  - Enhanced pytest discovery for all apps (`authentication`, `ax_merchant_api`, `bot`, `chats`, `crons`, `devs`, `dispatcher`, `operations`, `oprtn_dashboard`, `orders`, `referrals`, `riders`, `subscriptions`, `wallet`, `webhooks`, `whatsapp_messaging`), updated class/function patterns, ignored dirs, warning filters, markers, and coverage defaults.
+- **Global Test Fixtures (`backend/conftest.py`)**:
+  - Added `override_static_storage` fixture (autouse) preventing missing static file/manifest errors during testing.
+  - Added `authenticated_client` fixture alongside `auth_client` with type hinting and Google-style docstrings.
+- **Unified Makefiles**:
+  - Added root `Makefile` and updated `backend/Makefile` with complete suite targets (`make test`, `make test-fast`, `make test-cov`, `make test-unit`, `make test-integration`, `make test-api`, `make test-isolate`, `make migrations`, `make migrate`).
+
+---
+
+# [2026-08-26] — Google Places Autocomplete Session Usage Tracking & Place Details DB Caching
+
+### Backend
+#### Added
+- **Google Autocomplete Session Usage Tracking**:
+  - Model `GoogleAutoCompleteSessionUsage` (`orders/models.py`) to record session usage, pricing at $0.005 per session, query hits count, place resolution, and status lifecycle (`IN_PROGRESS`, `RESOLVED`, `EXPIRED`).
+  - Recorded session token hits in `google_place_autocomplete` and session resolution in `google_place_details` (`orders/utils.py`).
+  - Registered `GoogleAutoCompleteSessionUsageAdmin` in Django Admin (`orders/admin.py`) with filters, search, and raw ID fields.
+  - Added migration `orders/migrations/0015_googleautocompletesessionusage.py`.
+- **Google Place Details Database Caching (`GooglePlace`)**:
+  - Model `GooglePlace` (`orders/models.py`) to cache seen place details by `place_id`, saving `formatted_address`, `lat`, and `lng`.
+  - Updated `google_place_details` (`orders/utils.py`) to check `GooglePlace` in the database first, avoiding external Google Places API requests for previously seen places while still maintaining session resolution.
+  - Registered `GooglePlaceAdmin` in Django Admin (`orders/admin.py`).
+  - Added migration `orders/migrations/0016_googleplace_and_more.py`.
+  - Added comprehensive unit and E2E caching tests in `orders/test_google_autocomplete_session_usage.py`.
+
+---
+
 # [2026-08-07] — Multi/Bulk Drop Fare Price Guardrail
 
 ### Backend

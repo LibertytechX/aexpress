@@ -218,7 +218,9 @@ def handle_order_completion_tasks(order_id):
 SENDER_EMAIL = "assuredxpressng@gmail.com"
 
 
-def _send_marketing_email(merchant, template_code, subject, context=None, skip_daily_check=False):
+def _send_marketing_email(
+    merchant, template_code, subject, context=None, skip_daily_check=False
+):
     """Helper to render and send marketing emails, logging to prevent duplicates."""
 
     # Check if already sent for the date
@@ -227,7 +229,9 @@ def _send_marketing_email(merchant, template_code, subject, context=None, skip_d
         if MerchantEmailLog.objects.filter(
             merchant=merchant, template_code=template_code, sent_at__date=today
         ).exists():
-            logger.info(f"Skipping {template_code} for {merchant.phone} - already sent.")
+            logger.info(
+                f"Skipping {template_code} for {merchant.phone} - already sent."
+            )
             return False
 
     context = context or {}
@@ -248,14 +252,11 @@ def _send_marketing_email(merchant, template_code, subject, context=None, skip_d
     )
 
     if success:
-        MerchantEmailLog.objects.create(
-            merchant=merchant, template_code=template_code
-        )
+        MerchantEmailLog.objects.create(merchant=merchant, template_code=template_code)
         logger.info(
             f"Successfully sent {template_code} via fallback utility to {merchant.email}"
         )
     return success
-
 
 
 @shared_task
@@ -272,8 +273,6 @@ def process_daily_drip_campaigns():
     for merchant in merchants:
         days_since_signup = (now - merchant.created_at).days
 
-        # --- CATEGORY A: Onboarding ---
-
         # A2: Incomplete Signup (Day 1, missing verification)
         if days_since_signup == 1 and not (
             merchant.email_verified and merchant.phone_verified
@@ -287,14 +286,11 @@ def process_daily_drip_campaigns():
         if not (merchant.email_verified and merchant.phone_verified):
             continue
 
-        # --- CATEGORY C1: Why Assured Express ---
         # C1: Day 1 after Welcome (Day 1)
         if days_since_signup == 1:
             _send_marketing_email(
                 merchant, "C1", "The Merchant, and how delivery changed everything"
             )
-
-        # --- CATEGORY B: Activation & Re-engagement ---
 
         # B1: First Delivery Nudge (Day 3)
         if days_since_signup == 3 and merchant.order_count == 0:
@@ -327,8 +323,6 @@ def process_daily_drip_campaigns():
                 "B2c",
                 f"{merchant.first_name or merchant.contact_name or 'Merchant'} — your account is ready when you are",
             )
-
-        # --- CATEGORY C2 & D: Education and Coming Soon ---
 
         # C2: Delivery = Brand Trust (Day 20)
         if days_since_signup == 20:
@@ -571,7 +565,9 @@ def send_new_order_dispatcher_email_task(order_id: str) -> bool:
         order = Order.objects.get(id=order_id)
         dispatchers = User.objects.filter(usertype="Dispatcher", is_active=True)
         if not dispatchers.exists():
-            logger.info("No active dispatchers found. Skipping dispatcher notification email.")
+            logger.info(
+                "No active dispatchers found. Skipping dispatcher notification email."
+            )
             return False
 
         deliveries = order.deliveries.all()
@@ -580,7 +576,9 @@ def send_new_order_dispatcher_email_task(order_id: str) -> bool:
             "deliveries": deliveries,
         }
 
-        html_message = render_to_string("emails/marketing/new_order_dispatcher.html", context)
+        html_message = render_to_string(
+            "emails/marketing/new_order_dispatcher.html", context
+        )
         text_message = (
             f"Hello,\n\n"
             f"A new order #{order.order_number} has been created.\n\n"
@@ -606,17 +604,22 @@ def send_new_order_dispatcher_email_task(order_id: str) -> bool:
                 from_email=from_email,
             )
             if email_sent:
-                logger.info(f"New order notification email sent to dispatcher {recipient}")
+                logger.info(
+                    f"New order notification email sent to dispatcher {recipient}"
+                )
             else:
-                logger.error(f"Failed to send new order notification email to dispatcher {recipient}")
+                logger.error(
+                    f"Failed to send new order notification email to dispatcher {recipient}"
+                )
                 success = False
 
         return success
 
     except Order.DoesNotExist:
-        logger.error(f"send_new_order_dispatcher_email_task: Order {order_id} not found.")
+        logger.error(
+            f"send_new_order_dispatcher_email_task: Order {order_id} not found."
+        )
         return False
     except Exception as e:
         logger.exception(f"Error in send_new_order_dispatcher_email_task: {e}")
         return False
-
