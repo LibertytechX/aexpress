@@ -21,6 +21,8 @@ from .views import (
     RiderNotificationMarkReadView,
     GenerateCODAccountView,
     RiderAssignmentActionView,
+    RiderDocumentListCreateView,
+    RiderDocumentDetailView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -97,6 +99,16 @@ urlpatterns = [
         "cod/<str:order_id>/generate-account/",
         GenerateCODAccountView.as_view(),
         name="rider-cod-generate-account",
+    ),
+    path(
+        "documents/",
+        RiderDocumentListCreateView.as_view(),
+        name="rider-document-list-create",
+    ),
+    path(
+        "documents/<uuid:pk>/",
+        RiderDocumentDetailView.as_view(),
+        name="rider-document-detail",
     ),
     # ── Gamification ─────────────────────────────────────────────────────────
     path("ride-to-own/", RideToOwnView.as_view(), name="rider-ride-to-own"),

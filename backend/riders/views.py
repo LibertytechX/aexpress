@@ -2,12 +2,14 @@ import traceback
 import traceback
 from devs.models import ErrorLog
 import asyncio
+import base64
 import logging
 from datetime import timedelta
 from django.utils import timezone
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db.models import Q
@@ -33,6 +35,12 @@ from .serializers import (
     RiderTransactionSerializer,
     RiderLocationSerializer,
     RiderNotificationSerializer,
+    RiderDocumentListSerializer,
+    RiderDocumentDetailSerializer,
+    RiderDocumentCreateSerializer,
+    RiderDocumentCreateResponseSerializer,
+    RiderDocumentUpdateSerializer,
+    RiderDocumentUpdateResponseSerializer,
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
@@ -43,6 +51,7 @@ from .models import (
     RiderCodRecord,
     RiderLocation,
     RiderNotification,
+    RiderDocument,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -50,6 +59,7 @@ from orders.models import Order, OrderEvent
 from orders.permissions import IsRider
 from dispatcher.utils import emit_activity
 from .notifications import notify_rider
+from .tasks import finalize_rider_document_upload_task
 
 logger = logging.getLogger(__name__)
 
@@ -1134,4 +1144,213 @@ class RiderAssignmentActionView(APIView):
             message=f"Assignment {action}ed successfully.",
             data={"order_number": order.order_number, "status": order.status},
             status_code=200,
+        )
+
+
+class RiderDocumentListCreateView(APIView):
+    """
+    API endpoint for listing a rider's KYC documents and uploading new ones.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        documents = RiderDocument.objects.filter(rider=rider)
+
+        doc_type = request.query_params.get("doc_type")
+        if doc_type:
+            documents = documents.filter(doc_type=doc_type)
+
+        doc_status = request.query_params.get("status")
+        if doc_status:
+            documents = documents.filter(status=doc_status)
+
+        serializer = RiderDocumentListSerializer(documents, many=True)
+        return Response(
+            {"success": True, "message": "", "data": serializer.data},
+            status=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderDocumentCreateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "message": "Invalid input.", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+        doc_type = data["doc_type"]
+
+        if RiderDocument.objects.filter(
+            rider=rider,
+            doc_type=doc_type,
+            status__in=[RiderDocument.Status.PENDING, RiderDocument.Status.APPROVED],
+        ).exists():
+            return Response(
+                {
+                    "success": False,
+                    "message": (
+                        f"A {doc_type} document is already pending review or approved. "
+                        "Update the existing document instead of creating a new one."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        file_obj = data["file"]
+        file_data = base64.b64encode(file_obj.read()).decode("utf-8")
+
+        # Created immediately with an empty file_url — the background task fills
+        # it in once the S3 upload completes, so the view doesn't wait on it.
+        document = RiderDocument.objects.create(
+            rider=rider,
+            doc_type=doc_type,
+            file_url="",
+            expires_at=data.get("expires_at"),
+        )
+
+        finalize_rider_document_upload_task.delay(
+            str(document.id), file_data, file_obj.name
+        )
+
+        response_serializer = RiderDocumentCreateResponseSerializer(document)
+        return Response(
+            {
+                "success": True,
+                "message": "Document received and is being uploaded. It will be available shortly.",
+                "data": response_serializer.data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class RiderDocumentDetailView(APIView):
+    """
+    API endpoint for retrieving, updating, or deleting a single rider KYC document.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+    parser_classes = [MultiPartParser, FormParser]
+
+    def _get_document(self, request, pk):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return None, Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            document = RiderDocument.objects.get(pk=pk, rider=rider)
+        except RiderDocument.DoesNotExist:
+            return None, Response(
+                {"success": False, "message": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return document, None
+
+    def get(self, request, pk):
+        document, error = self._get_document(request, pk)
+        if error:
+            return error
+
+        serializer = RiderDocumentDetailSerializer(document)
+        return Response(
+            {"success": True, "message": "", "data": serializer.data},
+            status=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def patch(self, request, pk):
+        document, error = self._get_document(request, pk)
+        if error:
+            return error
+
+        if document.status == RiderDocument.Status.APPROVED:
+            return Response(
+                {"success": False, "message": "Approved documents cannot be modified."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RiderDocumentUpdateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "message": "Invalid input.", "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = serializer.validated_data
+        update_fields = []
+
+        file_obj = data.get("file")
+        file_data = None
+        if file_obj:
+            file_data = base64.b64encode(file_obj.read()).decode("utf-8")
+            # Metadata resets immediately; the actual file_url update happens
+            # in the background task once the S3 upload completes.
+            document.status = RiderDocument.Status.PENDING
+            document.rejection_reason = ""
+            update_fields += ["status", "rejection_reason"]
+
+        if "expires_at" in data:
+            document.expires_at = data["expires_at"]
+            update_fields.append("expires_at")
+
+        if update_fields:
+            update_fields.append("updated_at")
+            document.save(update_fields=update_fields)
+
+        if file_obj:
+            finalize_rider_document_upload_task.delay(
+                str(document.id), file_data, file_obj.name
+            )
+
+        response_serializer = RiderDocumentUpdateResponseSerializer(document)
+        message = (
+            "Document received and is being uploaded. It will be available shortly."
+            if file_obj
+            else "Document updated successfully."
+        )
+        return Response(
+            {
+                "success": True,
+                "message": message,
+                "data": response_serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    def delete(self, request, pk):
+        document, error = self._get_document(request, pk)
+        if error:
+            return error
+
+        if document.status == RiderDocument.Status.APPROVED:
+            return Response(
+                {"success": False, "message": "Approved documents cannot be deleted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        document.delete()
+        return Response(
+            {"success": True, "message": "Document deleted successfully.", "data": None},
+            status=status.HTTP_200_OK,
         )
