@@ -552,7 +552,7 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
 ### 2. Place Details
 **Endpoint:** `GET /details/`  
 **Authentication:** Required (Merchant Token or API Key)  
-**Description:** Retrieve the detailed formatted address and coordinates for a given PlaceId (supports `google:`, `geoapify:`, `mapbox:`, or `aws:` prefixes). For Google places, it checks the database (`GooglePlace` model) first and returns cached details directly to prevent unnecessary external API calls. If not found in DB, it fetches details from Google Places Details API and caches the record. When called with session_token, it also marks `GoogleAutoCompleteSessionUsage` as RESOLVED.
+**Description:** Retrieve the detailed formatted address and coordinates for a given PlaceId (supports `google:`, `geoapify:`, `mapbox:`, or `aws:` prefixes). When called with session_token for a Google place, marks the GoogleAutoCompleteSessionUsage as RESOLVED with the resolved place_id and timestamp.
 
 **Query Parameters:**
 - `place_id` (required): The PlaceId returned by the autocomplete suggestion (e.g. `google:ChIJ...`).

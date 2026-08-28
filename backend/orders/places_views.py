@@ -73,7 +73,11 @@ class PlacesAutocompleteView(APIView):
                 suggestions = google_place_autocomplete(
                     query,
                     session_token=session_token,
-                    user=request.user if request.user and request.user.is_authenticated else None,
+                    user=(
+                        request.user
+                        if request.user and request.user.is_authenticated
+                        else None
+                    ),
                 )
                 print("check google suggestions!: ", suggestions)
                 if suggestions:
@@ -277,18 +281,26 @@ class ReverseGeocodeView(APIView):
                 status_code=400,
             )
 
+        address = None
         mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
         if mapbox_token:
-            address = mapbox_reverse_geocode(lat, lng)
+            try:
+                address = mapbox_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
 
         geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
         if not address and geoapify_key:
-            address = geoapify_reverse_geocode(lat, lng)
-        else:
-            address = None
+            try:
+                address = geoapify_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
 
         if not address:
-            address = aws_reverse_geocode(lat, lng)
+            try:
+                address = aws_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
 
         if not address:
             return service_response(
