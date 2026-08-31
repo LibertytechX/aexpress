@@ -65,9 +65,7 @@ class GoogleReverseGeocodeTests(SimpleTestCase):
         mock_response.json.return_value = {
             "status": "OK",
             "results": [
-                {
-                    "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"
-                }
+                {"formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria"}
             ],
         }
         mock_get.return_value = mock_response
@@ -116,4 +114,3 @@ class GoogleReverseGeocodeTests(SimpleTestCase):
         with self.settings(GOOGLE_MAPS_API_KEY=""):
             address = google_reverse_geocode(6.45, 3.456)
             self.assertIsNone(address)
-
