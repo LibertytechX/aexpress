@@ -574,6 +574,39 @@ def google_place_details(
     return None
 
 
+def google_reverse_geocode(lat: float, lng: float) -> Optional[str]:
+    """Reverse geocode coordinates using Google Maps Geocoding API.
+
+    Args:
+        lat: Latitude coordinate.
+        lng: Longitude coordinate.
+
+    Returns:
+        Formatted address string or None if geocoding fails.
+    """
+    api_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+    if not api_key:
+        return None
+
+    url = "https://maps.googleapis.com/maps/api/geocode/json"
+    params = {
+        "latlng": f"{lat},{lng}",
+        "key": api_key,
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("status") == "OK" and data.get("results"):
+            return data["results"][0].get("formatted_address")
+        return None
+    except Exception as e:
+        print(f"[Google Reverse Geocode] Error: {str(e)}")
+        return None
+
+
 def geoapify_place_autocomplete(query: str) -> List[Dict]:
     """Get location autocomplete suggestions from Geoapify."""
     api_key = getattr(settings, "GEOAPIFY_API_KEY", "")

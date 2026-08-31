@@ -13,6 +13,7 @@ from django.conf import settings
 from orders.utils import (
     google_place_autocomplete,
     google_place_details,
+    google_reverse_geocode,
     aws_place_autocomplete,
     aws_place_details,
     aws_reverse_geocode,
@@ -25,7 +26,6 @@ from orders.utils import (
     mapbox_place_details,
     mapbox_reverse_geocode,
 )
-import uuid
 
 
 class PlacesAutocompleteView(APIView):
@@ -282,8 +282,15 @@ class ReverseGeocodeView(APIView):
             )
 
         address = None
+        google_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+        if google_key:
+            try:
+                address = google_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
+
         mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
-        if mapbox_token:
+        if not address and mapbox_token:
             try:
                 address = mapbox_reverse_geocode(lat, lng)
             except Exception:
