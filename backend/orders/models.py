@@ -1,5 +1,7 @@
+from decimal import Decimal
 import random
 import string
+from typing import Optional
 import uuid
 from django.db import models
 from django.utils import timezone
@@ -759,3 +761,170 @@ class MerchantPriceListItem(models.Model):
 
     def __str__(self):
         return f"{self.label}: {self.min_km}-{self.max_km}km = ₦{self.fixed_fee}"
+
+
+class GoogleAutoCompleteSessionUsage(models.Model):
+    """Tracks Google Places Autocomplete session usage and billing lifecycle."""
+
+    class Status(models.TextChoices):
+        IN_PROGRESS = "IN_PROGRESS", "In Progress"
+        RESOLVED = "RESOLVED", "Resolved"
+        EXPIRED = "EXPIRED", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session_token = models.CharField(
+        max_length=500,
+        unique=True,
+        db_index=True,
+        help_text="Unique session token for the autocomplete session",
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="google_autocomplete_session_usages",
+        help_text="User or merchant associated with this session",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.IN_PROGRESS,
+        db_index=True,
+        help_text="Session status: IN_PROGRESS, RESOLVED, or EXPIRED",
+    )
+    price_per_session = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        default=Decimal("0.0050"),
+        help_text="Cost per autocomplete session in USD ($0.005)",
+    )
+    request_count = models.PositiveIntegerField(
+        default=1,
+        help_text="Number of autocomplete query hits within this session",
+    )
+    place_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        help_text="Google Place ID resolved for this session",
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when place details was resolved",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "google_autocomplete_session_usages"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"GoogleAutoCompleteSession {self.session_token} [{self.status}] - hits: {self.request_count}"
+
+    def mark_resolved(self, place_id: str) -> None:
+        """Mark session as resolved with the selected place ID.
+
+        Args:
+            place_id: The Google Place ID returned upon place selection.
+        """
+        self.status = self.Status.RESOLVED
+        self.place_id = place_id
+        self.resolved_at = timezone.now()
+        self.save(update_fields=["status", "place_id", "resolved_at", "updated_at"])
+
+    def mark_expired(self) -> None:
+        """Mark session as expired."""
+        self.status = self.Status.EXPIRED
+        self.save(update_fields=["status", "updated_at"])
+
+    @classmethod
+    def record_hit(
+        cls, session_token: str, user: Optional[User] = None
+    ) -> Optional["GoogleAutoCompleteSessionUsage"]:
+        """Record an autocomplete hit for a session token.
+
+        Creates a new session usage if it does not exist, or increments request_count
+        if an in-progress session exists.
+
+        Args:
+            session_token: The unique UUID session token.
+            user: Optional authenticated User/Merchant initiating the autocomplete.
+
+        Returns:
+            The created or updated GoogleAutoCompleteSessionUsage instance, or None.
+        """
+        if not session_token:
+            return None
+
+        usage = cls.objects.filter(session_token=session_token).first()
+        if usage:
+            if usage.status == cls.Status.IN_PROGRESS:
+                usage.request_count = models.F("request_count") + 1
+                if user and not usage.user:
+                    usage.user = user
+                    usage.save(update_fields=["request_count", "user", "updated_at"])
+                else:
+                    usage.save(update_fields=["request_count", "updated_at"])
+                usage.refresh_from_db(fields=["request_count", "user"])
+            return usage
+
+        return cls.objects.create(
+            session_token=session_token,
+            user=user,
+            status=cls.Status.IN_PROGRESS,
+            price_per_session=Decimal("0.0050"),
+            request_count=1,
+        )
+
+    @classmethod
+    def expire_stale_sessions(cls, older_than_minutes: int = 30) -> int:
+        """Mark sessions that have remained IN_PROGRESS longer than threshold as EXPIRED.
+
+        Args:
+            older_than_minutes: Threshold in minutes after which in-progress sessions expire.
+
+        Returns:
+            Number of sessions marked as EXPIRED.
+        """
+        cutoff = timezone.now() - timezone.timedelta(minutes=older_than_minutes)
+        return cls.objects.filter(
+            status=cls.Status.IN_PROGRESS,
+            created_at__lte=cutoff,
+        ).update(status=cls.Status.EXPIRED, updated_at=timezone.now())
+
+
+class GooglePlace(models.Model):
+    """Stores previously resolved Google Place details to minimize external API requests."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    place_id = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text="Google Place ID",
+    )
+    formatted_address = models.TextField(
+        help_text="Formatted address string returned from Google",
+    )
+    lat = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        help_text="Latitude coordinate",
+    )
+    lng = models.DecimalField(
+        max_digits=10,
+        decimal_places=7,
+        help_text="Longitude coordinate",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "google_places"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.formatted_address} ({self.place_id})"

@@ -1,0 +1,29 @@
+[run]
+omit =
+    */migrations/*
+    */tests/*
+    */test_*.py
+    */management/*
+    conftest.py
+    manage.py
+    ax_merchant_api/wsgi.py
+    ax_merchant_api/asgi.py
+    */factories.py
+    */factories/*
+    test_utils/*
+    scratch/*
+    deploy/*
+    backfill_*.py
+    create_superuser.py
+    credit_wallet.py
+    verify_*.py
+    check_*.py
+
+[report]
+fail_under = 80
+exclude_lines =
+    pragma: no cover
+    if TYPE_CHECKING:
+    def __repr__
+    raise NotImplementedError
+

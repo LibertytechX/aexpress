@@ -11,6 +11,9 @@ from sparky_utils.advice import exception_advice
 from sparky_utils.response import service_response
 from django.conf import settings
 from orders.utils import (
+    google_place_autocomplete,
+    google_place_details,
+    google_reverse_geocode,
     aws_place_autocomplete,
     aws_place_details,
     aws_reverse_geocode,
@@ -21,11 +24,12 @@ from orders.utils import (
     geoapify_geocode_address,
     mapbox_place_autocomplete,
     mapbox_place_details,
+    mapbox_reverse_geocode,
 )
 
 
 class PlacesAutocompleteView(APIView):
-    """API endpoint to get place suggestions using AWS Location or Geoapify.
+    """API endpoint to get place suggestions using Google or fallback providers.
 
     GET /api/orders/places/autocomplete/?q=...
     """
@@ -57,7 +61,36 @@ class PlacesAutocompleteView(APIView):
                 status_code=400,
             )
 
-        # 1. Geoapify autocomplete first
+        # 1. Google autocomplete first; repeated queries are served from cache.
+        google_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+        print("ley's see the google api key: ", google_key)
+        if google_key:
+            try:
+                session_token = request.query_params.get("session_token", "")
+                if not session_token:
+                    # generate one with uuid
+                    session_token = uuid.uuid4()
+                suggestions = google_place_autocomplete(
+                    query,
+                    session_token=session_token,
+                    user=(
+                        request.user
+                        if request.user and request.user.is_authenticated
+                        else None
+                    ),
+                )
+                print("check google suggestions!: ", suggestions)
+                if suggestions:
+                    return service_response(
+                        status="success",
+                        message="Autocomplete suggestions retrieved successfully From Google",
+                        data=suggestions,
+                        status_code=200,
+                    )
+            except Exception as e:
+                print(f"[PlacesAutocompleteView] Google error: {str(e)}")
+
+        # 2. Geoapify autocomplete fallback
         geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
         if geoapify_key:
             try:
@@ -72,7 +105,7 @@ class PlacesAutocompleteView(APIView):
             except Exception as e:
                 print(f"[PlacesAutocompleteView] Geoapify error: {str(e)}")
 
-        # 2. Mapbox autocomplete fallback
+        # 3. Mapbox autocomplete fallback
         mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
         if mapbox_token:
             try:
@@ -90,7 +123,7 @@ class PlacesAutocompleteView(APIView):
             except Exception as e:
                 print(f"[PlacesAutocompleteView] Mapbox error: {str(e)}")
 
-        # 3. AWS Location Service fallback
+        # 4. AWS Location Service fallback
         try:
             suggestions = aws_place_autocomplete(query)
             for s in suggestions:
@@ -149,7 +182,10 @@ class PlaceDetailsView(APIView):
 
         session_token = request.query_params.get("session_token", "")
 
-        if place_id.startswith("geoapify:"):
+        if place_id.startswith("google:"):
+            real_id = place_id.split(":", 1)[1]
+            details = google_place_details(real_id, session_token=session_token)
+        elif place_id.startswith("geoapify:"):
             real_id = place_id.split(":", 1)[1]
             details = geoapify_place_details(real_id)
         elif place_id.startswith("mapbox:"):
@@ -245,14 +281,33 @@ class ReverseGeocodeView(APIView):
                 status_code=400,
             )
 
+        address = None
+        google_key = getattr(settings, "GOOGLE_MAPS_API_KEY", "")
+        if google_key:
+            try:
+                address = google_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
+
+        mapbox_token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+        if not address and mapbox_token:
+            try:
+                address = mapbox_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
+
         geoapify_key = getattr(settings, "GEOAPIFY_API_KEY", "")
-        if geoapify_key:
-            address = geoapify_reverse_geocode(lat, lng)
-        else:
-            address = None
+        if not address and geoapify_key:
+            try:
+                address = geoapify_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
 
         if not address:
-            address = aws_reverse_geocode(lat, lng)
+            try:
+                address = aws_reverse_geocode(lat, lng)
+            except Exception:
+                address = None
 
         if not address:
             return service_response(
