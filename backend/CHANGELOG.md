@@ -4,6 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-08-28] — Google Reverse Geocoding Integration
+
+### Added
+- **Google Reverse Geocoding Helper**: Added `google_reverse_geocode` in `orders/utils.py` using Google Maps Geocoding API (`/maps/api/geocode/json` with `latlng`).
+- **Reverse Geocode Multi-Provider Fallback**: Updated `ReverseGeocodeView` in `orders/places_views.py` to prioritize Google Maps reverse geocoding with graceful fallback to Mapbox, Geoapify, and AWS Location Service.
+- **Unit and Integration Tests**: Added unit tests in `orders/tests/unit/test_utils.py` and integration test coverage in `orders/tests/integration/test_places.py`.
+
+---
+
 ## [2026-08-27] — Standardized Testing Framework & Tests Folder Organization (Unit & Integration)
 
 ### Added

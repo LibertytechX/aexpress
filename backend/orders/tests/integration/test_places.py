@@ -13,6 +13,7 @@ from orders.utils import (
     geoapify_place_details,
     geoapify_geocode_address,
     geoapify_reverse_geocode,
+    google_reverse_geocode,
     mapbox_place_autocomplete,
     mapbox_place_details,
     mapbox_reverse_geocode,
@@ -139,8 +140,37 @@ class PlacesProxyViewsTests(APITestCase):
         self.assertEqual(response.data["status"], "success")
         self.assertEqual(response.data["data"]["lat"], 6.45)
 
+    @patch("orders.places_views.google_reverse_geocode")
+    def test_reverse_geocode_google_success(self, mock_google):
+        mock_google.return_value = "15a Kunle Ogunba St, Lekki, Lagos"
+
+        url = reverse("orders:places_reverse_geocode")
+        response = self.client.get(url, {"lat": "6.45", "lng": "3.45"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(
+            response.data["data"]["address"], "15a Kunle Ogunba St, Lekki, Lagos"
+        )
+        mock_google.assert_called_once_with(6.45, 3.45)
+
     @patch("orders.places_views.aws_reverse_geocode")
-    def test_reverse_geocode_view(self, mock_reverse):
+    @patch("orders.places_views.google_reverse_geocode")
+    def test_reverse_geocode_fallback_to_aws(self, mock_google, mock_aws):
+        mock_google.return_value = None
+        mock_aws.return_value = "Lekki, Lagos"
+
+        url = reverse("orders:places_reverse_geocode")
+        response = self.client.get(url, {"lat": "6.45", "lng": "3.45"})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "success")
+        self.assertEqual(response.data["data"]["address"], "Lekki, Lagos")
+        mock_google.assert_called_once_with(6.45, 3.45)
+        mock_aws.assert_called_once_with(6.45, 3.45)
+
+    @patch("orders.places_views.aws_reverse_geocode")
+    @patch("orders.places_views.google_reverse_geocode")
+    def test_reverse_geocode_view(self, mock_google, mock_reverse):
+        mock_google.return_value = None
         mock_reverse.return_value = "Lekki, Lagos"
 
         url = reverse("orders:places_reverse_geocode")
