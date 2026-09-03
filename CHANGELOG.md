@@ -1,5 +1,22 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-09-03] — Assured Express AI Agent & MCP Logistics Endpoints
+
+### Backend & Integrations
+#### Added
+- **AI Agent & MCP Delivery Endpoints (`orders/agent_views.py` & `orders/agent_serializers.py`)**:
+  - `POST /api/orders/quote/`: Delivery quote calculation between pickup and dropoff locations, with automated geocoding, route duration, distance estimation, and default 'Bike' vehicle pricing.
+  - `POST /api/orders/agent/book/`: AI agent order creation endpoint that auto-computes route distance and travel duration if not pre-calculated, assigns order number, creates delivery record, and notifies active fleet.
+  - `GET /api/orders/track/<str:order_id>/`: Comprehensive order tracking endpoint by order number or UUID with assigned rider details and progress milestones.
+  - `GET /api/orders/customer-deliveries/`: Order history lookup by customer phone number across both sender and recipient roles.
+  - `GET /api/orders/<str:order_id>/payment-info/`: Dedicated payment information and CoreBanking virtual bank account retrieval for customer bank transfer settlement.
+- **URL Routing (`orders/urls.py`)**:
+  - Registered `quote/`, `agent/book/`, `track/<str:order_id>/`, `customer-deliveries/`, and `<str:order_id>/payment-info/`.
+- **Integration Tests (`orders/tests/integration/test_agent_endpoints.py`)**:
+  - Added comprehensive integration tests covering quote calculation, automated booking, order tracking, customer deliveries phone lookup, and payment info retrieval.
+
+---
+
 # [2026-08-27] — Standardized Testing Framework & Tests Folder Organization (Unit & Integration)
 
 ### Backend & Tooling
