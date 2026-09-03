@@ -19,6 +19,7 @@
 10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
 11. [Dispatcher Orders](#dispatcher-orders)
 12. [Google Places AWS Fallback](#google-places-aws-fallback)
+13. [AI Agent & MCP Logistics Endpoints](#ai-agent--mcp-logistics-endpoints)
 
 ---
 
@@ -1282,3 +1283,205 @@ Response:
     "status_code": 200
   }
 ```
+
+---
+
+## AI AGENT & MCP LOGISTICS ENDPOINTS
+
+### 1. Calculate Delivery Quote (get_quote)
+```http
+POST /api/orders/quote/
+Description: Calculates delivery price estimates and route travel duration between pickup and delivery locations. Defaults to 'Bike' and returns all active vehicle quotes.
+Authentication: None / API Key / JWT (Permissive)
+Request Headers:
+  - Content-Type: application/json
+Request Body:
+  {
+    "pickup_location": "12 Admiralty Way, Lekki Phase 1, Lagos",
+    "delivery_location": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+    "vehicle": "Bike" // Optional: "Bike", "Car", "Van" (defaults to "Bike")
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Quote calculated successfully",
+    "data": {
+      "pickup_location": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "delivery_location": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+      "distance_km": 15.2,
+      "duration_minutes": 32,
+      "selected_vehicle": "Bike",
+      "estimated_price": 2500.0,
+      "formatted_price": "₦2,500.00",
+      "quotes": [
+        {
+          "vehicle": "Bike",
+          "price": 2500.0,
+          "formatted_price": "₦2,500.00",
+          "base_fare": 500.0,
+          "distance_km": 15.2,
+          "duration_minutes": 32
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 2. Book Order via AI Agent (book_order)
+```http
+POST /api/orders/agent/book/
+Description: Creates a quick-send delivery order. Automatically geocodes addresses and calculates route distance/duration if omitted.
+Authentication: None / API Key / JWT (Associates order with sender_phone user)
+Request Headers:
+  - Content-Type: application/json
+Request Body:
+  {
+    "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+    "sender_name": "Adeola Johnson",
+    "sender_phone": "+2348012345678",
+    "dropoff_address": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+    "receiver_name": "Chidi Okafor",
+    "receiver_phone": "+2348098765432",
+    "vehicle": "Bike", // Optional, defaults to "Bike"
+    "package_type": "Box", // Optional (Box, Envelope, Fragile, Food, Document, Other)
+    "notes": "Urgent package", // Optional
+    "payment_method": "wallet" // Optional (wallet, cash, cash_on_pickup, receiver_pays)
+  }
+Response (201 Created):
+  {
+    "status": "success",
+    "message": "Order booked successfully",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "status": "Pending",
+      "mode": "quick",
+      "vehicle": "Bike",
+      "total_amount": 2500.0,
+      "payment_method": "wallet",
+      "payment_status": "Pending",
+      "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "dropoff_address": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+      "distance_km": 15.2,
+      "duration_minutes": 32,
+      "created_at": "2026-09-03T13:00:00Z"
+    },
+    "status_code": 201
+  }
+```
+
+---
+
+### 3. Track Order (track_order)
+```http
+GET /api/orders/track/<order_id>/
+Description: Retrieves order tracking status, assigned rider details, and lifecycle milestone events. Accepts numeric order_number (e.g. 6158045) or UUID.
+Authentication: None / API Key / JWT
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order tracking details retrieved",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "status": "InTransit",
+      "payment_status": "Paid",
+      "total_amount": 2500.0,
+      "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "sender_name": "Adeola Johnson",
+      "dropoff_address": "Ikeja City Mall, Alausa, Lagos",
+      "receiver_name": "Chidi Okafor",
+      "vehicle": "Bike",
+      "rider": {
+        "rider_id": "RD-101",
+        "name": "Musa Ibrahim",
+        "phone": "+234805551234",
+        "vehicle_type": "Bike",
+        "status": "InTransit"
+      },
+      "deliveries": [...],
+      "timeline": [
+        {
+          "event": "created",
+          "description": "Order created",
+          "created_at": "2026-09-03T12:00:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 4. Customer Deliveries History (get_user_deliveries)
+```http
+GET /api/orders/customer-deliveries/?phone=<phone>&limit=10&status=<status>
+Description: Lists active and historical orders and shipments associated with a phone number (as sender or receiver).
+Authentication: None / API Key / JWT
+Query Parameters:
+  - phone (required): Customer phone number (e.g. 08012345678 or +2348012345678).
+  - limit (optional): Maximum records (1-50, default 10).
+  - status (optional): Filter by order status (e.g. Pending, InTransit, Done).
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Customer deliveries retrieved successfully",
+    "data": {
+      "phone": "+2348012345678",
+      "count": 1,
+      "deliveries": [
+        {
+          "order_number": "6158045",
+          "id": "e89c314a-...",
+          "role": "Sender",
+          "status": "InTransit",
+          "payment_status": "Paid",
+          "total_amount": 2500.0,
+          "vehicle": "Bike",
+          "pickup_address": "12 Admiralty Way, Lekki",
+          "dropoff_address": "Ikeja City Mall, Alausa",
+          "sender_name": "Adeola Johnson",
+          "receiver_name": "Chidi Okafor",
+          "created_at": "2026-09-03T12:00:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 5. Order Payment Info & Virtual Account (get_payment_info)
+```http
+GET /api/orders/<order_id>/payment-info/
+Description: Retrieves order payment status, total amount, and dedicated CoreBanking virtual account details for direct bank transfer funding.
+Authentication: None / API Key / JWT
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Payment details retrieved successfully",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "total_amount": 2500.0,
+      "formatted_total": "₦2,500.00",
+      "payment_status": "Pending",
+      "payment_method": "wallet",
+      "wallet_balance": 1200.0,
+      "virtual_account": {
+        "bank_name": "Wema Bank",
+        "account_number": "9912345678",
+        "account_name": "Adeola Johnson AXPRESS",
+        "bank_code": "035"
+      },
+      "instructions": "To complete payment for Order 6158045, transfer ₦2,500.00 to Wema Bank Account: 9912345678 (Adeola Johnson AXPRESS). Your wallet will be credited and the order processed immediately."
+    },
+    "status_code": 200
+  }
+```
+
