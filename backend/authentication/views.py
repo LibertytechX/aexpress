@@ -14,6 +14,7 @@ from .serializers import (
     AddressSerializer,
 )
 from .emails import (
+    send_password_reset_otp_to_email,
     send_verification_email,
     send_password_reset_email,
     send_mobile_password_reset_email,
@@ -578,10 +579,11 @@ class RequestPasswordResetView(APIView):
         try:
             # Try to find user with this email
             user = User.objects.filter(email=email).first()
+            print(f"Email: {email}, \nUser found: {user}")
 
             if user:
                 # Send password reset email
-                send_password_reset_email(user)
+                send_password_reset_otp_to_email(user)
                 logger.info(f"Password reset email sent to {email}")
 
             # Always return success to prevent email enumeration

@@ -218,6 +218,124 @@ def get_verification_email_template(name, verify_url, otp=None):
 """
 
 
+def send_password_reset_otp_to_email(user):
+    """
+    Send password reset email to user via Mailgun.
+    """
+    try:
+        from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
+        from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
+
+        print(f"send_password_reset_email called for user: {user.email}")
+        print(f"from_email ===>>", from_email)
+        print(f"from_name ===>>", from_name)
+
+        if user.usertype == "Dispatcher":
+            frontend_url = os.getenv("DISPATCHER_FRONTEND_URL", "http://localhost:5174")
+            portal_name = "DISPATCHER PORTAL"
+            print(f"frontend_url ===>>", frontend_url)
+            print(f"portal_name ===>>", portal_name)
+        else:
+            frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
+            portal_name = "MERCHANT PORTAL"
+            print(f"frontend_url ===>>", frontend_url)
+            print(f"portal_name ===>>", portal_name)
+
+        # Generate reset token
+        token = generate_verification_token()
+        print(f"Generated token: {token}")
+
+        # Save token to user
+        user.password_reset_token = token
+        user.password_reset_token_created = timezone.now()
+        user.save(
+            update_fields=["password_reset_token", "password_reset_token_created"]
+        )
+
+        # # Create reset link
+        # reset_link = f"{frontend_url}/?token={token}&reset=true"
+
+        # Create HTML email template
+        html_content = get_password_reset_otp_to_email_template(
+            business_name=user.business_name or "Assured Express",
+            contact_name=user.contact_name or user.get_full_name(),
+            reset_token=token,
+            portal_name=portal_name,
+        )
+
+        return send_email_with_fallback(
+            to_email=user.email,
+            subject="Reset Your Password - Assured Express",
+            html_content=html_content,
+            text_content=f"Reset your password.\n\nThis link will expire in 1 hour.",
+            # text_content=f"You are receiving this message because a request was made to verify your identity in the application."
+            #             f"Your one-time password (OTP) is {token}. Please enter this code to complete the verification process and continue using the application. This code will expire in 1 hour and can only be used once."
+            #             f"For your security, please do not share this code with anyone, including our support team.",
+            from_name=from_name,
+            from_email=from_email,
+        )
+
+    except Exception as e:
+        logger.error(f"Error sending password reset email: {str(e)}")
+        return False
+
+
+def get_password_reset_otp_to_email_template(
+    business_name, contact_name, reset_token, portal_name="MERCHANT PORTAL"
+):
+    return f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reset Your Password</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f3f4f6;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #f3f4f6;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #ffffff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,0.08);">
+                    <tr>
+                        <td style="background: linear-gradient(135deg, #1B2A4A 0%, #243656 100%); padding: 40px 32px; text-align: center; border-radius: 16px 16px 0 0;">
+                            <div style="width: 60px; height: 60px; margin: 0 auto 16px; background: linear-gradient(135deg, #E8A838 0%, #F5C563 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                <span style="font-size: 32px; font-weight: 800; color: #1B2A4A;">AX</span>
+                            </div>
+                            <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 700; letter-spacing: -0.5px;">ASSURED EXPRESS</h1>
+                            <p style="margin: 8px 0 0; color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 500; letter-spacing: 1px;">{portal_name}</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 40px 32px;">
+                            <h2 style="margin: 0 0 16px; color: #1B2A4A; font-size: 22px; font-weight: 700;">Reset Your Password</h2>
+                            <p style="margin: 0 0 8px; color: #64748b; font-size: 15px; line-height: 1.6;">Hi <strong style="color: #1B2A4A;">{contact_name}</strong>,</p>
+                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> account. Click the button below to create a new password:</p>
+                           
+                            <p style="margin: 0 0 16px; color: #94a3b8; font-size: 13px; line-height: 1.5;">Your one-time password (OTP) is 
+                            {reset_token}. 
+                            Please enter this code to complete the verification process and continue using the application. 
+                            </p>
+                            <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+                                <p style="margin: 0; color: #92400E; font-size: 13px; line-height: 1.5;"><strong>⏰ This link expires in 1 hour</strong><br>For security reasons, this link will only work for 1 hour.</p>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="background-color: #f8fafc; padding: 24px 32px; border-radius: 0 0 16px 16px; border-top: 1px solid #e2e8f0;">
+                            <p style="margin: 0 0 12px; color: #64748b; font-size: 13px; line-height: 1.5;">
+                                <strong style="color: #1B2A4A;">Need help?</strong><br>support@axpress.net | +234 809 999 9999
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
 def send_password_reset_email(user):
     """
     Send password reset email to user via Mailgun.
