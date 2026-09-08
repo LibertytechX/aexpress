@@ -226,24 +226,24 @@ def send_password_reset_otp_to_email(user):
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
 
-        print(f"send_password_reset_email called for user: {user.email}")
-        print(f"from_email ===>>", from_email)
-        print(f"from_name ===>>", from_name)
+        # print(f"send_password_reset_email called for user: {user.email}")
+        # print(f"from_email ===>>", from_email)
+        # print(f"from_name ===>>", from_name)
 
         if user.usertype == "Dispatcher":
             frontend_url = os.getenv("DISPATCHER_FRONTEND_URL", "http://localhost:5174")
             portal_name = "DISPATCHER PORTAL"
-            print(f"frontend_url ===>>", frontend_url)
-            print(f"portal_name ===>>", portal_name)
+            # print(f"frontend_url ===>>", frontend_url)
+            # print(f"portal_name ===>>", portal_name)
         else:
             frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
             portal_name = "MERCHANT PORTAL"
-            print(f"frontend_url ===>>", frontend_url)
-            print(f"portal_name ===>>", portal_name)
+            # print(f"frontend_url ===>>", frontend_url)
+            # print(f"portal_name ===>>", portal_name)
 
         # Generate reset token
         token = generate_verification_token()
-        print(f"Generated token: {token}")
+        # print(f"Generated token: {token}")
 
         # Save token to user
         user.password_reset_token = token

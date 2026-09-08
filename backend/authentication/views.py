@@ -579,7 +579,6 @@ class RequestPasswordResetView(APIView):
         try:
             # Try to find user with this email
             user = User.objects.filter(email=email).first()
-            print(f"Email: {email}, \nUser found: {user}")
 
             if user:
                 # Send password reset email
