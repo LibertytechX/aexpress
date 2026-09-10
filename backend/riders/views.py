@@ -34,6 +34,8 @@ from .serializers import (
     RiderTransactionSerializer,
     RiderLocationSerializer,
     RiderNotificationSerializer,
+    RiderDocumentSerializer,
+    RiderDocumentReuploadSerializer,
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
@@ -44,6 +46,7 @@ from .models import (
     RiderCodRecord,
     RiderLocation,
     RiderNotification,
+    RiderDocument,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -313,6 +316,84 @@ class RiderSelfRegisterView(APIView):
         return Response(
             {"success": False, "errors": serializer.errors},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class RiderDocumentListView(APIView):
+    """
+    API endpoint for a rider to view their uploaded KYC documents and review status.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        documents = rider.documents.all()
+        serializer = RiderDocumentSerializer(documents, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderDocumentReuploadView(APIView):
+    """
+    API endpoint for a rider to re-upload a document that an admin rejected.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, pk):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            document = RiderDocument.objects.get(pk=pk, rider=rider)
+        except RiderDocument.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if document.status != RiderDocument.Status.REJECTED:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Only rejected documents can be re-uploaded.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RiderDocumentReuploadSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        document.file_url = serializer.validated_data["url"]
+        document.status = RiderDocument.Status.PENDING
+        document.rejection_reason = ""
+        document.save(
+            update_fields=["file_url", "status", "rejection_reason", "updated_at"]
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Document re-uploaded successfully. Pending review.",
+                "data": RiderDocumentSerializer(document).data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 

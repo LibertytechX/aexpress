@@ -319,6 +319,30 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
         return {"user": user, "rider": rider}
 
 
+class RiderDocumentSerializer(serializers.ModelSerializer):
+    """
+    Serializer for a rider viewing their own KYC documents and review status.
+    """
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "file_url",
+            "status",
+            "expires_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class RiderDocumentReuploadSerializer(serializers.Serializer):
+    url = serializers.URLField(required=True)
+
+
 class RiderOrderSerializer(AssignedOrderSerializer):
     """
     Serializer for rider order history and details.
