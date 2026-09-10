@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum
 from dispatcher.models import Rider
@@ -9,6 +10,7 @@ from .models import (
     RiderAuth,
     RiderDevice,
     RiderCodRecord,
+    RiderDocument,
     OrderOffer,
     AreaDemand,
     RiderEarning,
@@ -204,6 +206,117 @@ class RiderLoginSerializer(serializers.Serializer):
         data["rider"] = rider
         data["user"] = user
         return data
+
+
+REQUIRED_DOC_TYPES = {
+    RiderDocument.DocType.NATIONAL_ID,
+    RiderDocument.DocType.RIDERS_CARD,
+    RiderDocument.DocType.DRIVERS_LICENSE,
+    RiderDocument.DocType.UTILITY_BILL,
+    RiderDocument.DocType.PROFILE_PHOTO,
+}
+
+
+class RiderDocumentInputSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=RiderDocument.DocType.choices)
+    url = serializers.URLField()
+
+
+class RiderSelfRegistrationSerializer(serializers.Serializer):
+    """
+    Serializer for independent/freelancer rider self-registration.
+    Creates a User + Rider (working_type="freelancer", is_independent_rider=True,
+    is_authorized=False pending ops review) plus the submitted KYC documents.
+    """
+
+    phone = serializers.CharField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        min_length=6,
+        style={"input_type": "password"},
+    )
+    confirm_password = serializers.CharField(
+        required=True, write_only=True, style={"input_type": "password"}
+    )
+    address = serializers.CharField(required=True)
+    bvn = serializers.RegexField(regex=r"^\d{11}$", required=True)
+    vehicle_model = serializers.CharField(required=True)
+    vehicle_plate_number = serializers.CharField(required=True)
+    vehicle_color = serializers.CharField(required=True)
+    vehicle_photo = serializers.URLField(required=True)
+    rider_documents = RiderDocumentInputSerializer(many=True, required=True)
+
+    def validate_phone(self, value):
+        phone = value.replace(" ", "").replace("-", "")
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError("This phone number is already registered.")
+        return phone
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        value = value.lower()
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+    def validate_rider_documents(self, value):
+        submitted_types = {doc["type"] for doc in value}
+        missing = REQUIRED_DOC_TYPES - submitted_types
+        if missing:
+            raise serializers.ValidationError(
+                f"Missing required documents: {', '.join(sorted(missing))}."
+            )
+        return value
+
+    def validate(self, data):
+        if data.get("password") != data.get("confirm_password"):
+            raise serializers.ValidationError("Passwords do not match.")
+        return data
+
+    def create(self, validated_data):
+        validated_data.pop("confirm_password")
+        rider_documents = validated_data.pop("rider_documents")
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                phone=validated_data["phone"],
+                email=validated_data.get("email") or None,
+                password=validated_data["password"],
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                contact_name=f"{validated_data['first_name']} {validated_data['last_name']}",
+                usertype="Rider",
+                address=validated_data["address"],
+                bvn=validated_data["bvn"],
+            )
+
+            rider = Rider.objects.create(
+                user=user,
+                working_type="freelancer",
+                is_independent_rider=True,
+                is_authorized=False,
+                address=validated_data["address"],
+                vehicle_model=validated_data["vehicle_model"],
+                vehicle_plate_number=validated_data["vehicle_plate_number"],
+                vehicle_color=validated_data["vehicle_color"],
+                vehicle_photo=validated_data["vehicle_photo"],
+            )
+
+            RiderDocument.objects.bulk_create(
+                [
+                    RiderDocument(
+                        rider=rider, doc_type=doc["type"], file_url=doc["url"]
+                    )
+                    for doc in rider_documents
+                ]
+            )
+
+        return {"user": user, "rider": rider}
 
 
 class RiderOrderSerializer(AssignedOrderSerializer):

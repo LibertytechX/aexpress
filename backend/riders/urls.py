@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    RiderSelfRegisterView,
     RiderLoginView,
     RiderTokenRefreshView,
     RiderDeviceRegistrationView,
@@ -33,6 +34,7 @@ from .gamification_views import (
 app_name = "riders"
 
 urlpatterns = [
+    path("auth/register/", RiderSelfRegisterView.as_view(), name="rider-register"),
     path("auth/login/", RiderLoginView.as_view(), name="rider-login"),
     path("auth/refresh/", RiderTokenRefreshView.as_view(), name="rider-token-refresh"),
     path(

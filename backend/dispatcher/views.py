@@ -1643,7 +1643,7 @@ class S3FileUploadView(views.APIView):
     Uploads a file straight to S3 and returns a presigned URL to access it.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser]
 
     def post(self, request):

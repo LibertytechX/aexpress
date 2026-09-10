@@ -20,6 +20,7 @@ from sparky_utils.exceptions import ServiceException
 
 from .serializers import (
     RiderLoginSerializer,
+    RiderSelfRegistrationSerializer,
     RiderMeSerializer,
     DeviceRegistrationSerializer,
     UpdatePermissionsSerializer,
@@ -267,6 +268,51 @@ class AreaDemandListView(APIView):
         serializer = AreaDemandSerializer(areas, many=True)
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderSelfRegisterView(APIView):
+    """
+    API endpoint for independent/freelancer rider self-registration.
+    Creates the rider pending ops review (is_authorized=False) and logs them
+    in immediately, following the same token/session issuance as RiderLoginView.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RiderSelfRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            result = serializer.save()
+            user, rider = result["user"], result["rider"]
+
+            refresh = RefreshToken.for_user(user)
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
+
+            RiderSession.objects.create(
+                rider=rider,
+                refresh_token=refresh_token,
+                device_id=request.data.get("device_id", ""),
+                device_name=request.data.get("device_name", ""),
+                device_os=request.data.get("device_os", "android"),
+                fcm_token=request.data.get("fcm_token", ""),
+                ip_address=request.META.get("REMOTE_ADDR"),
+                expires_at=timezone.now() + timedelta(days=30),
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Registration successful! Your account is pending review.",
+                    "tokens": {"access": access_token, "refresh": refresh_token},
+                    "rider": RiderMeSerializer(rider).data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
 

@@ -464,6 +464,7 @@ class Rider(models.Model):
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_independent_rider = models.BooleanField(default=False)
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
