@@ -661,7 +661,6 @@ class OrderViewSet(viewsets.ModelViewSet):
             created_by=request.user if request.user.is_authenticated else None,
         )
 
-
         # If this is a relay order, recalculate leg payouts as a proportional
         # share of the new total_amount weighted by each leg's distance.
         # Formula: leg_payout = (leg_km / total_km) * total_amount
@@ -1740,7 +1739,7 @@ class VehicleRevenueReportView(views.APIView):
     zero completed orders (distance/amount = 0, ratio = null).
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsDispatcherAdmin]
     _DECIMAL = DecimalField(max_digits=14, decimal_places=2)
 
     def get(self, request):
