@@ -226,24 +226,15 @@ def send_password_reset_otp_to_email(user):
         from_email = os.getenv("MAILGUN_FROM_EMAIL", "noreply@mg.axpress.net")
         from_name = os.getenv("MAILGUN_FROM_NAME", "Assured Express")
 
-        # print(f"send_password_reset_email called for user: {user.email}")
-        # print(f"from_email ===>>", from_email)
-        # print(f"from_name ===>>", from_name)
-
         if user.usertype == "Dispatcher":
             frontend_url = os.getenv("DISPATCHER_FRONTEND_URL", "http://localhost:5174")
             portal_name = "DISPATCHER PORTAL"
-            # print(f"frontend_url ===>>", frontend_url)
-            # print(f"portal_name ===>>", portal_name)
         else:
             frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
             portal_name = "MERCHANT PORTAL"
-            # print(f"frontend_url ===>>", frontend_url)
-            # print(f"portal_name ===>>", portal_name)
 
         # Generate reset token
         token = generate_verification_token()
-        # print(f"Generated token: {token}")
 
         # Save token to user
         user.password_reset_token = token
@@ -251,9 +242,6 @@ def send_password_reset_otp_to_email(user):
         user.save(
             update_fields=["password_reset_token", "password_reset_token_created"]
         )
-
-        # # Create reset link
-        # reset_link = f"{frontend_url}/?token={token}&reset=true"
 
         # Create HTML email template
         html_content = get_password_reset_otp_to_email_template(
@@ -266,11 +254,7 @@ def send_password_reset_otp_to_email(user):
         return send_email_with_fallback(
             to_email=user.email,
             subject="Reset Your Password - Assured Express",
-            html_content=html_content,
             text_content=f"Reset your password.\n\nThis link will expire in 1 hour.",
-            # text_content=f"You are receiving this message because a request was made to verify your identity in the application."
-            #             f"Your one-time password (OTP) is {token}. Please enter this code to complete the verification process and continue using the application. This code will expire in 1 hour and can only be used once."
-            #             f"For your security, please do not share this code with anyone, including our support team.",
             from_name=from_name,
             from_email=from_email,
         )
