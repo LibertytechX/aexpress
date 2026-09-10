@@ -15,6 +15,7 @@ from .views import (
     DispatcherViewSet,
     VehicleAssetViewSet,
     VerticalViewSet,
+    VehicleRevenueReportView,
 )
 
 router = DefaultRouter()
@@ -38,5 +39,6 @@ urlpatterns = [
     path("s3/presigned-url/", S3PresignedUrlView.as_view(), name="s3-presigned-url"),
     path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
     path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
+    path("revenue/", VehicleRevenueReportView.as_view(), name="vehicle-revenue-report"),
     path("", include(router.urls)),
 ]

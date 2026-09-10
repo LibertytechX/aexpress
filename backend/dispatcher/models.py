@@ -305,6 +305,12 @@ class VehicleAsset(models.Model):
         default=1200000,
         help_text="Amortization amount for the vehicle",
     )
+    target_ratio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Target amount-earned/distance ratio for this vehicle. Used by the Revenue report.",
+    )
 
     # ── Timestamps ──────────────────────────────────────────────────
     created_at = models.DateTimeField(auto_now_add=True)

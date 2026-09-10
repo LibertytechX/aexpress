@@ -1244,6 +1244,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "yesterday_distance",
+            "target_ratio",
         ]
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 

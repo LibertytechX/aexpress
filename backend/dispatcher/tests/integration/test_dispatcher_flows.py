@@ -887,6 +887,124 @@ class VehicleAssetOrdersTodayEndpointTests(TestCase):
         self.assertEqual(row.get("orders_today"), 1)
 
 
+class VehicleRevenueReportEndpointTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+
+        self.user = User.objects.create_user(
+            phone="08077770000",
+            email="dispatcher_revenue@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+        from orders.models import Vehicle
+
+        self.pricing_vehicle = Vehicle.objects.create(
+            name="Bike-Revenue",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+
+    def _mk_order(self, rider, order_number, amount, distance, completed_at, status="Done"):
+        from orders.models import Order
+
+        return Order.objects.create(
+            order_number=order_number,
+            user=self.user,
+            vehicle=self.pricing_vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal(str(amount)),
+            distance_km=Decimal(str(distance)),
+            payment_status="Pending",
+            escrow_released=False,
+            status=status,
+            completed_at=completed_at,
+        )
+
+    def _row_for(self, res, asset):
+        return next(
+            r for r in res.data["results"] if r["vehicle_asset_id"] == str(asset.id)
+        )
+
+    def test_zero_order_active_vehicle_is_included_with_null_ratio(self):
+        asset = VehicleAsset.objects.create(plate_number="TP-REV-1", vehicle_type="bike")
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        row = self._row_for(res, asset)
+        self.assertEqual(row["distance_km"], "0.00")
+        self.assertEqual(row["amount_earned"], "0.00")
+        self.assertIsNone(row["ratio"])
+        self.assertEqual(row["orders_count"], 0)
+        self.assertFalse(row["meets_target"])
+
+    def test_inactive_vehicle_is_excluded(self):
+        VehicleAsset.objects.create(
+            plate_number="TP-REV-2", vehicle_type="bike", is_active=False
+        )
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        plate_numbers = [r["plate_number"] for r in res.data["results"]]
+        self.assertNotIn("TP-REV-2", plate_numbers)
+
+    def test_ratio_computed_from_period_orders_only(self):
+        from authentication.models import User
+
+        asset = VehicleAsset.objects.create(
+            plate_number="TP-REV-3", vehicle_type="bike", target_ratio=Decimal("400.00")
+        )
+        rider_user = User.objects.create_user(
+            phone="08077770001",
+            email="rider_rev@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider",
+        )
+        rider = Rider.objects.create(user=rider_user, vehicle_asset=asset)
+
+        now = timezone.now()
+        self._mk_order(rider, "REV0001", 5000, 10, now)
+        self._mk_order(rider, "REV0002", 5000, 10, now - datetime.timedelta(days=90))
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        row = self._row_for(res, asset)
+        self.assertEqual(row["orders_count"], 1)
+        self.assertEqual(Decimal(row["amount_earned"]), Decimal("5000.00"))
+        self.assertEqual(Decimal(row["distance_km"]), Decimal("10.00"))
+        self.assertEqual(row["ratio"], 500.0)
+        self.assertTrue(row["meets_target"])
+
+    def test_target_ratio_editable_via_vehicle_asset_patch(self):
+        asset = VehicleAsset.objects.create(plate_number="TP-REV-4", vehicle_type="bike")
+
+        res = self.client.patch(
+            f"/api/dispatch/vehicle-assets/{asset.id}/",
+            {"target_ratio": "350.00"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 200, res.data)
+        asset.refresh_from_db()
+        self.assertEqual(asset.target_ratio, Decimal("350.00"))
+
+
 class GenerateRelayLegsSyncTests(TestCase):
     KM_PER_DEGREE_LNG = 111.1949
 
