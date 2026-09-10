@@ -623,6 +623,15 @@ export const VehicleAssetsAPI = {
     }
 };
 
+// ─── REVENUE ─────────────────────────────────────────────────────
+export const RevenueAPI = {
+    async getAll({ period = "this_month" } = {}) {
+        const res = await fetchWithAuth(`/dispatch/revenue/?period=${encodeURIComponent(period)}`);
+        if (!res.ok) throw new Error('Failed to fetch revenue report');
+        return await res.json();
+    }
+};
+
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {

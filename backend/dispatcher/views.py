@@ -1,5 +1,6 @@
 import logging
 import datetime
+from decimal import Decimal
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
 
@@ -31,8 +32,10 @@ from .serializers import (
     VerticalSerializer,
 )
 from .utils import emit_activity
+from .periods import _parse_period
 from django.contrib.auth import authenticate, get_user_model
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Sum, DecimalField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # Merchant API Key imports
@@ -1725,6 +1728,117 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
         if active is not None:
             qs = qs.filter(is_active=active.lower() in ("true", "1"))
         return qs
+
+
+class VehicleRevenueReportView(views.APIView):
+    """
+    Revenue-per-kilometre report, aggregated by physical VehicleAsset.
+
+    GET /api/dispatch/revenue/?period=today|this_week|this_month|this_year|YYYY-MM
+
+    Returns ALL active vehicle assets for the period, including those with
+    zero completed orders (distance/amount = 0, ratio = null).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    _DECIMAL = DecimalField(max_digits=14, decimal_places=2)
+
+    def get(self, request):
+        period = request.query_params.get("period", "this_month")
+        start_dt, end_dt, _ = _parse_period(period)
+
+        # Order attribution runs through the rider's *current* vehicle_asset
+        # (there's no direct Order->VehicleAsset FK), same limitation as
+        # compute_deliveries_today.py — historical orders "follow" a rider
+        # to their new vehicle if the rider is later reassigned.
+        completed_q = Q(riders__rider_orders__status="Done") & (
+            Q(
+                riders__rider_orders__completed_at__gte=start_dt,
+                riders__rider_orders__completed_at__lte=end_dt,
+            )
+            | Q(
+                riders__rider_orders__completed_at__isnull=True,
+                riders__rider_orders__updated_at__gte=start_dt,
+                riders__rider_orders__updated_at__lte=end_dt,
+            )
+        )
+
+        # Start from VehicleAsset (not Order) so active vehicles with zero
+        # matching orders are still included via annotate()+filter=Q(...),
+        # which produces a LEFT JOIN rather than an inner join.
+        vehicles = (
+            VehicleAsset.objects.filter(is_active=True)
+            .annotate(
+                rev_amount=Coalesce(
+                    Sum("riders__rider_orders__total_amount", filter=completed_q),
+                    Decimal("0.00"),
+                    output_field=self._DECIMAL,
+                ),
+                rev_distance=Coalesce(
+                    Sum("riders__rider_orders__distance_km", filter=completed_q),
+                    Decimal("0.00"),
+                    output_field=self._DECIMAL,
+                ),
+                rev_orders_count=Count(
+                    "riders__rider_orders", filter=completed_q, distinct=True
+                ),
+            )
+            .order_by("plate_number")
+        )
+
+        results = []
+        total_amount = Decimal("0.00")
+        total_distance = Decimal("0.00")
+        meeting_target = 0
+
+        for v in vehicles:
+            amount = v.rev_amount or Decimal("0.00")
+            distance = v.rev_distance or Decimal("0.00")
+            ratio = round(float(amount) / float(distance), 2) if distance else None
+            target = float(v.target_ratio or 0)
+            meets_target = ratio is not None and target > 0 and ratio >= target
+
+            total_amount += amount
+            total_distance += distance
+            if meets_target:
+                meeting_target += 1
+
+            results.append(
+                {
+                    "vehicle_asset_id": str(v.id),
+                    "asset_id": v.asset_id,
+                    "plate_number": v.plate_number,
+                    "vehicle_type": v.vehicle_type,
+                    "distance_km": str(distance),
+                    "amount_earned": str(amount),
+                    "ratio": ratio,
+                    "target_ratio": str(v.target_ratio or Decimal("0.00")),
+                    "orders_count": v.rev_orders_count,
+                    "meets_target": meets_target,
+                }
+            )
+
+        overall_ratio = (
+            round(float(total_amount) / float(total_distance), 2)
+            if total_distance
+            else None
+        )
+
+        return Response(
+            {
+                "period": period,
+                "start_date": start_dt.isoformat(),
+                "end_date": end_dt.isoformat(),
+                "results": results,
+                "summary": {
+                    "total_vehicles": len(results),
+                    "total_amount_earned": str(total_amount),
+                    "total_distance_km": str(total_distance),
+                    "overall_ratio": overall_ratio,
+                    "vehicles_meeting_target": meeting_target,
+                },
+            }
+        )
 
 
 class VerticalViewSet(viewsets.ModelViewSet):

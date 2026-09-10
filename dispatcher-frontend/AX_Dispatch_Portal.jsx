@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -96,6 +96,7 @@ const I = {
   check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>,
   teams: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
   vehicles: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10H1v7h2" /><circle cx="7" cy="17" r="2" /><path d="M9 17h6" /><circle cx="17" cy="17" r="2" /><path d="M5 10V6a1 1 0 0 1 1-1h4l3 5" /></svg>,
+  revenue: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>,
 };
 
 const S = {
@@ -1913,6 +1914,7 @@ export default function AXDispatchPortal() {
     { id: "orders", label: "Orders", icon: I.orders, count: orders.filter(o => o.status === "Pending").length },
     { id: "riders", label: "Riders", icon: I.riders, count: riders.filter(r => r.status === "online").length },
     { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
+    { id: "revenue", label: "Revenue", icon: I.revenue },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
     { id: "messaging", label: "Messaging", icon: I.messaging, count: 0 },
@@ -1958,7 +1960,7 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "revenue" ? "Revenue" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
@@ -1966,6 +1968,7 @@ export default function AXDispatchPortal() {
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
+          {screen === "revenue" && <RevenueScreen />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "messaging" && <MessagingScreen />}
@@ -4959,6 +4962,84 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   );
 }
 
+// ─── REVENUE SCREEN ─────────────────────────────────────────────
+const REVENUE_PERIOD_OPTS = [
+  { value: "today", label: "Today" },
+  { value: "this_week", label: "This Week" },
+  { value: "this_month", label: "This Month" },
+  { value: "this_year", label: "This Year" },
+];
+
+function RevenueScreen() {
+  const [period, setPeriod] = useState("today");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    RevenueAPI.getAll({ period })
+      .then(res => { if (!cancelled) setData(res); })
+      .catch(() => { if (!cancelled) setError("Failed to load revenue report."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [period]);
+
+  const rows = data?.results || [];
+  const summary = data?.summary || {};
+  const gridCols = "1.4fr 1fr 1.2fr 0.9fr 0.9fr 0.9fr";
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Revenue" value={`₦${Number(summary.total_amount_earned || 0).toLocaleString()}`} />
+        <StatCard label="Total Distance" value={`${Number(summary.total_distance_km || 0).toLocaleString()} km`} />
+        <StatCard label="Overall Ratio" value={summary.overall_ratio != null ? summary.overall_ratio.toLocaleString() : "—"} color={S.gold} />
+        <StatCard label="Meeting Target" value={`${summary.vehicles_meeting_target || 0}/${summary.total_vehicles || 0}`} color={S.green} />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <select
+          value={period}
+          onChange={e => setPeriod(e.target.value)}
+          style={{ padding: "7px 12px", borderRadius: 8, border: `1px solid ${S.gold}`, background: "rgba(232,168,56,0.12)", color: S.gold, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none" }}
+        >
+          {REVENUE_PERIOD_OPTS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+      </div>
+
+      <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <span>Vehicle</span><span>Distance</span><span>Amount Earned</span><span>Ratio</span><span>Target Ratio</span><span>Orders</span>
+        </div>
+        <div style={{ maxHeight: "calc(100vh - 360px)", overflowY: "auto" }}>
+          {loading && <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>}
+          {error && <div style={{ padding: 24, textAlign: "center", color: S.red, fontSize: 12 }}>{error}</div>}
+          {!loading && !error && rows.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles found.</div>
+          )}
+          {!loading && !error && rows.map(r => {
+            const hasTarget = Number(r.target_ratio) > 0;
+            const ratioColor = r.ratio == null ? S.textMuted : (!hasTarget ? S.text : (r.meets_target ? S.green : S.red));
+            return (
+              <div key={r.vehicle_asset_id} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{r.plate_number}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{Number(r.distance_km).toFixed(2)} km</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>₦{Number(r.amount_earned).toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: ratioColor }}>{r.ratio == null ? "—" : r.ratio.toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{hasTarget ? Number(r.target_ratio).toLocaleString() : "—"}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{r.orders_count}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── VEHICLE DETAIL MODAL ───────────────────────────────────────
 function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
   const [editing, setEditing] = useState(false);
@@ -4974,6 +5055,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
     registration_expiry: vehicle.registration_expiry || "",
     road_worthiness_expiry: vehicle.road_worthiness_expiry || "",
     is_active: vehicle.is_active,
+    target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -4981,7 +5063,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
 
   const cancelEdit = () => {
     setEditing(false); setError(null);
-    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active });
+    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active, target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0" });
   };
 
   const handleSave = async () => {
@@ -4989,6 +5071,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
     try {
       const payload = { ...form };
       if (payload.year) payload.year = parseInt(payload.year, 10); else delete payload.year;
+      payload.target_ratio = payload.target_ratio === "" ? "0" : parseFloat(payload.target_ratio);
       Object.keys(payload).forEach(k => { if (payload[k] === "" && k !== "plate_number" && k !== "vehicle_type" && k !== "is_active") delete payload[k]; });
       await VehicleAssetsAPI.update(vehicle.id, payload);
       if (onVehicleUpdated) onVehicleUpdated();
@@ -5097,6 +5180,19 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
             {vehicle.latitude && vehicle.longitude && (
               <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
                 📍 {parseFloat(vehicle.latitude).toFixed(6)}, {parseFloat(vehicle.longitude).toFixed(6)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Performance Target ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance Target</div>
+            {editing ? (
+              <div><label style={lSt}>Target Ratio (₦ per km)</label><input type="number" step="0.01" value={form.target_ratio} onChange={e => set("target_ratio", e.target.value)} style={iSt} placeholder="0.00" /></div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>Target Ratio</span>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{vehicle.target_ratio && Number(vehicle.target_ratio) > 0 ? `₦${Number(vehicle.target_ratio).toLocaleString()}/km` : "Not set"}</span>
               </div>
             )}
           </div>
