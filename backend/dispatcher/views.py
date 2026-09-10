@@ -1638,6 +1638,50 @@ class S3PresignedUrlView(views.APIView):
         )
 
 
+class S3FileUploadView(views.APIView):
+    """
+    Uploads a file straight to S3 and returns a presigned URL to access it.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def post(self, request):
+        from urllib.parse import urlparse
+        from .s3_utils import upload_image_file_to_s3, generate_presigned_url
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"error": "file is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        folder = request.data.get("folder", "uploads")
+        expiration = 3600
+
+        public_url = upload_image_file_to_s3(file_obj, file_obj.name, folder)
+        if not public_url:
+            return Response(
+                {"error": "Failed to upload file to S3"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        object_name = urlparse(public_url).path.lstrip("/")
+        presigned_url = generate_presigned_url(
+            object_name, expiration=expiration, client_method="get_object"
+        )
+
+        return Response(
+            {
+                "url": public_url,
+                "presigned_url": presigned_url,
+                "object_name": object_name,
+                "expires_in": expiration,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class ZoneViewSet(viewsets.ModelViewSet):
     """CRUD for delivery zones."""
 
