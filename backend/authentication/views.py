@@ -14,6 +14,7 @@ from .serializers import (
     AddressSerializer,
 )
 from .emails import (
+    send_password_reset_otp_to_email,
     send_verification_email,
     send_password_reset_email,
     send_mobile_password_reset_email,
@@ -581,14 +582,14 @@ class RequestPasswordResetView(APIView):
 
             if user:
                 # Send password reset email
-                send_password_reset_email(user)
+                send_password_reset_otp_to_email(user)
                 logger.info(f"Password reset email sent to {email}")
 
             # Always return success to prevent email enumeration
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
+                    "message": "If an account exists with that email, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
@@ -599,27 +600,28 @@ class RequestPasswordResetView(APIView):
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
+                    "message": "If an account exists with that email, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
 
 
 class ResetPasswordView(APIView):
-    """API endpoint for resetting password with token."""
+    """API endpoint for resetting password with an emailed OTP."""
 
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        """Reset password using token."""
+        """Reset password using the emailed OTP."""
+        email = request.data.get("email")
         token = request.data.get("token")
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
         # Validate input
-        if not token:
+        if not email or not token:
             return Response(
-                {"success": False, "error": "Reset token is required"},
+                {"success": False, "error": "Email and reset code are required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -645,17 +647,25 @@ class ResetPasswordView(APIView):
             )
 
         try:
-            # Find user with this token
-            user = User.objects.get(password_reset_token=token)
+            # Find user with this email + code combination
+            user = User.objects.filter(
+                email=email, password_reset_token=token
+            ).first()
 
-            # Check if token is expired (15 mins)
+            if not user:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if code is expired (15 mins)
             if user.password_reset_token_created:
                 token_age = timezone.now() - user.password_reset_token_created
                 if token_age > timedelta(minutes=15):
                     return Response(
                         {
                             "success": False,
-                            "error": "Password reset link has expired. Please request a new one.",
+                            "error": "Password reset code has expired. Please request a new one.",
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
@@ -682,11 +692,6 @@ class ResetPasswordView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        except User.DoesNotExist:
-            return Response(
-                {"success": False, "error": "Invalid or expired reset token"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         except Exception as e:
             logger.error(f"Error resetting password: {str(e)}")
             return Response(
@@ -699,50 +704,50 @@ class ResetPasswordView(APIView):
 
 
 class VerifyPasswordResetTokenView(APIView):
-    """API endpoint for verifying if a password reset token is valid."""
+    """API endpoint for verifying if an emailed password reset OTP is valid."""
 
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        """Verify token validity."""
+        """Verify OTP validity."""
+        email = request.data.get("email")
         token = request.data.get("token")
 
-        if not token:
+        if not email or not token:
             return Response(
-                {"success": False, "error": "Reset token is required."},
+                {"success": False, "error": "Email and reset code are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            # Find user with this token
-            user = User.objects.get(password_reset_token=token)
+        # Find user with this email + code combination
+        user = User.objects.filter(email=email, password_reset_token=token).first()
 
-            # Check if token is expired (15 mins)
-            if user.password_reset_token_created:
-                token_age = timezone.now() - user.password_reset_token_created
-                if token_age > timedelta(minutes=15):
-                    return Response(
-                        {
-                            "success": False,
-                            "error": "Password reset link has expired. Please request a new one.",
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            # Token is valid
+        if not user:
             return Response(
-                {
-                    "success": True,
-                    "message": "Token is valid.",
-                },
-                status=status.HTTP_200_OK,
-            )
-
-        except User.DoesNotExist:
-            return Response(
-                {"success": False, "error": "Invalid or expired reset token."},
+                {"success": False, "error": "Invalid or expired reset code."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # Check if code is expired (15 mins)
+        if user.password_reset_token_created:
+            token_age = timezone.now() - user.password_reset_token_created
+            if token_age > timedelta(minutes=15):
+                return Response(
+                    {
+                        "success": False,
+                        "error": "Password reset code has expired. Please request a new one.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Code is valid
+        return Response(
+            {
+                "success": True,
+                "message": "Code is valid.",
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class MobileRequestPasswordResetView(APIView):
