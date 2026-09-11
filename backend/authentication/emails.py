@@ -18,6 +18,11 @@ def generate_verification_token():
     return secrets.token_urlsafe(32)
 
 
+def generate_password_reset_otp():
+    """Generate a secure random 6-digit numeric OTP for password reset."""
+    return f"{secrets.randbelow(1000000):06d}"
+
+
 def send_email_with_fallback(
     to_email: str,
     subject: str,
@@ -233,11 +238,11 @@ def send_password_reset_otp_to_email(user):
             frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
             portal_name = "MERCHANT PORTAL"
 
-        # Generate reset token
-        token = generate_verification_token()
+        # Generate reset OTP
+        otp = generate_password_reset_otp()
 
-        # Save token to user
-        user.password_reset_token = token
+        # Save OTP to user
+        user.password_reset_token = otp
         user.password_reset_token_created = timezone.now()
         user.save(
             update_fields=["password_reset_token", "password_reset_token_created"]
@@ -247,14 +252,15 @@ def send_password_reset_otp_to_email(user):
         html_content = get_password_reset_otp_to_email_template(
             business_name=user.business_name or "Assured Express",
             contact_name=user.contact_name or user.get_full_name(),
-            reset_token=token,
+            reset_token=otp,
             portal_name=portal_name,
         )
 
         return send_email_with_fallback(
             to_email=user.email,
             subject="Reset Your Password - Assured Express",
-            text_content=f"Reset your password.\n\nThis link will expire in 1 hour.",
+            html_content=html_content,
+            text_content=f"Your password reset code is: {otp}\n\nThis code will expire in 15 minutes.",
             from_name=from_name,
             from_email=from_email,
         )
@@ -293,14 +299,15 @@ def get_password_reset_otp_to_email_template(
                         <td style="padding: 40px 32px;">
                             <h2 style="margin: 0 0 16px; color: #1B2A4A; font-size: 22px; font-weight: 700;">Reset Your Password</h2>
                             <p style="margin: 0 0 8px; color: #64748b; font-size: 15px; line-height: 1.6;">Hi <strong style="color: #1B2A4A;">{contact_name}</strong>,</p>
-                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> account. Click the button below to create a new password:</p>
-                           
-                            <p style="margin: 0 0 16px; color: #94a3b8; font-size: 13px; line-height: 1.5;">Your one-time password (OTP) is 
-                            {reset_token}. 
-                            Please enter this code to complete the verification process and continue using the application. 
-                            </p>
+                            <p style="margin: 0 0 24px; color: #64748b; font-size: 15px; line-height: 1.6;">We received a request to reset the password for your <strong style="color: #1B2A4A;">{business_name}</strong> account. Please use the following code to reset your password:</p>
+
+                            <div style="margin: 30px 0; padding: 24px; background-color: #f8fafc; border-radius: 12px; border: 2px dashed #94a3b8; text-align: center;">
+                                <p style="margin: 0 0 12px 0; color: #64748b; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 600;">Your Reset Code</p>
+                                <h2 style="margin: 0; color: #1B2A4A; font-size: 42px; letter-spacing: 8px; font-family: 'Courier New', Courier, monospace; font-weight: 800;">{reset_token}</h2>
+                            </div>
+
                             <div style="background-color: #FEF3C7; border-left: 4px solid #F59E0B; padding: 16px; border-radius: 8px; margin-bottom: 24px;">
-                                <p style="margin: 0; color: #92400E; font-size: 13px; line-height: 1.5;"><strong>⏰ This link expires in 1 hour</strong><br>For security reasons, this link will only work for 1 hour.</p>
+                                <p style="margin: 0; color: #92400E; font-size: 13px; line-height: 1.5;"><strong>⏰ This code expires in 15 minutes</strong><br>For security reasons, this code will only work for 15 minutes.</p>
                             </div>
                         </td>
                     </tr>
