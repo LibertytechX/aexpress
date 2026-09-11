@@ -26,6 +26,8 @@ from .models import (
 )
 from .serializers import (
     RiderSerializer,
+    RiderApprovalSerializer,
+    RiderRejectionSerializer,
     ZoneSerializer,
     RelayNodeSerializer,
     VehicleAssetSerializer,
@@ -47,6 +49,7 @@ import hashlib
 
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
+from riders.models import RiderDocument
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
 from .tasks import send_merchant_notification
 from orders.serializers import MergeGroupedOrdersSerializer
@@ -226,6 +229,106 @@ class RiderViewSet(viewsets.ModelViewSet):
                 "current_longitude": float(rider.current_longitude),
                 "last_location_update": rider.last_location_update.isoformat(),
             }
+        )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="pending-approval",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def pending_approval(self, request):
+        """List self-registered riders awaiting KYC/application review."""
+        riders = (
+            Rider.objects.filter(
+                is_independent_rider=True,
+                approval_status=Rider.ApprovalStatus.PENDING,
+            )
+            .select_related("user")
+            .prefetch_related("documents")
+            .order_by("-created_at")
+        )
+        serializer = RiderApprovalSerializer(riders, many=True)
+        return Response(
+            {"success": True, "count": riders.count(), "data": serializer.data}
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="approve",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def approve(self, request, pk=None):
+        """Approve a rider's application: authorizes them and approves any still-pending documents."""
+        rider = self.get_object()
+
+        rider.approval_status = Rider.ApprovalStatus.APPROVED
+        rider.is_authorized = True
+        rider.rejection_reason = ""
+        rider.save(update_fields=["approval_status", "is_authorized", "rejection_reason"])
+
+        rider.documents.filter(status=RiderDocument.Status.PENDING).update(
+            status=RiderDocument.Status.APPROVED
+        )
+
+        notify_rider(
+            rider,
+            "Application Approved",
+            "Your rider application has been approved! You can now start receiving jobs.",
+        )
+
+        return Response(
+            {"success": True, "data": RiderApprovalSerializer(rider).data}
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reject",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def reject(self, request, pk=None):
+        """
+        Reject a rider's application. Optionally flags specific submitted documents
+        as rejected (with a reason each) so the rider can re-upload them.
+        """
+        rider = self.get_object()
+
+        serializer = RiderRejectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data["reason"]
+        rejected_documents = serializer.validated_data["rejected_documents"]
+
+        for entry in rejected_documents:
+            updated = RiderDocument.objects.filter(
+                id=entry["document_id"], rider=rider
+            ).update(
+                status=RiderDocument.Status.REJECTED,
+                rejection_reason=entry["reason"],
+            )
+            if not updated:
+                return Response(
+                    {
+                        "success": False,
+                        "message": f"Document {entry['document_id']} not found for this rider.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        rider.approval_status = Rider.ApprovalStatus.REJECTED
+        rider.is_authorized = False
+        rider.rejection_reason = reason
+        rider.save(update_fields=["approval_status", "is_authorized", "rejection_reason"])
+
+        notify_rider(
+            rider,
+            "Application Rejected",
+            reason or "Your rider application was rejected. Please review your documents.",
+        )
+
+        return Response(
+            {"success": True, "data": RiderApprovalSerializer(rider).data}
         )
 
 

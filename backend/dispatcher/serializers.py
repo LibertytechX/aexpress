@@ -245,6 +245,59 @@ class RiderSerializer(serializers.ModelSerializer):
         }
 
 
+class RiderApprovalSerializer(serializers.ModelSerializer):
+    """
+    Serializer for dispatcher admins reviewing a self-registered rider's
+    application (profile, vehicle, and submitted KYC documents).
+    """
+
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    bvn = serializers.CharField(source="user.bvn", read_only=True)
+    documents = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Rider
+        fields = [
+            "id",
+            "rider_id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "bvn",
+            "address",
+            "working_type",
+            "is_independent_rider",
+            "approval_status",
+            "is_authorized",
+            "rejection_reason",
+            "vehicle_model",
+            "vehicle_plate_number",
+            "vehicle_color",
+            "vehicle_photo",
+            "documents",
+            "created_at",
+        ]
+
+    def get_documents(self, obj):
+        from riders.serializers import RiderDocumentSerializer
+
+        return RiderDocumentSerializer(obj.documents.all(), many=True).data
+
+
+class RejectedDocumentSerializer(serializers.Serializer):
+    document_id = serializers.UUIDField()
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RiderRejectionSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+    rejected_documents = RejectedDocumentSerializer(many=True, required=False, default=list)
+
+
 class OrderEventSerializer(serializers.ModelSerializer):
     event_type = serializers.CharField(source="event", read_only=True)
     created_by = serializers.SerializerMethodField()

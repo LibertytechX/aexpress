@@ -300,6 +300,7 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
                 working_type="freelancer",
                 is_independent_rider=True,
                 is_authorized=False,
+                approval_status=Rider.ApprovalStatus.PENDING,
                 address=validated_data["address"],
                 vehicle_model=validated_data["vehicle_model"],
                 vehicle_plate_number=validated_data["vehicle_plate_number"],
