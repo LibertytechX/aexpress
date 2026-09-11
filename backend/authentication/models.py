@@ -94,9 +94,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email_verification_token_created = models.DateTimeField(null=True, blank=True)
 
     # Password reset
-    password_reset_token = models.CharField(
-        max_length=100, null=True, blank=True, unique=True
-    )
+    password_reset_token = models.CharField(max_length=100, null=True, blank=True)
     password_reset_token_created = models.DateTimeField(null=True, blank=True)
 
     # OTP verification
