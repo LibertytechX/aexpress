@@ -78,6 +78,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     email = models.EmailField(unique=True, db_index=True)
     address = models.TextField(null=True, blank=True)
+    bvn = models.CharField(max_length=11, null=True, blank=True)
     registration_source = models.CharField(max_length=100, null=True, blank=True)
     referral_code = models.CharField(max_length=100, null=True, blank=True)
 

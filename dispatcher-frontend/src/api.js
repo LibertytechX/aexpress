@@ -253,6 +253,32 @@ export const RidersAPI = {
         const data = await res.json();
         if (!res.ok) throw data;
         return data;
+    },
+
+    async getPendingApproval() {
+        const res = await fetchWithAuth(`/dispatch/riders/pending-approval/`);
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data; // { success, count, data: [...] }
+    },
+
+    async approveRider(riderId) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/approve/`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async rejectRider(riderId, reason, rejectedDocuments = []) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/reject/`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, rejected_documents: rejectedDocuments }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     }
 };
 

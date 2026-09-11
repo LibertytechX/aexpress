@@ -20,6 +20,7 @@ from sparky_utils.exceptions import ServiceException
 
 from .serializers import (
     RiderLoginSerializer,
+    RiderSelfRegistrationSerializer,
     RiderMeSerializer,
     DeviceRegistrationSerializer,
     UpdatePermissionsSerializer,
@@ -33,6 +34,8 @@ from .serializers import (
     RiderTransactionSerializer,
     RiderLocationSerializer,
     RiderNotificationSerializer,
+    RiderDocumentSerializer,
+    RiderDocumentReuploadSerializer,
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
@@ -43,6 +46,7 @@ from .models import (
     RiderCodRecord,
     RiderLocation,
     RiderNotification,
+    RiderDocument,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -267,6 +271,133 @@ class AreaDemandListView(APIView):
         serializer = AreaDemandSerializer(areas, many=True)
         return Response(
             {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderSelfRegisterView(APIView):
+    """
+    API endpoint for independent/freelancer rider self-registration.
+    Creates the rider pending ops review (is_authorized=False) and logs them
+    in immediately, following the same token/session issuance as RiderLoginView.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RiderSelfRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            result = serializer.save()
+            user, rider = result["user"], result["rider"]
+
+            refresh = RefreshToken.for_user(user)
+            access_token = str(refresh.access_token)
+            refresh_token = str(refresh)
+
+            RiderSession.objects.create(
+                rider=rider,
+                refresh_token=refresh_token,
+                device_id=request.data.get("device_id", ""),
+                device_name=request.data.get("device_name", ""),
+                device_os=request.data.get("device_os", "android"),
+                fcm_token=request.data.get("fcm_token", ""),
+                ip_address=request.META.get("REMOTE_ADDR"),
+                expires_at=timezone.now() + timedelta(days=30),
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Registration successful! Your account is pending review.",
+                    "tokens": {"access": access_token, "refresh": refresh_token},
+                    "rider": RiderMeSerializer(rider).data,
+                },
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            {"success": False, "errors": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+
+class RiderDocumentListView(APIView):
+    """
+    API endpoint for a rider to view their uploaded KYC documents and review status.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        documents = rider.documents.all()
+        serializer = RiderDocumentSerializer(documents, many=True)
+        return Response(
+            {"success": True, "data": serializer.data}, status=status.HTTP_200_OK
+        )
+
+
+class RiderDocumentReuploadView(APIView):
+    """
+    API endpoint for a rider to re-upload a document that an admin rejected.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    def post(self, request, pk):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {"success": False, "message": "Rider profile not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            document = RiderDocument.objects.get(pk=pk, rider=rider)
+        except RiderDocument.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Document not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if document.status != RiderDocument.Status.REJECTED:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Only rejected documents can be re-uploaded.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # update the rider aproval status
+        rider.approval_status = Rider.ApprovalStatus.PENDING
+        rider.save()
+
+        serializer = RiderDocumentReuploadSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        document.file_url = serializer.validated_data["url"]
+        document.status = RiderDocument.Status.PENDING
+        document.rejection_reason = ""
+        document.save(
+            update_fields=["file_url", "status", "rejection_reason", "updated_at"]
+        )
+
+        return Response(
+            {
+                "success": True,
+                "message": "Document re-uploaded successfully. Pending review.",
+                "data": RiderDocumentSerializer(document).data,
+            },
+            status=status.HTTP_200_OK,
         )
 
 
@@ -545,7 +676,9 @@ class RiderToggleDutyView(APIView):
 
             # Update status
             request_status = serializer.validated_data["status"]
-            new_status = "online" if request_status in ["on_duty", "online"] else "offline"
+            new_status = (
+                "online" if request_status in ["on_duty", "online"] else "offline"
+            )
             rider.status = new_status
 
             # Update location if provided

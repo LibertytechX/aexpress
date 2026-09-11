@@ -1,5 +1,8 @@
 from django.urls import path
 from .views import (
+    RiderSelfRegisterView,
+    RiderDocumentListView,
+    RiderDocumentReuploadView,
     RiderLoginView,
     RiderTokenRefreshView,
     RiderDeviceRegistrationView,
@@ -33,6 +36,7 @@ from .gamification_views import (
 app_name = "riders"
 
 urlpatterns = [
+    path("auth/register/", RiderSelfRegisterView.as_view(), name="rider-register"),
     path("auth/login/", RiderLoginView.as_view(), name="rider-login"),
     path("auth/refresh/", RiderTokenRefreshView.as_view(), name="rider-token-refresh"),
     path(
@@ -44,6 +48,12 @@ urlpatterns = [
         name="rider-device-permissions",
     ),
     path("auth/me/", RiderMeView.as_view(), name="rider-me"),
+    path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
+    path(
+        "documents/<uuid:pk>/reupload/",
+        RiderDocumentReuploadView.as_view(),
+        name="rider-document-reupload",
+    ),
     path("duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
     path("area-demand/", AreaDemandListView.as_view(), name="area-demand-list"),
     path(

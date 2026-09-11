@@ -435,6 +435,11 @@ class Rider(models.Model):
 
     STATUS_CHOICES = Status.choices
 
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Auto-generated short ID
     rider_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
@@ -464,6 +469,14 @@ class Rider(models.Model):
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_independent_rider = models.BooleanField(default=False)
+    approval_status = models.CharField(
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING,
+        help_text="KYC/application review status for self-registered riders",
+    )
+    rejection_reason = models.TextField(blank=True, default="")
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
