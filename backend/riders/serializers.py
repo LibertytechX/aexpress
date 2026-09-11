@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.db import transaction
@@ -208,6 +210,8 @@ class RiderLoginSerializer(serializers.Serializer):
         return data
 
 
+NIGERIA_PHONE_REGEX = re.compile(r"^\+234[789]\d{9}$")
+
 REQUIRED_DOC_TYPES = {
     RiderDocument.DocType.NATIONAL_ID,
     RiderDocument.DocType.RIDERS_CARD,
@@ -251,7 +255,18 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
     rider_documents = RiderDocumentInputSerializer(many=True, required=True)
 
     def validate_phone(self, value):
-        phone = value.replace(" ", "").replace("-", "")
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678."
+            )
+
         if User.objects.filter(phone=phone).exists():
             raise serializers.ValidationError("This phone number is already registered.")
         return phone

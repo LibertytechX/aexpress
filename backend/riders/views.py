@@ -283,6 +283,7 @@ class RiderSelfRegisterView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         serializer = RiderSelfRegistrationSerializer(data=request.data)
         if serializer.is_valid():
