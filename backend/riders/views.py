@@ -373,6 +373,10 @@ class RiderDocumentReuploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # update the rider aproval status
+        rider.approval_status = Rider.ApprovalStatus.PENDING
+        rider.save()
+
         serializer = RiderDocumentReuploadSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -672,7 +676,9 @@ class RiderToggleDutyView(APIView):
 
             # Update status
             request_status = serializer.validated_data["status"]
-            new_status = "online" if request_status in ["on_duty", "online"] else "offline"
+            new_status = (
+                "online" if request_status in ["on_duty", "online"] else "offline"
+            )
             rider.status = new_status
 
             # Update location if provided

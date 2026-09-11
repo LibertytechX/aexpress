@@ -161,6 +161,12 @@ class RiderViewSet(viewsets.ModelViewSet):
         """Toggle a rider's duty status (online/offline)."""
         rider = self.get_object()
         status_val = request.data.get("status")
+        # reject rider that is not active or approved
+        if not rider.is_authorized:
+            return Response(
+                {"error": "Rider is not authorized to go online."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if status_val == Rider.Status.ONLINE:
             if rider.status != Rider.Status.ONLINE:
@@ -266,7 +272,9 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.approval_status = Rider.ApprovalStatus.APPROVED
         rider.is_authorized = True
         rider.rejection_reason = ""
-        rider.save(update_fields=["approval_status", "is_authorized", "rejection_reason"])
+        rider.save(
+            update_fields=["approval_status", "is_authorized", "rejection_reason"]
+        )
 
         rider.documents.filter(status=RiderDocument.Status.PENDING).update(
             status=RiderDocument.Status.APPROVED
@@ -278,9 +286,7 @@ class RiderViewSet(viewsets.ModelViewSet):
             "Your rider application has been approved! You can now start receiving jobs.",
         )
 
-        return Response(
-            {"success": True, "data": RiderApprovalSerializer(rider).data}
-        )
+        return Response({"success": True, "data": RiderApprovalSerializer(rider).data})
 
     @action(
         detail=True,
@@ -319,17 +325,18 @@ class RiderViewSet(viewsets.ModelViewSet):
         rider.approval_status = Rider.ApprovalStatus.REJECTED
         rider.is_authorized = False
         rider.rejection_reason = reason
-        rider.save(update_fields=["approval_status", "is_authorized", "rejection_reason"])
+        rider.save(
+            update_fields=["approval_status", "is_authorized", "rejection_reason"]
+        )
 
         notify_rider(
             rider,
             "Application Rejected",
-            reason or "Your rider application was rejected. Please review your documents.",
+            reason
+            or "Your rider application was rejected. Please review your documents.",
         )
 
-        return Response(
-            {"success": True, "data": RiderApprovalSerializer(rider).data}
-        )
+        return Response({"success": True, "data": RiderApprovalSerializer(rider).data})
 
 
 class OrderPagination(PageNumberPagination):
