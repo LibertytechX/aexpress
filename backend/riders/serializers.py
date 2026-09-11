@@ -212,13 +212,20 @@ class RiderLoginSerializer(serializers.Serializer):
                 status_code=400, message="Invalid phone number or password."
             )
 
-        if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
-
-        # Authenticate user
-        user = authenticate(username=phone, password=password)
+        user = None
+        # try authentication for phone with the given password
+        for phone_number in phone_numbers:
+            user = authenticate(username=phone_number, password=password)
+            if user:
+                if not user.is_active:
+                    raise ServiceException(
+                        status_code=400, message="This account has been deactivated."
+                    )
+                break
         if not user:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         # Ensure user has a rider profile
         try:
