@@ -1,3 +1,4 @@
+from sparky_utils.exceptions import ServiceException
 import re
 
 from rest_framework import serializers
@@ -152,7 +153,9 @@ class DutyToggleSerializer(serializers.Serializer):
     Serializer for toggling rider duty status.
     """
 
-    status = serializers.ChoiceField(choices=["on_duty", "off_duty", "online", "offline"])
+    status = serializers.ChoiceField(
+        choices=["on_duty", "off_duty", "online", "offline"]
+    )
     latitude = serializers.DecimalField(
         max_digits=30, decimal_places=20, required=False, allow_null=True
     )
@@ -184,10 +187,30 @@ class RiderLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Phone and password are required.")
 
         # Try to get the user
-        try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid phone number or password.")
+        # should try phone number combos
+        phone_2, phone_3 = "", ""
+        phone_numbers = [phone]
+        if phone.startswith("0"):
+            phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 10:
+            phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif phone.startswith("+234"):
+            phone_2 = phone[4:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        print("Let's see the phone numbers: ", phone_numbers)
+        user = User.objects.filter(phone__in=phone_numbers)
+        if user.count() == 0:
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         if not user.is_active:
             raise serializers.ValidationError("This account has been deactivated.")
@@ -268,7 +291,9 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
             )
 
         if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError("This phone number is already registered.")
+            raise serializers.ValidationError(
+                "This phone number is already registered."
+            )
         return phone
 
     def validate_email(self, value):
@@ -612,6 +637,7 @@ class RiderWalletInfoSerializer(serializers.Serializer):
         # Available Balance = Wallet Balance + Pending COD
         try:
             from wallet.models import Wallet
+
             wallet = Wallet.objects.get(user=obj.user)
             wallet_balance = wallet.balance
         except Wallet.DoesNotExist:
