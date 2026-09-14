@@ -69,6 +69,8 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "lastName",
             "phone",
             "email",
+            "emergency_contact_name",
+            "emergency_phone",
             "vehicle_model",
             "vehicle_plate_number",
             "rating",
@@ -277,6 +279,8 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
         required=True, write_only=True, style={"input_type": "password"}
     )
     address = serializers.CharField(required=True)
+    emergency_contact_name = serializers.CharField(required=True, max_length=100)
+    emergency_phone = serializers.CharField(required=True)
     bvn = serializers.RegexField(regex=r"^\d{11}$", required=True)
     vehicle_model = serializers.CharField(required=True)
     vehicle_plate_number = serializers.CharField(required=True)
@@ -300,6 +304,20 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
         if User.objects.filter(phone=phone).exists():
             raise serializers.ValidationError(
                 "This phone number is already registered."
+            )
+        return phone
+
+    def validate_emergency_phone(self, value):
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number for emergency contact, e.g. 08012345678 or +2348012345678."
             )
         return phone
 
@@ -349,6 +367,8 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
                 is_authorized=False,
                 approval_status=Rider.ApprovalStatus.PENDING,
                 address=validated_data["address"],
+                emergency_contact_name=validated_data["emergency_contact_name"],
+                emergency_phone=validated_data["emergency_phone"],
                 vehicle_model=validated_data["vehicle_model"],
                 vehicle_plate_number=validated_data["vehicle_plate_number"],
                 vehicle_color=validated_data["vehicle_color"],

@@ -12,7 +12,6 @@ import random
 import string
 from django.utils import timezone
 
-
 # ---------------------------------------------------------------------------
 # Relay Delivery Infrastructure
 # ---------------------------------------------------------------------------
@@ -399,6 +398,7 @@ class SoftDeleteQuerySet(models.QuerySet):
 
 from typing import Any
 
+
 class SoftDeleteManager(models.Manager):
     def get_queryset(self):
         return SoftDeleteQuerySet(self.model, using=self._db).alive()
@@ -424,7 +424,6 @@ class RiderManager(SoftDeleteManager):
             except Exception:
                 pass
         return super().create(**kwargs)
-
 
 
 class Rider(models.Model):
@@ -510,6 +509,7 @@ class Rider(models.Model):
     current_order = models.CharField(max_length=100, null=True, blank=True)
 
     # Contact & Location
+    emergency_contact_name = models.CharField(max_length=100, null=True, blank=True)
     emergency_phone = models.CharField(max_length=20, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     address = models.TextField(null=True, blank=True)

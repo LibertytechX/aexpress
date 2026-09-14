@@ -5,6 +5,97 @@
 ## Rider Facing Endpoints
 **Base URL:** `/api/riders/`
 
+### 0. Rider Self-Registration
+**Endpoint:** `POST /auth/register/`  
+**Authentication:** None (Public)  
+**Description:** Registers a new independent/freelancer rider account with personal details, emergency contact information, BVN, vehicle specifications, and required KYC documents. Generates JWT tokens and session immediately with account pending ops review (`is_authorized=False`).
+
+**Request Body:**
+```json
+{
+  "phone": "08012345678",
+  "email": "rider@example.com",
+  "first_name": "Ade",
+  "last_name": "Babatunde",
+  "password": "Password123!",
+  "confirm_password": "Password123!",
+  "address": "123 Lagos St, Ikeja",
+  "emergency_contact_name": "Bola Babatunde",
+  "emergency_phone": "08098765432",
+  "bvn": "12345678901",
+  "vehicle_model": "Honda Ace 125",
+  "vehicle_plate_number": "LAG-123-XY",
+  "vehicle_color": "Red",
+  "vehicle_photo": "https://storage.aexpress.com/vehicles/photo.jpg",
+  "device_id": "device-uuid-123",
+  "device_name": "Samsung Galaxy",
+  "device_os": "android",
+  "fcm_token": "fcm-token-123",
+  "rider_documents": [
+    {
+      "type": "national_id",
+      "url": "https://storage.aexpress.com/docs/nin.pdf"
+    },
+    {
+      "type": "riders_card",
+      "url": "https://storage.aexpress.com/docs/rcard.pdf"
+    },
+    {
+      "type": "drivers_license",
+      "url": "https://storage.aexpress.com/docs/license.pdf"
+    },
+    {
+      "type": "utility_bill",
+      "url": "https://storage.aexpress.com/docs/bill.pdf"
+    },
+    {
+      "type": "profile_photo",
+      "url": "https://storage.aexpress.com/docs/photo.jpg"
+    }
+  ]
+}
+```
+
+**Success Response (201 Created):**
+```json
+{
+  "success": true,
+  "message": "Registration successful! Your account is pending review.",
+  "tokens": {
+    "access": "eyJ0eXAi...",
+    "refresh": "eyJ0eXAi..."
+  },
+  "rider": {
+    "id": "uuid",
+    "rider_id": "R12345",
+    "status": "offline",
+    "firstName": "Ade",
+    "lastName": "Babatunde",
+    "phone": "+2348012345678",
+    "email": "rider@example.com",
+    "emergency_contact_name": "Bola Babatunde",
+    "emergency_phone": "+2348098765432",
+    "vehicle_model": "Honda Ace 125",
+    "vehicle_plate_number": "LAG-123-XY",
+    "rating": "0.00",
+    "total_deliveries": 0,
+    "wallet_balance": 0.0,
+    "pending_cod": 0.0,
+    "acceptance_rate": 100.0,
+    "on_time_rate": 100.0,
+    "documents_status": {
+      "total": 5,
+      "approved": 0,
+      "pending": 5,
+      "expiring_soon": 0
+    },
+    "net_earnings": 0.0
+  }
+}
+```
+
+---
+
 ### 1. Today's Trips (Orders)
 **Endpoint:** `GET /orders-today/`  
 **Authentication:** Required (Rider Bearer Token)  
