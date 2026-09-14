@@ -268,6 +268,8 @@ class RiderApprovalSerializer(serializers.ModelSerializer):
             "phone",
             "email",
             "bvn",
+            "emergency_contact_name",
+            "emergency_phone",
             "address",
             "working_type",
             "is_independent_rider",
@@ -1031,6 +1033,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
         default="freelancer",
     )
     team = serializers.CharField(required=False, max_length=100, default="Main Team")
+    emergency_contact_name = serializers.CharField(
+        required=False, max_length=100
+    )
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)

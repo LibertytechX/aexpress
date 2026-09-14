@@ -4,6 +4,18 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-09-13] — Rider Emergency Contact Collection on Self-Registration
+
+### Added
+- **Rider Emergency Contact Information**:
+  - Added `emergency_contact_name` field on `dispatcher.Rider` model with migration `0023_rider_emergency_contact_name.py`.
+  - Added `emergency_contact_name` and `emergency_phone` fields and validation to `RiderSelfRegistrationSerializer` in `riders/serializers.py`.
+  - Exposed `emergency_contact_name` and `emergency_phone` in `RiderMeSerializer` and `RiderApprovalSerializer` (for dispatcher admin application review).
+  - Added `emergency_contact_name` to `RiderOnboardingSerializer` in `dispatcher/serializers.py`.
+  - Added unit test suite `test_rider_self_registration_serializer.py` and integration test suite `test_rider_self_registration.py`.
+
+---
+
 ## [2026-08-28] — Google Reverse Geocoding Integration
 
 ### Added
