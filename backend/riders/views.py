@@ -1281,65 +1281,76 @@ class CustomerRatesRiderAPIView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @exception_advice(model_object=ErrorLog)
-    def post(self, request, order_number):
-        try:
-            order = Order.objects.get(order_number=order_number)
-        except Order.DoesNotExist:
-            return Response(
-                {"success": False, "message": "Order not found."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        if order.status != "Done":
-            return Response(
-                {
-                    "success": False,
-                    "message": "Cannot rate rider for an incomplete order.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if order.user != request.user:
-            return Response(
-                {
-                    "success": False,
-                    "message": "You are not authorized to rate this rider.",
-                },
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
+    def post(self, request):
         serializer = RiderRatingSerializer(data=request.data)
         if serializer.is_valid():
-            rating_value = serializer.validated_data["rating"]
             comment = serializer.validated_data.get("comment", "")
+            order_number = serializer.validated_data["order_number"]
+            rating_value = serializer.validated_data["rating"]
+            rider_id = serializer.validated_data["rider_id"]
+        
+            try:
+                rider = Rider.objects.get(rider_id=rider_id)
 
-            if not order.rider:
+            except Rider.DoesNotExist:
                 return Response(
-                    {
-                        "success": False,
-                        "message": "Rider rating failed. Rider information is no longer available for this order.",
-                        "data": {
-                            "order_number": order.order_number,
-                            "rider_id": None,
-                            "rating": None,
-                            "comment": None,
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"success": False, "message": "Rider not found."},
+                    status=status.HTTP_404_NOT_FOUND,
                 )
+            
+            try:
+                order = Order.objects.get(order_number=order_number)
 
-            # Create or update the rating
+                if order.status != "Done":
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "Cannot rate rider for an incomplete order.",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        
+                if order.user != request.user:
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "You are not authorized to rate this rider.",
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
+                if order.rider != rider:
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "Rider rating failed. Rider information is no longer available for this order.",
+                            "data": {
+                                "order_number": order.order_number,
+                                "rider_id": None,
+                                "rating": None,
+                                "comment": None,
+                            },
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                
+            except Order.DoesNotExist:
+                return Response(
+                    {"success": False, "message": "Order not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+                
             customer_rating, created = RiderRating.objects.update_or_create(
                 order=order,
                 defaults={
-                    "rider": order.rider,
-                    "customer": order.user,
+                    "rider": rider,
+                    "customer": request.user,
                     "rating": rating_value,
                     "comment": comment,
                 },
             )
 
-            order.rider.update_rider_average_rating()
+            rider.update_rider_average_rating()
 
             return Response(
                 {
@@ -1347,7 +1358,7 @@ class CustomerRatesRiderAPIView(APIView):
                     "message": "Rider rated successfully.",
                     "data": {
                         "order_number": order.order_number,
-                        "rider_id": str(order.rider.id),
+                        "rider_id": str(rider.id),
                         "rating": customer_rating.rating,
                         "comment": customer_rating.comment,
                     },

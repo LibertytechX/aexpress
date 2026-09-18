@@ -120,7 +120,7 @@ urlpatterns = [
         name="rider-dashboard-summary",
     ),
     path(
-        "customer-order-rating/<str:order_number>/",
+        "customer-order-rating/",
         CustomerRatesRiderAPIView.as_view(),
         name="customer-order-rating",
     ),
