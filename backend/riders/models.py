@@ -1,4 +1,5 @@
 import uuid
+from authentication.models import User
 from django.db import models
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
@@ -870,3 +871,30 @@ class LeaderboardEntry(models.Model):
 
     def __str__(self):
         return f"#{self.rank} {self.rider.rider_id} — {self.period_type} ({self.period_key})"
+
+
+class RiderRating(models.Model):
+    """
+    Rider ratings given by customers after order completion.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.OneToOneField(
+        "orders.Order", on_delete=models.CASCADE, related_name="rider_rating"
+    )
+    customer = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="customer"
+    )
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="ratings"
+    )
+    rating = models.IntegerField()
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "rider_ratings"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Rating for {self.rider.rider_id} on order {self.order.order_number}: {self.rating} stars"

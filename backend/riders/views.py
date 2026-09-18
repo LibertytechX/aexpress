@@ -20,6 +20,7 @@ from sparky_utils.exceptions import ServiceException
 
 from .serializers import (
     RiderLoginSerializer,
+    RiderRatingSerializer,
     RiderSelfRegistrationSerializer,
     RiderMeSerializer,
     DeviceRegistrationSerializer,
@@ -39,6 +40,7 @@ from .serializers import (
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
+    RiderRating,
     RiderSession,
     RiderDevice,
     AreaDemand,
@@ -1269,3 +1271,93 @@ class RiderAssignmentActionView(APIView):
             data={"order_number": order.order_number, "status": order.status},
             status_code=200,
         )
+
+
+class CustomerRatesRiderAPIView(APIView):
+    """
+    API endpoint for customers to rate a rider after order completion.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, order_number):
+        try:
+            order = Order.objects.get(order_number=order_number)
+        except Order.DoesNotExist:
+            return Response(
+                {"success": False, "message": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if order.status != "Done":
+            return Response(
+                {
+                    "success": False,
+                    "message": "Cannot rate rider for an incomplete order.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if order.user != request.user:
+            return Response(
+                {
+                    "success": False,
+                    "message": "You are not authorized to rate this rider.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = RiderRatingSerializer(data=request.data)
+        if serializer.is_valid():
+            rating_value = serializer.validated_data["rating"]
+            comment = serializer.validated_data.get("comment", "")
+
+            if not order.rider:
+                return Response(
+                    {
+                        "success": False,
+                        "message": "Rider rating failed. Rider information is no longer available for this order.",
+                        "data": {
+                            "order_number": order.order_number,
+                            "rider_id": None,
+                            "rating": None,
+                            "comment": None,
+                        },
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Create or update the rating
+            customer_rating, created = RiderRating.objects.update_or_create(
+                order=order,
+                defaults={
+                    "rider": order.rider,
+                    "customer": order.user,
+                    "rating": rating_value,
+                    "comment": comment,
+                },
+            )
+
+            order.rider.update_rider_average_rating()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Rider rated successfully.",
+                    "data": {
+                        "order_number": order.order_number,
+                        "rider_id": str(order.rider.id),
+                        "rating": customer_rating.rating,
+                        "comment": customer_rating.comment,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        else:
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+   

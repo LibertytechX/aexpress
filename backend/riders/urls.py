@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    CustomerRatesRiderAPIView,
     RiderSelfRegisterView,
     RiderDocumentListView,
     RiderDocumentReuploadView,
@@ -117,5 +118,10 @@ urlpatterns = [
         "dashboard-summary/",
         DashboardSummaryView.as_view(),
         name="rider-dashboard-summary",
+    ),
+    path(
+        "customer-order-rating/<str:order_number>/",
+        CustomerRatesRiderAPIView.as_view(),
+        name="customer-order-rating",
     ),
 ]
