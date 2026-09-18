@@ -879,11 +879,8 @@ class RiderRating(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order = models.OneToOneField(
-        "orders.Order", on_delete=models.CASCADE, related_name="rider_rating"
-    )
     customer = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name="customer"
+        User, on_delete=models.CASCADE, related_name="ratings_given"
     )
     rider = models.ForeignKey(
         "dispatcher.Rider", on_delete=models.CASCADE, related_name="ratings"
@@ -897,4 +894,4 @@ class RiderRating(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Rating for {self.rider.rider_id} on order {self.order.order_number}: {self.rating} stars"
+        return f"Rating for {self.rider.rider_id}: {self.rating} stars"

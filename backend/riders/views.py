@@ -1285,7 +1285,6 @@ class CustomerRatesRiderAPIView(APIView):
         serializer = RiderRatingSerializer(data=request.data)
         if serializer.is_valid():
             comment = serializer.validated_data.get("comment", "")
-            order_number = serializer.validated_data["order_number"]
             rating_value = serializer.validated_data["rating"]
             rider_id = serializer.validated_data["rider_id"]
         
@@ -1298,56 +1297,12 @@ class CustomerRatesRiderAPIView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
             
-            try:
-                order = Order.objects.get(order_number=order_number)
-
-                if order.status != "Done":
-                    return Response(
-                        {
-                            "success": False,
-                            "message": "Cannot rate rider for an incomplete order.",
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-        
-                if order.user != request.user:
-                    return Response(
-                        {
-                            "success": False,
-                            "message": "You are not authorized to rate this rider.",
-                        },
-                        status=status.HTTP_403_FORBIDDEN,
-                    )
-
-                if order.rider != rider:
-                    return Response(
-                        {
-                            "success": False,
-                            "message": "Rider rating failed. Rider information is no longer available for this order.",
-                            "data": {
-                                "order_number": order.order_number,
-                                "rider_id": None,
-                                "rating": None,
-                                "comment": None,
-                            },
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
                 
-            except Order.DoesNotExist:
-                return Response(
-                    {"success": False, "message": "Order not found."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
-                
-            customer_rating, created = RiderRating.objects.update_or_create(
-                order=order,
-                defaults={
-                    "rider": rider,
-                    "customer": request.user,
-                    "rating": rating_value,
-                    "comment": comment,
-                },
+            customer_rating = RiderRating.objects.create(
+                rider=rider,
+                customer=request.user,
+                rating=rating_value,
+                comment=comment,
             )
 
             rider.update_rider_average_rating()
@@ -1357,7 +1312,6 @@ class CustomerRatesRiderAPIView(APIView):
                     "success": True,
                     "message": "Rider rated successfully.",
                     "data": {
-                        "order_number": order.order_number,
                         "rider_id": str(rider.id),
                         "rating": customer_rating.rating,
                         "comment": customer_rating.comment,
