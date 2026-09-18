@@ -727,3 +727,13 @@ class RiderNotificationSerializer(serializers.ModelSerializer):
             "is_read",
             "created_at",
         ]
+
+
+class RiderRatingSerializer(serializers.Serializer):
+    """
+    Serializer for rider rating input.
+    """
+
+    rider_id = serializers.CharField(required=True)
+    rating = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    comment = serializers.CharField(required=False, allow_blank=True)

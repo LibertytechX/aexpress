@@ -725,6 +725,14 @@ class Rider(models.Model):
 
     yesterday_distance_covered.short_description = "Prev Day Distance (km)"
 
+    def update_rider_average_rating(self):
+        from riders.models import RiderRating
+
+        all_ratings = RiderRating.objects.filter(rider=self)
+        avg_rating = all_ratings.aggregate(models.Avg("rating"))["rating__avg"]
+        self.rating = round(avg_rating, 2) if avg_rating else 0.00
+        self.save(update_fields=["rating"])
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 

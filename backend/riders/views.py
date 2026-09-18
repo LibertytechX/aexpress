@@ -20,6 +20,7 @@ from sparky_utils.exceptions import ServiceException
 
 from .serializers import (
     RiderLoginSerializer,
+    RiderRatingSerializer,
     RiderSelfRegistrationSerializer,
     RiderMeSerializer,
     DeviceRegistrationSerializer,
@@ -39,6 +40,7 @@ from .serializers import (
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
+    RiderRating,
     RiderSession,
     RiderDevice,
     AreaDemand,
@@ -1269,3 +1271,58 @@ class RiderAssignmentActionView(APIView):
             data={"order_number": order.order_number, "status": order.status},
             status_code=200,
         )
+
+
+class CustomerRatesRiderAPIView(APIView):
+    """
+    API endpoint for customers to rate a rider after order completion.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        serializer = RiderRatingSerializer(data=request.data)
+        if serializer.is_valid():
+            comment = serializer.validated_data.get("comment", "")
+            rating_value = serializer.validated_data["rating"]
+            rider_id = serializer.validated_data["rider_id"]
+        
+            try:
+                rider = Rider.objects.get(rider_id=rider_id)
+
+            except Rider.DoesNotExist:
+                return Response(
+                    {"success": False, "message": "Rider not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            
+                
+            customer_rating = RiderRating.objects.create(
+                rider=rider,
+                customer=request.user,
+                rating=rating_value,
+                comment=comment,
+            )
+
+            rider.update_rider_average_rating()
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Rider rated successfully.",
+                    "data": {
+                        "rider_id": str(rider.id),
+                        "rating": customer_rating.rating,
+                        "comment": customer_rating.comment,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        else:
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+   
