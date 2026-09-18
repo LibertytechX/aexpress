@@ -734,7 +734,6 @@ class RiderRatingSerializer(serializers.Serializer):
     Serializer for rider rating input.
     """
 
-    order_number = serializers.CharField(required=True)
     rider_id = serializers.CharField(required=True)
     rating = serializers.IntegerField(min_value=1, max_value=5, required=True)
     comment = serializers.CharField(required=False, allow_blank=True)
