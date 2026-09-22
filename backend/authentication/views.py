@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import status, generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,6 +15,7 @@ from .serializers import (
     AddressSerializer,
 )
 from .emails import (
+    prep_user_for_otp,
     send_password_reset_otp_to_email,
     send_verification_email,
     send_password_reset_email,
@@ -568,27 +570,36 @@ class RequestPasswordResetView(APIView):
     def post(self, request):
         """Request password reset email."""
         email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
 
-        if not email:
+        if not email and not phone_number:
             return Response(
-                {"success": False, "error": "Email address is required"},
+                {"success": False, "error": "Email address or Phone number is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            # Try to find user with this email
-            user = User.objects.filter(email=email).first()
+            # Try to find user with this email or phone number
+            user = User.objects.filter(Q(email=email) | Q(phone=phone_number)).first()
 
             if user:
-                # Send password reset email
-                send_password_reset_otp_to_email(user)
-                logger.info(f"Password reset email sent to {email}")
+                prep_user_for_otp(user)
+
+                if email:
+                    # Send password reset to email
+                    send_password_reset_otp_to_email(user)
+                    logger.info(f"Password reset email sent to {user.email}")
+
+                if phone_number:
+                    # Send password reset to phone number
+                    OTPService.send_sms_otp(phone=user.phone, otp=user.password_reset_token)
+                    logger.info(f"Mobile password reset SMS sent to {user.phone}") 
 
             # Always return success to prevent email enumeration
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset code shortly.",
+                    "message": f"If an account exists with that {'email' if email else 'phone number'}, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
@@ -599,7 +610,7 @@ class RequestPasswordResetView(APIView):
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset code shortly.",
+                    "message": f"If an account exists with that {'email' if email else 'phone number'}, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
