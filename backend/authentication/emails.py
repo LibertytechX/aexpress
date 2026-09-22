@@ -22,6 +22,17 @@ def generate_password_reset_otp():
     """Generate a secure random 6-digit numeric OTP for password reset."""
     return f"{secrets.randbelow(1000000):06d}"
 
+def prep_user_for_otp(user):
+    # Generate reset OTP
+    otp = generate_password_reset_otp()
+
+    # Save OTP to user
+    user.password_reset_token = otp
+    user.password_reset_token_created = timezone.now()
+    user.save(
+        update_fields=["password_reset_token", "password_reset_token_created"]
+    )
+    
 
 def send_email_with_fallback(
     to_email: str,
@@ -238,15 +249,7 @@ def send_password_reset_otp_to_email(user):
             frontend_url = os.getenv("FRONTEND_URL", "https://aexpress.vercel.app")
             portal_name = "MERCHANT PORTAL"
 
-        # Generate reset OTP
-        otp = generate_password_reset_otp()
-
-        # Save OTP to user
-        user.password_reset_token = otp
-        user.password_reset_token_created = timezone.now()
-        user.save(
-            update_fields=["password_reset_token", "password_reset_token_created"]
-        )
+        otp = user.password_reset_token
 
         # Create HTML email template
         html_content = get_password_reset_otp_to_email_template(
