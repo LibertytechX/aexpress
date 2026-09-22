@@ -1286,10 +1286,10 @@ class CustomerRatesRiderAPIView(APIView):
         if serializer.is_valid():
             comment = serializer.validated_data.get("comment", "")
             rating_value = serializer.validated_data["rating"]
-            rider_id = serializer.validated_data["rider_id"]
+            rider_code = serializer.validated_data["rider_code"]
         
             try:
-                rider = Rider.objects.get(rider_id=rider_id)
+                rider = Rider.objects.get(rider_id=rider_code)
 
             except Rider.DoesNotExist:
                 return Response(
@@ -1312,7 +1312,7 @@ class CustomerRatesRiderAPIView(APIView):
                     "success": True,
                     "message": "Rider rated successfully.",
                     "data": {
-                        "rider_id": str(rider.id),
+                        "rider_code": str(rider.id),
                         "rating": customer_rating.rating,
                         "comment": customer_rating.comment,
                     },
