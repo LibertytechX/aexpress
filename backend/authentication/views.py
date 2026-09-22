@@ -584,13 +584,17 @@ class RequestPasswordResetView(APIView):
 
             if user:
                 prep_user_for_otp(user)
-                
-                # Send password reset email
-                send_password_reset_otp_to_email(user)
-                logger.info(f"Password reset email sent to {user.email}")
 
-                OTPService.send_sms_otp(phone=user.phone, otp=user.password_reset_token)
-                logger.info(f"Mobile password reset SMS sent to {user.phone}") 
+                if email:
+                    # Send password reset to email
+                    send_password_reset_otp_to_email(user)
+                    logger.info(f"Password reset email sent to {user.email}")
+
+                if phone_number:
+                    # Send password reset to phone number
+                    OTPService.send_sms_otp(phone=user.phone, otp=user.password_reset_token)
+                    logger.info(f"Mobile password reset SMS sent to {user.phone}") 
+
             # Always return success to prevent email enumeration
             return Response(
                 {
