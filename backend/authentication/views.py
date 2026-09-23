@@ -624,14 +624,21 @@ class ResetPasswordView(APIView):
     def post(self, request):
         """Reset password using the emailed OTP."""
         email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
         token = request.data.get("token")
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
 
         # Validate input
-        if not email or not token:
+        if not token:
             return Response(
-                {"success": False, "error": "Email and reset code are required"},
+                {"success": False, "error": "Reset code is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if not email and not phone_number:
+            return Response(
+                {"success": False, "error":"Please provide your account details used to initiate password reset."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -659,7 +666,8 @@ class ResetPasswordView(APIView):
         try:
             # Find user with this email + code combination
             user = User.objects.filter(
-                email=email, password_reset_token=token
+                Q(email=email) | Q(phone=phone_number),
+                password_reset_token=token
             ).first()
 
             if not user:
@@ -721,18 +729,33 @@ class VerifyPasswordResetTokenView(APIView):
     def post(self, request):
         """Verify OTP validity."""
         email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
         token = request.data.get("token")
 
-        if not email or not token:
+        if not token:
             return Response(
-                {"success": False, "error": "Email and reset code are required."},
+                {"success": False, "error": "Reset code is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Find user with this email + code combination
-        user = User.objects.filter(email=email, password_reset_token=token).first()
+        if not email and not phone_number:
+            return Response(
+                {"success": False, "error":"Please provide your account details used to initiate password reset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if not user:
+        # Find user with this email or phone number + code combination
+        try:
+            # Try to find user with this email or phone number
+            user = User.objects.filter(Q(email=email) | Q(phone=phone_number), password_reset_token=token).first()
+
+            if user is None:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+       
+        except Exception as e:
             return Response(
                 {"success": False, "error": "Invalid or expired reset code."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -749,12 +772,19 @@ class VerifyPasswordResetTokenView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+            # Code is valid
+            return Response(
+                {
+                    "success": True,
+                    "message": "Code is valid.",
+                },
+                status=status.HTTP_200_OK,
+            )
 
-        # Code is valid
         return Response(
             {
-                "success": True,
-                "message": "Code is valid.",
+                "success": False,
+                "message": "Code is invalid.",
             },
             status=status.HTTP_200_OK,
         )
