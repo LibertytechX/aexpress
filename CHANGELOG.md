@@ -1,5 +1,16 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-09-28] — AI Agent ServiceUser UUID Resolution Fix
+
+### Backend
+#### Fixed
+- **ServiceUser Model Validation in Agent Booking (`orders/agent_views.py`)**:
+  - Ensured `customer_user` and `caller_user` validation explicitly verifies that `request.user` or `request.merchant` is an instance of Django's `User` model (`isinstance(..., User)`), preventing non-ORM dummy authentication user objects (such as `ServiceUser` or `BotServiceUser`) from being passed into ForeignKey queries or model creations expecting a UUID.
+  - Added robust phone number lookup fallback across multiple phone format variations (`+234...`, `234...`, `0...`).
+  - Added integration test `test_agent_book_order_with_service_api_key` in `orders/tests/integration/test_agent_endpoints.py`.
+
+---
+
 # [2026-09-03] — Assured Express AI Agent & MCP Logistics Endpoints
 
 ### Backend & Integrations
