@@ -224,3 +224,51 @@ class AgentEndpointsTests(APITestCase):
         self.assertEqual(data["total_amount"], 3500.0)
         self.assertEqual(data["virtual_account"]["account_number"], "9988776655")
         self.assertIn("9988776655", data["instructions"])
+
+    @patch("orders.agent_views.calculate_route")
+    @patch("orders.agent_views.geocode_address")
+    def test_agent_book_order_with_service_api_key(self, mock_geocode, mock_route):
+        """Test agent book order works when authenticated with ServiceAPIKey (ServiceUser)."""
+        import hashlib
+        from dispatcher.models import ServiceAPIKey
+
+        raw_key = "sk_agent_test_key_1234567890"
+        key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+        ServiceAPIKey.objects.create(
+            name="Agent Service Key",
+            prefix=raw_key[:11],
+            key_hash=key_hash,
+            scopes=["occ:read", "occ:write"],
+            is_active=True,
+        )
+
+        mock_geocode.side_effect = [
+            {"lat": 6.45, "lng": 3.42},
+            {"lat": 6.60, "lng": 3.35},
+        ]
+        mock_route.return_value = {"distance_km": 8.0, "duration_minutes": 15}
+
+        url = reverse("orders:agent_book_order")
+        payload = {
+            "pickup_address": "5 Allen Avenue, Ikeja",
+            "sender_name": "Service Sender",
+            "sender_phone": "2348033332222",
+            "dropoff_address": "15 Toyin Street, Ikeja",
+            "receiver_name": "Jane Receiver",
+            "receiver_phone": "2348044443333",
+            "vehicle": "Bike",
+        }
+
+        response = self.client.post(
+            url,
+            payload,
+            format="json",
+            HTTP_AUTHORIZATION=f"Bearer {raw_key}",
+        )
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        data = response.data["data"]
+        self.assertIn("order_number", data)
+        order = Order.objects.get(order_number=data["order_number"])
+        self.assertEqual(order.sender_name, "Service Sender")
+        self.assertEqual(order.user.phone, "2348033332222")
+

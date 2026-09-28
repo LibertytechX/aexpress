@@ -138,9 +138,11 @@ class OrderQuoteView(APIView):
                 )
             ]
 
-        caller_user = getattr(request, "merchant", None) or (
-            request.user if request.user and request.user.is_authenticated else None
-        )
+        caller_user = getattr(request, "merchant", None)
+        if not isinstance(caller_user, User):
+            caller_user = None
+        if not caller_user and request.user and request.user.is_authenticated and isinstance(request.user, User):
+            caller_user = request.user
 
         quotes = []
         primary_quote = None
@@ -208,17 +210,29 @@ class AgentBookOrderView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        # Determine user / merchant
+        # Determine user / merchant (ensure it is a genuine Django User model instance, not a ServiceUser / BotServiceUser)
         customer_user = getattr(request, "merchant", None)
-        if not customer_user and request.user and request.user.is_authenticated:
+        if not isinstance(customer_user, User):
+            customer_user = None
+
+        if not customer_user and request.user and request.user.is_authenticated and isinstance(request.user, User):
             customer_user = request.user
 
         sender_phone = data["sender_phone"].strip()
         if not customer_user:
             # Look up or provision user by phone
-            customer_user = User.objects.filter(phone=sender_phone).first()
+            raw_phone = sender_phone.replace("+", "").replace(" ", "").replace("-", "")
+            clean_phone_variations = [sender_phone, raw_phone]
+            if raw_phone.startswith("234") and len(raw_phone) == 13:
+                clean_phone_variations.append("0" + raw_phone[3:])
+                clean_phone_variations.append("+" + raw_phone)
+            elif raw_phone.startswith("0") and len(raw_phone) == 11:
+                clean_phone_variations.append("234" + raw_phone[1:])
+                clean_phone_variations.append("+234" + raw_phone[1:])
+
+            customer_user = User.objects.filter(phone__in=clean_phone_variations).first()
             if not customer_user:
-                email = f"{sender_phone.replace('+', '')}@guest.axpress.net"
+                email = f"{raw_phone}@guest.axpress.net"
                 customer_user = User.objects.create(
                     phone=sender_phone,
                     contact_name=data["sender_name"],
