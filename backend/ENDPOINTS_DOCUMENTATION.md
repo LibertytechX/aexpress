@@ -336,7 +336,8 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 **Key Response Fields:**
 - `orders_today` (integer): Count of completed orders today for the assigned rider(s) calculated dynamically using local timezone boundaries and fallback mechanisms.
 - `yesterday_orders` (integer): Count of completed orders yesterday for the assigned rider(s) calculated dynamically using strict local timezone boundaries and fallback mechanisms.
-- `yesterday_distance` (decimal): Travelled distance (in km or specified units) covered by the asset yesterday.
+- `yesterday_distance` (decimal): Travelled GPS/odometer tracking distance (in km or specified units) covered by the asset yesterday.
+- `total_yesterday_orders_distance_km` (float): Sum of `distance_km` for completed orders yesterday by the vehicle's assigned rider(s). Also aliased as `yesterday_orders_distance` and `total_yesterday_order_distance`.
 - `assigned_rider` (object|null): Details of the currently assigned rider.
 
 ---

@@ -1741,6 +1741,9 @@ export default function AXDispatchPortal() {
               // Protect fields from being overwritten by null/omitted telemetry
               if (v.yesterday_distance === null && existing.yesterday_distance != null) merged.yesterday_distance = existing.yesterday_distance;
               if (v.yesterday_orders === null && existing.yesterday_orders != null) merged.yesterday_orders = existing.yesterday_orders;
+              if (v.total_yesterday_orders_distance_km === null && existing.total_yesterday_orders_distance_km != null) merged.total_yesterday_orders_distance_km = existing.total_yesterday_orders_distance_km;
+              if (v.yesterday_orders_distance === null && existing.yesterday_orders_distance != null) merged.yesterday_orders_distance = existing.yesterday_orders_distance;
+              if (v.total_yesterday_order_distance === null && existing.total_yesterday_order_distance != null) merged.total_yesterday_order_distance = existing.total_yesterday_order_distance;
               if (v.orders_today === null && existing.orders_today != null) merged.orders_today = existing.orders_today;
               if (v.total_distance === null && existing.total_distance != null) merged.total_distance = existing.total_distance;
               if (v.distance_today === null && existing.distance_today != null) merged.distance_today = existing.distance_today;
@@ -4992,6 +4995,7 @@ function VehiclesLocationMap({ vehicles }) {
           const totalDistanceStr = fmtDistance(latest.total_distance, latest.unit_of_distance);
           const distanceTodayStr = fmtDistance(latest.distance_today, latest.unit_of_distance);
           const yesterdayDistanceStr = fmtDistance(latest.yesterday_distance, latest.unit_of_distance);
+          const yesterdayOrdersDistStr = fmtDistance(latest.total_yesterday_orders_distance_km ?? latest.yesterday_orders_distance ?? latest.total_yesterday_order_distance, latest.unit_of_distance || 'km');
           infoWindowRef.current.setContent(
             `<div style="font-family:sans-serif;padding:6px 2px;min-width:180px;">` +
             `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
@@ -5005,6 +5009,7 @@ function VehiclesLocationMap({ vehicles }) {
             `<span><span style="color:#888;font-weight:700;">Yesterday Dist:</span> ${yesterdayDistanceStr}</span>` +
             `<span><span style="color:#888;font-weight:700;">Today Orders:</span> ${latest.orders_today != null ? latest.orders_today : '—'}</span>` +
             `<span><span style="color:#888;font-weight:700;">Yesterday Orders:</span> ${latest.yesterday_orders != null ? latest.yesterday_orders : '—'}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yest Orders Dist:</span> ${yesterdayOrdersDistStr}</span>` +
             `</div>` +
             (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
             `</div>`
@@ -5127,7 +5132,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-  const gridCols = "70px 1.2fr 50px 0.9fr 0.9fr 75px 105px 105px 115px 90px 105px 1.3fr 75px";
+  const gridCols = "70px 1.2fr 50px 0.9fr 0.9fr 75px 105px 105px 115px 90px 105px 115px 1.3fr 75px";
   const fmtDistance = (raw, unit) => {
     if (raw === null || raw === undefined || raw === "") return "—";
     const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -5161,7 +5166,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Today Orders</span><span>Yesterday Orders</span><span>Rider</span><span>Status</span>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Today Orders</span><span>Yesterday Orders</span><span>Yest Orders Dist</span><span>Rider</span><span>Status</span>
             </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(v => (
@@ -5177,6 +5182,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : v.orders_today}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.yesterday_orders === null || v.yesterday_orders === undefined) ? "—" : v.yesterday_orders}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_yesterday_orders_distance_km ?? v.yesterday_orders_distance ?? v.total_yesterday_order_distance, v.unit_of_distance || 'km')}</span>
                   <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
                 </div>
@@ -5458,6 +5464,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
               <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Distance:</span> {fmtDistance(vehicle.yesterday_distance, vehicle.unit_of_distance)}</span>
               <span><span style={{ fontWeight: 700, color: S.textDim }}>Today Orders:</span> {vehicle.orders_today != null ? vehicle.orders_today : "—"}</span>
               <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders:</span> {vehicle.yesterday_orders != null ? vehicle.yesterday_orders : "—"}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders Distance:</span> {fmtDistance(vehicle.total_yesterday_orders_distance_km ?? vehicle.yesterday_orders_distance ?? vehicle.total_yesterday_order_distance, vehicle.unit_of_distance || 'km')}</span>
             </div>
             {vehicle.latitude && vehicle.longitude && (
               <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>

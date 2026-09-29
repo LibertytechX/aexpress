@@ -1,19 +1,25 @@
 All notable changes to the AXpress project are documented in this file.
 
-# [2026-09-29] — Vehicle Asset Yesterday Orders & Dispatcher Fleet Table Updates
+# [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
 
 ### Backend
 #### Added
+- **Vehicle Asset Total Yesterday Orders Distance (`dispatcher/serializers.py`)**:
+  - Added `total_yesterday_orders_distance_km` field and `get_total_yesterday_orders_distance_km` serializer method (with aliases `yesterday_orders_distance` and `total_yesterday_order_distance`) to `VehicleAssetSerializer`, aggregating `distance_km` from completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback and 24-hour cache.
+  - Added `total_yesterday_orders_distance_km` field to `RiderSerializer` alongside `total_yesterday_order_distance`.
+  - Added integration tests `VehicleAssetYesterdayOrdersDistanceTest` in `backend/dispatcher/tests/integration/test_dispatcher_flows.py`.
 - **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
   - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback (order `completed_at`, delivery `delivered_at`, and order `updated_at`).
   - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
 
 ### Frontend
 #### Changed
-- **Dispatcher Portal Vehicle Screen & Modals (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
-  - Updated Vehicles table columns to display `Today Orders` and `Yesterday Orders` alongside `Distance Today` and `Yesterday Distance`.
-  - Updated telemetry info and map marker info window to display both today and yesterday distance and order counts.
-  - Preserved `yesterday_orders` across live Ably telemetry merges.
+- **Dispatcher Portal Vehicles Screen, Modals & Map Popup (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Updated Vehicles table columns to display `Yest Orders Dist` alongside `Today Orders`, `Yesterday Orders`, `Distance Today`, and `Yesterday Distance`.
+  - Updated telemetry read-only modal and map marker info window to display `Yest Orders Dist` / `Yesterday Orders Distance`.
+  - Preserved `total_yesterday_orders_distance_km`, `yesterday_orders_distance`, and `total_yesterday_order_distance` across live Ably telemetry merges.
+- **Dispatcher API Client (`dispatcher-frontend/src/api.js`)**:
+  - Mapped `total_yesterday_orders_distance_km` and `total_yesterday_order_distance` in `RidersAPI.getAll()`.
 
 ---
 
