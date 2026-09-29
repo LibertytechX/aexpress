@@ -189,6 +189,54 @@
 
 ---
 
+### 4. Real-Time Leaderboard
+**Endpoint:** `GET /leaderboard/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Returns real-time ranked list of top 50 riders and the requesting rider's current rank, trips count, and earnings for the selected period (`this_week`, `this_month`, or `all_time`). Powered by Redis Sorted Sets with automatic PostgreSQL failover.
+
+**Query Parameters:**
+- `period` (optional): `this_week`, `this_month` (default), or `all_time`.
+
+**Success Response (200 OK):**
+```json
+{
+  "period": "this_month",
+  "period_key": "2026-09",
+  "my_rank": 3,
+  "entries": [
+    {
+      "rank": 1,
+      "rider_id": "R-101",
+      "name": "Ade Babatunde",
+      "zone": "Ikeja",
+      "trips_count": 45,
+      "earnings": "67500.00",
+      "is_me": false
+    },
+    {
+      "rank": 2,
+      "rider_id": "R-105",
+      "name": "Emeka Okafor",
+      "zone": "Lekki Phase 1",
+      "trips_count": 42,
+      "earnings": "63000.00",
+      "is_me": false
+    },
+    {
+      "rank": 3,
+      "rider_id": "R-102",
+      "name": "Musa Danjuma",
+      "zone": "Victoria Island",
+      "trips_count": 39,
+      "earnings": "58500.00",
+      "is_me": true
+    }
+  ]
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/

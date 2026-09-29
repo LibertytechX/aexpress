@@ -17,6 +17,7 @@ from .models import (
     RiderStreak,
     Challenge,
 )
+from .leaderboard_service import LeaderboardService
 
 
 def get_rider(user):
@@ -249,40 +250,13 @@ class LeaderboardView(APIView):
         else:
             period_key = "all_time"
 
-        entries = (
-            LeaderboardEntry.objects.filter(
-                period_type=period,
-                period_key=period_key,
-            )
-            .select_related("rider__user")
-            .order_by("rank")[:50]
+        data = LeaderboardService.get_leaderboard(
+            period_type=period,
+            period_key=period_key,
+            current_rider=rider,
+            limit=50,
         )
-
-        result = []
-        my_entry = None
-        for entry in entries:
-            r = entry.rider
-            item = {
-                "rank": entry.rank,
-                "rider_id": r.rider_id,
-                "name": r.user.contact_name or r.user.phone,
-                "zone": entry.zone_name,
-                "trips_count": entry.trips_count,
-                "earnings": entry.earnings,
-                "is_me": r.id == rider.id,
-            }
-            result.append(item)
-            if r.id == rider.id:
-                my_entry = item
-
-        return Response(
-            {
-                "period": period,
-                "period_key": period_key,
-                "my_rank": my_entry["rank"] if my_entry else None,
-                "entries": result,
-            }
-        )
+        return Response(data)
 
 
 # ---------------------------------------------------------------------------
@@ -351,16 +325,11 @@ class DashboardSummaryView(APIView):
 
         # Leaderboard rank this month
         period_key = today.strftime("%Y-%m")
-        leaderboard_rank = None
-        try:
-            entry = LeaderboardEntry.objects.get(
-                rider=rider,
-                period_type=LeaderboardEntry.PeriodType.THIS_MONTH,
-                period_key=period_key,
-            )
-            leaderboard_rank = entry.rank
-        except LeaderboardEntry.DoesNotExist:
-            pass
+        leaderboard_rank = LeaderboardService.get_rider_rank(
+            rider.id,
+            LeaderboardEntry.PeriodType.THIS_MONTH,
+            period_key,
+        )
 
         # Referrals
         referral_count = 0

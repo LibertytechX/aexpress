@@ -4,6 +4,27 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)
+
+### Added
+- **Centralized `LeaderboardService` (`riders/leaderboard_service.py`)**:
+  - Implemented real-time rider leaderboard tracking using Redis Sorted Sets (`leaderboard:trips:{period_key}` and `leaderboard:earnings:{period_key}`).
+  - Added atomic PostgreSQL fallback to ensure uninterrupted service if Redis is cold or offline.
+  - Implemented `record_order_completion` for incremental trips and earnings updates upon order delivery.
+  - Added `get_rider_rank` and `get_leaderboard` for sub-millisecond retrieval of rankings and requesting rider's rank.
+  - Added `warm_redis_for_period` to populate Redis directly from PostgreSQL during rebuilds.
+- **Post-Order Background Ingestion (`orders/tasks.py`)**:
+  - Integrated `LeaderboardService.record_order_completion` into `handle_order_completion_tasks` to atomically update rider leaderboards across active periods (`this_week`, `this_month`, `all_time`) without blocking synchronous order endpoints.
+- **Modernized Leaderboard & Gamification Views (`riders/gamification_views.py`)**:
+  - Refactored `LeaderboardView` to read high-speed rankings from Redis with PostgreSQL fallback.
+  - Updated `RiderGamificationSummaryView` to retrieve real-time monthly ranks via `LeaderboardService.get_rider_rank`.
+- **Scheduled Rebuild Synchronization (`riders/management/commands/rebuild_leaderboard.py`)**:
+  - Enhanced command to reconcile PostgreSQL `LeaderboardEntry` table and warm Redis Sorted Sets simultaneously.
+- **Unit and Integration Test Suites**:
+  - Added `test_leaderboard_service.py` (`riders/tests/unit/`) and `test_realtime_leaderboard.py` (`riders/tests/integration/`).
+
+---
+
 ## [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
 
 ### Added

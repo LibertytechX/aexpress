@@ -1188,6 +1188,50 @@ Response:
   }
 ```
 
+### 4. Rider Real-Time Leaderboard
+```
+GET /api/riders/leaderboard/
+Description: Retrieves real-time ranked list of top 50 riders and current rider's rank, trips count, and earnings. Powered by Redis Sorted Sets with automatic PostgreSQL failover.
+Authentication: Required (Rider)
+Query Parameters:
+  - period (optional): this_week, this_month (default), or all_time.
+Response:
+  {
+    "period": "this_month",
+    "period_key": "2026-09",
+    "my_rank": 3,
+    "entries": [
+      {
+        "rank": 1,
+        "rider_id": "R-101",
+        "name": "Ade Babatunde",
+        "zone": "Ikeja",
+        "trips_count": 45,
+        "earnings": "67500.00",
+        "is_me": false
+      },
+      {
+        "rank": 2,
+        "rider_id": "R-105",
+        "name": "Emeka Okafor",
+        "zone": "Lekki Phase 1",
+        "trips_count": 42,
+        "earnings": "63000.00",
+        "is_me": false
+      },
+      {
+        "rank": 3,
+        "rider_id": "R-102",
+        "name": "Musa Danjuma",
+        "zone": "Victoria Island",
+        "trips_count": 39,
+        "earnings": "58500.00",
+        "is_me": true
+      }
+    ]
+  }
+```
+
 ---
 
 ## Places API (Google Places / Fallbacks & Session Usage Tracking)

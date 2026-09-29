@@ -1,5 +1,18 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)
+
+### Backend
+#### Added
+- **Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)**:
+  - Added centralized `LeaderboardService` (`riders/leaderboard_service.py`) for real-time rider leaderboard tracking using Redis Sorted Sets (`leaderboard:trips:{period_key}` and `leaderboard:earnings:{period_key}`) with automatic PostgreSQL failover.
+  - Connected `LeaderboardService.record_order_completion` to background task `handle_order_completion_tasks` in `orders/tasks.py`.
+  - Refactored `LeaderboardView` and `RiderGamificationSummaryView` in `riders/gamification_views.py` to read real-time rankings and stats with sub-millisecond latency.
+  - Updated `rebuild_leaderboard` management command to sync both PostgreSQL snapshot tables and Redis Sorted Sets.
+  - Added unit test suite `test_leaderboard_service.py` and integration test suite `test_realtime_leaderboard.py`.
+
+---
+
 # [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
 
 ### Backend
