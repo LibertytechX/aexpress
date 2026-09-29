@@ -1,6 +1,21 @@
 All notable changes to the AXpress project are documented in this file.
 
-# [2026-09-28] — AI Agent ServiceUser UUID Resolution Fix & Distance Cron Update
+# [2026-09-29] — Vehicle Asset Yesterday Orders & Dispatcher Fleet Table Updates
+
+### Backend
+#### Added
+- **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
+  - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback (order `completed_at`, delivery `delivered_at`, and order `updated_at`).
+  - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
+
+### Frontend
+#### Changed
+- **Dispatcher Portal Vehicle Screen & Modals (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Updated Vehicles table columns to display `Today Orders` and `Yesterday Orders` alongside `Distance Today` and `Yesterday Distance`.
+  - Updated telemetry info and map marker info window to display both today and yesterday distance and order counts.
+  - Preserved `yesterday_orders` across live Ably telemetry merges.
+
+---
 
 ### Backend
 #### Changed
