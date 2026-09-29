@@ -1,8 +1,12 @@
 All notable changes to the AXpress project are documented in this file.
 
-# [2026-09-28] — AI Agent ServiceUser UUID Resolution Fix
+# [2026-09-28] — AI Agent ServiceUser UUID Resolution Fix & Distance Cron Update
 
 ### Backend
+#### Changed
+- **Vehicle Distance Cron Script (`backend/crons/compute_distance_today.sh`)**:
+  - Added `--reset-missing` flag to `compute_distance_today` management command execution to zero out `distance_today` for vehicles with no tracking records today.
+
 #### Fixed
 - **ServiceUser Model Validation in Agent Booking (`orders/agent_views.py`)**:
   - Ensured `customer_user` and `caller_user` validation explicitly verifies that `request.user` or `request.merchant` is an instance of Django's `User` model (`isinstance(..., User)`), preventing non-ORM dummy authentication user objects (such as `ServiceUser` or `BotServiceUser`) from being passed into ForeignKey queries or model creations expecting a UUID.

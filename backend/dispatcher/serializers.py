@@ -1268,6 +1268,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider: serializers.SerializerMethodField = serializers.SerializerMethodField()
     orders_today: serializers.SerializerMethodField = serializers.SerializerMethodField()
     yesterday_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    yesterday_orders: serializers.SerializerMethodField = serializers.SerializerMethodField()
 
     class Meta:
         model = VehicleAsset
@@ -1302,6 +1303,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
             "yesterday_distance",
+            "yesterday_orders",
             "target_ratio",
         ]
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
@@ -1396,6 +1398,55 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             deliveries__status="Delivered",
             deliveries__delivered_at__isnull=True,
             updated_at__gte=start,
+        )
+
+        return orders.filter(q_a | q_b | q_c).distinct().count()
+
+    def get_yesterday_orders(self, obj: VehicleAsset) -> int:
+        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset.
+
+        It aggregates completed orders across three fallback criteria strictly within yesterday:
+        Criterion A: Order status is "Done" and completed_at was yesterday.
+        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
+            delivered_at was yesterday.
+        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
+            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
+
+        Args:
+            obj: The VehicleAsset instance.
+
+        Returns:
+            The number of completed orders yesterday.
+        """
+        riders = obj.riders.all()
+        if not riders.exists():
+            return 0
+
+        today = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(
+            datetime.combine(today, time.min), tz
+        )
+        yesterday_start = yesterday_end - timedelta(days=1)
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(
+            completed_at__gte=yesterday_start,
+            completed_at__lt=yesterday_end,
+        )
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=yesterday_start,
+            deliveries__delivered_at__lt=yesterday_end,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=yesterday_start,
+            updated_at__lt=yesterday_end,
         )
 
         return orders.filter(q_a | q_b | q_c).distinct().count()
