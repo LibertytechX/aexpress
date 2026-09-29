@@ -17,7 +17,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta, time
 from django.core.cache import cache
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Sum
 from orders.models import Order, Delivery
 from .models import VehicleTracking
 
@@ -146,6 +146,7 @@ class RiderSerializer(serializers.ModelSerializer):
         source="created_at", format="%Y-%m-%d", read_only=True
     )
     total_yesterday_order_distance = serializers.SerializerMethodField()
+    total_yesterday_orders_distance_km = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -171,6 +172,7 @@ class RiderSerializer(serializers.ModelSerializer):
             "current_longitude",
             "last_location_update",
             "total_yesterday_order_distance",
+            "total_yesterday_orders_distance_km",
         ]
 
     def get_zone(self, obj):
@@ -179,13 +181,11 @@ class RiderSerializer(serializers.ModelSerializer):
         return None
 
     def get_todayOrders(self, obj):
-        today = datetime.now().date()
+        today = timezone.localdate()
         return obj.rider_orders.filter(status="Done", created_at__date=today).count()
 
     def get_todayEarnings(self, obj):
-        from django.db.models import Sum
-
-        today = datetime.now().date()
+        today = timezone.localdate()
         total = obj.rider_orders.filter(
             status="Done", created_at__date=today
         ).aggregate(total=Sum("total_amount"))["total"]
@@ -204,7 +204,7 @@ class RiderSerializer(serializers.ModelSerializer):
         return None
 
     def get_total_yesterday_order_distance(self, obj):
-        yesterday = datetime.now() - timedelta(days=1)
+        yesterday = timezone.localdate() - timedelta(days=1)
         cache_key = (
             f"total_yesterday_order_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
         )
@@ -214,15 +214,19 @@ class RiderSerializer(serializers.ModelSerializer):
             return cached_distance
 
         # get the riders yesterdays order
-        orders = obj.rider_orders.filter(created_at__date=yesterday.date())
-        total_distance = 0
+        orders = obj.rider_orders.filter(created_at__date=yesterday)
+        total_distance = 0.0
         for order in orders:
             if order.distance_km is not None:
-                total_distance += order.distance_km
+                total_distance += float(order.distance_km)
 
+        total_distance = round(total_distance, 2)
         # cache for 24 hours
         cache.set(cache_key, total_distance, 60 * 60 * 24)
         return total_distance
+
+    def get_total_yesterday_orders_distance_km(self, obj):
+        return self.get_total_yesterday_order_distance(obj)
 
     def get_vehicle(self, obj):
         if obj.vehicle_type:
@@ -1269,6 +1273,9 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
     orders_today: serializers.SerializerMethodField = serializers.SerializerMethodField()
     yesterday_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
     yesterday_orders: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    total_yesterday_orders_distance_km: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    yesterday_orders_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    total_yesterday_order_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
 
     class Meta:
         model = VehicleAsset
@@ -1304,6 +1311,9 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             "updated_at",
             "yesterday_distance",
             "yesterday_orders",
+            "total_yesterday_orders_distance_km",
+            "yesterday_orders_distance",
+            "total_yesterday_order_distance",
             "target_ratio",
         ]
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
@@ -1450,6 +1460,74 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         )
 
         return orders.filter(q_a | q_b | q_c).distinct().count()
+
+    def get_total_yesterday_orders_distance_km(self, obj: VehicleAsset) -> float:
+        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset.
+
+        It aggregates completed orders across three fallback criteria strictly within yesterday:
+        Criterion A: Order status is "Done" and completed_at was yesterday.
+        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
+            delivered_at was yesterday.
+        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
+            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
+
+        Args:
+            obj: The VehicleAsset instance.
+
+        Returns:
+            The total completed orders distance in km yesterday (float, rounded to 2 decimal places).
+        """
+        yesterday = timezone.localdate() - timedelta(days=1)
+        cache_key = f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        riders = obj.riders.all()
+        if not riders.exists():
+            cache.set(cache_key, 0.0, 60 * 60 * 24)
+            return 0.0
+
+        today = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(
+            datetime.combine(today, time.min), tz
+        )
+        yesterday_start = yesterday_end - timedelta(days=1)
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(
+            completed_at__gte=yesterday_start,
+            completed_at__lt=yesterday_end,
+        )
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=yesterday_start,
+            deliveries__delivered_at__lt=yesterday_end,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=yesterday_start,
+            updated_at__lt=yesterday_end,
+        )
+
+        matching_orders = orders.filter(q_a | q_b | q_c).distinct()
+        total_dist = matching_orders.aggregate(total=Sum("distance_km"))["total"]
+        result = float(round(total_dist, 2)) if total_dist else 0.0
+        cache.set(cache_key, result, 60 * 60 * 24)
+        return result
+
+    def get_yesterday_orders_distance(self, obj: VehicleAsset) -> float:
+        """Alias for total_yesterday_orders_distance_km."""
+        return self.get_total_yesterday_orders_distance_km(obj)
+
+    def get_total_yesterday_order_distance(self, obj: VehicleAsset) -> float:
+        """Alias for total_yesterday_orders_distance_km."""
+        return self.get_total_yesterday_orders_distance_km(obj)
 
 
 class VerticalSerializer(serializers.ModelSerializer):
