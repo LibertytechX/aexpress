@@ -212,6 +212,16 @@ def handle_order_completion_tasks(order_id):
             f"handle_order_completion_tasks: Failed to fire buddy referral commission for order {order.order_number}"
         )
 
+    # 5. Record real-time leaderboard progress
+    try:
+        from riders.leaderboard_service import LeaderboardService
+
+        LeaderboardService.record_order_completion(order)
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to update leaderboard for rider {rider.id}"
+        )
+
     return True
 
 
