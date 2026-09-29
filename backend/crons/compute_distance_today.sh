@@ -50,8 +50,9 @@ fi
 
 # ── Prevent overlapping runs ─────────────────────────────────
 if command -v flock >/dev/null 2>&1; then
-  flock -n "$LOCK_FILE" "$VENV_PYTHON" "$MANAGE" compute_distance_today >> "$LOG_FILE" 2>&1
+  flock -n "$LOCK_FILE" "$VENV_PYTHON" "$MANAGE" compute_distance_today --reset-missing >> "$LOG_FILE" 2>&1
 else
-  "$VENV_PYTHON" "$MANAGE" compute_distance_today >> "$LOG_FILE" 2>&1
+  "$VENV_PYTHON" "$MANAGE" compute_distance_today --reset-missing >> "$LOG_FILE" 2>&1
 fi
+
 
