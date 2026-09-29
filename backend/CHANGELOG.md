@@ -4,6 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-09-29] — Vehicle Asset Yesterday Orders & Orders Today Calculation
+
+### Added
+- **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
+  - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders within previous local day boundaries `[yesterday_start, yesterday_end)` with 3-tier fallback (`completed_at`, `delivered_at`, `updated_at`).
+  - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
+
+---
+
 ## [2026-09-13] — Rider Emergency Contact Collection on Self-Registration
 
 ### Added
