@@ -1,3 +1,5 @@
+import base64
+import io
 import logging
 import asyncio
 from celery import shared_task
@@ -7,6 +9,43 @@ from .models import OrderOffer
 from .serializers import OrderOfferListSerializer
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def finalize_rider_document_upload_task(self, document_id, file_data, filename):
+    """
+    Background task: uploads a rider KYC document to S3 and attaches the resulting
+    URL to the already-created RiderDocument record. Runs after the view has
+    already responded, so the caller never waits on this.
+    file_data is base64-encoded file bytes — Celery tasks can't accept file-like objects.
+    """
+    from dispatcher.s3_utils import upload_document_to_s3
+    from .models import RiderDocument
+
+    try:
+        document = RiderDocument.objects.get(pk=document_id)
+    except RiderDocument.DoesNotExist:
+        logger.error(
+            f"finalize_rider_document_upload_task: document {document_id} not found"
+        )
+        return
+
+    file_content = base64.b64decode(file_data)
+    file_obj = io.BytesIO(file_content)
+    file_url = upload_document_to_s3(file_obj, filename, "riders", document.doc_type)
+    if not file_url:
+        logger.error(
+            f"finalize_rider_document_upload_task: S3 upload failed for document {document_id}"
+        )
+        raise RuntimeError(f"S3 upload failed for document {document_id}")
+
+    document.file_url = file_url
+    document.save(update_fields=["file_url", "updated_at"])
 
 
 @shared_task
