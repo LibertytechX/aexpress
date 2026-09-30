@@ -35,9 +35,7 @@ class LeaderboardService:
             return None
 
     @classmethod
-    def get_period_tuples(
-        cls, today=None
-    ) -> List[Tuple[str, str, Dict[str, Any]]]:
+    def get_period_tuples(cls, today=None) -> List[Tuple[str, str, Dict[str, Any]]]:
         """
         Returns list of (period_type, period_key, date_filter) for this_week, this_month, and all_time.
         Standardizes period_key generation across the entire codebase.
@@ -172,93 +170,93 @@ class LeaderboardService:
         Returns ranked list of riders for the given period.
         Tries Redis first. If Redis is cold or down, falls back to PostgreSQL.
         """
-        redis_client = cls.get_redis_client()
-        if redis_client:
-            try:
-                trips_key = f"leaderboard:trips:{period_key}"
-                earnings_key = f"leaderboard:earnings:{period_key}"
+        # redis_client = cls.get_redis_client()
+        # if redis_client:
+        #     try:
+        #         trips_key = f"leaderboard:trips:{period_key}"
+        #         earnings_key = f"leaderboard:earnings:{period_key}"
 
-                top_members = redis_client.zrevrange(
-                    trips_key, 0, limit - 1, withscores=True
-                )
+        #         top_members = redis_client.zrevrange(
+        #             trips_key, 0, limit - 1, withscores=True
+        #         )
 
-                if top_members:
-                    rider_ids = [
-                        m[0].decode("utf-8") if isinstance(m[0], bytes) else str(m[0])
-                        for m in top_members
-                    ]
+        #         if top_members:
+        #             rider_ids = [
+        #                 m[0].decode("utf-8") if isinstance(m[0], bytes) else str(m[0])
+        #                 for m in top_members
+        #             ]
 
-                    # Single SQL query to fetch rider metadata
-                    riders = (
-                        Rider.objects.filter(id__in=rider_ids)
-                        .select_related("user", "hub__zone")
-                    )
-                    rider_map = {str(r.id): r for r in riders}
+        #             # Single SQL query to fetch rider metadata
+        #             riders = (
+        #                 Rider.objects.filter(id__in=rider_ids)
+        #                 .select_related("user", "hub__zone")
+        #             )
+        #             rider_map = {str(r.id): r for r in riders}
 
-                    # Fetch earnings via pipeline
-                    pipe = redis_client.pipeline()
-                    for r_id in rider_ids:
-                        pipe.zscore(earnings_key, r_id)
-                    earnings_scores = pipe.execute()
+        #             # Fetch earnings via pipeline
+        #             pipe = redis_client.pipeline()
+        #             for r_id in rider_ids:
+        #                 pipe.zscore(earnings_key, r_id)
+        #             earnings_scores = pipe.execute()
 
-                    entries = []
-                    my_entry = None
-                    current_rider_id_str = str(current_rider.id) if current_rider else None
+        #             entries = []
+        #             my_entry = None
+        #             current_rider_id_str = str(current_rider.id) if current_rider else None
 
-                    for idx, (m, trips_score) in enumerate(top_members, start=1):
-                        r_id = (
-                            m.decode("utf-8") if isinstance(m, bytes) else str(m)
-                        )
-                        rider_obj = rider_map.get(r_id)
-                        if not rider_obj:
-                            continue
+        #             for idx, (m, trips_score) in enumerate(top_members, start=1):
+        #                 r_id = (
+        #                     m.decode("utf-8") if isinstance(m, bytes) else str(m)
+        #                 )
+        #                 rider_obj = rider_map.get(r_id)
+        #                 if not rider_obj:
+        #                     continue
 
-                        earning_val = earnings_scores[idx - 1] or 0.0
-                        zone_name = (
-                            rider_obj.hub.zone.name
-                            if (rider_obj.hub and rider_obj.hub.zone)
-                            else ""
-                        )
-                        is_me = (
-                            current_rider_id_str is not None
-                            and str(rider_obj.id) == current_rider_id_str
-                        )
+        #                 earning_val = earnings_scores[idx - 1] or 0.0
+        #                 zone_name = (
+        #                     rider_obj.hub.zone.name
+        #                     if (rider_obj.hub and rider_obj.hub.zone)
+        #                     else ""
+        #                 )
+        #                 is_me = (
+        #                     current_rider_id_str is not None
+        #                     and str(rider_obj.id) == current_rider_id_str
+        #                 )
 
-                        item = {
-                            "rank": idx,
-                            "rider_id": rider_obj.rider_id,
-                            "name": rider_obj.user.contact_name or rider_obj.user.phone,
-                            "zone": zone_name,
-                            "trips_count": int(trips_score),
-                            "earnings": Decimal(str(round(earning_val, 2))),
-                            "is_me": is_me,
-                        }
-                        entries.append(item)
-                        if is_me:
-                            my_entry = item
+        #                 item = {
+        #                     "rank": idx,
+        #                     "rider_id": rider_obj.rider_id,
+        #                     "name": rider_obj.user.contact_name or rider_obj.user.phone,
+        #                     "zone": zone_name,
+        #                     "trips_count": int(trips_score),
+        #                     "earnings": Decimal(str(round(earning_val, 2))),
+        #                     "is_me": is_me,
+        #                 }
+        #                 entries.append(item)
+        #                 if is_me:
+        #                     my_entry = item
 
-                    # Get current rider rank directly from Redis even if outside top 50
-                    my_rank = None
-                    if current_rider_id_str:
-                        if my_entry:
-                            my_rank = my_entry["rank"]
-                        else:
-                            rank_0_idx = redis_client.zrevrank(
-                                trips_key, current_rider_id_str
-                            )
-                            if rank_0_idx is not None:
-                                my_rank = rank_0_idx + 1
+        #             # Get current rider rank directly from Redis even if outside top 50
+        #             my_rank = None
+        #             if current_rider_id_str:
+        #                 if my_entry:
+        #                     my_rank = my_entry["rank"]
+        #                 else:
+        #                     rank_0_idx = redis_client.zrevrank(
+        #                         trips_key, current_rider_id_str
+        #                     )
+        #                     if rank_0_idx is not None:
+        #                         my_rank = rank_0_idx + 1
 
-                    return {
-                        "period": period_type,
-                        "period_key": period_key,
-                        "my_rank": my_rank,
-                        "entries": entries,
-                    }
-            except Exception as e:
-                logger.error(
-                    f"LeaderboardService: Redis query failed for {period_key}, falling back to DB: {e}"
-                )
+        #             return {
+        #                 "period": period_type,
+        #                 "period_key": period_key,
+        #                 "my_rank": my_rank,
+        #                 "entries": entries,
+        #             }
+        #     except Exception as e:
+        #         logger.error(
+        #             f"LeaderboardService: Redis query failed for {period_key}, falling back to DB: {e}"
+        #         )
 
         # Fallback to PostgreSQL
         return cls._get_leaderboard_from_db(
@@ -280,7 +278,6 @@ class LeaderboardService:
         entries_qs = (
             LeaderboardEntry.objects.filter(
                 period_type=period_type,
-                period_key=period_key,
             )
             .select_related("rider__user", "rider__hub__zone")
             .order_by("rank")[:limit]
@@ -292,7 +289,7 @@ class LeaderboardService:
 
         for entry in entries_qs:
             r = entry.rider
-            is_me = (current_rider_id is not None and r.id == current_rider_id)
+            is_me = current_rider_id is not None and r.id == current_rider_id
             item = {
                 "rank": entry.rank,
                 "rider_id": r.rider_id,
@@ -312,7 +309,6 @@ class LeaderboardService:
             own_entry = LeaderboardEntry.objects.filter(
                 rider=current_rider,
                 period_type=period_type,
-                period_key=period_key,
             ).first()
             if own_entry:
                 my_rank = own_entry.rank
