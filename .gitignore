@@ -90,3 +90,6 @@ Desktop.ini
 
 # Operations dashboard frontend — cloned locally for audit only, never commit
 /operations-frontend/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
