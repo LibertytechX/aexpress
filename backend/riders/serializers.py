@@ -1,5 +1,9 @@
+from sparky_utils.exceptions import ServiceException
+import re
+
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum
 from dispatcher.models import Rider
@@ -9,6 +13,7 @@ from .models import (
     RiderAuth,
     RiderDevice,
     RiderCodRecord,
+    RiderDocument,
     OrderOffer,
     AreaDemand,
     RiderEarning,
@@ -65,6 +70,8 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "lastName",
             "phone",
             "email",
+            "emergency_contact_name",
+            "emergency_phone",
             "vehicle_model",
             "vehicle_plate_number",
             "rating",
@@ -149,7 +156,9 @@ class DutyToggleSerializer(serializers.Serializer):
     Serializer for toggling rider duty status.
     """
 
-    status = serializers.ChoiceField(choices=["on_duty", "off_duty", "online", "offline"])
+    status = serializers.ChoiceField(
+        choices=["on_duty", "off_duty", "online", "offline"]
+    )
     latitude = serializers.DecimalField(
         max_digits=30, decimal_places=20, required=False, allow_null=True
     )
@@ -181,18 +190,45 @@ class RiderLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Phone and password are required.")
 
         # Try to get the user
-        try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid phone number or password.")
+        # should try phone number combos
+        phone_2, phone_3 = "", ""
+        phone_numbers = [phone]
+        if phone.startswith("0"):
+            phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 10:
+            phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif phone.startswith("+234"):
+            phone_2 = phone[4:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        print("Let's see the phone numbers: ", phone_numbers)
+        user = User.objects.filter(phone__in=phone_numbers)
+        if user.count() == 0:
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
-        if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
-
-        # Authenticate user
-        user = authenticate(username=phone, password=password)
+        user = None
+        # try authentication for phone with the given password
+        for phone_number in phone_numbers:
+            user = authenticate(username=phone_number, password=password)
+            if user:
+                if not user.is_active:
+                    raise ServiceException(
+                        status_code=400, message="This account has been deactivated."
+                    )
+                break
         if not user:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         # Ensure user has a rider profile
         try:
@@ -205,6 +241,175 @@ class RiderLoginSerializer(serializers.Serializer):
         data["rider"] = rider
         data["user"] = user
         return data
+
+
+NIGERIA_PHONE_REGEX = re.compile(r"^\+234[789]\d{9}$")
+
+REQUIRED_DOC_TYPES = {
+    RiderDocument.DocType.NATIONAL_ID,
+    RiderDocument.DocType.RIDERS_CARD,
+    RiderDocument.DocType.DRIVERS_LICENSE,
+    RiderDocument.DocType.UTILITY_BILL,
+    RiderDocument.DocType.PROFILE_PHOTO,
+}
+
+
+class RiderDocumentInputSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=RiderDocument.DocType.choices)
+    url = serializers.URLField()
+
+
+class RiderSelfRegistrationSerializer(serializers.Serializer):
+    """
+    Serializer for independent/freelancer rider self-registration.
+    Creates a User + Rider (working_type="freelancer", is_independent_rider=True,
+    is_authorized=False pending ops review) plus the submitted KYC documents.
+    """
+
+    phone = serializers.CharField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        min_length=6,
+        style={"input_type": "password"},
+    )
+    confirm_password = serializers.CharField(
+        required=True, write_only=True, style={"input_type": "password"}
+    )
+    address = serializers.CharField(required=True)
+    emergency_contact_name = serializers.CharField(required=True, max_length=100)
+    emergency_phone = serializers.CharField(required=True)
+    bvn = serializers.RegexField(regex=r"^\d{11}$", required=True)
+    vehicle_model = serializers.CharField(required=True)
+    vehicle_plate_number = serializers.CharField(required=True)
+    vehicle_color = serializers.CharField(required=True)
+    vehicle_photo = serializers.URLField(required=True)
+    rider_documents = RiderDocumentInputSerializer(many=True, required=True)
+
+    def validate_phone(self, value):
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678."
+            )
+
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError(
+                "This phone number is already registered."
+            )
+        return phone
+
+    def validate_emergency_phone(self, value):
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number for emergency contact, e.g. 08012345678 or +2348012345678."
+            )
+        return phone
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        value = value.lower()
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+    def validate_rider_documents(self, value):
+        submitted_types = {doc["type"] for doc in value}
+        missing = REQUIRED_DOC_TYPES - submitted_types
+        if missing:
+            raise serializers.ValidationError(
+                f"Missing required documents: {', '.join(sorted(missing))}."
+            )
+        return value
+
+    def validate(self, data):
+        if data.get("password") != data.get("confirm_password"):
+            raise serializers.ValidationError("Passwords do not match.")
+        return data
+
+    def create(self, validated_data):
+        validated_data.pop("confirm_password")
+        rider_documents = validated_data.pop("rider_documents")
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                phone=validated_data["phone"],
+                email=validated_data.get("email") or None,
+                password=validated_data["password"],
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                contact_name=f"{validated_data['first_name']} {validated_data['last_name']}",
+                usertype="Rider",
+                address=validated_data["address"],
+                bvn=validated_data["bvn"],
+            )
+
+            rider = Rider.objects.create(
+                user=user,
+                working_type="freelancer",
+                is_independent_rider=True,
+                is_authorized=False,
+                approval_status=Rider.ApprovalStatus.PENDING,
+                address=validated_data["address"],
+                emergency_contact_name=validated_data["emergency_contact_name"],
+                emergency_phone=validated_data["emergency_phone"],
+                vehicle_model=validated_data["vehicle_model"],
+                vehicle_plate_number=validated_data["vehicle_plate_number"],
+                vehicle_color=validated_data["vehicle_color"],
+                vehicle_photo=validated_data["vehicle_photo"],
+            )
+
+            RiderDocument.objects.bulk_create(
+                [
+                    RiderDocument(
+                        rider=rider, doc_type=doc["type"], file_url=doc["url"]
+                    )
+                    for doc in rider_documents
+                ]
+            )
+
+        return {"user": user, "rider": rider}
+
+
+class RiderDocumentSerializer(serializers.ModelSerializer):
+    """
+    Serializer for a rider viewing their own KYC documents and review status.
+    """
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "file_url",
+            "status",
+            "expires_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class RiderDocumentReuploadSerializer(serializers.Serializer):
+    url = serializers.URLField(required=True)
 
 
 class RiderOrderSerializer(AssignedOrderSerializer):
@@ -460,6 +665,7 @@ class RiderWalletInfoSerializer(serializers.Serializer):
         # Available Balance = Wallet Balance + Pending COD
         try:
             from wallet.models import Wallet
+
             wallet = Wallet.objects.get(user=obj.user)
             wallet_balance = wallet.balance
         except Wallet.DoesNotExist:

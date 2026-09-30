@@ -20,14 +20,14 @@ test-backend:
 	@cd backend && ./run_tests.sh
 
 test-fast:
-	@cd backend && pytest -v
+	@cd backend && .venv/bin/pytest -v
 
 test-cov:
-	@cd backend && pytest --cov=. --cov-report=term-missing --cov-report=html
+	@cd backend && .venv/bin/pytest --cov=. --cov-report=term-missing --cov-report=html
 
 migrations:
-	@cd backend && python manage.py makemigrations
+	@cd backend && .venv/bin/python manage.py makemigrations
 
 migrate:
-	@cd backend && python manage.py migrate
+	@cd backend && .venv/bin/python manage.py migrate
 

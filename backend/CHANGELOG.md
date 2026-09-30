@@ -4,6 +4,52 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
+## [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)
+
+### Added
+- **Centralized `LeaderboardService` (`riders/leaderboard_service.py`)**:
+  - Implemented real-time rider leaderboard tracking using Redis Sorted Sets (`leaderboard:trips:{period_key}` and `leaderboard:earnings:{period_key}`).
+  - Added atomic PostgreSQL fallback to ensure uninterrupted service if Redis is cold or offline.
+  - Implemented `record_order_completion` for incremental trips and earnings updates upon order delivery.
+  - Added `get_rider_rank` and `get_leaderboard` for sub-millisecond retrieval of rankings and requesting rider's rank.
+  - Added `warm_redis_for_period` to populate Redis directly from PostgreSQL during rebuilds.
+- **Post-Order Background Ingestion (`orders/tasks.py`)**:
+  - Integrated `LeaderboardService.record_order_completion` into `handle_order_completion_tasks` to atomically update rider leaderboards across active periods (`this_week`, `this_month`, `all_time`) without blocking synchronous order endpoints.
+- **Modernized Leaderboard & Gamification Views (`riders/gamification_views.py`)**:
+  - Refactored `LeaderboardView` to read high-speed rankings from Redis with PostgreSQL fallback.
+  - Updated `RiderGamificationSummaryView` to retrieve real-time monthly ranks via `LeaderboardService.get_rider_rank`.
+- **Scheduled Rebuild Synchronization (`riders/management/commands/rebuild_leaderboard.py`)**:
+  - Enhanced command to reconcile PostgreSQL `LeaderboardEntry` table and warm Redis Sorted Sets simultaneously.
+- **Unit and Integration Test Suites**:
+  - Added `test_leaderboard_service.py` (`riders/tests/unit/`) and `test_realtime_leaderboard.py` (`riders/tests/integration/`).
+
+---
+
+## [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
+
+### Added
+- **Vehicle Asset Total Yesterday Orders Distance (`dispatcher/serializers.py`)**:
+  - Added `total_yesterday_orders_distance_km` field and `get_total_yesterday_orders_distance_km` serializer method (with aliases `yesterday_orders_distance` and `total_yesterday_order_distance`) to `VehicleAssetSerializer`, aggregating `distance_km` from completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback and 24-hour cache.
+  - Added `total_yesterday_orders_distance_km` field to `RiderSerializer` alongside `total_yesterday_order_distance`.
+  - Added integration tests `VehicleAssetYesterdayOrdersDistanceTest` in `backend/dispatcher/tests/integration/test_dispatcher_flows.py`.
+- **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
+  - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders within previous local day boundaries `[yesterday_start, yesterday_end)` with 3-tier fallback (`completed_at`, `delivered_at`, `updated_at`).
+  - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
+
+---
+
+## [2026-09-13] — Rider Emergency Contact Collection on Self-Registration
+
+### Added
+- **Rider Emergency Contact Information**:
+  - Added `emergency_contact_name` field on `dispatcher.Rider` model with migration `0023_rider_emergency_contact_name.py`.
+  - Added `emergency_contact_name` and `emergency_phone` fields and validation to `RiderSelfRegistrationSerializer` in `riders/serializers.py`.
+  - Exposed `emergency_contact_name` and `emergency_phone` in `RiderMeSerializer` and `RiderApprovalSerializer` (for dispatcher admin application review).
+  - Added `emergency_contact_name` to `RiderOnboardingSerializer` in `dispatcher/serializers.py`.
+  - Added unit test suite `test_rider_self_registration_serializer.py` and integration test suite `test_rider_self_registration.py`.
+
+---
+
 ## [2026-08-28] — Google Reverse Geocoding Integration
 
 ### Added

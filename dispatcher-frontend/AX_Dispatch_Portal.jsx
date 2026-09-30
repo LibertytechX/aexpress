@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -96,6 +96,8 @@ const I = {
   check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>,
   teams: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
   vehicles: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10H1v7h2" /><circle cx="7" cy="17" r="2" /><path d="M9 17h6" /><circle cx="17" cy="17" r="2" /><path d="M5 10V6a1 1 0 0 1 1-1h4l3 5" /></svg>,
+  revenue: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>,
+  idCard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M15 9h4" /><path d="M15 13h4" /><path d="M6 17c.5-1.5 1.8-2.5 3-2.5s2.5 1 3 2.5" /></svg>,
 };
 
 const S = {
@@ -1520,6 +1522,7 @@ export default function AXDispatchPortal() {
     } catch (e) { /* ignore */ }
   };
   const [riders, setRiders] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState({ count: 0, data: [] });
   const [merchants, setMerchants] = useState([]);
   const [vehicleAssets, setVehicleAssets] = useState([]);
   const [eventLogs, setEventLogs] = useState({});
@@ -1610,13 +1613,14 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData, pendingApprovalsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
           OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => ({ results: [], count: 0 })),
           MerchantsAPI.getAll().catch(() => []),
           DispatchersAPI.getAll().catch(() => []),
           VehicleAssetsAPI.getAll().catch(() => []),
-          SettingsAPI.get().catch(() => null)
+          SettingsAPI.get().catch(() => null),
+          RidersAPI.getPendingApproval().catch(() => ({ count: 0, data: [] }))
         ]);
         if (cancelled) return;
         setRiders(ridersData);
@@ -1625,6 +1629,7 @@ export default function AXDispatchPortal() {
         setMerchants(merchantsData);
         setDispatchers(dispatchersData);
         setVehicleAssets(vehicleAssetsData);
+        setPendingApprovals(pendingApprovalsData);
         setEventLogs(initEventLogs(ordersData.results || ordersData));
         if (settingsData?.commission_pct != null) {
           setCommissionPct(parseFloat(settingsData.commission_pct) || 20);
@@ -1735,6 +1740,10 @@ export default function AXDispatchPortal() {
               const merged = { ...existing, ...v };
               // Protect fields from being overwritten by null/omitted telemetry
               if (v.yesterday_distance === null && existing.yesterday_distance != null) merged.yesterday_distance = existing.yesterday_distance;
+              if (v.yesterday_orders === null && existing.yesterday_orders != null) merged.yesterday_orders = existing.yesterday_orders;
+              if (v.total_yesterday_orders_distance_km === null && existing.total_yesterday_orders_distance_km != null) merged.total_yesterday_orders_distance_km = existing.total_yesterday_orders_distance_km;
+              if (v.yesterday_orders_distance === null && existing.yesterday_orders_distance != null) merged.yesterday_orders_distance = existing.yesterday_orders_distance;
+              if (v.total_yesterday_order_distance === null && existing.total_yesterday_order_distance != null) merged.total_yesterday_order_distance = existing.total_yesterday_order_distance;
               if (v.orders_today === null && existing.orders_today != null) merged.orders_today = existing.orders_today;
               if (v.total_distance === null && existing.total_distance != null) merged.total_distance = existing.total_distance;
               if (v.distance_today === null && existing.distance_today != null) merged.distance_today = existing.distance_today;
@@ -1908,11 +1917,14 @@ export default function AXDispatchPortal() {
   };
 
   const navTo = (s, id) => { if (s === "orders") { setSelectedOrderId(id); setScreen("orders"); } else { setSelectedRiderId(id); setScreen("riders"); } };
+  const refreshPendingApprovals = () => RidersAPI.getPendingApproval().then(setPendingApprovals).catch(() => { });
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: I.dashboard },
     { id: "orders", label: "Orders", icon: I.orders, count: orders.filter(o => o.status === "Pending").length },
     { id: "riders", label: "Riders", icon: I.riders, count: riders.filter(r => r.status === "online").length },
+    { id: "riderApprovals", label: "Rider Approvals", icon: I.idCard, count: pendingApprovals.count || 0 },
     { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
+    { id: "revenue", label: "Revenue", icon: I.revenue },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
     { id: "messaging", label: "Messaging", icon: I.messaging, count: 0 },
@@ -1958,14 +1970,16 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "vehicles" ? "Vehicles" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "riderApprovals" ? "Rider Approvals" : screen === "vehicles" ? "Vehicles" : screen === "revenue" ? "Revenue" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
         <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
           {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
           {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
           {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
+          {screen === "riderApprovals" && <PendingRiderApprovalsScreen riders={pendingApprovals.data || []} onRefresh={refreshPendingApprovals} />}
           {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
+          {screen === "revenue" && <RevenueScreen />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
           {screen === "messaging" && <MessagingScreen />}
@@ -4456,6 +4470,272 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   );
 }
 
+// ─── PENDING RIDER APPROVALS ──────────────────────────────────────
+const APPROVAL_PILL = {
+  pending: { bg: S.yellowBg, text: S.yellow },
+  approved: { bg: S.greenBg, text: S.green },
+  rejected: { bg: S.redBg, text: S.red },
+  expired: { bg: S.borderLight, text: S.textMuted },
+};
+const StatusPill = ({ status }) => {
+  const s = APPROVAL_PILL[status] || { bg: S.borderLight, text: S.textMuted };
+  return <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: s.bg, color: s.text, textTransform: "uppercase", letterSpacing: "0.5px" }}>{status}</span>;
+};
+
+const DOC_TYPE_LABELS = {
+  national_id: "National ID",
+  riders_card: "Rider's Card",
+  drivers_license: "Driver's License",
+  utility_bill: "Utility Bill",
+  profile_photo: "Profile Photo",
+  vehicle_insurance: "Vehicle Insurance",
+  vehicle_registration: "Vehicle Registration",
+};
+
+const InfoRow = ({ label, value }) => (
+  <div style={{ marginBottom: 6 }}>
+    <span style={{ fontSize: 10, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}: </span>
+    <span style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{value || "—"}</span>
+  </div>
+);
+
+function PendingRiderApprovalsScreen({ riders, onRefresh }) {
+  const [reviewingRider, setReviewingRider] = useState(null);
+  const [toast, setToast] = useState("");
+
+  const handleDone = (message) => {
+    setReviewingRider(null);
+    onRefresh();
+    setToast(message);
+    setTimeout(() => setToast(""), 3500);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Pending Applications" value={riders.length} color={S.gold} />
+      </div>
+
+      {riders.length === 0 ? (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: "60px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🪪</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: S.navy, marginBottom: 6 }}>No pending applications</div>
+          <div style={{ fontSize: 12, color: S.textMuted }}>Self-registered riders awaiting document review will show up here.</div>
+        </div>
+      ) : (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 120px 160px 90px 110px 90px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+            <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Docs</span><span>Submitted</span><span></span>
+          </div>
+          {riders.map(r => {
+            const docsCount = (r.documents || []).length;
+            return (
+              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "80px 1fr 120px 160px 90px 110px 90px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.rider_id}</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{r.first_name} {r.last_name}</div>
+                  <div style={{ fontSize: 11, color: S.textMuted }}>{r.email}</div>
+                </div>
+                <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
+                <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle_model} · {r.vehicle_plate_number}</span>
+                <span style={{ fontSize: 11, color: S.textDim }}>{docsCount} docs</span>
+                <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}</span>
+                <button onClick={() => setReviewingRider(r)} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Review</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {reviewingRider && (
+        <RiderApprovalReviewModal
+          rider={reviewingRider}
+          onClose={() => setReviewingRider(null)}
+          onDone={handleDone}
+        />
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", background: S.navy, color: "#fff", padding: "12px 24px", borderRadius: 30, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 2000, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: S.green }}>{I.check}</span> {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RiderApprovalReviewModal({ rider, onClose, onDone }) {
+  const [mode, setMode] = useState("view"); // "view" | "reject"
+  const [reason, setReason] = useState("");
+  const [flagged, setFlagged] = useState({}); // { [docId]: reasonString }
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null); // "approved" | "rejected"
+
+  const toggleFlag = (docId) => {
+    setFlagged(prev => {
+      const next = { ...prev };
+      if (docId in next) delete next[docId];
+      else next[docId] = "";
+      return next;
+    });
+  };
+  const setFlagReason = (docId, val) => setFlagged(prev => ({ ...prev, [docId]: val }));
+
+  const handleApprove = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await RidersAPI.approveRider(rider.id);
+      setSuccess("approved");
+    } catch (err) {
+      setError(err?.message || err?.error || err?.detail || "Failed to approve rider.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setError(null);
+    if (!reason.trim()) { setError("Please provide a reason for rejection."); return; }
+    setLoading(true);
+    try {
+      const rejectedDocuments = Object.entries(flagged).map(([docId, docReason]) => ({
+        document_id: docId,
+        reason: docReason.trim() || reason.trim(),
+      }));
+      await RidersAPI.rejectRider(rider.id, reason.trim(), rejectedDocuments);
+      setSuccess("rejected");
+    } catch (err) {
+      setError(err?.message || err?.error || err?.detail || "Failed to reject application.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const documents = rider.documents || [];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: 24 }} onClick={e => { if (e.target === e.currentTarget && !loading) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 20, width: 640, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
+        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{rider.first_name} {rider.last_name}</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2, fontFamily: "'Space Mono',monospace" }}>#{rider.rider_id} · {rider.phone}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <StatusPill status={rider.approval_status} />
+            {!loading && <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>}
+          </div>
+        </div>
+
+        {success ? (
+          <div style={{ padding: "40px 24px", textAlign: "center" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>{success === "approved" ? "✅" : "🚫"}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: success === "approved" ? S.green : S.red, marginBottom: 6 }}>
+              {success === "approved" ? "Rider Approved" : "Application Rejected"}
+            </div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>
+              {success === "approved" ? "The rider is now authorized to receive jobs." : "The rider has been notified and can re-upload flagged documents."}
+            </div>
+            <button onClick={() => onDone(success === "approved" ? "Rider approved successfully" : "Application rejected")} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
+              {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Personal Info</div>
+                  <InfoRow label="Email" value={rider.email} />
+                  <InfoRow label="Address" value={rider.address} />
+                  <InfoRow label="BVN" value={rider.bvn} />
+                  <InfoRow label="Working Type" value={rider.working_type} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Vehicle Info</div>
+                  <InfoRow label="Model" value={rider.vehicle_model} />
+                  <InfoRow label="Plate Number" value={rider.vehicle_plate_number} />
+                  <InfoRow label="Color" value={rider.vehicle_color} />
+                  {rider.vehicle_photo && (
+                    <a href={rider.vehicle_photo} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: S.blue, fontWeight: 600 }}>View vehicle photo →</a>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>
+                Submitted Documents ({documents.length})
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {documents.map(doc => {
+                  const isFlagged = doc.id in flagged;
+                  return (
+                    <div key={doc.id} style={{ border: `1px solid ${isFlagged ? S.red : S.border}`, borderRadius: 12, overflow: "hidden", background: S.bg }}>
+                      <a href={doc.file_url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative" }}>
+                        <img src={doc.file_url} alt={doc.doc_type} style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />
+                      </a>
+                      <div style={{ padding: "8px 10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: S.navy }}>{DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}</span>
+                          <StatusPill status={doc.status} />
+                        </div>
+                        {doc.rejection_reason && <div style={{ fontSize: 10, color: S.red, marginBottom: 4 }}>Previously: {doc.rejection_reason}</div>}
+                        {mode === "reject" && (
+                          <div style={{ marginTop: 6 }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: S.textDim, cursor: "pointer" }}>
+                              <input type="checkbox" checked={isFlagged} onChange={() => toggleFlag(doc.id)} />
+                              Flag as rejected
+                            </label>
+                            {isFlagged && (
+                              <input
+                                value={flagged[doc.id]}
+                                onChange={e => setFlagReason(doc.id, e.target.value)}
+                                placeholder="Reason for this document (optional)"
+                                style={{ width: "100%", marginTop: 6, padding: "6px 8px", borderRadius: 6, border: `1px solid ${S.border}`, fontSize: 11, fontFamily: "inherit", boxSizing: "border-box" }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {mode === "reject" && (
+                <div style={{ marginTop: 20 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Overall Rejection Reason *</label>
+                  <textarea
+                    value={reason}
+                    onChange={e => setReason(e.target.value)}
+                    placeholder="Explain why this application is being rejected..."
+                    style={{ width: "100%", height: 90, padding: 12, borderRadius: 12, border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 13, color: S.text, fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box" }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ padding: "16px 24px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 10, flexShrink: 0 }}>
+              {mode === "view" ? (
+                <>
+                  <button onClick={() => setMode("reject")} disabled={loading} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.red}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: S.red }}>Reject Application</button>
+                  <button onClick={handleApprove} disabled={loading} style={{ flex: 2, padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Approving…" : "Approve Rider"}</button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => setMode("view")} disabled={loading} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+                  <button onClick={handleReject} disabled={loading} style={{ flex: 2, padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg, ${S.red}, #c1121f)`, color: "#fff", opacity: loading ? 0.7 : 1 }}>{loading ? "Rejecting…" : "Confirm Rejection"}</button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── VEHICLES LOCATION MAP ──────────────────────────────────────
 function VehiclesLocationMap({ vehicles }) {
   const mapRef = useRef(null);
@@ -4714,8 +4994,10 @@ function VehiclesLocationMap({ vehicles }) {
           const latestIcon = latest.vehicle_type === 'bike' ? '🏍️' : latest.vehicle_type === 'car' ? '🚗' : '🚐';
           const totalDistanceStr = fmtDistance(latest.total_distance, latest.unit_of_distance);
           const distanceTodayStr = fmtDistance(latest.distance_today, latest.unit_of_distance);
+          const yesterdayDistanceStr = fmtDistance(latest.yesterday_distance, latest.unit_of_distance);
+          const yesterdayOrdersDistStr = fmtDistance(latest.total_yesterday_orders_distance_km ?? latest.yesterday_orders_distance ?? latest.total_yesterday_order_distance, latest.unit_of_distance || 'km');
           infoWindowRef.current.setContent(
-            `<div style="font-family:sans-serif;padding:6px 2px;min-width:160px;">` +
+            `<div style="font-family:sans-serif;padding:6px 2px;min-width:180px;">` +
             `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
             `<div style="color:${latestColor};font-weight:600;font-size:11px;">${latestStatus}</div>` +
             `<div style="color:#555;font-size:11px;margin-top:4px;">${latest.asset_id} • ${(latest.vehicle_type || '').toUpperCase()}</div>` +
@@ -4723,7 +5005,11 @@ function VehiclesLocationMap({ vehicles }) {
             (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
             `<div style="color:#555;font-size:10px;margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">` +
             `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
-            `<span><span style="color:#888;font-weight:700;">Today:</span> ${distanceTodayStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Today Dist:</span> ${distanceTodayStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yesterday Dist:</span> ${yesterdayDistanceStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Today Orders:</span> ${latest.orders_today != null ? latest.orders_today : '—'}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yesterday Orders:</span> ${latest.yesterday_orders != null ? latest.yesterday_orders : '—'}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yest Orders Dist:</span> ${yesterdayOrdersDistStr}</span>` +
             `</div>` +
             (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
             `</div>`
@@ -4846,7 +5132,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
   const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
   const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
-  const gridCols = "70px 1.2fr 60px 1fr 1fr 80px 110px 110px 120px 80px 1.5fr 80px";
+  const gridCols = "70px 1.2fr 50px 0.9fr 0.9fr 75px 105px 105px 115px 90px 105px 115px 1.3fr 75px";
   const fmtDistance = (raw, unit) => {
     if (raw === null || raw === undefined || raw === "") return "—";
     const n = (typeof raw === "number") ? raw : parseFloat(raw);
@@ -4880,7 +5166,7 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
           </div>
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Deliveries km</span><span>Rider</span><span>Status</span>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Today Orders</span><span>Yesterday Orders</span><span>Yest Orders Dist</span><span>Rider</span><span>Status</span>
             </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(v => (
@@ -4894,7 +5180,9 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
-                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : fmtDistance(v.orders_today, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : v.orders_today}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.yesterday_orders === null || v.yesterday_orders === undefined) ? "—" : v.yesterday_orders}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_yesterday_orders_distance_km ?? v.yesterday_orders_distance ?? v.total_yesterday_order_distance, v.unit_of_distance || 'km')}</span>
                   <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
                 </div>
@@ -4959,6 +5247,84 @@ function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
   );
 }
 
+// ─── REVENUE SCREEN ─────────────────────────────────────────────
+const REVENUE_PERIOD_OPTS = [
+  { value: "today", label: "Today" },
+  { value: "this_week", label: "This Week" },
+  { value: "this_month", label: "This Month" },
+  { value: "this_year", label: "This Year" },
+];
+
+function RevenueScreen() {
+  const [period, setPeriod] = useState("today");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    RevenueAPI.getAll({ period })
+      .then(res => { if (!cancelled) setData(res); })
+      .catch(() => { if (!cancelled) setError("Failed to load revenue report."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [period]);
+
+  const rows = data?.results || [];
+  const summary = data?.summary || {};
+  const gridCols = "1.4fr 1fr 1.2fr 0.9fr 0.9fr 0.9fr";
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Revenue" value={`₦${Number(summary.total_amount_earned || 0).toLocaleString()}`} />
+        <StatCard label="Total Distance" value={`${Number(summary.total_distance_km || 0).toLocaleString()} km`} />
+        <StatCard label="Overall Ratio" value={summary.overall_ratio != null ? summary.overall_ratio.toLocaleString() : "—"} color={S.gold} />
+        <StatCard label="Meeting Target" value={`${summary.vehicles_meeting_target || 0}/${summary.total_vehicles || 0}`} color={S.green} />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <select
+          value={period}
+          onChange={e => setPeriod(e.target.value)}
+          style={{ padding: "7px 12px", borderRadius: 8, border: `1px solid ${S.gold}`, background: "rgba(232,168,56,0.12)", color: S.gold, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none" }}
+        >
+          {REVENUE_PERIOD_OPTS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+      </div>
+
+      <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <span>Vehicle</span><span>Distance</span><span>Amount Earned</span><span>Ratio</span><span>Target Ratio</span><span>Orders</span>
+        </div>
+        <div style={{ maxHeight: "calc(100vh - 360px)", overflowY: "auto" }}>
+          {loading && <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>}
+          {error && <div style={{ padding: 24, textAlign: "center", color: S.red, fontSize: 12 }}>{error}</div>}
+          {!loading && !error && rows.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles found.</div>
+          )}
+          {!loading && !error && rows.map(r => {
+            const hasTarget = Number(r.target_ratio) > 0;
+            const ratioColor = r.ratio == null ? S.textMuted : (!hasTarget ? S.text : (r.meets_target ? S.green : S.red));
+            return (
+              <div key={r.vehicle_asset_id} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{r.plate_number}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{Number(r.distance_km).toFixed(2)} km</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>₦{Number(r.amount_earned).toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: ratioColor }}>{r.ratio == null ? "—" : r.ratio.toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{hasTarget ? Number(r.target_ratio).toLocaleString() : "—"}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{r.orders_count}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── VEHICLE DETAIL MODAL ───────────────────────────────────────
 function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
   const [editing, setEditing] = useState(false);
@@ -4974,6 +5340,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
     registration_expiry: vehicle.registration_expiry || "",
     road_worthiness_expiry: vehicle.road_worthiness_expiry || "",
     is_active: vehicle.is_active,
+    target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -4981,7 +5348,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
 
   const cancelEdit = () => {
     setEditing(false); setError(null);
-    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active });
+    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active, target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0" });
   };
 
   const handleSave = async () => {
@@ -4989,6 +5356,7 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
     try {
       const payload = { ...form };
       if (payload.year) payload.year = parseInt(payload.year, 10); else delete payload.year;
+      payload.target_ratio = payload.target_ratio === "" ? "0" : parseFloat(payload.target_ratio);
       Object.keys(payload).forEach(k => { if (payload[k] === "" && k !== "plate_number" && k !== "vehicle_type" && k !== "is_active") delete payload[k]; });
       await VehicleAssetsAPI.update(vehicle.id, payload);
       if (onVehicleUpdated) onVehicleUpdated();
@@ -5092,11 +5460,28 @@ function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
             </div>
             <div style={{ marginTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
               <span><span style={{ fontWeight: 700, color: S.textDim }}>Total:</span> {totalDistanceStr}</span>
-              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today:</span> {distanceTodayStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today Distance:</span> {distanceTodayStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Distance:</span> {fmtDistance(vehicle.yesterday_distance, vehicle.unit_of_distance)}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today Orders:</span> {vehicle.orders_today != null ? vehicle.orders_today : "—"}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders:</span> {vehicle.yesterday_orders != null ? vehicle.yesterday_orders : "—"}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders Distance:</span> {fmtDistance(vehicle.total_yesterday_orders_distance_km ?? vehicle.yesterday_orders_distance ?? vehicle.total_yesterday_order_distance, vehicle.unit_of_distance || 'km')}</span>
             </div>
             {vehicle.latitude && vehicle.longitude && (
               <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
                 📍 {parseFloat(vehicle.latitude).toFixed(6)}, {parseFloat(vehicle.longitude).toFixed(6)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Performance Target ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance Target</div>
+            {editing ? (
+              <div><label style={lSt}>Target Ratio (₦ per km)</label><input type="number" step="0.01" value={form.target_ratio} onChange={e => set("target_ratio", e.target.value)} style={iSt} placeholder="0.00" /></div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>Target Ratio</span>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{vehicle.target_ratio && Number(vehicle.target_ratio) > 0 ? `₦${Number(vehicle.target_ratio).toLocaleString()}/km` : "Not set"}</span>
               </div>
             )}
           </div>

@@ -27,7 +27,6 @@ from sparky_utils.advice import exception_advice
 from sparky_utils.exceptions import ServiceException
 from devs.models import ErrorLog
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -766,7 +765,25 @@ class MobileRequestPasswordResetView(APIView):
             if email:
                 user = User.objects.get(email=email)
             elif phone_number:
-                user = User.objects.get(phone=phone_number)
+                phone_2, phone_3 = "", ""
+                phone = phone_number
+                phone_numbers = [phone]
+                if phone.startswith("0"):
+                    phone_2 = "+234" + phone[1:]
+                    phone_3 = phone[1:]
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                elif len(phone) == 10:
+                    phone_3 = "0" + phone
+                    phone_2 = "+234" + phone
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                elif phone.startswith("+234"):
+                    phone_2 = phone[4:]
+                    phone_3 = "0" + phone_2
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                user = User.objects.filter(phone__in=phone_numbers).first()
 
             if user:
                 # Generate a 6-digit OTP

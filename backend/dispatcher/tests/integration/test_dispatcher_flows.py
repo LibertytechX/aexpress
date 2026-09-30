@@ -887,6 +887,124 @@ class VehicleAssetOrdersTodayEndpointTests(TestCase):
         self.assertEqual(row.get("orders_today"), 1)
 
 
+class VehicleRevenueReportEndpointTests(TestCase):
+    def setUp(self):
+        from authentication.models import User
+
+        self.user = User.objects.create_user(
+            phone="08077770000",
+            email="dispatcher_revenue@example.com",
+            password="testpassword",
+            usertype="Dispatcher",
+            contact_name="Dispatcher",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+        from orders.models import Vehicle
+
+        self.pricing_vehicle = Vehicle.objects.create(
+            name="Bike-Revenue",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=0,
+            rate_per_km=0,
+            rate_per_minute=0,
+            min_fee=0,
+            is_active=True,
+        )
+
+    def _mk_order(self, rider, order_number, amount, distance, completed_at, status="Done"):
+        from orders.models import Order
+
+        return Order.objects.create(
+            order_number=order_number,
+            user=self.user,
+            vehicle=self.pricing_vehicle,
+            rider=rider,
+            pickup_address="Pickup",
+            sender_name="Sender",
+            sender_phone="08011112222",
+            total_amount=Decimal(str(amount)),
+            distance_km=Decimal(str(distance)),
+            payment_status="Pending",
+            escrow_released=False,
+            status=status,
+            completed_at=completed_at,
+        )
+
+    def _row_for(self, res, asset):
+        return next(
+            r for r in res.data["results"] if r["vehicle_asset_id"] == str(asset.id)
+        )
+
+    def test_zero_order_active_vehicle_is_included_with_null_ratio(self):
+        asset = VehicleAsset.objects.create(plate_number="TP-REV-1", vehicle_type="bike")
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        row = self._row_for(res, asset)
+        self.assertEqual(row["distance_km"], "0.00")
+        self.assertEqual(row["amount_earned"], "0.00")
+        self.assertIsNone(row["ratio"])
+        self.assertEqual(row["orders_count"], 0)
+        self.assertFalse(row["meets_target"])
+
+    def test_inactive_vehicle_is_excluded(self):
+        VehicleAsset.objects.create(
+            plate_number="TP-REV-2", vehicle_type="bike", is_active=False
+        )
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        plate_numbers = [r["plate_number"] for r in res.data["results"]]
+        self.assertNotIn("TP-REV-2", plate_numbers)
+
+    def test_ratio_computed_from_period_orders_only(self):
+        from authentication.models import User
+
+        asset = VehicleAsset.objects.create(
+            plate_number="TP-REV-3", vehicle_type="bike", target_ratio=Decimal("400.00")
+        )
+        rider_user = User.objects.create_user(
+            phone="08077770001",
+            email="rider_rev@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider",
+        )
+        rider = Rider.objects.create(user=rider_user, vehicle_asset=asset)
+
+        now = timezone.now()
+        self._mk_order(rider, "REV0001", 5000, 10, now)
+        self._mk_order(rider, "REV0002", 5000, 10, now - datetime.timedelta(days=90))
+
+        res = self.client.get("/api/dispatch/revenue/?period=this_month")
+
+        self.assertEqual(res.status_code, 200, res.data)
+        row = self._row_for(res, asset)
+        self.assertEqual(row["orders_count"], 1)
+        self.assertEqual(Decimal(row["amount_earned"]), Decimal("5000.00"))
+        self.assertEqual(Decimal(row["distance_km"]), Decimal("10.00"))
+        self.assertEqual(row["ratio"], 500.0)
+        self.assertTrue(row["meets_target"])
+
+    def test_target_ratio_editable_via_vehicle_asset_patch(self):
+        asset = VehicleAsset.objects.create(plate_number="TP-REV-4", vehicle_type="bike")
+
+        res = self.client.patch(
+            f"/api/dispatch/vehicle-assets/{asset.id}/",
+            {"target_ratio": "350.00"},
+            format="json",
+        )
+
+        self.assertEqual(res.status_code, 200, res.data)
+        asset.refresh_from_db()
+        self.assertEqual(asset.target_ratio, Decimal("350.00"))
+
+
 class GenerateRelayLegsSyncTests(TestCase):
     KM_PER_DEGREE_LNG = 111.1949
 
@@ -1486,3 +1604,144 @@ class OrderViewSetGenerateRelayRouteTests(TestCase):
 
         self.assertEqual(res.status_code, 200, res.data)
         generate_relay_legs_sync_mock.assert_called_once_with(str(self.order.id))
+
+
+class VehicleAssetYesterdayOrdersDistanceTest(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from dispatcher.models import VehicleAsset, Rider
+        from orders.models import Order, Delivery, Vehicle
+        from django.core.cache import cache
+
+        cache.clear()
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            phone="08099887766",
+            email="asset_dist_test@example.com",
+            password="testpassword",
+            usertype="Customer",
+            contact_name="Customer User",
+        )
+        self.rider_user = User.objects.create_user(
+            phone="08099887767",
+            email="rider_asset_dist_test@example.com",
+            password="testpassword",
+            usertype="Rider",
+            contact_name="Rider Joe",
+        )
+        self.vehicle_model = Vehicle.objects.create(
+            name="Bike-Asset-Test",
+            max_weight_kg=10,
+            base_price=500,
+            base_fare=200,
+            rate_per_km=50,
+            rate_per_minute=5,
+            min_fee=500,
+            is_active=True,
+        )
+        self.asset = VehicleAsset.objects.create(
+            plate_number="LND-123-XY",
+            asset_id="AST-0099",
+            vehicle_type="bike",
+            make="Yamaha",
+            model="Crux",
+            is_active=True,
+        )
+        self.rider = Rider.objects.create(
+            user=self.rider_user,
+            vehicle_asset=self.asset,
+            status="online",
+        )
+
+    def test_vehicle_asset_serializer_computes_yesterday_orders_distance_km(self):
+        from dispatcher.serializers import VehicleAssetSerializer, RiderSerializer
+        from orders.models import Order, Delivery
+        from datetime import datetime, time, timedelta
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_mid = yesterday_end - timedelta(hours=12)
+
+        # Order 1: Completed yesterday (Criterion A) with distance_km = 12.50
+        o1 = Order.objects.create(
+            order_number="ORD-YEST-DIST-1",
+            user=self.user,
+            rider=self.rider,
+            vehicle=self.vehicle_model,
+            distance_km=Decimal("12.50"),
+            total_amount=Decimal("2500.00"),
+            status="Done",
+            completed_at=yesterday_mid,
+            sender_name="Sender",
+            sender_phone="08011111111",
+        )
+        Delivery.objects.create(
+            order=o1,
+            dropoff_address="Drop 1",
+            receiver_name="Rec 1",
+            receiver_phone="08022222222",
+            status="Delivered",
+            delivered_at=yesterday_mid,
+        )
+
+        # Order 2: Completed yesterday via Delivery delivered_at (Criterion B) with distance_km = 7.30
+        o2 = Order.objects.create(
+            order_number="ORD-YEST-DIST-2",
+            user=self.user,
+            rider=self.rider,
+            vehicle=self.vehicle_model,
+            distance_km=Decimal("7.30"),
+            total_amount=Decimal("1500.00"),
+            status="Done",
+            completed_at=None,
+            sender_name="Sender",
+            sender_phone="08011111111",
+        )
+        Delivery.objects.create(
+            order=o2,
+            dropoff_address="Drop 2",
+            receiver_name="Rec 2",
+            receiver_phone="08022222222",
+            status="Delivered",
+            delivered_at=yesterday_mid - timedelta(hours=2),
+        )
+
+        # Order 3: Completed today (should NOT be included in yesterday distance)
+        o3 = Order.objects.create(
+            order_number="ORD-TODAY-DIST-3",
+            user=self.user,
+            rider=self.rider,
+            vehicle=self.vehicle_model,
+            distance_km=Decimal("20.00"),
+            total_amount=Decimal("4000.00"),
+            status="Done",
+            completed_at=timezone.now(),
+            sender_name="Sender",
+            sender_phone="08011111111",
+        )
+        Delivery.objects.create(
+            order=o3,
+            dropoff_address="Drop 3",
+            receiver_name="Rec 3",
+            receiver_phone="08022222222",
+            status="Delivered",
+            delivered_at=timezone.now(),
+        )
+
+        serializer = VehicleAssetSerializer(self.asset)
+        data = serializer.data
+
+        # Verify fields
+        self.assertEqual(data["yesterday_orders"], 2)
+        self.assertEqual(data["orders_today"], 1)
+        self.assertEqual(data["total_yesterday_orders_distance_km"], 19.80)
+        self.assertEqual(data["yesterday_orders_distance"], 19.80)
+        self.assertEqual(data["total_yesterday_order_distance"], 19.80)
+
+        # Verify RiderSerializer also reflects yesterday orders distance
+        rider_serializer = RiderSerializer(self.rider)
+        rider_data = rider_serializer.data
+        self.assertIn("total_yesterday_orders_distance_km", rider_data)
+        self.assertIn("total_yesterday_order_distance", rider_data)

@@ -8,6 +8,7 @@ from .views import (
     SystemSettingsView,
     RiderOnboardingView,
     S3PresignedUrlView,
+    S3FileUploadView,
     ActivityFeedView,
     AblyTokenView,
     ZoneViewSet,
@@ -15,6 +16,7 @@ from .views import (
     DispatcherViewSet,
     VehicleAssetViewSet,
     VerticalViewSet,
+    VehicleRevenueReportView,
 )
 
 router = DefaultRouter()
@@ -36,7 +38,9 @@ urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),
     path("riders/onboarding/", RiderOnboardingView.as_view(), name="rider-onboarding"),
     path("s3/presigned-url/", S3PresignedUrlView.as_view(), name="s3-presigned-url"),
+    path("s3/upload/", S3FileUploadView.as_view(), name="s3-upload"),
     path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
     path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
+    path("revenue/", VehicleRevenueReportView.as_view(), name="vehicle-revenue-report"),
     path("", include(router.urls)),
 ]

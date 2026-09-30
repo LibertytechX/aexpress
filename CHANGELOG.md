@@ -1,5 +1,71 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)
+
+### Backend
+#### Added
+- **Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)**:
+  - Added centralized `LeaderboardService` (`riders/leaderboard_service.py`) for real-time rider leaderboard tracking using Redis Sorted Sets (`leaderboard:trips:{period_key}` and `leaderboard:earnings:{period_key}`) with automatic PostgreSQL failover.
+  - Connected `LeaderboardService.record_order_completion` to background task `handle_order_completion_tasks` in `orders/tasks.py`.
+  - Refactored `LeaderboardView` and `RiderGamificationSummaryView` in `riders/gamification_views.py` to read real-time rankings and stats with sub-millisecond latency.
+  - Updated `rebuild_leaderboard` management command to sync both PostgreSQL snapshot tables and Redis Sorted Sets.
+  - Added unit test suite `test_leaderboard_service.py` and integration test suite `test_realtime_leaderboard.py`.
+
+---
+
+# [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
+
+### Backend
+#### Added
+- **Vehicle Asset Total Yesterday Orders Distance (`dispatcher/serializers.py`)**:
+  - Added `total_yesterday_orders_distance_km` field and `get_total_yesterday_orders_distance_km` serializer method (with aliases `yesterday_orders_distance` and `total_yesterday_order_distance`) to `VehicleAssetSerializer`, aggregating `distance_km` from completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback and 24-hour cache.
+  - Added `total_yesterday_orders_distance_km` field to `RiderSerializer` alongside `total_yesterday_order_distance`.
+  - Added integration tests `VehicleAssetYesterdayOrdersDistanceTest` in `backend/dispatcher/tests/integration/test_dispatcher_flows.py`.
+- **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
+  - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback (order `completed_at`, delivery `delivered_at`, and order `updated_at`).
+  - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
+
+### Frontend
+#### Changed
+- **Dispatcher Portal Vehicles Screen, Modals & Map Popup (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Updated Vehicles table columns to display `Yest Orders Dist` alongside `Today Orders`, `Yesterday Orders`, `Distance Today`, and `Yesterday Distance`.
+  - Updated telemetry read-only modal and map marker info window to display `Yest Orders Dist` / `Yesterday Orders Distance`.
+  - Preserved `total_yesterday_orders_distance_km`, `yesterday_orders_distance`, and `total_yesterday_order_distance` across live Ably telemetry merges.
+- **Dispatcher API Client (`dispatcher-frontend/src/api.js`)**:
+  - Mapped `total_yesterday_orders_distance_km` and `total_yesterday_order_distance` in `RidersAPI.getAll()`.
+
+---
+
+### Backend
+#### Changed
+- **Vehicle Distance Cron Script (`backend/crons/compute_distance_today.sh`)**:
+  - Added `--reset-missing` flag to `compute_distance_today` management command execution to zero out `distance_today` for vehicles with no tracking records today.
+
+#### Fixed
+- **ServiceUser Model Validation in Agent Booking (`orders/agent_views.py`)**:
+  - Ensured `customer_user` and `caller_user` validation explicitly verifies that `request.user` or `request.merchant` is an instance of Django's `User` model (`isinstance(..., User)`), preventing non-ORM dummy authentication user objects (such as `ServiceUser` or `BotServiceUser`) from being passed into ForeignKey queries or model creations expecting a UUID.
+  - Added robust phone number lookup fallback across multiple phone format variations (`+234...`, `234...`, `0...`).
+  - Added integration test `test_agent_book_order_with_service_api_key` in `orders/tests/integration/test_agent_endpoints.py`.
+
+---
+
+# [2026-09-03] — Assured Express AI Agent & MCP Logistics Endpoints
+
+### Backend & Integrations
+#### Added
+- **AI Agent & MCP Delivery Endpoints (`orders/agent_views.py` & `orders/agent_serializers.py`)**:
+  - `POST /api/orders/quote/`: Delivery quote calculation between pickup and dropoff locations, with automated geocoding, route duration, distance estimation, and default 'Bike' vehicle pricing.
+  - `POST /api/orders/agent/book/`: AI agent order creation endpoint that auto-computes route distance and travel duration if not pre-calculated, assigns order number, creates delivery record, and notifies active fleet.
+  - `GET /api/orders/track/<str:order_id>/`: Comprehensive order tracking endpoint by order number or UUID with assigned rider details and progress milestones.
+  - `GET /api/orders/customer-deliveries/`: Order history lookup by customer phone number across both sender and recipient roles.
+  - `GET /api/orders/<str:order_id>/payment-info/`: Dedicated payment information and CoreBanking virtual bank account retrieval for customer bank transfer settlement.
+- **URL Routing (`orders/urls.py`)**:
+  - Registered `quote/`, `agent/book/`, `track/<str:order_id>/`, `customer-deliveries/`, and `<str:order_id>/payment-info/`.
+- **Integration Tests (`orders/tests/integration/test_agent_endpoints.py`)**:
+  - Added comprehensive integration tests covering quote calculation, automated booking, order tracking, customer deliveries phone lookup, and payment info retrieval.
+
+---
+
 # [2026-08-27] — Standardized Testing Framework & Tests Folder Organization (Unit & Integration)
 
 ### Backend & Tooling

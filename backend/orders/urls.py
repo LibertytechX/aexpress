@@ -53,8 +53,16 @@ from .places_views import (
     ReverseGeocodeView,
     GeocodeView,
 )
+from .agent_views import (
+    OrderQuoteView,
+    AgentBookOrderView,
+    OrderTrackView,
+    CustomerDeliveriesView,
+    OrderPaymentInfoView,
+)
 
 app_name = "orders"
+
 
 urlpatterns = [
     # Places fallback endpoints
@@ -132,6 +140,14 @@ urlpatterns = [
     ),
     path("cancel/<str:order_number>/", CancelOrderView.as_view(), name="cancel_order"),
     path("<str:order_number>/pay-now/", OrderPayNowView.as_view(), name="order_pay_now"),
+
+    # AI Agent / MCP Endpoints
+    path("quote/", OrderQuoteView.as_view(), name="order_quote"),
+    path("agent/book/", AgentBookOrderView.as_view(), name="agent_book_order"),
+    path("track/<str:order_id>/", OrderTrackView.as_view(), name="order_track"),
+    path("customer-deliveries/", CustomerDeliveriesView.as_view(), name="customer_deliveries"),
+    path("<str:order_id>/payment-info/", OrderPaymentInfoView.as_view(), name="order_payment_info"),
+
     # Generic order detail (must come last to avoid matching specific endpoints)
     path("<str:order_number>/", OrderDetailView.as_view(), name="order_detail"),
 

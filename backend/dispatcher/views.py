@@ -1,5 +1,6 @@
 import logging
 import datetime
+from decimal import Decimal
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
 
@@ -25,14 +26,18 @@ from .models import (
 )
 from .serializers import (
     RiderSerializer,
+    RiderApprovalSerializer,
+    RiderRejectionSerializer,
     ZoneSerializer,
     RelayNodeSerializer,
     VehicleAssetSerializer,
     VerticalSerializer,
 )
 from .utils import emit_activity
+from .periods import _parse_period
 from django.contrib.auth import authenticate, get_user_model
-from django.db.models import Count, Q, Prefetch
+from django.db.models import Count, Q, Prefetch, Sum, DecimalField
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # Merchant API Key imports
@@ -44,6 +49,7 @@ import hashlib
 
 from riders.notifications import notify_rider
 from riders.views import publish_order_assigned_event
+from riders.models import RiderDocument
 from .permissions import IsDispatcher, IsZoneLead, IsDispatcherAdmin
 from .tasks import send_merchant_notification
 from orders.serializers import MergeGroupedOrdersSerializer
@@ -155,6 +161,12 @@ class RiderViewSet(viewsets.ModelViewSet):
         """Toggle a rider's duty status (online/offline)."""
         rider = self.get_object()
         status_val = request.data.get("status")
+        # reject rider that is not active or approved
+        if not rider.is_authorized:
+            return Response(
+                {"error": "Rider is not authorized to go online."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if status_val == Rider.Status.ONLINE:
             if rider.status != Rider.Status.ONLINE:
@@ -224,6 +236,107 @@ class RiderViewSet(viewsets.ModelViewSet):
                 "last_location_update": rider.last_location_update.isoformat(),
             }
         )
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="pending-approval",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def pending_approval(self, request):
+        """List self-registered riders awaiting KYC/application review."""
+        riders = (
+            Rider.objects.filter(
+                is_independent_rider=True,
+                approval_status=Rider.ApprovalStatus.PENDING,
+            )
+            .select_related("user")
+            .prefetch_related("documents")
+            .order_by("-created_at")
+        )
+        serializer = RiderApprovalSerializer(riders, many=True)
+        return Response(
+            {"success": True, "count": riders.count(), "data": serializer.data}
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="approve",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def approve(self, request, pk=None):
+        """Approve a rider's application: authorizes them and approves any still-pending documents."""
+        rider = self.get_object()
+
+        rider.approval_status = Rider.ApprovalStatus.APPROVED
+        rider.is_authorized = True
+        rider.rejection_reason = ""
+        rider.save(
+            update_fields=["approval_status", "is_authorized", "rejection_reason"]
+        )
+
+        rider.documents.filter(status=RiderDocument.Status.PENDING).update(
+            status=RiderDocument.Status.APPROVED
+        )
+
+        notify_rider(
+            rider,
+            "Application Approved",
+            "Your rider application has been approved! You can now start receiving jobs.",
+        )
+
+        return Response({"success": True, "data": RiderApprovalSerializer(rider).data})
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="reject",
+        permission_classes=[IsDispatcherAdmin],
+    )
+    def reject(self, request, pk=None):
+        """
+        Reject a rider's application. Optionally flags specific submitted documents
+        as rejected (with a reason each) so the rider can re-upload them.
+        """
+        rider = self.get_object()
+
+        serializer = RiderRejectionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = serializer.validated_data["reason"]
+        rejected_documents = serializer.validated_data["rejected_documents"]
+
+        for entry in rejected_documents:
+            updated = RiderDocument.objects.filter(
+                id=entry["document_id"], rider=rider
+            ).update(
+                status=RiderDocument.Status.REJECTED,
+                rejection_reason=entry["reason"],
+            )
+            if not updated:
+                return Response(
+                    {
+                        "success": False,
+                        "message": f"Document {entry['document_id']} not found for this rider.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        rider.approval_status = Rider.ApprovalStatus.REJECTED
+        rider.is_authorized = False
+        rider.rejection_reason = reason
+        rider.save(
+            update_fields=["approval_status", "is_authorized", "rejection_reason"]
+        )
+
+        notify_rider(
+            rider,
+            "Application Rejected",
+            reason
+            or "Your rider application was rejected. Please review your documents.",
+        )
+
+        return Response({"success": True, "data": RiderApprovalSerializer(rider).data})
 
 
 class OrderPagination(PageNumberPagination):
@@ -657,7 +770,6 @@ class OrderViewSet(viewsets.ModelViewSet):
             new_value=str(new_amount),
             created_by=request.user if request.user.is_authenticated else None,
         )
-
 
         # If this is a relay order, recalculate leg payouts as a proportional
         # share of the new total_amount weighted by each leg's distance.
@@ -1636,6 +1748,50 @@ class S3PresignedUrlView(views.APIView):
         )
 
 
+class S3FileUploadView(views.APIView):
+    """
+    Uploads a file straight to S3 and returns a presigned URL to access it.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    parser_classes = [parsers.MultiPartParser, parsers.FormParser]
+
+    def post(self, request):
+        from urllib.parse import urlparse
+        from .s3_utils import upload_image_file_to_s3, generate_presigned_url
+
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            return Response(
+                {"error": "file is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        folder = request.data.get("folder", "uploads")
+        expiration = 3600
+
+        public_url = upload_image_file_to_s3(file_obj, file_obj.name, folder)
+        if not public_url:
+            return Response(
+                {"error": "Failed to upload file to S3"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        object_name = urlparse(public_url).path.lstrip("/")
+        presigned_url = generate_presigned_url(
+            object_name, expiration=expiration, client_method="get_object"
+        )
+
+        return Response(
+            {
+                "url": public_url,
+                "presigned_url": presigned_url,
+                "object_name": object_name,
+                "expires_in": expiration,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
 class ZoneViewSet(viewsets.ModelViewSet):
     """CRUD for delivery zones."""
 
@@ -1725,6 +1881,117 @@ class VehicleAssetViewSet(viewsets.ModelViewSet):
         if active is not None:
             qs = qs.filter(is_active=active.lower() in ("true", "1"))
         return qs
+
+
+class VehicleRevenueReportView(views.APIView):
+    """
+    Revenue-per-kilometre report, aggregated by physical VehicleAsset.
+
+    GET /api/dispatch/revenue/?period=today|this_week|this_month|this_year|YYYY-MM
+
+    Returns ALL active vehicle assets for the period, including those with
+    zero completed orders (distance/amount = 0, ratio = null).
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcherAdmin]
+    _DECIMAL = DecimalField(max_digits=14, decimal_places=2)
+
+    def get(self, request):
+        period = request.query_params.get("period", "this_month")
+        start_dt, end_dt, _ = _parse_period(period)
+
+        # Order attribution runs through the rider's *current* vehicle_asset
+        # (there's no direct Order->VehicleAsset FK), same limitation as
+        # compute_deliveries_today.py — historical orders "follow" a rider
+        # to their new vehicle if the rider is later reassigned.
+        completed_q = Q(riders__rider_orders__status="Done") & (
+            Q(
+                riders__rider_orders__completed_at__gte=start_dt,
+                riders__rider_orders__completed_at__lte=end_dt,
+            )
+            | Q(
+                riders__rider_orders__completed_at__isnull=True,
+                riders__rider_orders__updated_at__gte=start_dt,
+                riders__rider_orders__updated_at__lte=end_dt,
+            )
+        )
+
+        # Start from VehicleAsset (not Order) so active vehicles with zero
+        # matching orders are still included via annotate()+filter=Q(...),
+        # which produces a LEFT JOIN rather than an inner join.
+        vehicles = (
+            VehicleAsset.objects.filter(is_active=True)
+            .annotate(
+                rev_amount=Coalesce(
+                    Sum("riders__rider_orders__total_amount", filter=completed_q),
+                    Decimal("0.00"),
+                    output_field=self._DECIMAL,
+                ),
+                rev_distance=Coalesce(
+                    Sum("riders__rider_orders__distance_km", filter=completed_q),
+                    Decimal("0.00"),
+                    output_field=self._DECIMAL,
+                ),
+                rev_orders_count=Count(
+                    "riders__rider_orders", filter=completed_q, distinct=True
+                ),
+            )
+            .order_by("plate_number")
+        )
+
+        results = []
+        total_amount = Decimal("0.00")
+        total_distance = Decimal("0.00")
+        meeting_target = 0
+
+        for v in vehicles:
+            amount = v.rev_amount or Decimal("0.00")
+            distance = v.rev_distance or Decimal("0.00")
+            ratio = round(float(amount) / float(distance), 2) if distance else None
+            target = float(v.target_ratio or 0)
+            meets_target = ratio is not None and target > 0 and ratio >= target
+
+            total_amount += amount
+            total_distance += distance
+            if meets_target:
+                meeting_target += 1
+
+            results.append(
+                {
+                    "vehicle_asset_id": str(v.id),
+                    "asset_id": v.asset_id,
+                    "plate_number": v.plate_number,
+                    "vehicle_type": v.vehicle_type,
+                    "distance_km": str(distance),
+                    "amount_earned": str(amount),
+                    "ratio": ratio,
+                    "target_ratio": str(v.target_ratio or Decimal("0.00")),
+                    "orders_count": v.rev_orders_count,
+                    "meets_target": meets_target,
+                }
+            )
+
+        overall_ratio = (
+            round(float(total_amount) / float(total_distance), 2)
+            if total_distance
+            else None
+        )
+
+        return Response(
+            {
+                "period": period,
+                "start_date": start_dt.isoformat(),
+                "end_date": end_dt.isoformat(),
+                "results": results,
+                "summary": {
+                    "total_vehicles": len(results),
+                    "total_amount_earned": str(total_amount),
+                    "total_distance_km": str(total_distance),
+                    "overall_ratio": overall_ratio,
+                    "vehicles_meeting_target": meeting_target,
+                },
+            }
+        )
 
 
 class VerticalViewSet(viewsets.ModelViewSet):

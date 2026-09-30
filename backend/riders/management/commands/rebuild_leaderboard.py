@@ -17,54 +17,20 @@ from decimal import Decimal
 from dispatcher.models import Rider
 from orders.models import Order
 from riders.models import LeaderboardEntry, RiderEarning
+from riders.leaderboard_service import LeaderboardService
 
 
 class Command(BaseCommand):
-    help = "Rebuilds the leaderboard snapshot for this_week, this_month, and all_time."
+    help = "Rebuilds the leaderboard snapshot for this_week, this_month, and all_time in DB and Redis."
 
     def handle(self, *args, **options):
         today = timezone.now().date()
         self.stdout.write("🏆 Rebuilding leaderboard...")
 
-        for period_type, period_key, date_filter in self._get_periods(today):
+        for period_type, period_key, date_filter in LeaderboardService.get_period_tuples(today):
             self._rebuild_period(period_type, period_key, date_filter)
 
         self.stdout.write(self.style.SUCCESS("✅ Leaderboard rebuilt successfully."))
-
-    def _get_periods(self, today):
-        from datetime import timedelta
-
-        # This week (Mon – today)
-        week_start = today - timedelta(days=today.weekday())
-        week_key = today.strftime("%Y-W%W")
-
-        # This month
-        month_start = today.replace(day=1)
-        month_key = today.strftime("%Y-%m")
-
-        return [
-            (
-                LeaderboardEntry.PeriodType.THIS_WEEK,
-                week_key,
-                {
-                    "completed_at__date__gte": week_start,
-                    "completed_at__date__lte": today,
-                },
-            ),
-            (
-                LeaderboardEntry.PeriodType.THIS_MONTH,
-                month_key,
-                {
-                    "completed_at__date__gte": month_start,
-                    "completed_at__date__lte": today,
-                },
-            ),
-            (
-                LeaderboardEntry.PeriodType.ALL_TIME,
-                "all_time",
-                {},
-            ),
-        ]
 
     def _rebuild_period(self, period_type, period_key, date_filter):
         self.stdout.write(f"  → {period_type} ({period_key})")
@@ -109,5 +75,11 @@ class Command(BaseCommand):
                 )
             )
 
-        LeaderboardEntry.objects.bulk_create(entries)
-        self.stdout.write(f"     {len(entries)} riders ranked.")
+        created_entries = LeaderboardEntry.objects.bulk_create(entries)
+        # Warm Redis Sorted Sets with the fresh ranking snapshot
+        LeaderboardService.warm_redis_for_period(
+            period_type=period_type,
+            period_key=period_key,
+            entries=created_entries,
+        )
+        self.stdout.write(f"     {len(entries)} riders ranked and synced to Redis.")

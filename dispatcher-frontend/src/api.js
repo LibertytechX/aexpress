@@ -188,7 +188,8 @@ export const RidersAPI = {
             currentOrder: r.current_order || null,
             todayOrders: r.todayOrders || 0,
             todayEarnings: r.todayEarnings || 0,
-            total_yesterday_order_distance: r.total_yesterday_order_distance,
+            total_yesterday_order_distance: r.total_yesterday_orders_distance_km ?? r.total_yesterday_order_distance ?? 0,
+            total_yesterday_orders_distance_km: r.total_yesterday_orders_distance_km ?? r.total_yesterday_order_distance ?? 0,
             rating: parseFloat(r.rating) || 4.5,
             totalDeliveries: r.total_deliveries || 0,
             completionRate: r.completionRate || 95,
@@ -249,6 +250,32 @@ export const RidersAPI = {
         const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/toggle_duty/`, {
             method: 'POST',
             body: JSON.stringify({ status }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async getPendingApproval() {
+        const res = await fetchWithAuth(`/dispatch/riders/pending-approval/`);
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data; // { success, count, data: [...] }
+    },
+
+    async approveRider(riderId) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/approve/`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async rejectRider(riderId, reason, rejectedDocuments = []) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/reject/`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, rejected_documents: rejectedDocuments }),
         });
         const data = await res.json();
         if (!res.ok) throw data;
@@ -620,6 +647,15 @@ export const VehicleAssetsAPI = {
             method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete vehicle asset');
+    }
+};
+
+// ─── REVENUE ─────────────────────────────────────────────────────
+export const RevenueAPI = {
+    async getAll({ period = "this_month" } = {}) {
+        const res = await fetchWithAuth(`/dispatch/revenue/?period=${encodeURIComponent(period)}`);
+        if (!res.ok) throw new Error('Failed to fetch revenue report');
+        return await res.json();
     }
 };
 

@@ -174,6 +174,8 @@ class RiderDocument(models.Model):
         VEHICLE_REGISTRATION = "vehicle_registration", "Vehicle Registration"
         NATIONAL_ID = "national_id", "National ID"
         PROFILE_PHOTO = "profile_photo", "Profile Photo"
+        RIDERS_CARD = "riders_card", "Rider's Card"
+        UTILITY_BILL = "utility_bill", "Utility Bill"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending Review"

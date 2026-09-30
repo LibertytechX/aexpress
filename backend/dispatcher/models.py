@@ -12,7 +12,6 @@ import random
 import string
 from django.utils import timezone
 
-
 # ---------------------------------------------------------------------------
 # Relay Delivery Infrastructure
 # ---------------------------------------------------------------------------
@@ -305,6 +304,12 @@ class VehicleAsset(models.Model):
         default=1200000,
         help_text="Amortization amount for the vehicle",
     )
+    target_ratio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Target amount-earned/distance ratio for this vehicle. Used by the Revenue report.",
+    )
 
     # ── Timestamps ──────────────────────────────────────────────────
     created_at = models.DateTimeField(auto_now_add=True)
@@ -393,6 +398,7 @@ class SoftDeleteQuerySet(models.QuerySet):
 
 from typing import Any
 
+
 class SoftDeleteManager(models.Manager):
     def get_queryset(self):
         return SoftDeleteQuerySet(self.model, using=self._db).alive()
@@ -420,7 +426,6 @@ class RiderManager(SoftDeleteManager):
         return super().create(**kwargs)
 
 
-
 class Rider(models.Model):
     class Status(models.TextChoices):
         ONLINE = "online", "Online"
@@ -428,6 +433,11 @@ class Rider(models.Model):
         OFFLINE = "offline", "Offline"
 
     STATUS_CHOICES = Status.choices
+
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Auto-generated short ID
@@ -458,6 +468,14 @@ class Rider(models.Model):
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
     is_deleted = models.BooleanField(default=False, db_index=True)
+    is_independent_rider = models.BooleanField(default=False)
+    approval_status = models.CharField(
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING,
+        help_text="KYC/application review status for self-registered riders",
+    )
+    rejection_reason = models.TextField(blank=True, default="")
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
@@ -491,6 +509,7 @@ class Rider(models.Model):
     current_order = models.CharField(max_length=100, null=True, blank=True)
 
     # Contact & Location
+    emergency_contact_name = models.CharField(max_length=100, null=True, blank=True)
     emergency_phone = models.CharField(max_length=20, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     address = models.TextField(null=True, blank=True)
