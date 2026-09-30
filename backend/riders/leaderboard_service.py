@@ -277,7 +277,7 @@ class LeaderboardService:
         """Fall back to querying PostgreSQL LeaderboardEntry directly."""
         entries_qs = (
             LeaderboardEntry.objects.filter(
-                period_type=period_type,
+                period_type=period_type, period_key=period_key
             )
             .select_related("rider__user", "rider__hub__zone")
             .order_by("rank")[:limit]
@@ -307,8 +307,7 @@ class LeaderboardService:
         if current_rider and not my_rank:
             # Query rider's specific entry if ranked outside limit
             own_entry = LeaderboardEntry.objects.filter(
-                rider=current_rider,
-                period_type=period_type,
+                rider=current_rider, period_type=period_type, period_key=period_key
             ).first()
             if own_entry:
                 my_rank = own_entry.rank
