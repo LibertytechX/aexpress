@@ -122,6 +122,26 @@ Request Body:
   }
 ```
 
+### 2. Request Password Reset
+```
+POST /api/auth/request-password-reset/
+Description: Requests a 6-digit password reset code. Generates token and triggers Celery background task (send_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone_number required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone_number": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that email, you will receive a password reset code shortly."
+  }
+```
+
 ---
 
 ## SUBSCRIPTION ENDPOINTS

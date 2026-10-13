@@ -22,7 +22,7 @@ from .emails import (
     send_mobile_password_reset_email,
 )
 from .services import OTPService
-from .tasks import send_onboarding_email_task
+from .tasks import send_onboarding_email_task, send_password_reset_otp_task
 import logging
 from django.db import models
 from sparky_utils.response import service_response
@@ -585,15 +585,11 @@ class RequestPasswordResetView(APIView):
             if user:
                 prep_user_for_otp(user)
 
-                if email:
-                    # Send password reset to email
-                    send_password_reset_otp_to_email(user)
-                    logger.info(f"Password reset email sent to {user.email}")
-
-                if phone_number:
-                    # Send password reset to phone number
-                    OTPService.send_sms_otp(phone=user.phone, otp=user.password_reset_token)
-                    logger.info(f"Mobile password reset SMS sent to {user.phone}") 
+                try:
+                    send_password_reset_otp_task.delay(str(user.id))
+                    logger.info(f"Triggered password reset OTP task for user {user.id}")
+                except Exception as e:
+                    logger.error(f"Failed to trigger password reset OTP task: {str(e)}") 
 
             # Always return success to prevent email enumeration
             return Response(
