@@ -1533,27 +1533,52 @@ class AblyTokenView(views.APIView):
                 {"error": "Ably not configured"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        rider_id = None
-        try:
-            rider_id = request.user.rider_profile.rider_id
-        except Exception:
-            pass
+        rider = getattr(request.user, "rider_profile", None)
+        rider_id = rider.rider_id if rider else None
+        is_dispatcher = bool(
+            hasattr(request.user, "dispatcher_profile")
+            or getattr(request.user, "usertype", "")
+            in ["Dispatcher", "Admin", "SuperAdmin"]
+        )
+        is_verified_rider = bool(
+            rider
+            and rider.is_authorized
+            and (
+                not rider.is_independent_rider
+                or getattr(rider, "approval_status", "")
+                == Rider.ApprovalStatus.APPROVED
+            )
+        )
 
-        # Wildcard capability: covers "assigned-{any-rider-id}" and the broadcast feed.
-        # Dispatchers (no rider profile) only get dispatch-feed.
+        # Baseline capabilities
         capability = {
-            "dispatch-feed": ["subscribe"],
-            "vehicle-telemetry": ["subscribe"],
-            "assigned-*": ["subscribe"],
-            "for-you": ["subscribe"],
-            "for-you*": ["subscribe"],
-            f"for-you-{rider_id}": ["subscribe"],
-            "assigned*": ["subscribe"],
-            "order*": ["subscribe"],
             "location-update": ["publish", "subscribe"],
-            # Support chat channels — all parties (dispatcher + user) need pub+sub
             "chat:*": ["publish", "subscribe"],
         }
+
+        if is_dispatcher:
+            capability.update(
+                {
+                    "dispatch-feed": ["subscribe"],
+                    "vehicle-telemetry": ["subscribe"],
+                    "assigned-*": ["subscribe"],
+                    "order*": ["subscribe"],
+                }
+            )
+
+        if is_verified_rider:
+            capability.update(
+                {
+                    "assigned-*": ["subscribe"],
+                    "for-you": ["subscribe"],
+                    "for-you*": ["subscribe"],
+                    f"for-you-{rider_id}": ["subscribe"]
+                    if rider_id
+                    else ["subscribe"],
+                    "assigned*": ["subscribe"],
+                    "order*": ["subscribe"],
+                }
+            )
 
         try:
             import asyncio

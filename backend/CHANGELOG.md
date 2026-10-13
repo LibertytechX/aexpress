@@ -2,6 +2,32 @@
 
 All notable changes to the AXpress backend are documented in this file.
 
+## [2026-10-13] — Restrict Order Offers for Unverified Independent Riders
+
+### Security & Fixed
+- **Order Offer Access Restrictions for Unverified Independent Riders (`riders/views.py` & `orders/permissions.py`)**:
+  - Implemented `IsVerifiedRider` permission in `orders/permissions.py` enforcing that riders must have `is_authorized=True` and, for independent riders, `approval_status == 'approved'`.
+  - Added access controls to `OrderOfferListView` (`GET /api/riders/orders/offers/`) and `OrderOfferAcceptView` (`POST /api/riders/orders/offers/<id>/accept/`) returning `403 Forbidden` for unverified riders pending KYC approval.
+  - Hardened `RiderToggleDutyView` (`POST /api/riders/duty/`) to block unverified independent riders from switching status to `online` or `on_duty`.
+  - Scoped Ably real-time token channel capabilities in `AblyTokenView` (`dispatcher/views.py`) so unverified riders cannot subscribe to `for-you`, `for-you*`, or assigned order channels.
+  - Added unit test suite `test_unverified_rider_offer_restriction.py` and updated `test_zone_filtering.py`.
+
+---
+
+## [2026-10-13] — Celery Background Tasks for Password Reset OTP (Web & Mobile)
+
+### Added
+- **`send_password_reset_otp_task` & `send_mobile_password_reset_otp_task` (`authentication/tasks.py`)**:
+  - Celery background tasks dedicated to sending password reset OTP via both email and SMS in the background.
+  - Added unit test suite `test_password_reset_task.py` in `authentication/tests/unit/`.
+  - Added integration test suite `test_password_reset_view.py` in `authentication/tests/integration/`.
+
+### Changed
+- **`RequestPasswordResetView` & `MobileRequestPasswordResetView` (`authentication/views.py`)**:
+  - Offloaded OTP sending to Celery tasks (`send_password_reset_otp_task` and `send_mobile_password_reset_otp_task`), preventing external gateway latency (Mailgun, WhisperSMS) from blocking the HTTP request thread.
+  - Ensured both email and SMS notifications are always dispatched to the user's registered contact channels regardless of whether email or phone was provided in the reset request.
+  - Hardened email lookup in `MobileRequestPasswordResetView` using `.filter().first()` to avoid unhandled exceptions and prevent enumeration.
+
 ---
 
 ## [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)

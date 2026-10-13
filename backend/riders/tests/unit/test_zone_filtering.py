@@ -42,16 +42,39 @@ class ZoneFilteringTest(TestCase):
         # Rider profiles are created via signals (presumably) but let's ensure they exist
         self.rider_a = Rider.objects.get(user=self.user_a)
         self.rider_a.home_zone = self.zone_a
+        self.rider_a.is_authorized = True
+        self.rider_a.approval_status = Rider.ApprovalStatus.APPROVED
         self.rider_a.save()
 
         self.rider_b = Rider.objects.get(user=self.user_b)
         self.rider_b.home_zone = self.zone_b
+        self.rider_b.is_authorized = True
+        self.rider_b.approval_status = Rider.ApprovalStatus.APPROVED
         self.rider_b.save()
+
+        self.rider_no_zone = Rider.objects.get(user=self.user_no_zone)
+        self.rider_no_zone.is_authorized = True
+        self.rider_no_zone.approval_status = Rider.ApprovalStatus.APPROVED
+        self.rider_no_zone.save()
+
+        # Unverified independent rider
+        self.user_unverified = User.objects.create_user(
+            phone="+2348123456782",
+            email="unverified@test.com",
+            password="password123",
+            usertype="Rider",
+        )
+        self.rider_unverified = Rider.objects.get(user=self.user_unverified)
+        self.rider_unverified.is_independent_rider = True
+        self.rider_unverified.is_authorized = False
+        self.rider_unverified.approval_status = Rider.ApprovalStatus.PENDING
+        self.rider_unverified.save()
 
         # Refresh users to clear cached rider_profile
         self.user_a.refresh_from_db()
         self.user_b.refresh_from_db()
         self.user_no_zone.refresh_from_db()
+        self.user_unverified.refresh_from_db()
 
         self.vehicle = Vehicle.objects.create(
             name="Bike",
@@ -68,31 +91,45 @@ class ZoneFilteringTest(TestCase):
             user=self.user_a,  # Merchant in real case but here just for owner
             vehicle=self.vehicle,
             pickup_address="Address A",
+            pickup_latitude=6.6059,
+            pickup_longitude=3.3491,
             total_amount=Decimal("1000.00"),
             distance_km=Decimal("5.0"),
             duration_minutes=15,
         )
-        self.offer_a = OrderOffer.objects.create(
+        self.offer_a, _ = OrderOffer.objects.get_or_create(
             order=order1,
-            status="pending",
-            zone=self.zone_a,
-            estimated_earnings=Decimal("200.00"),
+            defaults={
+                "status": "pending",
+                "zone": self.zone_a,
+                "estimated_earnings": Decimal("200.00"),
+            },
         )
+        self.offer_a.status = "pending"
+        self.offer_a.zone = self.zone_a
+        self.offer_a.save()
 
         order2 = Order.objects.create(
             user=self.user_a,
             vehicle=self.vehicle,
             pickup_address="Address B",
+            pickup_latitude=6.4531,
+            pickup_longitude=3.3958,
             total_amount=Decimal("1500.00"),
             distance_km=Decimal("8.0"),
             duration_minutes=20,
         )
-        self.offer_b = OrderOffer.objects.create(
+        self.offer_b, _ = OrderOffer.objects.get_or_create(
             order=order2,
-            status="pending",
-            zone=self.zone_b,
-            estimated_earnings=Decimal("300.00"),
+            defaults={
+                "status": "pending",
+                "zone": self.zone_b,
+                "estimated_earnings": Decimal("300.00"),
+            },
         )
+        self.offer_b.status = "pending"
+        self.offer_b.zone = self.zone_b
+        self.offer_b.save()
 
     def test_rider_a_sees_only_zone_a_offers(self):
         self.client.force_authenticate(user=self.user_a)
@@ -117,3 +154,8 @@ class ZoneFilteringTest(TestCase):
         ids = [offer["id"] for offer in response.data]
         self.assertIn(str(self.offer_a.id), ids)
         self.assertIn(str(self.offer_b.id), ids)
+
+    def test_unverified_independent_rider_cannot_see_offers(self):
+        self.client.force_authenticate(user=self.user_unverified)
+        response = self.client.get("/api/riders/orders/offers/")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
