@@ -1216,16 +1216,26 @@ Error Response (403 Forbidden):
 ### 1b. Accept Order Offer
 ```
 POST /api/riders/orders/offers/<uuid:offer_id>/accept/
-Description: Accepts an order offer and assigns the order to the rider. Forbidden for unverified riders.
+Description: Accepts an order offer and assigns the order to the rider. Forbidden for unverified riders and riders whose assigned home zone or hub does not match the offer's zone.
 Authentication: Required (Verified Rider)
 Response (200 OK):
   {
     "success": true,
     "message": "Order offer accepted."
   }
-Error Response (403 Forbidden):
+Error Response (403 Forbidden - Unverified):
   {
     "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+Error Response (403 Forbidden - Out of Zone):
+  {
+    "success": false,
+    "message": "Rider is not in the zone."
+  }
+Error Response (400 Bad Request - Missing Zone Assignment):
+  {
+    "success": false,
+    "message": "Rider has no assigned hub or home zone."
   }
 ```
 

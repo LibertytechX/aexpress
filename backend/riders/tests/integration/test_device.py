@@ -21,7 +21,12 @@ class RiderDeviceTests(TestCase):
             business_name="Test Rider Business",
             contact_name="Test Rider Contact",
         )
-        self.rider = Rider.objects.create(user=self.user, status="online")
+        self.rider = Rider.objects.create(
+            user=self.user,
+            status="online",
+            is_authorized=True,
+            approval_status=Rider.ApprovalStatus.APPROVED,
+        )
         self.client.force_authenticate(user=self.user)
 
     def test_register_device(self):

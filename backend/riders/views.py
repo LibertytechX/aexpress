@@ -195,29 +195,34 @@ class OrderOfferAcceptView(APIView):
                 {"success": False, "message": "Offer not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        if not rider.hub:
-            return Response(
-                {"success": False, "message": "Rider has no assigned hub."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            rider_hub_id = rider.hub.id
-            zone_hubs = (
-                offer.zone.relay_nodes.all().values_list("id", flat=True)
-                if offer.zone
-                else []
-            )
-        except Exception as exc:
-            logger.warning(f"Error getting rider hub or zone hubs: {exc}")
-            return Response(
-                {"success": False, "message": "Error getting rider hub or zone hubs."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            )
-        if rider_hub_id not in zone_hubs:
-            return Response(
-                {"success": False, "message": "Rider is not in the zone."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        # Zone / Hub restriction
+        if offer.zone:
+            if rider.home_zone and rider.home_zone != offer.zone:
+                return Response(
+                    {"success": False, "message": "Rider is not in the zone."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if rider.hub:
+                try:
+                    zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
+                    if rider.hub.id not in zone_hubs:
+                        return Response(
+                            {"success": False, "message": "Rider is not in the zone."},
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                except Exception as exc:
+                    logger.warning(f"Error getting rider hub or zone hubs: {exc}")
+                    return Response(
+                        {"success": False, "message": "Error getting rider hub or zone hubs."},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
+            if not rider.hub and not rider.home_zone:
+                return Response(
+                    {"success": False, "message": "Rider has no assigned hub or home zone."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # 1. Validation
         if offer.status != "pending":
