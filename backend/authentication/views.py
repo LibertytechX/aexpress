@@ -22,7 +22,11 @@ from .emails import (
     send_mobile_password_reset_email,
 )
 from .services import OTPService
-from .tasks import send_onboarding_email_task, send_password_reset_otp_task
+from .tasks import (
+    send_onboarding_email_task,
+    send_password_reset_otp_task,
+    send_mobile_password_reset_otp_task,
+)
 import logging
 from django.db import models
 from sparky_utils.response import service_response
@@ -805,7 +809,7 @@ class MobileRequestPasswordResetView(APIView):
         try:
             # Try to find user with this identifier (email or phone)
             if email:
-                user = User.objects.get(email=email)
+                user = User.objects.filter(email=email).first()
             elif phone_number:
                 phone_2, phone_3 = "", ""
                 phone = phone_number
@@ -841,23 +845,15 @@ class MobileRequestPasswordResetView(APIView):
                     ]
                 )
 
-                # Send OTP via SMS
+                # Send OTP via Celery background task (both SMS and Email)
                 try:
-                    # using the existing WhisperSMS service implementation
-                    OTPService.send_sms_otp(user.phone, otp)
-                    logger.info(f"Mobile password reset SMS sent to {user.phone}")
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send mobile reset SMS to {user.phone}: {str(e)}"
+                    send_mobile_password_reset_otp_task.delay(str(user.id))
+                    logger.info(
+                        f"Triggered mobile password reset OTP task for user {user.id}"
                     )
-
-                # Send OTP via Email
-                try:
-                    send_mobile_password_reset_email(user, otp)
-                    logger.info(f"Mobile password reset email sent to {user.email}")
                 except Exception as e:
                     logger.error(
-                        f"Failed to send mobile reset email to {user.email}: {str(e)}"
+                        f"Failed to trigger mobile password reset OTP task: {str(e)}"
                     )
 
             # Always return success to prevent user enumeration

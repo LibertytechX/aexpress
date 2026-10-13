@@ -142,6 +142,26 @@ Response (200 OK):
   }
 ```
 
+### 3. Mobile Request Password Reset
+```
+POST /api/auth/mobile/request-password-reset/
+Description: Requests a 6-digit password reset code for mobile app. Generates token and triggers Celery background task (send_mobile_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email."
+  }
+```
+
 ---
 
 ## SUBSCRIPTION ENDPOINTS

@@ -3,7 +3,10 @@
 from unittest.mock import patch, MagicMock
 from django.test import TestCase
 from authentication.models import User
-from authentication.tasks import send_password_reset_otp_task
+from authentication.tasks import (
+    send_password_reset_otp_task,
+    send_mobile_password_reset_otp_task,
+)
 
 
 class SendPasswordResetOtpTaskUnitTest(TestCase):
@@ -95,3 +98,19 @@ class SendPasswordResetOtpTaskUnitTest(TestCase):
 
         self.assertEqual(result, {"email_sent": True, "sms_sent": False})
         mock_send_email.assert_called_once_with(self.user)
+
+    @patch("authentication.tasks.send_mobile_password_reset_email")
+    @patch("authentication.tasks.OTPService.send_sms_otp")
+    def test_send_mobile_password_reset_otp_task_sends_to_both(
+        self, mock_send_sms, mock_send_mobile_email
+    ):
+        """Verify mobile OTP task delivers via send_mobile_password_reset_email and SMS."""
+        mock_send_mobile_email.return_value = True
+        mock_send_sms.return_value = True
+
+        result = send_mobile_password_reset_otp_task(str(self.user.id))
+
+        self.assertEqual(result, {"email_sent": True, "sms_sent": True})
+        mock_send_mobile_email.assert_called_once_with(self.user, "123456")
+        mock_send_sms.assert_called_once_with(phone=self.user.phone, otp="123456")
+

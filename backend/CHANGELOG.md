@@ -4,18 +4,19 @@ All notable changes to the AXpress backend are documented in this file.
 
 ---
 
-## [2026-10-13] — Celery Background Task for Password Reset OTP (Email & SMS)
+## [2026-10-13] — Celery Background Tasks for Password Reset OTP (Web & Mobile)
 
 ### Added
-- **`send_password_reset_otp_task` (`authentication/tasks.py`)**:
-  - Celery task dedicated to sending password reset OTP via both email and SMS in the background.
+- **`send_password_reset_otp_task` & `send_mobile_password_reset_otp_task` (`authentication/tasks.py`)**:
+  - Celery background tasks dedicated to sending password reset OTP via both email and SMS in the background.
   - Added unit test suite `test_password_reset_task.py` in `authentication/tests/unit/`.
   - Added integration test suite `test_password_reset_view.py` in `authentication/tests/integration/`.
 
 ### Changed
-- **`RequestPasswordResetView` (`authentication/views.py`)**:
-  - Offloaded OTP sending to Celery task `send_password_reset_otp_task.delay(str(user.id))`, preventing external gateway latency (Mailgun, WhisperSMS) from blocking the HTTP request thread.
+- **`RequestPasswordResetView` & `MobileRequestPasswordResetView` (`authentication/views.py`)**:
+  - Offloaded OTP sending to Celery tasks (`send_password_reset_otp_task` and `send_mobile_password_reset_otp_task`), preventing external gateway latency (Mailgun, WhisperSMS) from blocking the HTTP request thread.
   - Ensured both email and SMS notifications are always dispatched to the user's registered contact channels regardless of whether email or phone was provided in the reset request.
+  - Hardened email lookup in `MobileRequestPasswordResetView` using `.filter().first()` to avoid unhandled exceptions and prevent enumeration.
 
 ---
 

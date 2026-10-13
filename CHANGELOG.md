@@ -1,12 +1,14 @@
 All notable changes to the AXpress project are documented in this file.
 
-# [2026-10-13] — Celery Background Task for Password Reset OTP (Email & SMS)
+# [2026-10-13] — Celery Background Tasks for Password Reset OTP (Web & Mobile)
 
 ### Backend
 #### Changed
 - **Asynchronous Password Reset OTP Dispatch (`authentication/views.py` & `authentication/tasks.py`)**:
-  - Offloaded password reset OTP delivery in `RequestPasswordResetView` to Celery background task `send_password_reset_otp_task`.
-  - Updated OTP dispatch logic to always deliver to both the user's registered email (`send_password_reset_otp_to_email`) and phone (`OTPService.send_sms_otp`), regardless of whether the requester supplied an email or phone number in the request body.
+  - Offloaded password reset OTP delivery in `RequestPasswordResetView` to Celery task `send_password_reset_otp_task`.
+  - Offloaded mobile password reset OTP delivery in `MobileRequestPasswordResetView` to Celery task `send_mobile_password_reset_otp_task`.
+  - Updated OTP dispatch logic to always deliver to both the user's registered email (`send_password_reset_otp_to_email` / `send_mobile_password_reset_email`) and phone (`OTPService.send_sms_otp`), regardless of whether the requester supplied an email or phone number in the request body.
+  - Enhanced user lookup in `MobileRequestPasswordResetView` to prevent user enumeration on missing email addresses.
   - Added unit test suite `test_password_reset_task.py` and integration test suite `test_password_reset_view.py`.
 
 ---
