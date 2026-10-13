@@ -1171,20 +1171,61 @@ These endpoints support rider mobile application interactions:
 ### 1. Toggle Duty Status
 ```
 POST /api/riders/duty/
-Description: Toggles the online/offline duty status of the rider.
+Description: Toggles the online/offline duty status of the rider. Blocked with 403 Forbidden if unverified independent rider attempts to go online.
 Authentication: Required (Rider)
 Request Body:
   {
-    "status": "online" | "offline"
+    "status": "online" | "offline",
+    "latitude": 6.5244,
+    "longitude": 3.3792
   }
-Response:
+Response (200 OK):
   {
     "success": true,
-    "data": {
-      "status": "online",
-      "working_type": "freelancer",
-      "is_authorized": true
+    "status": "online",
+    "timestamp": "2026-10-13T12:00:00Z"
+  }
+Error Response (403 Forbidden):
+  {
+    "success": false,
+    "message": "Account is not verified or authorized to go online."
+  }
+```
+
+### 1a. Order Offers List
+```
+GET /api/riders/orders/offers/
+Description: Returns pending available order offers. Forbidden for unverified independent riders pending KYC review.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  [
+    {
+      "id": "uuid",
+      "order_number": "AX-123456",
+      "pickup_address": "123 Marina St",
+      "estimated_earnings": "400.00",
+      "status": "pending"
     }
+  ]
+Error Response (403 Forbidden):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+```
+
+### 1b. Accept Order Offer
+```
+POST /api/riders/orders/offers/<uuid:offer_id>/accept/
+Description: Accepts an order offer and assigns the order to the rider. Forbidden for unverified riders.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  {
+    "success": true,
+    "message": "Order offer accepted."
+  }
+Error Response (403 Forbidden):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
   }
 ```
 

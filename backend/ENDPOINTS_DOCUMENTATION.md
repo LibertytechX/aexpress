@@ -262,6 +262,58 @@
 
 ---
 
+### 10. Order Offers List
+**Endpoint:** `GET /orders/offers/`  
+**Authentication:** Required (Verified Rider)  
+**Description:** Returns pending unassigned order offers in the rider's zone. Unverified independent riders (pending KYC review) are forbidden from viewing offers.
+
+**Error Response (403 Forbidden - Unverified Rider):**
+```json
+{
+  "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+}
+```
+
+---
+
+### 11. Accept Order Offer
+**Endpoint:** `POST /orders/offers/<uuid:offer_id>/accept/`  
+**Authentication:** Required (Verified Rider)  
+**Description:** Accepts a pending order offer and assigns the order to the rider. Unverified independent riders cannot accept offers.
+
+**Error Response (403 Forbidden - Unverified Rider):**
+```json
+{
+  "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+}
+```
+
+---
+
+### 12. Toggle Duty Status
+**Endpoint:** `POST /duty/`  
+**Authentication:** Required (Rider)  
+**Description:** Toggles the rider's duty status (`online` / `offline`). Toggling to `online` is blocked if the rider is not authorized or verified.
+
+**Request Body:**
+```json
+{
+  "status": "online",
+  "latitude": 6.5244,
+  "longitude": 3.3792
+}
+```
+
+**Error Response (403 Forbidden - Unverified Rider going online):**
+```json
+{
+  "success": false,
+  "message": "Account is not verified or authorized to go online."
+}
+```
+
+---
+
 ## Dispatcher Portal API Documentation
 
 ## Base URL

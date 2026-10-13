@@ -61,7 +61,7 @@ from .models import (
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
 from orders.models import Order, OrderEvent
-from orders.permissions import IsRider
+from orders.permissions import IsRider, IsVerifiedRider
 from dispatcher.utils import emit_activity
 from .notifications import notify_rider
 from .tasks import finalize_rider_document_upload_task
@@ -111,11 +111,32 @@ class OrderOfferListView(APIView):
     Returns pending offers that haven't expired.
     """
 
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsVerifiedRider]
 
     @exception_advice(model_object=ErrorLog)
     def get(self, request):
-        # now = timezone.now()
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return Response(
+                {
+                    "success": False,
+                    "message": "Authenticated user is not a driver.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if not rider.is_authorized or (
+            rider.is_independent_rider
+            and getattr(rider, "approval_status", "") != Rider.ApprovalStatus.APPROVED
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Account is not verified. You cannot view order offers until approved.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         offers = (
             OrderOffer.objects.filter(
                 status="pending", rider__isnull=True, order__status="Pending"
@@ -125,8 +146,7 @@ class OrderOfferListView(APIView):
             .order_by("-created_at")
         )
 
-        rider = getattr(request.user, "rider_profile", None)
-        if rider and rider.home_zone:
+        if rider.home_zone:
             offers = offers.filter(zone=rider.home_zone)
 
         serializer = OrderOfferListSerializer(offers, many=True)
@@ -138,7 +158,7 @@ class OrderOfferAcceptView(APIView):
     API endpoint for riders to accept an order offer.
     """
 
-    permission_classes = [permissions.IsAuthenticated, IsRider]
+    permission_classes = [permissions.IsAuthenticated, IsVerifiedRider]
 
     @exception_advice(model_object=ErrorLog)
     @transaction.atomic
@@ -155,7 +175,17 @@ class OrderOfferAcceptView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        #
+        if not rider.is_authorized or (
+            rider.is_independent_rider
+            and getattr(rider, "approval_status", "") != Rider.ApprovalStatus.APPROVED
+        ):
+            return Response(
+                {
+                    "success": False,
+                    "message": "Account is not verified. You cannot accept order offers until approved.",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         # Get the offer and lock it for update
         try:
@@ -165,9 +195,18 @@ class OrderOfferAcceptView(APIView):
                 {"success": False, "message": "Offer not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        if not rider.hub:
+            return Response(
+                {"success": False, "message": "Rider has no assigned hub."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             rider_hub_id = rider.hub.id
-            zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
+            zone_hubs = (
+                offer.zone.relay_nodes.all().values_list("id", flat=True)
+                if offer.zone
+                else []
+            )
         except Exception as exc:
             logger.warning(f"Error getting rider hub or zone hubs: {exc}")
             return Response(
@@ -688,6 +727,19 @@ class RiderToggleDutyView(APIView):
 
             # Update status
             request_status = serializer.validated_data["status"]
+            if request_status in ["on_duty", "online"]:
+                if not rider.is_authorized or (
+                    rider.is_independent_rider
+                    and getattr(rider, "approval_status", "") != Rider.ApprovalStatus.APPROVED
+                ):
+                    return Response(
+                        {
+                            "success": False,
+                            "message": "Account is not verified or authorized to go online.",
+                        },
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+
             new_status = (
                 "online" if request_status in ["on_duty", "online"] else "offline"
             )
