@@ -74,7 +74,7 @@ def send_email_with_fallback(
 
     # Fallback to MailNow
     mailnow_url = getattr(
-        settings, "MAILNOW_API_URL", "https://api.mailnow.xyz/v1/email/send"
+        settings, "MAILNOW_API_URL", "https://api.mailnow.dev/v1/email/send"
     )
     mailnow_key = getattr(settings, "MAILNOW_API_KEY", "")
 
