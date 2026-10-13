@@ -159,3 +159,32 @@ class ZoneFilteringTest(TestCase):
         self.client.force_authenticate(user=self.user_unverified)
         response = self.client.get("/api/riders/orders/offers/")
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_rider_a_can_accept_zone_a_offer(self):
+        self.client.force_authenticate(user=self.user_a)
+        response = self.client.post(
+            f"/api/riders/orders/offers/{self.offer_a.id}/accept/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.offer_a.refresh_from_db()
+        self.assertEqual(self.offer_a.status, "accepted")
+        self.assertEqual(self.offer_a.rider, self.rider_a)
+
+    def test_rider_a_cannot_accept_zone_b_offer(self):
+        self.client.force_authenticate(user=self.user_a)
+        response = self.client.post(
+            f"/api/riders/orders/offers/{self.offer_b.id}/accept/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["message"], "Rider is not in the zone.")
+        self.offer_b.refresh_from_db()
+        self.assertEqual(self.offer_b.status, "pending")
+
+    def test_rider_no_zone_cannot_accept_zoned_offer(self):
+        self.client.force_authenticate(user=self.user_no_zone)
+        response = self.client.post(
+            f"/api/riders/orders/offers/{self.offer_a.id}/accept/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("hub or home zone", response.data["message"])
+
