@@ -59,6 +59,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
     on_time_rate = serializers.SerializerMethodField()
     documents_status = serializers.SerializerMethodField()
     net_earnings = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -82,7 +83,16 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "on_time_rate",
             "documents_status",
             "net_earnings",
+            "is_verified",
         ]
+
+    def get_is_verified(self, obj):
+        if obj.is_independent_rider and obj.is_authorized:
+            return True
+        elif not obj.is_independent_rider:
+            return True
+        else:
+            return False
 
     def get_wallet_balance(self, obj):
         try:

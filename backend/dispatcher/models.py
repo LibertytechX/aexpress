@@ -458,7 +458,7 @@ class Rider(models.Model):
         ("full_time", "Full Time"),
     )
     working_type = models.CharField(
-        max_length=20, choices=WORKING_TYPE_CHOICES, default="freelancer"
+        max_length=20, choices=WORKING_TYPE_CHOICES, default="full_time"
     )
     team = models.CharField(max_length=100, default="Main Team")
     is_authorized = models.BooleanField(
