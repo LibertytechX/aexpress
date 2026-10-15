@@ -444,3 +444,76 @@ def reset_monthly_commissions_service() -> int:
         f"reset_monthly_commissions_service: Rolled over {count} dispatchers to month {current_calendar_month}"
     )
     return count
+
+
+def verify_affiliation_code(affiliation_code: str) -> Dict[str, Any]:
+    """
+    Validates an affiliation code and returns the associated dispatcher profile metadata.
+    Raises ServiceException if the code is blank, invalid, or does not belong to an active Hub Captain / Zone Lead.
+    """
+    if not affiliation_code or not str(affiliation_code).strip():
+        raise ServiceException(
+            status_code=400,
+            message="Affiliation code is required."
+        )
+
+    code_clean = str(affiliation_code).strip().upper()
+    dispatcher = (
+        DispatcherProfile.objects.select_related("user")
+        .filter(affiliation_code__iexact=code_clean)
+        .first()
+    )
+    if not dispatcher:
+        raise ServiceException(
+            status_code=400,
+            message="Invalid affiliation code. No active dispatcher found with this code."
+        )
+
+    if not dispatcher.user.is_active:
+        raise ServiceException(
+            status_code=400,
+            message="This affiliation code belongs to an inactive account."
+        )
+
+    if dispatcher.role not in [
+        DispatcherProfile.Role.ZONE_LEAD,
+        DispatcherProfile.Role.HUB_CAPTAIN,
+    ]:
+        raise ServiceException(
+            status_code=400,
+            message="This affiliation code does not belong to an active Hub Captain or Zone Lead."
+        )
+
+    name = (
+        dispatcher.user.contact_name
+        or f"{dispatcher.user.first_name} {dispatcher.user.last_name}".strip()
+        or dispatcher.user.phone
+        or "Dispatcher"
+    )
+
+    hub_name = None
+    zone_name = None
+    try:
+        from dispatcher.models import RelayNode
+        relay = RelayNode.objects.filter(
+            hub_captain_phone__iexact=dispatcher.user.phone
+        ).first()
+        if relay:
+            hub_name = relay.name
+            if relay.zone:
+                zone_name = relay.zone.name
+    except Exception:
+        pass
+
+    return {
+        "is_valid": True,
+        "affiliation_code": dispatcher.affiliation_code,
+        "dispatcher_id": str(dispatcher.id),
+        "name": name,
+        "phone": dispatcher.user.phone,
+        "role": dispatcher.role,
+        "role_display": dispatcher.get_role_display(),
+        "hub_name": hub_name,
+        "zone_name": zone_name,
+    }
+

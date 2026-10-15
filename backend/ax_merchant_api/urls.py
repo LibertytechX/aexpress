@@ -68,4 +68,14 @@ urlpatterns = [
         __import__("authentication.views", fromlist=["MerchantAffiliationView"]).MerchantAffiliationView.as_view(),
         name="merchant_affiliation_direct",
     ),
+    path(
+        "api/merchant/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="merchant_affiliation_verify_direct",
+    ),
+    path(
+        "api/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="affiliation_verify_direct",
+    ),
 ]

@@ -24,6 +24,11 @@ All notable changes to the AXpress project are documented in this file.
   - Created `regenerate_dispatcher_codes` management command to regenerate unique, collision-free affiliation codes for dispatchers, supporting `--only-affiliates`, `--dispatcher-id`, and `--dry-run`.
   - Updated `DispatcherProfile.save()` to restrict automatic affiliation code generation strictly to `zone_lead` and `hub_captain` roles, preventing unwanted codes on `admin` profiles.
   - Added unit test suite `test_regenerate_dispatcher_codes.py` (4 tests).
+- **Public Affiliation Code Verification Endpoint (`dispatcher/services.py`, `authentication/views.py`, `authentication/serializers.py`)**:
+  - Implemented `verify_affiliation_code(code)` domain service to validate affiliation codes, enforce that the dispatcher is active and holds a `zone_lead` or `hub_captain` role, and resolve profile contact, role, hub, and zone metadata.
+  - Implemented `VerifyAffiliationCodeView` (`permissions.AllowAny`) supporting both `GET ?code=...` (or `?affiliation_code=...`) and `POST {"affiliation_code": "..."}` (or `{"code": "..."}`) with case-insensitive whitespace trimming.
+  - Exposed verification endpoints across `/api/auth/affiliation/verify/`, `/api/merchant/affiliation/verify/`, `/api/riders/affiliation/verify/`, and `/api/affiliation/verify/` for seamless onboarding validation.
+  - Added integration test suite `test_verify_affiliation_code_api.py` (11 tests).
 
 ### Frontend (Dispatcher Portal)
 #### Added & Improved

@@ -981,3 +981,52 @@ Response (200 OK):
     "status_code": 200
   }
 ```
+
+### 6. Verify Affiliation Code (Public)
+```http
+GET /api/auth/affiliation/verify/?code=HUB001
+GET /api/merchant/affiliation/verify/?code=HUB001
+GET /api/riders/affiliation/verify/?code=HUB001
+GET /api/affiliation/verify/?code=HUB001
+POST /api/auth/affiliation/verify/
+POST /api/merchant/affiliation/verify/
+POST /api/riders/affiliation/verify/
+POST /api/affiliation/verify/
+Description: Validates a dispatcher affiliation code and returns the dispatcher's details (name, phone, role, hub, zone) without requiring authentication. Used during rider/merchant onboarding and profile linking.
+Authentication: None (Public - AllowAny)
+
+Query Parameters (GET):
+  - code or affiliation_code (required): The affiliation code to verify (e.g. 'HUB001'). Case-insensitive.
+
+Request Body (POST):
+  {
+    "affiliation_code": "HUB001"
+  }
+  // Or alias: {"code": "HUB001"}
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation code is valid.",
+    "data": {
+      "is_valid": true,
+      "affiliation_code": "HUB001",
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "name": "Alice Hub Captain",
+      "phone": "+2348011110001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "hub_name": "Ikeja Central Hub",
+      "zone_name": "Ikeja Zone"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Invalid affiliation code. No active dispatcher found with this code.",
+    "data": {},
+    "status_code": 400
+  }
+```

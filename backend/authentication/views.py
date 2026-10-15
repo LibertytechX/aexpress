@@ -1306,3 +1306,67 @@ class MerchantAffiliationView(APIView):
             status_code=status.HTTP_200_OK,
         )
 
+
+class VerifyAffiliationCodeView(APIView):
+    """
+    Public API endpoint to verify an affiliation code.
+    Accessible without authentication so riders and merchants can validate codes during registration.
+
+    GET /api/auth/affiliation/verify/?code=HUB001
+    POST /api/auth/affiliation/verify/ with {"affiliation_code": "HUB001"}
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        from authentication.serializers import VerifyAffiliationCodeSerializer
+        from dispatcher.services import verify_affiliation_code
+
+        code = request.query_params.get("affiliation_code") or request.query_params.get("code")
+        serializer = VerifyAffiliationCodeSerializer(data={"affiliation_code": code})
+        if not serializer.is_valid():
+            first_err = (
+                next(iter(serializer.errors.values()))[0]
+                if serializer.errors
+                else "Invalid data."
+            )
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message=str(first_err)
+            )
+
+        clean_code = serializer.validated_data["clean_code"]
+        data = verify_affiliation_code(clean_code)
+        return service_response(
+            status="success",
+            message="Affiliation code is valid.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        from authentication.serializers import VerifyAffiliationCodeSerializer
+        from dispatcher.services import verify_affiliation_code
+
+        serializer = VerifyAffiliationCodeSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_err = (
+                next(iter(serializer.errors.values()))[0]
+                if serializer.errors
+                else "Invalid data."
+            )
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message=str(first_err)
+            )
+
+        clean_code = serializer.validated_data["clean_code"]
+        data = verify_affiliation_code(clean_code)
+        return service_response(
+            status="success",
+            message="Affiliation code is valid.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+

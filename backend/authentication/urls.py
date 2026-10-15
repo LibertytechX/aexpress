@@ -26,6 +26,7 @@ from .views import (
     MerchantNotificationDeleteView,
     MerchantNotificationDeleteAllView,
     MerchantAffiliationView,
+    VerifyAffiliationCodeView,
 )
 
 app_name = "authentication"
@@ -127,5 +128,10 @@ urlpatterns = [
         "merchant/affiliation/",
         MerchantAffiliationView.as_view(),
         name="merchant_affiliation",
+    ),
+    path(
+        "affiliation/verify/",
+        VerifyAffiliationCodeView.as_view(),
+        name="verify_affiliation_code",
     ),
 ]
