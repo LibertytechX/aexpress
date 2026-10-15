@@ -807,7 +807,7 @@ class DispatcherProfile(models.Model):
         related_name="dispatcher_profile",
     )
     affiliation_code = models.CharField(
-        max_length=100, default=generate_random_code, unique=True
+        max_length=100, default=generate_random_code, null=True, blank=True
     )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
     monthly_commission = models.DecimalField(
@@ -1509,4 +1509,3 @@ class DispatcherMonthlyEarning(models.Model):
 
     def __str__(self):
         return f"{self.dispatcher} - {self.month_year}: ₦{self.total_commission} ({self.total_orders} orders)"
-
