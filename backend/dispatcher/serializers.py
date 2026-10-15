@@ -58,9 +58,8 @@ class DispatcherListSerializer(serializers.ModelSerializer):
         source="created_at", format="%Y-%m-%d", read_only=True
     )
     is_active = serializers.BooleanField(source="user.is_active", read_only=True)
-    affiliated_riders_count = serializers.IntegerField(
-        source="affiliated_riders_count", read_only=True
-    )
+    affiliated_riders_count = serializers.IntegerField(read_only=True)
+    affiliated_merchants_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = DispatcherProfile
@@ -77,6 +76,7 @@ class DispatcherListSerializer(serializers.ModelSerializer):
             "previous_month_commission",
             "total_commission_earned",
             "affiliated_riders_count",
+            "affiliated_merchants_count",
         ]
 
     def get_name(self, obj):
