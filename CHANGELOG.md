@@ -1,5 +1,23 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-10-15] — Rider Approval Review Slideshow & Rejection Notes
+
+### Frontend (Dispatcher Portal)
+#### Added & Improved
+- **Rider Approval Review Slideshow (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Transformed document review into an interactive full-height slideshow occupying almost the entire modal, allowing reviewers to view submitted KYC documents and vehicle photos one after the other in high clarity without separate clicks.
+  - Implemented keyboard arrow navigation (`←` / `→`) and responsive floating buttons for fast document cycling.
+  - Added 1.7x zoom toggle and direct "Open Original" file link actions.
+  - Added interactive thumbnail filmstrip with active indicators and rejection flag badges.
+  - Added robust image fallback UI for broken image URLs or unsupported preview formats.
+- **Reviewer Rejection Notes & Granular Document Flagging**:
+  - Added dedicated Rejection Composer view with overall rejection note textarea and quick-fill suggestions.
+  - Added per-document rejection flagging with specific notes and quick reason chips directly in the slideshow and rejection composer.
+  - Added auto-populate helper to summarize flagged document issues into the overall rejection note.
+  - Connected rejection notes to `RidersAPI.rejectRider()` passing both the overall reason and per-document rejection breakdown.
+
+---
+
 # [2026-10-13] — Restrict Order Offers for Unverified Independent Riders
 
 ### Backend
