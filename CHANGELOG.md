@@ -20,7 +20,10 @@ All notable changes to the AXpress project are documented in this file.
   - Implemented `DispatcherAffiliatedMerchantsListView` (`GET /api/dispatch/affiliation/merchants/`) with search and pagination.
   - Updated `DispatcherAffiliationSummaryView` to include `total_affiliated_merchants`, `affiliated_merchants_count`, and `active_merchants_this_month`.
   - Updated `DispatcherCommissionListView` to support filtering by `merchant_id` and `source` (`rider` vs `merchant`).
-  - Added unit test suite `test_merchant_affiliation_services.py` (10 tests) and integration suite `test_merchant_affiliation_api.py` (7 tests).
+- **Management Command & Scoped Code Generation (`dispatcher/management/commands/regenerate_dispatcher_codes.py`, `dispatcher/models.py`)**:
+  - Created `regenerate_dispatcher_codes` management command to regenerate unique, collision-free affiliation codes for dispatchers, supporting `--only-affiliates`, `--dispatcher-id`, and `--dry-run`.
+  - Updated `DispatcherProfile.save()` to restrict automatic affiliation code generation strictly to `zone_lead` and `hub_captain` roles, preventing unwanted codes on `admin` profiles.
+  - Added unit test suite `test_regenerate_dispatcher_codes.py` (4 tests).
 
 ### Frontend (Dispatcher Portal)
 #### Added & Improved

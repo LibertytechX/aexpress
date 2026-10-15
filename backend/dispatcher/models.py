@@ -807,7 +807,7 @@ class DispatcherProfile(models.Model):
         related_name="dispatcher_profile",
     )
     affiliation_code = models.CharField(
-        max_length=100, default=generate_random_code, null=True, blank=True
+        max_length=100, null=True, blank=True
     )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
     monthly_commission = models.DecimalField(
@@ -844,14 +844,15 @@ class DispatcherProfile(models.Model):
         return f"Dispatcher: {self.user.contact_name or self.user.phone} ({self.affiliation_code})"
 
     def save(self, *args, **kwargs):
-        if not self.affiliation_code:
-            self.affiliation_code = generate_random_code()
-            while (
-                DispatcherProfile.objects.filter(affiliation_code=self.affiliation_code)
-                .exclude(pk=self.pk)
-                .exists()
-            ):
+        if self.role in [self.Role.ZONE_LEAD, self.Role.HUB_CAPTAIN]:
+            if not self.affiliation_code:
                 self.affiliation_code = generate_random_code()
+                while (
+                    DispatcherProfile.objects.filter(affiliation_code=self.affiliation_code)
+                    .exclude(pk=self.pk)
+                    .exists()
+                ):
+                    self.affiliation_code = generate_random_code()
         super().save(*args, **kwargs)
 
     @property
