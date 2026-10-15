@@ -1192,3 +1192,117 @@ class MerchantNotificationDeleteAllView(APIView):
             message=f"{count} notification(s) deleted successfully.",
             status_code=status.HTTP_200_OK,
         )
+
+
+class MerchantAffiliationView(APIView):
+    """
+    GET /api/auth/merchant/affiliation/
+    View current affiliation status and dispatcher details for the authenticated merchant.
+
+    POST /api/auth/merchant/affiliation/
+    Affiliate the authenticated merchant to a dispatcher using an affiliation code.
+    Payload: {"affiliation_code": "..."}
+    """
+
+    from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        from dispatcher.models import Merchant
+
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            merchant = Merchant.objects.filter(user=request.user).first()
+
+        if not merchant:
+            raise ServiceException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                message="Merchant profile not found.",
+            )
+
+        data = {
+            "is_affiliated": merchant.is_affiliated,
+            "affiliation_code": (
+                merchant.affiliated_to.affiliation_code
+                if merchant.is_affiliated and merchant.affiliated_to
+                else None
+            ),
+            "dispatcher_name": (
+                merchant.affiliated_to.user.contact_name
+                or f"{merchant.affiliated_to.user.first_name} {merchant.affiliated_to.user.last_name}".strip()
+                or merchant.affiliated_to.user.phone
+                if merchant.is_affiliated and merchant.affiliated_to and merchant.affiliated_to.user
+                else None
+            ),
+            "dispatcher_phone": (
+                merchant.affiliated_to.user.phone
+                if merchant.is_affiliated and merchant.affiliated_to and merchant.affiliated_to.user
+                else None
+            ),
+            "affiliated_at": (
+                merchant.affiliated_at.isoformat()
+                if merchant.is_affiliated and merchant.affiliated_at
+                else None
+            ),
+        }
+
+        return service_response(
+            status="success",
+            message="Merchant affiliation details retrieved successfully.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        from dispatcher.models import Merchant
+
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            merchant = Merchant.objects.filter(user=request.user).first()
+
+        if not merchant:
+            raise ServiceException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                message="Merchant profile not found.",
+            )
+
+        code = request.data.get("affiliation_code")
+        if not code or not str(code).strip():
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Affiliation code is required.",
+            )
+
+        from dispatcher.services import affiliate_merchant_to_dispatcher
+
+        dispatcher = affiliate_merchant_to_dispatcher(merchant, str(code).strip())
+
+        disp_name = (
+            dispatcher.user.contact_name
+            or f"{dispatcher.user.first_name} {dispatcher.user.last_name}".strip()
+            or dispatcher.user.phone
+            if dispatcher.user
+            else "Dispatcher"
+        )
+
+        return service_response(
+            status="success",
+            message=f"Successfully affiliated with {disp_name}.",
+            data={
+                "is_affiliated": True,
+                "affiliation_code": dispatcher.affiliation_code,
+                "dispatcher_name": disp_name,
+                "dispatcher_phone": dispatcher.user.phone if dispatcher.user else None,
+                "affiliated_at": (
+                    merchant.affiliated_at.isoformat()
+                    if merchant.affiliated_at
+                    else None
+                ),
+            },
+            status_code=status.HTTP_200_OK,
+        )
+

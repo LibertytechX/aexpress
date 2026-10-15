@@ -21,6 +21,7 @@ from .views import (
     DispatcherCommissionListView,
     DispatcherMonthlyEarningsListView,
     DispatcherAffiliatedRidersListView,
+    DispatcherAffiliatedMerchantsListView,
     DispatcherCommissionReconcileView,
 )
 
@@ -66,6 +67,11 @@ urlpatterns = [
         "affiliation/riders/",
         DispatcherAffiliatedRidersListView.as_view(),
         name="dispatcher-affiliation-riders",
+    ),
+    path(
+        "affiliation/merchants/",
+        DispatcherAffiliatedMerchantsListView.as_view(),
+        name="dispatcher-affiliation-merchants",
     ),
     path(
         "affiliation/reconcile/",

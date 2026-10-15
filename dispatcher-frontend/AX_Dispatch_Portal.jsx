@@ -8659,13 +8659,14 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
 // ─── TEAMS SCREEN ────────────────────────────────────────────────
 function TeamsScreen({ dispatchers, onDispatcherCreated }) {
-  const [activeTab, setActiveTab] = useState("members"); // "members" | "riders" | "earnings"
+  const [activeTab, setActiveTab] = useState("members"); // "members" | "riders" | "merchants" | "earnings"
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState("");
   const [copiedCode, setCopiedCode] = useState(null);
   const [affiliationSummary, setAffiliationSummary] = useState(null);
   const [affiliatedRiders, setAffiliatedRiders] = useState([]);
+  const [affiliatedMerchants, setAffiliatedMerchants] = useState([]);
   const [monthlyEarnings, setMonthlyEarnings] = useState([]);
   const [loading, setLoading] = useState(false);
   const [reconciling, setReconciling] = useState(false);
@@ -8673,13 +8674,15 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
   const loadAffiliationData = useCallback(async () => {
     setLoading(true);
     try {
-      const [sum, riders, earnings] = await Promise.all([
+      const [sum, riders, merchants, earnings] = await Promise.all([
         AffiliationAPI.getSummary().catch(() => null),
         AffiliationAPI.getAffiliatedRiders().catch(() => []),
+        AffiliationAPI.getAffiliatedMerchants().catch(() => []),
         AffiliationAPI.getMonthlyEarnings().catch(() => []),
       ]);
       setAffiliationSummary(sum);
       setAffiliatedRiders(riders);
+      setAffiliatedMerchants(merchants);
       setMonthlyEarnings(earnings);
     } catch (e) {
       console.error("Failed to load affiliation data:", e);
@@ -8747,20 +8750,36 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
     return name.includes(q) || id.includes(q) || phone.includes(q);
   });
 
+  const filteredMerchants = (affiliatedMerchants || []).filter(m => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const bName = (m.business_name || "").toLowerCase();
+    const cName = (m.contact_name || "").toLowerCase();
+    const id = (m.merchant_id || "").toLowerCase();
+    const phone = (m.phone || "").toLowerCase();
+    return bName.includes(q) || cName.includes(q) || id.includes(q) || phone.includes(q);
+  });
+
   return (
     <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
       {/* ─── STAT CARDS ─── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
         <StatCard
           label="Total Dispatchers"
           value={dispatchers.length}
           subtext="Hub Captains & Leads"
         />
         <StatCard
-          label="Affiliated Riders"
+          label="Affiliated Fleet"
           value={affiliationSummary?.total_affiliated_riders || affiliatedRiders.length || 0}
           subtext="Active fleet linked to hubs"
           color={S.blue}
+        />
+        <StatCard
+          label="Affiliated Merchants"
+          value={affiliationSummary?.total_affiliated_merchants || affiliatedMerchants.length || 0}
+          subtext="Businesses linked to hubs"
+          color={S.purple}
         />
         <StatCard
           label="Monthly Commission"
@@ -8792,10 +8811,10 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
               </span>
             </div>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-              Share your affiliation code with riders to onboard or link them to your hub.
+              Share your affiliation code with riders and merchants to onboard or link them to your hub.
             </div>
             <div style={{ fontSize: 12, color: S.textMuted }}>
-              Earn ₦{parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} commission for each completed order by your affiliated riders.
+              Earn ₦{parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} commission for each completed order by your affiliated riders or merchants.
             </div>
           </div>
 
@@ -8853,6 +8872,19 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
             }}
           >
             {I.riders} Affiliated Fleet ({affiliatedRiders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("merchants")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "merchants" ? S.card : "transparent",
+              color: activeTab === "merchants" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "merchants" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🏪 Affiliated Merchants ({affiliatedMerchants.length})
           </button>
           <button
             onClick={() => setActiveTab("earnings")}
@@ -9085,7 +9117,80 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
         </div>
       )}
 
-      {/* ─── TAB 3: MONTHLY LEDGERS ─── */}
+      {/* ─── TAB 3: AFFILIATED MERCHANTS ─── */}
+      {activeTab === "merchants" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Merchant ID</span>
+            <span>Business / Contact</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span>Type</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredMerchants.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated merchants..." : "No affiliated merchants linked to your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredMerchants.map(m => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {m.merchant_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{m.business_name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Contact: {m.contact_name} {m.affiliated_at ? `• Affiliated: ${new Date(m.affiliated_at).toLocaleDateString()}` : ""}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{m.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: m.activity_status === "active" ? S.greenBg : m.activity_status === "watch" ? S.goldPale : S.borderLight,
+                      color: m.activity_status === "active" ? S.green : m.activity_status === "watch" ? S.gold : S.textMuted
+                    }}>
+                      {m.activity_status || "active"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12, color: S.textDim, textTransform: "capitalize" }}>
+                    {m.merchant_type || "regular"}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {m.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {m.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(m.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 4: MONTHLY LEDGERS ─── */}
       {activeTab === "earnings" && (
         <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
           <div style={{

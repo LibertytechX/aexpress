@@ -1,6 +1,6 @@
 import logging
 from decimal import Decimal
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from django.db import transaction
 from django.db.models import Sum
@@ -12,6 +12,7 @@ from dispatcher.models import (
     DispatcherCommission,
     DispatcherMonthlyEarning,
     Rider,
+    Merchant,
     SystemSettings,
 )
 
@@ -85,54 +86,86 @@ def affiliate_rider_to_dispatcher(rider: Rider, affiliation_code: str) -> Dispat
     return dispatcher
 
 
-def record_dispatcher_affiliation_commission(order) -> Optional[DispatcherCommission]:
+def affiliate_merchant_to_dispatcher(merchant: Merchant, affiliation_code: str) -> DispatcherProfile:
     """
-    Records an immutable commission entry for the dispatcher affiliated with the order's rider
-    upon successful order completion ('Done').
-    
-    Guarantees:
-    - Atomicity & Concurrency: uses database row-level locking (select_for_update).
-    - Idempotency: checks unique constraint on (dispatcher, order).
-    - Automatic monthly rollover: handles transitions across calendar months.
+    Affiliates a merchant with a dispatcher using the dispatcher's unique affiliation code.
+    Raises ServiceException if code is invalid or merchant is already affiliated.
     """
-    if not order or not getattr(order, "rider", None):
-        return None
-
-    rider = order.rider
-    if not rider.is_affiliated or not rider.affiliated_to:
-        return None
-
-    dispatcher = rider.affiliated_to
-
-    # Check if commission was already generated for this order
-    existing = DispatcherCommission.objects.filter(
-        dispatcher=dispatcher,
-        order=order,
-    ).first()
-    if existing:
-        logger.info(
-            f"Dispatcher commission already recorded for order {order.order_number} and dispatcher {dispatcher.id}"
+    if not affiliation_code or not affiliation_code.strip():
+        raise ServiceException(
+            status_code=400,
+            message="Affiliation code is required."
         )
-        return existing
 
-    # Determine commission amount from SystemSettings or fallback default (3000)
-    settings = SystemSettings.objects.first()
-    commission_amount = (
-        getattr(settings, "affiliation_commission_per_order", None)
-        or DEFAULT_COMMISSION_PER_ORDER
+    code_clean = affiliation_code.strip().upper()
+    try:
+        dispatcher = DispatcherProfile.objects.select_related("user").get(
+            affiliation_code__iexact=code_clean
+        )
+    except DispatcherProfile.DoesNotExist:
+        raise ServiceException(
+            status_code=400,
+            message="Invalid affiliation code. No dispatcher found with this code."
+        )
+
+    if merchant.is_affiliated and merchant.affiliated_to_id:
+        if merchant.affiliated_to_id == dispatcher.id:
+            raise ServiceException(
+                status_code=400,
+                message="You are already affiliated with this dispatcher."
+            )
+        else:
+            current_dispatcher_name = (
+                merchant.affiliated_to.user.contact_name
+                or merchant.affiliated_to.user.phone
+                if merchant.affiliated_to.user
+                else "another dispatcher"
+            )
+            raise ServiceException(
+                status_code=400,
+                message=f"You are already affiliated with {current_dispatcher_name}."
+            )
+
+    merchant.affiliated_to = dispatcher
+    merchant.is_affiliated = True
+    merchant.affiliated_at = timezone.now()
+    merchant.save(update_fields=["affiliated_to", "is_affiliated", "affiliated_at"])
+
+    logger.info(
+        f"Merchant {merchant.merchant_id} successfully affiliated to dispatcher {dispatcher.id} (code: {code_clean})"
     )
+    return dispatcher
 
-    completion_dt = order.completed_at or timezone.now()
-    order_month_str = get_current_month_str(completion_dt)
-    current_calendar_month = get_current_month_str()
 
+def _award_commission_to_dispatcher(
+    dispatcher_id,
+    order,
+    order_number: str,
+    commission_amount: Decimal,
+    order_month_str: str,
+    current_calendar_month: str,
+    rider: Optional[Rider],
+    merchant: Optional[Merchant],
+    affiliation_source: str,
+    description: str,
+) -> Optional[DispatcherCommission]:
+    """Helper executing atomic, row-locked ledger creation and monthly accumulation."""
     with transaction.atomic():
-        # Concurrency safety: lock DispatcherProfile
         profile = (
             DispatcherProfile.objects.select_for_update()
             .select_related("user")
-            .get(id=dispatcher.id)
+            .get(id=dispatcher_id)
         )
+
+        existing = DispatcherCommission.objects.filter(
+            dispatcher=profile,
+            order=order,
+        ).first()
+        if existing:
+            logger.info(
+                f"Dispatcher commission already recorded for order {order_number} and dispatcher {profile.id}"
+            )
+            return existing
 
         # Check for month rollover
         if profile.last_commission_month and profile.last_commission_month != current_calendar_month:
@@ -147,10 +180,12 @@ def record_dispatcher_affiliation_commission(order) -> Optional[DispatcherCommis
             order=order,
             defaults={
                 "rider": rider,
-                "order_number": getattr(order, "order_number", "") or str(order.id),
+                "merchant": merchant,
+                "affiliation_source": affiliation_source,
+                "order_number": order_number,
                 "amount": commission_amount,
                 "month_year": order_month_str,
-                "description": f"Affiliation commission for completed order #{order.order_number} by rider {rider.rider_id}",
+                "description": description,
             },
         )
 
@@ -190,9 +225,121 @@ def record_dispatcher_affiliation_commission(order) -> Optional[DispatcherCommis
         monthly_earning.save(update_fields=["total_orders", "total_commission", "updated_at"])
 
     logger.info(
-        f"Recorded ₦{commission_amount} commission for dispatcher {profile.id} from order {order.order_number} (rider {rider.rider_id})"
+        f"Recorded ₦{commission_amount} commission for dispatcher {profile.id} from order {order_number} (source: {affiliation_source})"
     )
     return commission
+
+
+def record_dispatcher_affiliation_commission(order) -> List[DispatcherCommission]:
+    """
+    Records immutable commission entries for dispatchers affiliated with the order's rider
+    and/or merchant upon successful order completion ('Done').
+
+    Deduplication Rule:
+    - If both the rider and merchant are affiliated to the SAME dispatcher, only ONE commission
+      is awarded to that dispatcher (disregarding the rider to prevent double-payouts).
+    - If the rider and merchant are affiliated to DIFFERENT dispatchers, each dispatcher receives
+      their respective single commission.
+
+    Guarantees:
+    - Atomicity & Concurrency: uses database row-level locking (select_for_update).
+    - Idempotency: checks unique constraint on (dispatcher, order).
+    - Automatic monthly rollover: handles transitions across calendar months.
+    """
+    if not order:
+        return []
+
+    rider = getattr(order, "rider", None)
+    if rider:
+        rider = Rider.objects.filter(id=rider.id).first()
+
+    merchant = None
+    order_user = getattr(order, "user", None)
+    if order_user:
+        merchant = Merchant.objects.filter(user=order_user).first()
+
+    rider_dispatcher = None
+    if rider and rider.is_affiliated and rider.affiliated_to_id:
+        rider_dispatcher = rider.affiliated_to
+
+    merchant_dispatcher = None
+    if merchant and merchant.is_affiliated and merchant.affiliated_to_id:
+        merchant_dispatcher = merchant.affiliated_to
+
+    if not rider_dispatcher and not merchant_dispatcher:
+        return []
+
+    settings = SystemSettings.objects.first()
+    commission_amount = (
+        getattr(settings, "affiliation_commission_per_order", None)
+        or DEFAULT_COMMISSION_PER_ORDER
+    )
+
+    completion_dt = order.completed_at or timezone.now()
+    order_month_str = get_current_month_str(completion_dt)
+    current_calendar_month = get_current_month_str()
+    order_num = getattr(order, "order_number", "") or str(order.id)
+
+    recorded_commissions = []
+
+    # Case A: Same dispatcher affiliated to both merchant and rider
+    # Award ONLY ONE commission to the dispatcher, disregarding rider duplicate
+    if (
+        rider_dispatcher
+        and merchant_dispatcher
+        and rider_dispatcher.id == merchant_dispatcher.id
+    ):
+        comm = _award_commission_to_dispatcher(
+            dispatcher_id=merchant_dispatcher.id,
+            order=order,
+            order_number=order_num,
+            commission_amount=commission_amount,
+            order_month_str=order_month_str,
+            current_calendar_month=current_calendar_month,
+            rider=rider,
+            merchant=merchant,
+            affiliation_source="merchant",
+            description=f"Affiliation commission for completed order #{order_num} from merchant {merchant.merchant_id} (rider {rider.rider_id} also affiliated, single commission awarded)",
+        )
+        if comm:
+            recorded_commissions.append(comm)
+        return recorded_commissions
+
+    # Case B: Merchant is affiliated
+    if merchant_dispatcher:
+        comm = _award_commission_to_dispatcher(
+            dispatcher_id=merchant_dispatcher.id,
+            order=order,
+            order_number=order_num,
+            commission_amount=commission_amount,
+            order_month_str=order_month_str,
+            current_calendar_month=current_calendar_month,
+            rider=None,
+            merchant=merchant,
+            affiliation_source="merchant",
+            description=f"Affiliation commission for completed order #{order_num} from merchant {merchant.merchant_id}",
+        )
+        if comm:
+            recorded_commissions.append(comm)
+
+    # Case C: Rider is affiliated (and different dispatcher than merchant)
+    if rider_dispatcher:
+        comm = _award_commission_to_dispatcher(
+            dispatcher_id=rider_dispatcher.id,
+            order=order,
+            order_number=order_num,
+            commission_amount=commission_amount,
+            order_month_str=order_month_str,
+            current_calendar_month=current_calendar_month,
+            rider=rider,
+            merchant=None,
+            affiliation_source="rider",
+            description=f"Affiliation commission for completed order #{order_num} by rider {rider.rider_id}",
+        )
+        if comm:
+            recorded_commissions.append(comm)
+
+    return recorded_commissions
 
 
 def reconcile_dispatcher_monthly_commission(

@@ -810,3 +810,174 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
   "status_code": 200
 }
 ```
+
+---
+
+## DISPATCHER AFFILIATION & MERCHANT COMMISSION ENDPOINTS
+
+### 1. Get Merchant Affiliation Status
+```http
+GET /api/auth/merchant/affiliation/
+GET /api/merchant/affiliation/
+Description: Retrieves the current dispatcher affiliation details for the authenticated merchant profile.
+Authentication: Required (Merchant)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Merchant affiliation retrieved successfully",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 2. Affiliate Merchant to Dispatcher
+```http
+POST /api/auth/merchant/affiliation/
+POST /api/merchant/affiliation/
+Description: Affiliates the authenticated merchant to a dispatcher using their unique affiliation code.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "affiliation_code": "HUB001"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Successfully affiliated with dispatcher Ikeja Hub Logistics",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 3. List Affiliated Merchants (Dispatcher View)
+```http
+GET /api/dispatch/affiliation/merchants/
+Description: Lists all merchants affiliated to the authenticated dispatcher with pagination, search, and activity counts.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - search (optional): Filter by merchant ID, business name, phone, or email
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliated merchants retrieved successfully",
+    "data": {
+      "count": 12,
+      "next": null,
+      "previous": null,
+      "results": [
+        {
+          "id": 105,
+          "merchant_id": "261603",
+          "name": "Acme Ventures",
+          "email": "acme@example.com",
+          "phone": "+2348011112222",
+          "business_name": "Acme Retail Ltd",
+          "merchant_type": "Retail",
+          "status": "active",
+          "affiliated_at": "2026-10-15T12:00:00Z",
+          "total_orders": 34,
+          "monthly_orders": 8,
+          "monthly_commission": 24000.0
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 4. Dispatcher Affiliation Summary
+```http
+GET /api/dispatch/affiliation/summary/
+Description: Retrieves aggregated performance and earnings for the dispatcher, including affiliated riders, affiliated merchants, and monthly commission totals.
+Authentication: Required (Dispatcher)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation summary retrieved successfully",
+    "data": {
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "affiliation_code": "HUB001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "monthly_commission": 45000.0,
+      "previous_month_commission": 30000.0,
+      "total_commission_earned": 75000.0,
+      "commission_per_order": 3000.0,
+      "affiliated_riders_count": 5,
+      "total_affiliated_riders": 5,
+      "active_riders_this_month": 3,
+      "affiliated_merchants_count": 8,
+      "total_affiliated_merchants": 8,
+      "active_merchants_this_month": 4,
+      "current_month": "October 2026",
+      "currency": "NGN"
+    },
+    "status_code": 200
+  }
+```
+
+### 5. Dispatcher Commission History
+```http
+GET /api/dispatch/affiliation/commissions/
+Description: Lists ledgered commission records for the authenticated dispatcher with optional source and merchant filtering.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - month (optional): Filter by month string (format: YYYY-MM)
+  - rider_id (optional): Filter by rider ID
+  - merchant_id (optional): Filter by merchant ID
+  - source (optional): Filter by affiliation source ('rider' or 'merchant')
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Commissions retrieved successfully",
+    "data": {
+      "count": 15,
+      "results": [
+        {
+          "id": "b968fc24-...",
+          "order_number": "6158045",
+          "amount": 3000.0,
+          "affiliation_source": "merchant",
+          "rider_id": null,
+          "rider_name": null,
+          "merchant_id": "261603",
+          "merchant_name": "Acme Retail Ltd",
+          "month_year": "2026-10",
+          "description": "Affiliation commission for completed order #6158045 from merchant 261603",
+          "created_at": "2026-10-15T14:30:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```

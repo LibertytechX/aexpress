@@ -155,8 +155,8 @@ class TestDispatcherAffiliationServices:
             status="Done",
             total_amount=Decimal("5000.00"),
         )
-        commission = record_dispatcher_affiliation_commission(order)
-        assert commission is None
+        commissions = record_dispatcher_affiliation_commission(order)
+        assert len(commissions) == 0
         assert DispatcherCommission.objects.count() == 0
 
     def test_record_commission_affiliated_rider_success(self):
@@ -174,8 +174,9 @@ class TestDispatcherAffiliationServices:
             total_amount=Decimal("5000.00"),
         )
 
-        commission = record_dispatcher_affiliation_commission(order)
-        assert commission is not None
+        commissions = record_dispatcher_affiliation_commission(order)
+        assert len(commissions) == 1
+        commission = commissions[0]
         assert commission.amount == Decimal("3000.00")
         assert commission.dispatcher == self.dispatcher_profile
         assert commission.rider == self.rider
@@ -211,7 +212,9 @@ class TestDispatcherAffiliationServices:
         comm1 = record_dispatcher_affiliation_commission(order)
         comm2 = record_dispatcher_affiliation_commission(order)
 
-        assert comm1.id == comm2.id
+        assert len(comm1) == 1
+        assert len(comm2) == 1
+        assert comm1[0].id == comm2[0].id
         assert DispatcherCommission.objects.count() == 1
 
         self.dispatcher_profile.refresh_from_db()

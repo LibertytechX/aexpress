@@ -847,6 +847,12 @@ export const AffiliationAPI = {
         const json = await res.json();
         return json.data || json;
     },
+    async getAffiliatedMerchants() {
+        const res = await fetchWithAuth('/dispatch/affiliation/merchants/');
+        if (!res.ok) throw new Error('Failed to fetch affiliated merchants');
+        const json = await res.json();
+        return json.data || json;
+    },
     async reconcile(month) {
         const res = await fetchWithAuth('/dispatch/affiliation/reconcile/', {
             method: 'POST',

@@ -95,6 +95,8 @@ class DispatcherCommissionSerializer(serializers.ModelSerializer):
 
     rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
     rider_name = serializers.SerializerMethodField()
+    merchant_id = serializers.CharField(source="merchant.merchant_id", read_only=True)
+    merchant_name = serializers.SerializerMethodField()
     order_id = serializers.UUIDField(source="order.id", read_only=True)
 
     class Meta:
@@ -105,6 +107,9 @@ class DispatcherCommissionSerializer(serializers.ModelSerializer):
             "order_number",
             "rider_id",
             "rider_name",
+            "merchant_id",
+            "merchant_name",
+            "affiliation_source",
             "amount",
             "month_year",
             "description",
@@ -118,7 +123,16 @@ class DispatcherCommissionSerializer(serializers.ModelSerializer):
                 or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
                 or obj.rider.user.phone
             )
-        return "Unknown"
+        return None
+
+    def get_merchant_name(self, obj):
+        if obj.merchant and obj.merchant.user:
+            return (
+                obj.merchant.user.business_name
+                or obj.merchant.user.contact_name
+                or obj.merchant.user.phone
+            )
+        return None
 
 
 class DispatcherMonthlyEarningSerializer(serializers.ModelSerializer):

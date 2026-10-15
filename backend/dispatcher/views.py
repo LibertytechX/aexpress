@@ -2075,12 +2075,23 @@ class DispatcherAffiliationSummaryView(views.APIView):
 
         affiliated_riders_qs = dispatcher.affiliated_riders.all()
         total_affiliated_riders = affiliated_riders_qs.count()
+        affiliated_merchants_qs = dispatcher.affiliated_merchants.all()
+        total_affiliated_merchants = affiliated_merchants_qs.count()
 
-        # Orders completed this month by affiliated riders
+        # Orders completed this month by affiliated entities
         month_commissions_qs = dispatcher.commissions.filter(month_year=current_month)
         orders_completed_this_month = month_commissions_qs.count()
         active_riders_this_month = (
-            month_commissions_qs.values("rider").distinct().count()
+            month_commissions_qs.filter(rider__isnull=False)
+            .values("rider")
+            .distinct()
+            .count()
+        )
+        active_merchants_this_month = (
+            month_commissions_qs.filter(merchant__isnull=False)
+            .values("merchant")
+            .distinct()
+            .count()
         )
 
         data = {
@@ -2099,7 +2110,10 @@ class DispatcherAffiliationSummaryView(views.APIView):
             "total_commission_earned": str(dispatcher.total_commission_earned),
             "total_affiliated_riders": total_affiliated_riders,
             "affiliated_riders_count": total_affiliated_riders,
+            "total_affiliated_merchants": total_affiliated_merchants,
+            "affiliated_merchants_count": total_affiliated_merchants,
             "active_riders_this_month": active_riders_this_month,
+            "active_merchants_this_month": active_merchants_this_month,
             "orders_completed_this_month": orders_completed_this_month,
             "commission_per_order": str(comm_rate),
         }
@@ -2114,7 +2128,7 @@ class DispatcherAffiliationSummaryView(views.APIView):
 class DispatcherCommissionListView(views.APIView):
     """
     List commission records for the dispatcher.
-    GET /api/dispatch/affiliation/commissions/?month=YYYY-MM&rider_id=...
+    GET /api/dispatch/affiliation/commissions/?month=YYYY-MM&rider_id=...&merchant_id=...&source=...
     """
 
     permission_classes = [permissions.IsAuthenticated, IsDispatcher]
@@ -2131,7 +2145,7 @@ class DispatcherCommissionListView(views.APIView):
 
         qs = (
             DispatcherCommission.objects.filter(dispatcher=dispatcher)
-            .select_related("rider", "rider__user", "order")
+            .select_related("rider", "rider__user", "merchant", "merchant__user", "order")
             .order_by("-created_at")
         )
 
@@ -2142,6 +2156,14 @@ class DispatcherCommissionListView(views.APIView):
         rider_id = request.query_params.get("rider_id")
         if rider_id:
             qs = qs.filter(rider__rider_id=rider_id)
+
+        merchant_id = request.query_params.get("merchant_id")
+        if merchant_id:
+            qs = qs.filter(merchant__merchant_id=merchant_id)
+
+        source = request.query_params.get("source") or request.query_params.get("affiliation_source")
+        if source:
+            qs = qs.filter(affiliation_source=source)
 
         start_date = request.query_params.get("start_date")
         if start_date:
@@ -2280,6 +2302,82 @@ class DispatcherAffiliatedRidersListView(views.APIView):
         return service_response(
             status="success",
             message="Affiliated riders retrieved successfully.",
+            data=results,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class DispatcherAffiliatedMerchantsListView(views.APIView):
+    """
+    List all merchants affiliated to the authenticated dispatcher with performance metrics.
+    GET /api/dispatch/affiliation/merchants/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .services import get_current_month_str
+
+        current_month = get_current_month_str()
+
+        merchants_qs = (
+            dispatcher.affiliated_merchants.select_related("user")
+            .prefetch_related("dispatcher_commissions")
+            .order_by("-affiliated_at", "-created_at")
+        )
+
+        results = []
+        for merchant in merchants_qs:
+            total_orders = merchant.dispatcher_commissions.filter(
+                dispatcher=dispatcher
+            ).count()
+            month_commissions = merchant.dispatcher_commissions.filter(
+                dispatcher=dispatcher, month_year=current_month
+            )
+            orders_this_month = month_commissions.count()
+            comm_this_month = (
+                month_commissions.aggregate(Sum("amount"))["amount__sum"]
+                or Decimal("0.00")
+            )
+
+            results.append(
+                {
+                    "id": str(merchant.id),
+                    "merchant_id": merchant.merchant_id,
+                    "business_name": merchant.user.business_name or "Unknown Business",
+                    "contact_name": (
+                        merchant.user.contact_name
+                        or f"{merchant.user.first_name} {merchant.user.last_name}".strip()
+                        or merchant.user.phone
+                    ),
+                    "phone": merchant.user.phone,
+                    "email": merchant.user.email or "",
+                    "activity_status": merchant.activity_status,
+                    "merchant_type": merchant.merchant_type,
+                    "is_affiliated": merchant.is_affiliated,
+                    "affiliated_at": (
+                        merchant.affiliated_at.isoformat()
+                        if merchant.affiliated_at
+                        else None
+                    ),
+                    "total_completed_orders": total_orders,
+                    "orders_this_month": orders_this_month,
+                    "commission_this_month": str(comm_this_month),
+                }
+            )
+
+        return service_response(
+            status="success",
+            message="Affiliated merchants retrieved successfully.",
             data=results,
             status_code=status.HTTP_200_OK,
         )

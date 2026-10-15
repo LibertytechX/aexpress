@@ -63,4 +63,9 @@ urlpatterns = [
         MerchantAPIKeyRetrieveView.as_view(),
         name="merchant_apikey_retrieve",
     ),
+    path(
+        "api/merchant/affiliation/",
+        __import__("authentication.views", fromlist=["MerchantAffiliationView"]).MerchantAffiliationView.as_view(),
+        name="merchant_affiliation_direct",
+    ),
 ]
