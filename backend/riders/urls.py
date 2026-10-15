@@ -27,6 +27,7 @@ from .views import (
     RiderAssignmentActionView,
     RiderDocumentListCreateView,
     RiderDocumentDetailView,
+    RiderAffiliationView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -51,6 +52,7 @@ urlpatterns = [
         name="rider-device-permissions",
     ),
     path("auth/me/", RiderMeView.as_view(), name="rider-me"),
+    path("affiliation/", RiderAffiliationView.as_view(), name="rider-affiliation"),
     path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
     path(
         "documents/<uuid:pk>/reupload/",

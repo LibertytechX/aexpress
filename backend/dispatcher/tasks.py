@@ -1528,3 +1528,37 @@ def send_merchant_notification(self, merchant_id, title, body, data=None, catego
         logger.error(f"send_merchant_notification failed for merchant {merchant_id}: {exc}")
         raise self.retry(exc=exc)
     return True
+
+
+@shared_task
+def reset_monthly_dispatcher_commissions_task():
+    """
+    Periodic task to roll over monthly commissions for all dispatchers at month boundary.
+    Runs at 00:00 on the 1st of every month.
+    """
+    from .services import reset_monthly_commissions_service
+
+    count = reset_monthly_commissions_service()
+    logger.info(
+        f"reset_monthly_dispatcher_commissions_task completed. Reset {count} dispatchers."
+    )
+    return count
+
+
+@shared_task
+def reconcile_all_dispatchers_commissions_task(month_year=None):
+    """
+    Periodic or on-demand task to reconcile commission ledgers for all dispatchers.
+    """
+    from .models import DispatcherProfile
+    from .services import reconcile_dispatcher_monthly_commission
+
+    count = 0
+    for dispatcher in DispatcherProfile.objects.all():
+        try:
+            reconcile_dispatcher_monthly_commission(dispatcher, month_year=month_year)
+            count += 1
+        except Exception as e:
+            logger.error(f"Reconciliation failed for dispatcher {dispatcher.id}: {e}")
+    return count
+

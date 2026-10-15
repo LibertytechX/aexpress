@@ -395,12 +395,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "oprtn_dashboard.tasks.refresh_dashboard_cache",
         "schedule": crontab(minute="*/30"),
     },
-    # Optional fast lane (uncomment once telemetry sync is on beat, guide §14.8):
-    # "generate-ops-alerts-fast": {
-    #     "task": "oprtn_dashboard.tasks.generate_alerts",
-    #     "schedule": crontab(minute="*/2"),
-    #     "kwargs": {"only_types": ["BIKE_AFTER_HOURS", "SPEED_VIOLATION", "GHOST_RIDE"]},
-    # },
+    # Monthly Dispatcher Affiliation Commission Rollover
+    "reset-monthly-dispatcher-commissions": {
+        "task": "dispatcher.tasks.reset_monthly_dispatcher_commissions_task",
+        "schedule": crontab(day_of_month=1, hour=0, minute=0),
+    },
 }
 
 # Production Security Settings

@@ -819,3 +819,41 @@ export const ChatsAPI = {
         return await res.json();
     },
 };
+
+// ─── AFFILIATION & COMMISSIONS ──────────────────────────────────
+export const AffiliationAPI = {
+    async getSummary() {
+        const res = await fetchWithAuth('/dispatch/affiliation/summary/');
+        if (!res.ok) throw new Error('Failed to fetch affiliation summary');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getCommissions(params = {}) {
+        const qs = new URLSearchParams(params).toString();
+        const res = await fetchWithAuth(`/dispatch/affiliation/commissions/${qs ? '?' + qs : ''}`);
+        if (!res.ok) throw new Error('Failed to fetch commissions');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getMonthlyEarnings() {
+        const res = await fetchWithAuth('/dispatch/affiliation/monthly-earnings/');
+        if (!res.ok) throw new Error('Failed to fetch monthly earnings');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getAffiliatedRiders() {
+        const res = await fetchWithAuth('/dispatch/affiliation/riders/');
+        if (!res.ok) throw new Error('Failed to fetch affiliated riders');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async reconcile(month) {
+        const res = await fetchWithAuth('/dispatch/affiliation/reconcile/', {
+            method: 'POST',
+            body: JSON.stringify(month ? { month } : {})
+        });
+        const json = await res.json();
+        if (!res.ok) throw json;
+        return json.data || json;
+    }
+};

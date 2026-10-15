@@ -60,6 +60,8 @@ class RiderMeSerializer(serializers.ModelSerializer):
     documents_status = serializers.SerializerMethodField()
     net_earnings = serializers.SerializerMethodField()
     is_verified = serializers.SerializerMethodField()
+    affiliated_to_code = serializers.SerializerMethodField()
+    affiliated_to_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -84,7 +86,25 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "documents_status",
             "net_earnings",
             "is_verified",
+            "is_affiliated",
+            "affiliated_to_code",
+            "affiliated_to_name",
+            "affiliated_at",
         ]
+
+    def get_affiliated_to_code(self, obj):
+        if obj.affiliated_to:
+            return obj.affiliated_to.affiliation_code
+        return None
+
+    def get_affiliated_to_name(self, obj):
+        if obj.affiliated_to and obj.affiliated_to.user:
+            return (
+                obj.affiliated_to.user.contact_name
+                or f"{obj.affiliated_to.user.first_name} {obj.affiliated_to.user.last_name}".strip()
+                or obj.affiliated_to.user.phone
+            )
+        return None
 
     def get_is_verified(self, obj):
         if obj.is_independent_rider and obj.is_authorized:
@@ -298,6 +318,9 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
     vehicle_color = serializers.CharField(required=True)
     vehicle_photo = serializers.URLField(required=True)
     rider_documents = RiderDocumentInputSerializer(many=True, required=True)
+    affiliation_code = serializers.CharField(
+        required=False, allow_blank=True, max_length=100
+    )
 
     def validate_phone(self, value):
         phone = re.sub(r"[\s\-()]", "", value)
@@ -352,11 +375,27 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
     def validate(self, data):
         if data.get("password") != data.get("confirm_password"):
             raise serializers.ValidationError("Passwords do not match.")
+
+        affiliation_code = data.get("affiliation_code")
+        if affiliation_code and affiliation_code.strip():
+            from dispatcher.models import DispatcherProfile
+
+            dispatcher = DispatcherProfile.objects.filter(
+                affiliation_code__iexact=affiliation_code.strip()
+            ).first()
+            if not dispatcher:
+                raise serializers.ValidationError(
+                    {"affiliation_code": "Invalid affiliation code."}
+                )
+            data["_dispatcher"] = dispatcher
+
         return data
 
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         rider_documents = validated_data.pop("rider_documents")
+        dispatcher = validated_data.pop("_dispatcher", None)
+        validated_data.pop("affiliation_code", None)
 
         with transaction.atomic():
             user = User.objects.create_user(
@@ -384,6 +423,9 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
                 vehicle_plate_number=validated_data["vehicle_plate_number"],
                 vehicle_color=validated_data["vehicle_color"],
                 vehicle_photo=validated_data["vehicle_photo"],
+                affiliated_to=dispatcher,
+                is_affiliated=bool(dispatcher),
+                affiliated_at=timezone.now() if dispatcher else None,
             )
 
             RiderDocument.objects.bulk_create(
@@ -396,6 +438,38 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
             )
 
         return {"user": user, "rider": rider}
+
+
+class RiderAffiliationSerializer(serializers.Serializer):
+    """
+    Serializer for existing riders to affiliate with a dispatcher.
+    """
+
+    affiliation_code = serializers.CharField(required=True, max_length=100)
+
+    def validate_affiliation_code(self, value):
+        from dispatcher.models import DispatcherProfile
+
+        if not value or not value.strip():
+            raise serializers.ValidationError("Affiliation code is required.")
+        dispatcher = DispatcherProfile.objects.filter(
+            affiliation_code__iexact=value.strip()
+        ).first()
+        if not dispatcher:
+            raise serializers.ValidationError(
+                "Invalid affiliation code. No dispatcher found with this code."
+            )
+        return value.strip().upper()
+
+
+class RiderAffiliationResponseSerializer(serializers.Serializer):
+    """
+    Serializer for returning rider affiliation status and details.
+    """
+
+    is_affiliated = serializers.BooleanField()
+    affiliated_at = serializers.DateTimeField(allow_null=True)
+    dispatcher = serializers.DictField(allow_null=True)
 
 
 class RiderDocumentSerializer(serializers.ModelSerializer):

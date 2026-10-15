@@ -25,6 +25,8 @@ from .models import (
     MerchantNotification,
     MerchantNotificationSettings,
     VehicleReassignment,
+    DispatcherCommission,
+    DispatcherMonthlyEarning,
 )
 
 
@@ -278,6 +280,8 @@ class RiderAdmin(ImportExportModelAdmin):
         "is_deleted",
         "completed_today",
         "is_jumia_rider",
+        "is_affiliated",
+        "affiliated_to",
         "completed_this_week",
         "completed_this_month",
         "overall_completed",
@@ -289,6 +293,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "hub__zone",
         "vehicle_type",
         "vehicle_asset__vehicle_type",
+        "is_affiliated",
         "is_jumia_rider",
         "is_active",
         "is_deleted",
@@ -551,13 +556,73 @@ class RiderAdmin(ImportExportModelAdmin):
 
 @admin.register(DispatcherProfile)
 class DispatcherProfileAdmin(admin.ModelAdmin):
-    list_display = ("user", "role", "created_at")
+    list_display = (
+        "user",
+        "role",
+        "affiliation_code",
+        "monthly_commission",
+        "previous_month_commission",
+        "total_commission_earned",
+        "affiliated_riders_count",
+        "created_at",
+    )
     search_fields = (
         "user__first_name",
         "user__last_name",
         "user__email",
         "user__phone",
+        "affiliation_code",
     )
+    readonly_fields = (
+        "monthly_commission",
+        "previous_month_commission",
+        "total_commission_earned",
+        "last_commission_month",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(DispatcherCommission)
+class DispatcherCommissionAdmin(admin.ModelAdmin):
+    list_display = (
+        "order_number",
+        "dispatcher",
+        "rider",
+        "amount",
+        "month_year",
+        "created_at",
+    )
+    list_filter = ("month_year", "created_at")
+    search_fields = (
+        "order_number",
+        "dispatcher__user__phone",
+        "dispatcher__user__contact_name",
+        "rider__rider_id",
+        "rider__user__phone",
+    )
+    readonly_fields = ("created_at",)
+
+
+@admin.register(DispatcherMonthlyEarning)
+class DispatcherMonthlyEarningAdmin(admin.ModelAdmin):
+    list_display = (
+        "dispatcher",
+        "month_year",
+        "total_orders",
+        "total_commission",
+        "status",
+        "paid_at",
+        "created_at",
+    )
+    list_filter = ("month_year", "status")
+    search_fields = (
+        "dispatcher__user__phone",
+        "dispatcher__user__contact_name",
+        "month_year",
+    )
+    readonly_fields = ("created_at", "updated_at")
+
 
 
 class MerchantResource(resources.ModelResource):

@@ -3,9 +3,17 @@ import logging
 import base64
 import json
 from django.conf import settings
+import string
+import random
 
 
 logger = logging.getLogger(__name__)
+
+
+def generate_random_code(length=6) -> str:
+    """Generate a random alphanumeric code of given length."""
+    characters = string.ascii_uppercase + string.digits
+    return "".join(random.choice(characters) for _ in range(length))
 
 
 def emit_activity(event_type, order_id, text, color="gold", metadata=None):
@@ -118,10 +126,12 @@ class MailgunEmailService:
             logger.info(f"Onboarding email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send onboarding email to {email} via Mailgun: {str(e)}")
+            logger.error(
+                f"Failed to send onboarding email to {email} via Mailgun: {str(e)}"
+            )
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
-            
+
             # Fallback to MailNow
             logger.info(f"Attempting fallback to MailNow for {email}")
             return MailNowService.send_email(
@@ -129,7 +139,7 @@ class MailgunEmailService:
                 to_email=email,
                 subject=subject,
                 text=None,
-                html=html_body
+                html=html_body,
             )
 
     @staticmethod
@@ -161,17 +171,23 @@ class MailgunEmailService:
             logger.info(f"CSV export email sent successfully to {email}")
             return True
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to send CSV export email to {email} via Mailgun: {str(e)}")
+            logger.error(
+                f"Failed to send CSV export email to {email} via Mailgun: {str(e)}"
+            )
             if hasattr(e, "response") and e.response is not None:
                 logger.error(f"Mailgun response: {e.response.text}")
-            
+
             # Fallback to MailNow
             logger.info(f"Attempting fallback to MailNow for {email}")
             attachments = [
                 {
                     "filename": filename,
-                    "content": base64.b64encode(csv_content.encode() if isinstance(csv_content, str) else csv_content).decode('utf-8'),
-                    "content_type": "text/csv"
+                    "content": base64.b64encode(
+                        csv_content.encode()
+                        if isinstance(csv_content, str)
+                        else csv_content
+                    ).decode("utf-8"),
+                    "content_type": "text/csv",
                 }
             ]
             return MailNowService.send_email(
@@ -179,7 +195,7 @@ class MailgunEmailService:
                 to_email=email,
                 subject=subject,
                 text=body,
-                attachments=attachments
+                attachments=attachments,
             )
 
 
