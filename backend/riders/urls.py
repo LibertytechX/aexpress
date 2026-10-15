@@ -51,8 +51,12 @@ urlpatterns = [
         RiderUpdatePermissionsView.as_view(),
         name="rider-device-permissions",
     ),
-    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path("affiliation/", RiderAffiliationView.as_view(), name="rider-affiliation"),
+    path(
+        "affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="rider-affiliation-verify",
+    ),
     path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
     path(
         "documents/<uuid:pk>/reupload/",

@@ -313,3 +313,33 @@ class MerchantNotificationSettingsSerializer(serializers.ModelSerializer):
             "email_notification",
             "sms_notification",
         ]
+
+
+class VerifyAffiliationCodeSerializer(serializers.Serializer):
+    """Serializer for verifying an affiliation code."""
+
+    affiliation_code = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=100,
+        help_text="The affiliation code to verify (e.g. HUB001)",
+    )
+    code = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=100,
+        help_text="Alias for affiliation_code",
+    )
+
+    def validate(self, attrs):
+        raw_code = attrs.get("affiliation_code") or attrs.get("code")
+        if not raw_code or not str(raw_code).strip():
+            raise ServiceException(
+                status_code=400,
+                message="Affiliation code is required.",
+            )
+        attrs["clean_code"] = str(raw_code).strip().upper()
+        return attrs
+
