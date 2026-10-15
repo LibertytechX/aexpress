@@ -858,6 +858,10 @@ class DispatcherProfile(models.Model):
     def affiliated_riders_count(self) -> int:
         return self.affiliated_riders.count()
 
+    @property
+    def affiliated_merchants_count(self) -> int:
+        return self.affiliated_merchants.count()
+
 
 class Merchant(models.Model):
     ACTIVITY_STATUS_CHOICES = [
@@ -878,6 +882,15 @@ class Merchant(models.Model):
         on_delete=models.CASCADE,
         related_name="merchant_profile",
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_merchants",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
     can_group_orders = models.BooleanField(default=False)
     zone = models.ForeignKey(
         Zone,
@@ -1439,7 +1452,25 @@ class DispatcherCommission(models.Model):
     rider = models.ForeignKey(
         Rider,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         related_name="dispatcher_commissions",
+    )
+    merchant = models.ForeignKey(
+        "dispatcher.Merchant",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dispatcher_commissions",
+    )
+    affiliation_source = models.CharField(
+        max_length=20,
+        choices=[
+            ("rider", "Rider"),
+            ("merchant", "Merchant"),
+            ("both", "Both / Deduplicated"),
+        ],
+        default="rider",
     )
     order = models.ForeignKey(
         "orders.Order",

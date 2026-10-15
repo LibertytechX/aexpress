@@ -1,5 +1,37 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-10-15] — Dispatcher Merchant & Rider Affiliation and Commission Deduplication
+
+### Backend
+#### Added
+- **Merchant Affiliation Architecture (`dispatcher/models.py`, `dispatcher/services.py`)**:
+  - Extended Hub Captain and Zone Lead dispatcher affiliation to include merchants: added `affiliated_to`, `is_affiliated`, and `affiliated_at` to `Merchant`.
+  - Added `affiliated_merchants_count` property to `DispatcherProfile`.
+  - Added `merchant` foreign key and `affiliation_source` (`"rider"`, `"merchant"`, `"both"`) to `DispatcherCommission`.
+  - Implemented `affiliate_merchant_to_dispatcher(merchant, affiliation_code)` with validation, case-insensitivity, and duplicate checks.
+- **Order Completion Commission Deduplication (`dispatcher/services.py`, `orders/tasks.py`)**:
+  - Implemented same-dispatcher deduplication: when an order is completed where both the rider and merchant are affiliated to the same dispatcher, exactly ONE ₦3,000 commission is awarded to that dispatcher, disregarding duplicate rider payouts.
+  - When the rider and merchant are affiliated to different dispatchers, each dispatcher receives their respective ₦3,000 commission.
+  - Enforced atomic concurrency controls via `select_for_update` and month rollover tracking.
+- **Merchant Onboarding & Affiliation APIs (`authentication/views.py`, `authentication/serializers.py`)**:
+  - Added optional `affiliation_code` to `SignupSerializer` for automatic dispatcher linkage during merchant onboarding.
+  - Implemented `MerchantAffiliationView` (`GET`, `POST /api/auth/merchant/affiliation/` & `/api/merchant/affiliation/`) for viewing affiliation status and linking existing merchant accounts to a dispatcher.
+- **Dispatcher Fleet & Affiliation Management APIs (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
+  - Implemented `DispatcherAffiliatedMerchantsListView` (`GET /api/dispatch/affiliation/merchants/`) with search and pagination.
+  - Updated `DispatcherAffiliationSummaryView` to include `total_affiliated_merchants`, `affiliated_merchants_count`, and `active_merchants_this_month`.
+  - Updated `DispatcherCommissionListView` to support filtering by `merchant_id` and `source` (`rider` vs `merchant`).
+  - Added unit test suite `test_merchant_affiliation_services.py` (10 tests) and integration suite `test_merchant_affiliation_api.py` (7 tests).
+
+### Frontend (Dispatcher Portal)
+#### Added & Improved
+- **Dispatcher Affiliation & Merchant Fleet Hub (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Added "Affiliated Merchants" stat card to `TeamsScreen` showing live count of onboarded merchants.
+  - Updated hero banner copy and share actions to emphasize onboarding both riders and merchants.
+  - Added "Affiliated Merchants" management tab with real-time merchant table displaying Merchant ID, Business Name, Contact, Status, Merchant Type, Total Orders, and Monthly Commission.
+  - Added `AffiliationAPI.getAffiliatedMerchants()` in `src/api.js`.
+
+---
+
 # [2026-10-15] — Rider Approval Review Slideshow & Rejection Notes
 
 ### Frontend (Dispatcher Portal)

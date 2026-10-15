@@ -35,6 +35,9 @@ class SignupSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(
         write_only=True, style={"input_type": "password"}
     )
+    affiliation_code = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
 
     class Meta:
         model = User
@@ -49,6 +52,7 @@ class SignupSerializer(serializers.ModelSerializer):
             "usertype",
             "registration_source",
             "referral_code",
+            "affiliation_code",
         ]
         extra_kwargs = {
             "usertype": {
@@ -87,8 +91,9 @@ class SignupSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         """Create a new user with hashed password."""
-        # Remove confirm_password from validated data
+        # Remove confirm_password and affiliation_code from validated data
         validated_data.pop("confirm_password", None)
+        affiliation_code = validated_data.pop("affiliation_code", None)
 
         # Get usertype or default to Merchant (or whatever default behavior is desired)
         # If usertype is passed, it will be in validated_data
@@ -105,6 +110,17 @@ class SignupSerializer(serializers.ModelSerializer):
             registration_source=validated_data.get("registration_source"),
             referral_code=validated_data.get("referral_code"),
         )
+
+        if affiliation_code and affiliation_code.strip() and user.usertype == "Merchant":
+            from dispatcher.models import Merchant
+            from dispatcher.services import affiliate_merchant_to_dispatcher
+            merchant = getattr(user, "merchant_profile", None) or Merchant.objects.filter(user=user).first()
+            if merchant:
+                try:
+                    affiliate_merchant_to_dispatcher(merchant, affiliation_code)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Could not affiliate merchant on signup: {e}")
 
         return user
 

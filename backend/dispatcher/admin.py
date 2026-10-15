@@ -589,17 +589,22 @@ class DispatcherCommissionAdmin(admin.ModelAdmin):
         "order_number",
         "dispatcher",
         "rider",
+        "merchant",
+        "affiliation_source",
         "amount",
         "month_year",
         "created_at",
     )
-    list_filter = ("month_year", "created_at")
+    list_filter = ("affiliation_source", "month_year", "created_at")
     search_fields = (
         "order_number",
         "dispatcher__user__phone",
         "dispatcher__user__contact_name",
         "rider__rider_id",
         "rider__user__phone",
+        "merchant__merchant_id",
+        "merchant__user__phone",
+        "merchant__user__business_name",
     )
     readonly_fields = ("created_at",)
 
@@ -667,6 +672,8 @@ class MerchantAdmin(ImportExportModelAdmin):
         "get_email",
         "get_phone",
         "merchant_id",
+        "is_affiliated",
+        "affiliated_to",
         "activity_status",
         "acquisition_source",
         "merchant_type",
@@ -675,7 +682,13 @@ class MerchantAdmin(ImportExportModelAdmin):
         "get_last_login",
         "can_group_orders",
     )
-    list_filter = ("activity_status", "zone", "acquisition_source", "is_partner")
+    list_filter = (
+        "is_affiliated",
+        "activity_status",
+        "zone",
+        "acquisition_source",
+        "is_partner",
+    )
     search_fields = (
         "user__first_name",
         "user__last_name",
@@ -683,6 +696,7 @@ class MerchantAdmin(ImportExportModelAdmin):
         "user__phone",
         "merchant_id",
         "user__business_name",
+        "affiliated_to__affiliation_code",
     )
 
     @admin.display(description="Name", ordering="user__first_name")
