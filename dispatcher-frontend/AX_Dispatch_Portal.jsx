@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI } from "./src/api.js";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI, AffiliationAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -8659,91 +8659,494 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
 // ─── TEAMS SCREEN ────────────────────────────────────────────────
 function TeamsScreen({ dispatchers, onDispatcherCreated }) {
+  const [activeTab, setActiveTab] = useState("members"); // "members" | "riders" | "earnings"
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState("");
+  const [copiedCode, setCopiedCode] = useState(null);
+  const [affiliationSummary, setAffiliationSummary] = useState(null);
+  const [affiliatedRiders, setAffiliatedRiders] = useState([]);
+  const [monthlyEarnings, setMonthlyEarnings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
 
-  const filtered = dispatchers.filter(d => {
+  const loadAffiliationData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sum, riders, earnings] = await Promise.all([
+        AffiliationAPI.getSummary().catch(() => null),
+        AffiliationAPI.getAffiliatedRiders().catch(() => []),
+        AffiliationAPI.getMonthlyEarnings().catch(() => []),
+      ]);
+      setAffiliationSummary(sum);
+      setAffiliatedRiders(riders);
+      setMonthlyEarnings(earnings);
+    } catch (e) {
+      console.error("Failed to load affiliation data:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAffiliationData();
+  }, [loadAffiliationData]);
+
+  const copyToClipboard = (code) => {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setToast(`Affiliation Code "${code}" copied to clipboard!`);
+    setTimeout(() => {
+      setCopiedCode(null);
+      setToast("");
+    }, 3000);
+  };
+
+  const handleReconcile = async () => {
+    setReconciling(true);
+    try {
+      const res = await AffiliationAPI.reconcile();
+      setToast(`Reconciliation complete! Verified ${res.total_orders || 0} orders (₦${parseFloat(res.total_commission || 0).toLocaleString()})`);
+      await loadAffiliationData();
+    } catch (err) {
+      setToast(err.message || "Reconciliation failed.");
+    } finally {
+      setReconciling(false);
+      setTimeout(() => setToast(""), 4000);
+    }
+  };
+
+  const roleBadgeStyle = (role) => {
+    const r = (role || "").toLowerCase();
+    if (r.includes("hub") || r.includes("captain")) {
+      return { background: S.purpleBg, color: S.purple, border: `1px solid ${S.purple}30` };
+    }
+    if (r.includes("zone") || r.includes("lead")) {
+      return { background: S.blueBg, color: S.blue, border: `1px solid ${S.blue}30` };
+    }
+    return { background: S.goldPale, color: S.gold, border: `1px solid ${S.gold}30` };
+  };
+
+  const filteredDispatchers = (dispatchers || []).filter(d => {
+    if (!search) return true;
     const q = search.toLowerCase();
-    return (
-      (d.name || "").toLowerCase().includes(q) ||
-      (d.phone || "").includes(q) ||
-      (d.email || "").toLowerCase().includes(q)
-    );
+    const name = (d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`).toLowerCase();
+    const phone = (d.phone || "").toLowerCase();
+    const code = (d.affiliation_code || "").toLowerCase();
+    const role = (d.role || "").toLowerCase();
+    return name.includes(q) || phone.includes(q) || code.includes(q) || role.includes(q);
+  });
+
+  const filteredRiders = (affiliatedRiders || []).filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const name = (r.name || "").toLowerCase();
+    const id = (r.rider_id || "").toLowerCase();
+    const phone = (r.phone || "").toLowerCase();
+    return name.includes(q) || id.includes(q) || phone.includes(q);
   });
 
   return (
-    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%" }}>
-      {/* Header bar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: S.navy }}>Dispatch Team</div>
-          <div style={{ fontSize: 13, color: S.textMuted, marginTop: 2 }}>{dispatchers.length} dispatcher{dispatchers.length !== 1 ? "s" : ""} • manage access and roles</div>
-        </div>
-        <button onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>
-          {I.plus} Add Dispatcher
-        </button>
+    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* ─── STAT CARDS ─── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+        <StatCard
+          label="Total Dispatchers"
+          value={dispatchers.length}
+          subtext="Hub Captains & Leads"
+        />
+        <StatCard
+          label="Affiliated Riders"
+          value={affiliationSummary?.total_affiliated_riders || affiliatedRiders.length || 0}
+          subtext="Active fleet linked to hubs"
+          color={S.blue}
+        />
+        <StatCard
+          label="Monthly Commission"
+          value={`₦${parseFloat(affiliationSummary?.monthly_commission || 0).toLocaleString()}`}
+          subtext={`Current month (${affiliationSummary?.current_month || "Active"})`}
+          color={S.green}
+        />
+        <StatCard
+          label="Lifetime Commission"
+          value={`₦${parseFloat(affiliationSummary?.total_commission_earned || 0).toLocaleString()}`}
+          subtext={`Rate: ₦${parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} / completed order`}
+          color={S.gold}
+        />
       </div>
 
-      {/* Search */}
-      <div style={{ position: "relative", marginBottom: 18, maxWidth: 360 }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted }}>{I.search}</span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, phone or email…" style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: `1px solid ${S.border}`, fontSize: 13, fontFamily: "inherit", color: S.text, background: "#fff", outline: "none" }} />
-      </div>
-
-      {/* Table */}
-      <div style={{ background: "#fff", borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-        {/* Table header */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 2fr 1fr 1fr", padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: S.bg }}>
-          {["Name", "Phone", "Email", "Role", "Status"].map(h => (
-            <div key={h} style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>{h}</div>
-          ))}
-        </div>
-
-        {filtered.length === 0 ? (
-          <div style={{ padding: "48px 24px", textAlign: "center" }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>👥</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: S.navy, marginBottom: 6 }}>
-              {search ? "No dispatchers match your search" : "No dispatchers yet"}
-            </div>
-            <div style={{ fontSize: 13, color: S.textMuted }}>
-              {search ? "Try a different query" : "Click 'Add Dispatcher' to onboard your first team member."}
-            </div>
-          </div>
-        ) : filtered.map((d, idx) => (
-          <div key={d.id || idx} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 2fr 1fr 1fr", padding: "14px 20px", borderBottom: idx < filtered.length - 1 ? `1px solid ${S.borderLight}` : "none", alignItems: "center", transition: "background 0.15s", cursor: "default" }}
-            onMouseEnter={e => e.currentTarget.style.background = S.bg}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            {/* Name */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg,${S.navy},${S.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: S.gold, flexShrink: 0 }}>
-                {(d.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{d.name || "—"}</div>
-                <div style={{ fontSize: 11, color: S.textMuted }}>Joined {d.joined || "—"}</div>
-              </div>
-            </div>
-            {/* Phone */}
-            <div style={{ fontSize: 13, color: S.text, display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ color: S.textMuted, flexShrink: 0 }}>{I.phone}</span>
-              {d.phone || "—"}
-            </div>
-            {/* Email */}
-            <div style={{ fontSize: 13, color: S.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.email || "—"}</div>
-            {/* Role */}
-            <div>
-              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: S.purpleBg, color: S.purple }}>{d.role || "Dispatcher"}</span>
-            </div>
-            {/* Status */}
-            <div>
-              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: d.is_active !== false ? S.greenBg : S.redBg, color: d.is_active !== false ? S.green : S.red }}>
-                {d.is_active !== false ? "Active" : "Inactive"}
+      {/* ─── AFFILIATION CODE PROMO BANNER ─── */}
+      {affiliationSummary?.affiliation_code && (
+        <div style={{
+          background: `linear-gradient(135deg, ${S.navy} 0%, #17233c 100%)`,
+          borderRadius: 16, padding: "20px 24px", color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ color: S.gold }}>{I.idCard}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px" }}>
+                Hub Captain Affiliation Program
               </span>
             </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              Share your affiliation code with riders to onboard or link them to your hub.
+            </div>
+            <div style={{ fontSize: 12, color: S.textMuted }}>
+              Earn ₦{parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} commission for each completed order by your affiliated riders.
+            </div>
           </div>
-        ))}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", padding: "10px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)" }}>
+            <div>
+              <div style={{ fontSize: 10, color: S.textMuted, textTransform: "uppercase", fontWeight: 700 }}>Your Affiliation Code</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: S.gold, fontFamily: "'Space Mono', monospace", letterSpacing: "2px" }}>
+                {affiliationSummary.affiliation_code}
+              </div>
+            </div>
+            <button
+              onClick={() => copyToClipboard(affiliationSummary.affiliation_code)}
+              style={{
+                background: copiedCode === affiliationSummary.affiliation_code ? S.green : S.gold,
+                color: S.navy, border: "none", padding: "8px 14px", borderRadius: 8,
+                fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                transition: "all 0.2s"
+              }}
+            >
+              {copiedCode === affiliationSummary.affiliation_code ? (
+                <>{I.check} Copied</>
+              ) : (
+                <>{I.copy} Copy Code</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── TABS & CONTROLS ─── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", gap: 6, background: S.borderLight, padding: 4, borderRadius: 10 }}>
+          <button
+            onClick={() => setActiveTab("members")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "members" ? S.card : "transparent",
+              color: activeTab === "members" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "members" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.teams} Team Dispatchers ({dispatchers.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("riders")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "riders" ? S.card : "transparent",
+              color: activeTab === "riders" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "riders" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.riders} Affiliated Fleet ({affiliatedRiders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("earnings")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "earnings" ? S.card : "transparent",
+              color: activeTab === "earnings" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "earnings" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.revenue} Monthly Ledgers ({monthlyEarnings.length})
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            background: S.card, borderRadius: 10, border: `1px solid ${S.border}`,
+            display: "flex", alignItems: "center", gap: 8, padding: "0 12px", width: 240
+          }}>
+            <span style={{ opacity: 0.4 }}>{I.search}</span>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search..."
+              style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, height: 36, outline: "none" }}
+            />
+          </div>
+
+          <button
+            onClick={handleReconcile}
+            disabled={reconciling}
+            style={{
+              padding: "8px 14px", borderRadius: 10, border: `1px solid ${S.border}`,
+              background: S.card, color: S.navy, fontSize: 12, fontWeight: 700,
+              cursor: reconciling ? "not-allowed" : "pointer", opacity: reconciling ? 0.6 : 1,
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🔄 {reconciling ? "Reconciling..." : "Reconcile Commissions"}
+          </button>
+
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 16px",
+              borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12,
+              background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy,
+              boxShadow: `0 4px 12px ${S.gold}40`
+            }}
+          >
+            {I.plus} Add Dispatcher
+          </button>
+        </div>
       </div>
+
+      {/* ─── TAB 1: TEAM MEMBERS ─── */}
+      {activeTab === "members" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Dispatcher / Captain</span>
+            <span>Role</span>
+            <span>Phone</span>
+            <span>Affiliation Code</span>
+            <span style={{ textAlign: "right" }}>Riders</span>
+            <span style={{ textAlign: "right" }}>This Month</span>
+            <span style={{ textAlign: "right" }}>Lifetime</span>
+          </div>
+
+          <div>
+            {filteredDispatchers.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                No dispatchers found matching "{search}".
+              </div>
+            ) : (
+              filteredDispatchers.map((d, idx) => {
+                const name = d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`.trim() || d.phone || "Dispatcher";
+                const role = d.role_display || d.role || "Dispatcher";
+                const code = d.affiliation_code || "—";
+                return (
+                  <div
+                    key={d.id || idx}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: S.navy, color: "#fff", display: "flex",
+                        alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13
+                      }}>
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: S.navy }}>{name}</div>
+                        <div style={{ fontSize: 11, color: S.textMuted }}>{d.email || d.username || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        ...roleBadgeStyle(role)
+                      }}>
+                        {role}
+                      </span>
+                    </div>
+
+                    <div style={{ color: S.textDim, fontSize: 12 }}>
+                      {d.phone || "—"}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        fontFamily: "'Space Mono', monospace", fontWeight: 700,
+                        fontSize: 12, color: S.navy, background: S.borderLight,
+                        padding: "3px 8px", borderRadius: 6
+                      }}>
+                        {code}
+                      </span>
+                      {code !== "—" && (
+                        <button
+                          onClick={() => copyToClipboard(code)}
+                          title="Copy Code"
+                          style={{
+                            background: "transparent", border: "none", cursor: "pointer",
+                            color: copiedCode === code ? S.green : S.textMuted, padding: 4
+                          }}
+                        >
+                          {copiedCode === code ? I.check : I.copy}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {d.affiliated_riders_count || 0}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.monthly_commission || 0).toLocaleString()}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.gold, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.total_commission_earned || 0).toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 2: AFFILIATED RIDERS ─── */}
+      {activeTab === "riders" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Rider ID</span>
+            <span>Rider Name</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredRiders.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated riders..." : "No affiliated riders found for your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredRiders.map(r => (
+                <div
+                  key={r.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {r.rider_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{r.name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Affiliated: {r.affiliated_at ? new Date(r.affiliated_at).toLocaleDateString() : "Active"}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{r.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: r.status === "online" ? S.greenBg : S.borderLight,
+                      color: r.status === "online" ? S.green : S.textMuted
+                    }}>
+                      {r.status || "offline"}
+                    </span>
+                  </div>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {r.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {r.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(r.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 3: MONTHLY LEDGERS ─── */}
+      {activeTab === "earnings" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Month</span>
+            <span style={{ textAlign: "right" }}>Total Orders</span>
+            <span style={{ textAlign: "right" }}>Commission (₦)</span>
+            <span>Settlement Status</span>
+            <span>Last Updated</span>
+          </div>
+
+          <div>
+            {monthlyEarnings.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading monthly records..." : "No monthly commission ledger entries yet."}
+              </div>
+            ) : (
+              monthlyEarnings.map(m => {
+                const isPaid = m.status === "paid";
+                return (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 800, color: S.navy }}>
+                      {m.month_year}
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {m.total_orders} orders
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(m.total_commission || 0).toLocaleString()}
+                    </span>
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: isPaid ? S.greenBg : S.goldPale,
+                        color: isPaid ? S.green : S.gold
+                      }}>
+                        {m.status_display || m.status}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 12, color: S.textMuted }}>
+                      {m.updated_at ? new Date(m.updated_at).toLocaleString() : "—"}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
       {showAdd && (
         <AddDispatcherModal
@@ -8751,7 +9154,8 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
           onCreated={(d) => {
             onDispatcherCreated(d);
             setShowAdd(false);
-            setToast(`Dispatcher ${d.name || ''} created successfully`);
+            loadAffiliationData();
+            setToast(`Dispatcher ${d.name || d.first_name || ''} created successfully`);
             setTimeout(() => setToast(""), 3500);
           }}
         />
@@ -8918,3 +9322,4 @@ function PaymentDetailsModal({ order, onClose }) {
     </div>
   );
 }
+

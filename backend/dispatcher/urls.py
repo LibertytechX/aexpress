@@ -17,6 +17,11 @@ from .views import (
     VehicleAssetViewSet,
     VerticalViewSet,
     VehicleRevenueReportView,
+    DispatcherAffiliationSummaryView,
+    DispatcherCommissionListView,
+    DispatcherMonthlyEarningsListView,
+    DispatcherAffiliatedRidersListView,
+    DispatcherCommissionReconcileView,
 )
 
 router = DefaultRouter()
@@ -42,5 +47,30 @@ urlpatterns = [
     path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
     path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
     path("revenue/", VehicleRevenueReportView.as_view(), name="vehicle-revenue-report"),
+    path(
+        "affiliation/summary/",
+        DispatcherAffiliationSummaryView.as_view(),
+        name="dispatcher-affiliation-summary",
+    ),
+    path(
+        "affiliation/commissions/",
+        DispatcherCommissionListView.as_view(),
+        name="dispatcher-affiliation-commissions",
+    ),
+    path(
+        "affiliation/monthly-earnings/",
+        DispatcherMonthlyEarningsListView.as_view(),
+        name="dispatcher-affiliation-monthly-earnings",
+    ),
+    path(
+        "affiliation/riders/",
+        DispatcherAffiliatedRidersListView.as_view(),
+        name="dispatcher-affiliation-riders",
+    ),
+    path(
+        "affiliation/reconcile/",
+        DispatcherCommissionReconcileView.as_view(),
+        name="dispatcher-affiliation-reconcile",
+    ),
     path("", include(router.urls)),
 ]

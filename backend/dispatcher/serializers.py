@@ -3,6 +3,8 @@ from rest_framework import serializers
 from .models import (
     Rider,
     DispatcherProfile,
+    DispatcherCommission,
+    DispatcherMonthlyEarning,
     ActivityFeed,
     Zone,
     ZoneTarget,
@@ -56,10 +58,26 @@ class DispatcherListSerializer(serializers.ModelSerializer):
         source="created_at", format="%Y-%m-%d", read_only=True
     )
     is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+    affiliated_riders_count = serializers.IntegerField(
+        source="affiliated_riders_count", read_only=True
+    )
 
     class Meta:
         model = DispatcherProfile
-        fields = ["id", "name", "phone", "email", "role", "joined", "is_active"]
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "email",
+            "role",
+            "joined",
+            "is_active",
+            "affiliation_code",
+            "monthly_commission",
+            "previous_month_commission",
+            "total_commission_earned",
+            "affiliated_riders_count",
+        ]
 
     def get_name(self, obj):
         return (
@@ -70,6 +88,125 @@ class DispatcherListSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return obj.get_role_display()
+
+
+class DispatcherCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for individual dispatcher commission entries."""
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+    order_id = serializers.UUIDField(source="order.id", read_only=True)
+
+    class Meta:
+        model = DispatcherCommission
+        fields = [
+            "id",
+            "order_id",
+            "order_number",
+            "rider_id",
+            "rider_name",
+            "amount",
+            "month_year",
+            "description",
+            "created_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+                or obj.rider.user.phone
+            )
+        return "Unknown"
+
+
+class DispatcherMonthlyEarningSerializer(serializers.ModelSerializer):
+    """Serializer for monthly earning summaries and salary tracking."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = DispatcherMonthlyEarning
+        fields = [
+            "id",
+            "month_year",
+            "total_orders",
+            "total_commission",
+            "status",
+            "status_display",
+            "paid_at",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class DispatcherAffiliatedRiderSerializer(serializers.ModelSerializer):
+    """Serializer for riders affiliated to a dispatcher."""
+
+    name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    total_completed_orders = serializers.IntegerField(read_only=True)
+    orders_this_month = serializers.IntegerField(read_only=True)
+    commission_this_month = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = Rider
+        fields = [
+            "id",
+            "rider_id",
+            "name",
+            "phone",
+            "email",
+            "status",
+            "working_type",
+            "is_authorized",
+            "affiliated_at",
+            "total_completed_orders",
+            "orders_this_month",
+            "commission_this_month",
+        ]
+
+    def get_name(self, obj):
+        if obj.user:
+            return (
+                obj.user.contact_name
+                or f"{obj.user.first_name} {obj.user.last_name}".strip()
+                or obj.user.phone
+            )
+        return "Unknown"
+
+
+class DispatcherAffiliationSummarySerializer(serializers.Serializer):
+    dispatcher_id = serializers.UUIDField()
+    dispatcher_name = serializers.CharField()
+    role = serializers.CharField()
+    affiliation_code = serializers.CharField()
+    current_month = serializers.CharField()
+    monthly_commission = serializers.DecimalField(max_digits=12, decimal_places=2)
+    previous_month_commission = serializers.DecimalField(
+        max_digits=12, decimal_places=2
+    )
+    total_commission_earned = serializers.DecimalField(
+        max_digits=12, decimal_places=2
+    )
+    total_affiliated_riders = serializers.IntegerField()
+    active_riders_this_month = serializers.IntegerField()
+    orders_completed_this_month = serializers.IntegerField()
+    commission_per_order = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class CommissionReconcileRequestSerializer(serializers.Serializer):
+    month = serializers.CharField(
+        required=False,
+        max_length=7,
+        help_text="Format: YYYY-MM (e.g. 2026-10). If omitted, defaults to current active month.",
+    )
+
 
 
 class DispatcherCreateSerializer(serializers.Serializer):

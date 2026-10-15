@@ -13,6 +13,7 @@ from .authentication import ServiceAPIKeyAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.pagination import PageNumberPagination
 from .models import (
+    DispatcherProfile,
     Rider,
     ActivityFeed,
     Zone,
@@ -23,6 +24,9 @@ from .models import (
     RiderDutyLog,
     Merchant,
     MerchantAPIKey,
+    SystemSettings,
+    DispatcherCommission,
+    DispatcherMonthlyEarning,
 )
 from .serializers import (
     RiderSerializer,
@@ -2029,3 +2033,294 @@ class VerticalViewSet(viewsets.ModelViewSet):
         *api_settings.DEFAULT_AUTHENTICATION_CLASSES,
     ]
     permission_classes = [permissions.IsAuthenticated]
+
+
+class DispatcherAffiliationSummaryView(views.APIView):
+    """
+    Get affiliation summary for the authenticated dispatcher.
+    GET /api/dispatch/affiliation/summary/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .services import get_current_month_str, get_previous_month_str
+
+        current_month = get_current_month_str()
+        prev_month = get_previous_month_str()
+
+        # Check for month rollover if needed
+        if (
+            dispatcher.last_commission_month
+            and dispatcher.last_commission_month != current_month
+        ):
+            from .services import reset_monthly_commissions_service
+
+            reset_monthly_commissions_service()
+            dispatcher.refresh_from_db()
+
+        settings = SystemSettings.objects.first()
+        comm_rate = getattr(
+            settings, "affiliation_commission_per_order", Decimal("3000.00")
+        )
+
+        affiliated_riders_qs = dispatcher.affiliated_riders.all()
+        total_affiliated_riders = affiliated_riders_qs.count()
+
+        # Orders completed this month by affiliated riders
+        month_commissions_qs = dispatcher.commissions.filter(month_year=current_month)
+        orders_completed_this_month = month_commissions_qs.count()
+        active_riders_this_month = (
+            month_commissions_qs.values("rider").distinct().count()
+        )
+
+        data = {
+            "dispatcher_id": str(dispatcher.id),
+            "dispatcher_name": (
+                dispatcher.user.contact_name
+                or f"{dispatcher.user.first_name} {dispatcher.user.last_name}".strip()
+                or dispatcher.user.phone
+            ),
+            "role": dispatcher.get_role_display(),
+            "affiliation_code": dispatcher.affiliation_code,
+            "current_month": current_month,
+            "previous_month": prev_month,
+            "monthly_commission": str(dispatcher.monthly_commission),
+            "previous_month_commission": str(dispatcher.previous_month_commission),
+            "total_commission_earned": str(dispatcher.total_commission_earned),
+            "total_affiliated_riders": total_affiliated_riders,
+            "affiliated_riders_count": total_affiliated_riders,
+            "active_riders_this_month": active_riders_this_month,
+            "orders_completed_this_month": orders_completed_this_month,
+            "commission_per_order": str(comm_rate),
+        }
+        return service_response(
+            status="success",
+            message="Dispatcher affiliation summary retrieved successfully.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class DispatcherCommissionListView(views.APIView):
+    """
+    List commission records for the dispatcher.
+    GET /api/dispatch/affiliation/commissions/?month=YYYY-MM&rider_id=...
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = (
+            DispatcherCommission.objects.filter(dispatcher=dispatcher)
+            .select_related("rider", "rider__user", "order")
+            .order_by("-created_at")
+        )
+
+        month = request.query_params.get("month")
+        if month:
+            qs = qs.filter(month_year=month)
+
+        rider_id = request.query_params.get("rider_id")
+        if rider_id:
+            qs = qs.filter(rider__rider_id=rider_id)
+
+        start_date = request.query_params.get("start_date")
+        if start_date:
+            qs = qs.filter(created_at__date__gte=start_date)
+
+        end_date = request.query_params.get("end_date")
+        if end_date:
+            qs = qs.filter(created_at__date__lte=end_date)
+
+        total_amount = qs.aggregate(Sum("amount"))["amount__sum"] or Decimal("0.00")
+        total_count = qs.count()
+
+        paginator = PageNumberPagination()
+        paginator.page_size = 20
+        page = paginator.paginate_queryset(qs, request)
+
+        from .serializers import DispatcherCommissionSerializer
+
+        serializer = DispatcherCommissionSerializer(page, many=True)
+
+        return service_response(
+            status="success",
+            message="Commissions retrieved successfully.",
+            data={
+                "results": serializer.data,
+                "count": total_count,
+                "total_amount": str(total_amount),
+                "next": paginator.get_next_link(),
+                "previous": paginator.get_previous_link(),
+            },
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class DispatcherMonthlyEarningsListView(views.APIView):
+    """
+    List aggregated monthly earnings history for salary settlement tracking.
+    GET /api/dispatch/affiliation/monthly-earnings/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        qs = DispatcherMonthlyEarning.objects.filter(dispatcher=dispatcher).order_by(
+            "-month_year"
+        )
+        from .serializers import DispatcherMonthlyEarningSerializer
+
+        serializer = DispatcherMonthlyEarningSerializer(qs, many=True)
+
+        return service_response(
+            status="success",
+            message="Monthly earnings retrieved successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class DispatcherAffiliatedRidersListView(views.APIView):
+    """
+    List all riders affiliated to the authenticated dispatcher with performance metrics.
+    GET /api/dispatch/affiliation/riders/
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .services import get_current_month_str
+
+        current_month = get_current_month_str()
+
+        riders_qs = (
+            dispatcher.affiliated_riders.select_related("user")
+            .prefetch_related("dispatcher_commissions")
+            .order_by("-affiliated_at", "-created_at")
+        )
+
+        results = []
+        for rider in riders_qs:
+            total_orders = rider.dispatcher_commissions.filter(
+                dispatcher=dispatcher
+            ).count()
+            month_commissions = rider.dispatcher_commissions.filter(
+                dispatcher=dispatcher, month_year=current_month
+            )
+            orders_this_month = month_commissions.count()
+            comm_this_month = (
+                month_commissions.aggregate(Sum("amount"))["amount__sum"]
+                or Decimal("0.00")
+            )
+
+            results.append(
+                {
+                    "id": str(rider.id),
+                    "rider_id": rider.rider_id,
+                    "name": (
+                        rider.user.contact_name
+                        or f"{rider.user.first_name} {rider.user.last_name}".strip()
+                        or rider.user.phone
+                    ),
+                    "phone": rider.user.phone,
+                    "email": rider.user.email or "",
+                    "status": rider.status,
+                    "working_type": rider.working_type,
+                    "is_authorized": rider.is_authorized,
+                    "is_affiliated": rider.is_affiliated,
+                    "affiliated_at": (
+                        rider.affiliated_at.isoformat()
+                        if rider.affiliated_at
+                        else None
+                    ),
+                    "total_completed_orders": total_orders,
+                    "orders_this_month": orders_this_month,
+                    "commission_this_month": str(comm_this_month),
+                }
+            )
+
+        return service_response(
+            status="success",
+            message="Affiliated riders retrieved successfully.",
+            data=results,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class DispatcherCommissionReconcileView(views.APIView):
+    """
+    Reconciles commission entries against monthly earnings for consistency.
+    POST /api/dispatch/affiliation/reconcile/
+    Payload: {"month": "YYYY-MM"} (optional)
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsDispatcher]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        dispatcher = DispatcherProfile.objects.filter(user=request.user).first()
+        if not dispatcher:
+            return service_response(
+                status="error",
+                message="Dispatcher profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        from .serializers import CommissionReconcileRequestSerializer
+
+        serializer = CommissionReconcileRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message="Invalid payload."
+            )
+
+        month = serializer.validated_data.get("month")
+        from .services import reconcile_dispatcher_monthly_commission
+
+        result = reconcile_dispatcher_monthly_commission(dispatcher, month)
+
+        return service_response(
+            status="success",
+            message=f"Commission entries reconciled successfully for month {result['month_year']}.",
+            data=result,
+            status_code=status.HTTP_200_OK,
+        )
+

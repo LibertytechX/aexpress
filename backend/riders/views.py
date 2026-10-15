@@ -9,7 +9,7 @@ from django.utils import timezone
 from rest_framework import status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db.models import Q
@@ -24,6 +24,7 @@ from .serializers import (
     RiderLoginSerializer,
     RiderRatingSerializer,
     RiderSelfRegistrationSerializer,
+    RiderAffiliationSerializer,
     RiderMeSerializer,
     DeviceRegistrationSerializer,
     UpdatePermissionsSerializer,
@@ -707,6 +708,106 @@ class RiderMeView(APIView):
                 {"success": False, "message": "Rider profile not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
+
+
+class RiderAffiliationView(APIView):
+    """
+    API endpoint for getting and updating rider affiliation with a dispatcher/hub captain.
+    GET /api/riders/affiliation/ -> Returns current affiliation status and dispatcher details
+    POST /api/riders/affiliation/ -> Affiliates rider using an affiliation code
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return service_response(
+                status="error",
+                message="Rider profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        dispatcher_data = None
+        if rider.is_affiliated and rider.affiliated_to:
+            disp = rider.affiliated_to
+            dispatcher_data = {
+                "id": str(disp.id),
+                "name": (
+                    disp.user.contact_name
+                    or f"{disp.user.first_name} {disp.user.last_name}".strip()
+                    or disp.user.phone
+                ),
+                "phone": disp.user.phone,
+                "role": disp.get_role_display(),
+                "affiliation_code": disp.affiliation_code,
+            }
+
+        return service_response(
+            status="success",
+            message="Rider affiliation details retrieved successfully.",
+            data={
+                "is_affiliated": rider.is_affiliated,
+                "affiliated_at": (
+                    rider.affiliated_at.isoformat() if rider.affiliated_at else None
+                ),
+                "dispatcher": dispatcher_data,
+            },
+            status_code=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            return service_response(
+                status="error",
+                message="Rider profile not found.",
+                status_code=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = RiderAffiliationSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_err = (
+                next(iter(serializer.errors.values()))[0]
+                if serializer.errors
+                else "Invalid data."
+            )
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message=str(first_err)
+            )
+
+        code = serializer.validated_data["affiliation_code"]
+        from dispatcher.services import affiliate_rider_to_dispatcher
+
+        dispatcher = affiliate_rider_to_dispatcher(rider, code)
+
+        dispatcher_data = {
+            "id": str(dispatcher.id),
+            "name": (
+                dispatcher.user.contact_name
+                or f"{dispatcher.user.first_name} {dispatcher.user.last_name}".strip()
+                or dispatcher.user.phone
+            ),
+            "phone": dispatcher.user.phone,
+            "role": dispatcher.get_role_display(),
+            "affiliation_code": dispatcher.affiliation_code,
+        }
+
+        return service_response(
+            status="success",
+            message="Successfully affiliated with dispatcher.",
+            data={
+                "is_affiliated": True,
+                "affiliated_at": (
+                    rider.affiliated_at.isoformat() if rider.affiliated_at else None
+                ),
+                "dispatcher": dispatcher_data,
+            },
+            status_code=status.HTTP_200_OK,
+        )
 
 
 class RiderToggleDutyView(APIView):

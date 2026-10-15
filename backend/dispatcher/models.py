@@ -1,4 +1,5 @@
-from dispatcher.utils import generate_notification_id
+from decimal import Decimal
+from dispatcher.utils import generate_notification_id, generate_random_code
 from email.policy import default
 import hashlib
 import math
@@ -557,6 +558,15 @@ class Rider(models.Model):
     current_latitude = models.DecimalField(
         max_digits=30, decimal_places=20, null=True, blank=True
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_riders",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
     current_longitude = models.DecimalField(
         max_digits=30, decimal_places=20, null=True, blank=True
     )
@@ -796,7 +806,34 @@ class DispatcherProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="dispatcher_profile",
     )
+    affiliation_code = models.CharField(
+        max_length=100, default=generate_random_code, unique=True
+    )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
+    monthly_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Current month accumulated commission",
+    )
+    previous_month_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Previous month total commission",
+    )
+    total_commission_earned = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Lifetime accumulated commission",
+    )
+    last_commission_month = models.CharField(
+        max_length=7,
+        default="",
+        blank=True,
+        help_text="YYYY-MM of current active commission month",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -804,7 +841,22 @@ class DispatcherProfile(models.Model):
         db_table = "dispatcher_profiles"
 
     def __str__(self):
-        return f"Dispatcher: {self.user.contact_name or self.user.phone}"
+        return f"Dispatcher: {self.user.contact_name or self.user.phone} ({self.affiliation_code})"
+
+    def save(self, *args, **kwargs):
+        if not self.affiliation_code:
+            self.affiliation_code = generate_random_code()
+            while (
+                DispatcherProfile.objects.filter(affiliation_code=self.affiliation_code)
+                .exclude(pk=self.pk)
+                .exists()
+            ):
+                self.affiliation_code = generate_random_code()
+        super().save(*args, **kwargs)
+
+    @property
+    def affiliated_riders_count(self) -> int:
+        return self.affiliated_riders.count()
 
 
 class Merchant(models.Model):
@@ -942,6 +994,12 @@ class SystemSettings(models.Model):
     cod_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=500)
     cod_pct_fee = models.DecimalField(max_digits=4, decimal_places=2, default=1.5)
     commission_pct = models.DecimalField(max_digits=4, decimal_places=2, default=20)
+    affiliation_commission_per_order = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("3000.00"),
+        help_text="Commission earned by dispatcher per completed order of affiliated rider",
+    )
 
     # Notifications
     notif_new_order = models.BooleanField(default=True)
@@ -1364,3 +1422,91 @@ class MerchantNotificationSettings(models.Model):
 
     def __str__(self):
         return f"Settings for {self.merchant.merchant_id}"
+
+
+class DispatcherCommission(models.Model):
+    """
+    Immutable ledger entry for each commission earned by a dispatcher
+    from an affiliated rider's completed order.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="commissions",
+    )
+    rider = models.ForeignKey(
+        Rider,
+        on_delete=models.CASCADE,
+        related_name="dispatcher_commissions",
+    )
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.CASCADE,
+        related_name="dispatcher_commissions",
+    )
+    order_number = models.CharField(max_length=100, blank=True, db_index=True)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("3000.00")
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    description = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "dispatcher_commissions"
+        unique_together = ("dispatcher", "order")
+        ordering = ["-created_at"]
+        verbose_name = "Dispatcher Commission"
+        verbose_name_plural = "Dispatcher Commissions"
+
+    def __str__(self):
+        return f"Commission #{self.id}: ₦{self.amount} for {self.dispatcher} (Order: {self.order_number})"
+
+
+class DispatcherMonthlyEarning(models.Model):
+    """
+    Aggregated monthly summary for dispatcher earnings and monthly salary reconciliation.
+    """
+
+    class SettlementStatus(models.TextChoices):
+        ACCUMULATING = "accumulating", "Accumulating"
+        PENDING_PAYMENT = "pending_payment", "Pending Payment"
+        PAID = "paid", "Paid"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="monthly_earnings",
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    total_orders = models.PositiveIntegerField(default=0)
+    total_commission = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=SettlementStatus.choices,
+        default=SettlementStatus.ACCUMULATING,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dispatcher_monthly_earnings"
+        unique_together = ("dispatcher", "month_year")
+        ordering = ["-month_year"]
+        verbose_name = "Dispatcher Monthly Earning"
+        verbose_name_plural = "Dispatcher Monthly Earnings"
+
+    def __str__(self):
+        return f"{self.dispatcher} - {self.month_year}: ₦{self.total_commission} ({self.total_orders} orders)"
+
