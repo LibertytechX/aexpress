@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "subscriptions",
     "oprtn_dashboard",
     "devs",
+    "support",
 ]
 
 MIDDLEWARE = [
