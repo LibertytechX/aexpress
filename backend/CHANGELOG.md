@@ -15,16 +15,18 @@ All notable changes to the AXpress backend are documented in this file.
   - Implemented `POST /api/v1/riders/wallet/verify-account/` (`RiderVerifyAccountView`) with `VerifyAccountSerializer` to validate 10-digit NUBAN numbers and resolve destination account names.
 - **Wema CoreBanking Earnings Withdrawal Flow (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/integrations.py`)**:
   - Implemented `WemaCoreBankingPayoutSDK` in `wallet/integrations.py` handling CoreBanking token authentication and disbursement to external bank accounts.
-  - Implemented `RiderPayoutTransaction` model in `wallet/models.py` to record disbursement status, destination bank details, references, and audit logs.
-  - Implemented `POST /api/v1/riders/wallet/withdraw/` (`RiderWithdrawalView`) allowing independent riders (`is_independent_rider=True`) to withdraw wallet earnings.
+  - Implemented `IndependentRiderPayoutWalletPool` and `IndependentRiderPayoutWalletPoolTransaction` models in `wallet/models.py` with double-entry ledger bookkeeping, row-level locking (`select_for_update`), and admin registration.
+  - Implemented `RiderPayoutTransaction` model in `wallet/models.py` linked to both `rider` and `pool` to record disbursement status, destination bank details, references, and audit logs.
+  - Implemented `POST /api/v1/riders/wallet/withdraw/` (`RiderWithdrawalView`) allowing strictly independent riders (`is_independent_rider=True`) to withdraw wallet earnings.
+  - Enforced pre-flight platform liquidity check: verifies that the Independent Rider Payout Wallet Pool has sufficient balance before initiating disbursement.
   - Enforced unremitted Cash on Delivery (COD) deductions: `withdrawable_balance = max(wallet.balance - pending_cod, 0)` to guarantee platform fund safety.
-  - Implemented atomic row-level locking (`select_for_update`) on `Wallet` to prevent race conditions during withdrawals.
-  - Implemented synchronous failure rollback with immediate wallet refund (`wallet.credit(...)`) and `422 Unprocessable Entity` response.
+  - Implemented atomic row-level locking (`select_for_update`) to prevent race conditions during withdrawals, debited both the payout pool and the rider wallet atomically.
+  - Implemented dual-refund synchronous failure rollback: if external transfer fails or rejects, immediately refunds **both** the rider's wallet (`wallet.credit(...)`) and the payout pool (`pool.credit(...)`), returning a `422 Unprocessable Entity` response.
   - Automatically updates rider's saved preferred bank details (`bank_name`, `bank_account_number`, `bank_routing_code`) on successful payout.
 - **Asynchronous Payout Reconciliation Task (`riders/tasks.py`)**:
-  - Created Celery background task `check_pending_rider_payout_status` to periodically verify pending CoreBanking disbursements, mark completed transfers as success, and issue automated wallet refunds if external transfers are rejected.
-- **Automated Test Coverage (`riders/tests/unit/test_rider_withdrawal.py`, `riders/tests/integration/test_rider_withdrawal_flow.py`)**:
-  - Added 21 automated unit and integration tests covering public bank directory access, account name enquiry, independent rider authorization, COD restrictions, atomic balance debits, successful payouts, and automated failure refunds.
+  - Created Celery background task `check_pending_rider_payout_status` to periodically verify pending CoreBanking disbursements, mark completed transfers as success, and issue automated dual refunds (to both wallet and payout pool) if external transfers are rejected or reversed.
+- **Automated Test Coverage (`wallet/tests/unit/test_payout_wallet_pool.py`, `riders/tests/unit/test_rider_withdrawal.py`, `riders/tests/integration/test_rider_withdrawal_flow.py`)**:
+  - Added 29 automated unit and integration tests covering public bank directory access, account name enquiry, independent rider authorization, COD restrictions, payout pool liquidity validation, pool ledger debit records, dual refunds on failure, and admin registrations.
 
 ---
 

@@ -12,6 +12,8 @@ from .models import (
     AmortizationVirtualAccount,
     Bank,
     RiderPayoutTransaction,
+    IndependentRiderPayoutWalletPool,
+    IndependentRiderPayoutWalletPoolTransaction,
 )
 
 
@@ -601,6 +603,7 @@ class RiderPayoutTransactionAdmin(admin.ModelAdmin):
     list_display = [
         "reference",
         "rider",
+        "pool",
         "amount",
         "destination_bank_name",
         "destination_account_number",
@@ -620,6 +623,7 @@ class RiderPayoutTransactionAdmin(admin.ModelAdmin):
     ]
     readonly_fields = [
         "id",
+        "pool",
         "reference",
         "amount",
         "charges",
@@ -628,5 +632,49 @@ class RiderPayoutTransactionAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
-    raw_id_fields = ["rider"]
+    raw_id_fields = ["rider", "pool"]
     ordering = ["-created_at"]
+
+
+@admin.register(IndependentRiderPayoutWalletPool)
+class IndependentRiderPayoutWalletPoolAdmin(admin.ModelAdmin):
+    list_display = ["name", "balance", "currency", "is_active", "created_at", "updated_at"]
+    list_filter = ["is_active", "created_at"]
+    search_fields = ["name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+
+@admin.register(IndependentRiderPayoutWalletPoolTransaction)
+class IndependentRiderPayoutWalletPoolTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        "reference",
+        "pool",
+        "rider",
+        "transaction_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "status",
+        "created_at",
+    ]
+    list_filter = ["transaction_type", "status", "created_at"]
+    search_fields = ["reference", "rider__rider_id", "description"]
+    readonly_fields = [
+        "id",
+        "pool",
+        "rider",
+        "payout_transaction",
+        "transaction_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "reference",
+        "description",
+        "status",
+        "metadata",
+        "created_at",
+    ]
+    raw_id_fields = ["pool", "rider", "payout_transaction"]
+    ordering = ["-created_at"]
+

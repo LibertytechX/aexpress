@@ -2,7 +2,12 @@ import pytest
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
 from sparky_utils.exceptions import ServiceException
-from wallet.models import Bank, RiderPayoutTransaction, Wallet
+from wallet.models import (
+    Bank,
+    RiderPayoutTransaction,
+    Wallet,
+    IndependentRiderPayoutWalletPool,
+)
 from wallet.integrations import (
     LibertyPayAccountEnquiryService,
     WemaCoreBankingPayoutSDK,
@@ -217,3 +222,8 @@ class TestReconciliationTask:
         wallet.refresh_from_db()
         # Initial 500 + refunded 1000 = 1500
         assert wallet.balance == Decimal("1500.00")
+
+        # Pool also receives refund of 1000.00
+        pool = IndependentRiderPayoutWalletPool.get_default_pool()
+        assert pool.balance == Decimal("1000.00")
+

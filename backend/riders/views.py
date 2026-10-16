@@ -50,7 +50,13 @@ from .serializers import (
     VerifyAccountSerializer,
     RiderWithdrawalSerializer,
 )
-from wallet.models import Bank, RiderPayoutTransaction, Wallet
+from wallet.models import (
+    Bank,
+    RiderPayoutTransaction,
+    Wallet,
+    IndependentRiderPayoutWalletPool,
+    IndependentRiderPayoutWalletPoolTransaction,
+)
 from wallet.integrations import (
     LibertyPayAccountEnquiryService,
     WemaCoreBankingPayoutSDK,
@@ -1804,11 +1810,29 @@ class RiderWithdrawalView(APIView):
             or f"Earnings withdrawal by {rider.rider_id}"
         )
 
-        # Double-entry balance verification & atomic wallet debit
+        # Double-entry balance verification & atomic wallet and pool debit
+        reference = f"WDR-{uuid.uuid4().hex[:12].upper()}"
+
         with transaction.atomic():
+            # 1. Check Independent Rider Payout Wallet Pool funds first
+            pool = (
+                IndependentRiderPayoutWalletPool.objects.select_for_update()
+                .filter(is_active=True)
+                .first()
+            )
+            if not pool:
+                pool = IndependentRiderPayoutWalletPool.get_default_pool()
+                pool = IndependentRiderPayoutWalletPool.objects.select_for_update().get(id=pool.id)
+
+            if pool.balance < amount:
+                raise ServiceException(
+                    status_code=400,
+                    message="Insufficient funds in payout pool. Unable to process withdrawal at this time.",
+                )
+
+            # 2. Check rider's withdrawable balance (pending unremitted COD deduction)
             wallet, _ = Wallet.objects.select_for_update().get_or_create(user=request.user)
 
-            # Pending unremitted COD deduction
             pending_cod_agg = rider.cod_records.filter(status="pending").aggregate(
                 Sum("amount")
             )["amount__sum"]
@@ -1824,8 +1848,38 @@ class RiderWithdrawalView(APIView):
                     ),
                 )
 
-            reference = f"WDR-{uuid.uuid4().hex[:12].upper()}"
+            # 3. Create pending RiderPayoutTransaction
+            payout = RiderPayoutTransaction.objects.create(
+                rider=rider,
+                pool=pool,
+                destination_account_name=account_name,
+                destination_account_number=account_number,
+                destination_bank_code=bank_code,
+                destination_bank_name=bank_name,
+                amount=amount,
+                reference=reference,
+                narration=narration,
+                status=RiderPayoutTransaction.Status.PENDING,
+            )
 
+            # 4. Debit the payout pool and record pool debit transaction
+            pool.debit(
+                amount=amount,
+                reference=f"POOL-{reference}",
+                rider=rider,
+                payout_transaction=payout,
+                description=f"Payout disbursement to {account_name} ({account_number})",
+                metadata={
+                    "withdrawal_reference": reference,
+                    "account_number": account_number,
+                    "account_name": account_name,
+                    "bank_code": bank_code,
+                    "bank_name": bank_name,
+                    "type": "rider_withdrawal_pool_debit",
+                },
+            )
+
+            # 5. Debit the rider wallet and record wallet debit transaction
             wallet.debit(
                 amount=amount,
                 description=f"Withdrawal to {account_name} ({account_number})",
@@ -1839,28 +1893,21 @@ class RiderWithdrawalView(APIView):
                 },
             )
 
-            payout = RiderPayoutTransaction.objects.create(
-                rider=rider,
-                destination_account_name=account_name,
-                destination_account_number=account_number,
-                destination_bank_code=bank_code,
-                destination_bank_name=bank_name,
-                amount=amount,
-                reference=reference,
-                narration=narration,
-                status=RiderPayoutTransaction.Status.PENDING,
-            )
-
         # Dispatch payout to Wema CoreBanking
-        sdk = WemaCoreBankingPayoutSDK()
-        success, resp = sdk.transfer_funds(
-            amount=float(amount),
-            narration=narration,
-            account_name=account_name,
-            account_number=account_number,
-            bank_code=bank_code,
-            reference=reference,
-        )
+        try:
+            sdk = WemaCoreBankingPayoutSDK()
+            success, resp = sdk.transfer_funds(
+                amount=float(amount),
+                narration=narration,
+                account_name=account_name,
+                account_number=account_number,
+                bank_code=bank_code,
+                reference=reference,
+            )
+        except Exception as exc:
+            logger.error(f"Unexpected exception during CoreBanking payout transfer: {exc}")
+            success = False
+            resp = {"error": str(exc), "message": "Payout transfer encountered an unexpected connection error."}
 
         if success:
             payout.status = RiderPayoutTransaction.Status.SUCCESS
@@ -1890,21 +1937,39 @@ class RiderWithdrawalView(APIView):
                 status_code=status.HTTP_200_OK,
             )
         else:
-            # Immediate automated refund
-            refund_ref = f"REF-{uuid.uuid4().hex[:12].upper()}"
-            wallet.credit(
-                amount=amount,
-                description=f"Refund for failed payout {reference}",
-                reference=refund_ref,
-                metadata={
-                    "original_reference": reference,
-                    "reason": "CoreBanking payout rejected",
-                },
-            )
-            payout.status = RiderPayoutTransaction.Status.FAILED
-            payout.refunded = True
-            payout.corebanking_response = resp
-            payout.save(update_fields=["status", "refunded", "corebanking_response", "updated_at"])
+            # Immediate automated refund for BOTH rider wallet and payout pool
+            with transaction.atomic():
+                # 1. Refund rider wallet
+                refund_ref = f"REF-{uuid.uuid4().hex[:12].upper()}"
+                wallet.credit(
+                    amount=amount,
+                    description=f"Refund for failed payout {reference}",
+                    reference=refund_ref,
+                    metadata={
+                        "original_reference": reference,
+                        "reason": "CoreBanking payout rejected",
+                    },
+                )
+
+                # 2. Refund payout pool
+                pool_refund_ref = f"POOL-REF-{uuid.uuid4().hex[:12].upper()}"
+                target_pool = payout.pool or IndependentRiderPayoutWalletPool.get_default_pool()
+                target_pool.credit(
+                    amount=amount,
+                    reference=pool_refund_ref,
+                    rider=rider,
+                    payout_transaction=payout,
+                    description=f"Refund for failed payout {reference}",
+                    metadata={
+                        "original_reference": reference,
+                        "reason": "CoreBanking payout rejected",
+                    },
+                )
+
+                payout.status = RiderPayoutTransaction.Status.FAILED
+                payout.refunded = True
+                payout.corebanking_response = resp
+                payout.save(update_fields=["status", "refunded", "corebanking_response", "updated_at"])
 
             err_msg = (
                 resp.get("message")

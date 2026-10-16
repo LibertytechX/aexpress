@@ -1922,7 +1922,11 @@ Error Response (400 Bad Request):
 ### 3. Withdraw Earnings to Bank Account
 ```http
 POST /api/riders/wallet/withdraw/
-Description: Allows independent riders (is_independent_rider=True) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout. Validates that the withdrawal amount does not exceed withdrawable_balance (wallet balance minus any unremitted Cash on Delivery). Automatically issues an instant refund if the external transfer is rejected.
+Description: Allows independent riders (is_independent_rider=True) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout.
+1. Validates that the platform Independent Rider Payout Wallet Pool has sufficient funds to disburse the withdrawal.
+2. Validates that the withdrawal amount does not exceed withdrawable_balance (wallet balance minus any unremitted Cash on Delivery).
+3. Atomically debits both the Independent Rider Payout Wallet Pool and the rider's personal wallet.
+4. Triggers Wema CoreBanking payout. If rejected or failed, automatically issues an immediate automated refund to both the rider's wallet and the payout pool.
 Authentication: Required (Rider Bearer Token)
 
 Request Body:
@@ -1952,6 +1956,14 @@ Response (200 OK):
   }
 
 Error Responses:
+  - 400 Bad Request (Insufficient Payout Pool Balance):
+    {
+      "status": "error",
+      "message": "Insufficient funds in payout pool. Unable to process withdrawal at this time.",
+      "data": {},
+      "status_code": 400
+    }
+
   - 400 Bad Request (Insufficient Withdrawable Balance or Pending COD):
     {
       "status": "error",
@@ -1968,7 +1980,7 @@ Error Responses:
       "status_code": 403
     }
 
-  - 422 Unprocessable Entity (CoreBanking Failure - Auto-Refunded):
+  - 422 Unprocessable Entity (CoreBanking Failure - Auto-Refunded to Wallet & Pool):
     {
       "status": "error",
       "message": "Destination bank unavailable. Your wallet balance has been refunded.",
