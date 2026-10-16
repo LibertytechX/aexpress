@@ -185,6 +185,138 @@
     }
   ]
 }
+---
+
+### 3a. Supported Banks Directory
+**Endpoint:** `GET /banks/`  
+**Authentication:** None (Public / Open)  
+**Description:** Retrieves the complete directory of supported Nigerian commercial banks, microfinance banks, and fintech institutions with their corresponding 3-digit and 6-digit CBN/NIBSS codes and USSD shortcodes. Cached in Redis for ultra-low latency.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Banks retrieved successfully.",
+  "data": [
+    {
+      "id": 1,
+      "name": "Access Bank",
+      "bank_code": "044",
+      "cbn_code": "000014",
+      "ussd_short_code": "*901#",
+      "bank_short_name": "ACCESS"
+    },
+    {
+      "id": 6,
+      "name": "Wema Bank",
+      "bank_code": "035",
+      "cbn_code": "000017",
+      "ussd_short_code": "*945#",
+      "bank_short_name": "WEMA"
+    }
+  ]
+}
+```
+
+---
+
+### 3b. Verify Bank Account Number
+**Endpoint:** `POST /wallet/verify-account/`  
+**Authentication:** None (Public / AllowAny)  
+**Description:** Validates a 10-digit NUBAN account number and resolves the account name using the LibertyPay Account Enquiry integration.
+
+**Request Body:**
+```json
+{
+  "account_number": "0123456789",
+  "bank_code": "044"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Account verified successfully.",
+  "data": {
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "044",
+    "cbn_code": "000014",
+    "currency_code": "NGN"
+  }
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "status": "error",
+  "message": "Account verification failed. Please check the account number and bank code.",
+  "data": null
+}
+```
+
+---
+
+### 3c. Withdraw Earnings (Independent Riders)
+**Endpoint:** `POST /wallet/withdraw/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Allows independent riders (`is_independent_rider=True`) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout. Validates that the withdrawal amount does not exceed `withdrawable_balance` (wallet balance minus any unremitted Cash on Delivery). Automatically issues an instant refund if the external transfer is rejected.
+
+**Request Body:**
+```json
+{
+  "amount": "5000.00",
+  "account_number": "0123456789",
+  "account_name": "ADE BABATUNDE",
+  "bank_code": "044",
+  "bank_name": "Access Bank",
+  "narration": "Payout for deliveries"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Withdrawal request processed successfully.",
+  "data": {
+    "reference": "WDR-A1B2C3D4E5F6",
+    "amount": 5000.0,
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "044",
+    "status": "success",
+    "remaining_balance": 15000.0
+  }
+}
+```
+
+**Error Responses:**
+- **400 Bad Request (Insufficient Withdrawable Balance or Unremitted COD):**
+```json
+{
+  "status": "error",
+  "message": "Insufficient withdrawable balance. Withdrawable: ₦2,000.00 (Pending unremitted COD: ₦8,000.00)",
+  "data": null
+}
+```
+- **403 Forbidden (Non-Independent Rider):**
+```json
+{
+  "status": "error",
+  "message": "Only independent riders are permitted to withdraw wallet earnings.",
+  "data": null
+}
+```
+- **422 Unprocessable Entity (Transfer Rejected, Wallet Refunded):**
+```json
+{
+  "status": "error",
+  "message": "Destination bank connection timeout. Your wallet balance has been refunded.",
+  "data": null
+}
 ```
 
 ---

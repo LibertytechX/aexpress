@@ -10,6 +10,8 @@ from .models import (
     AmortizationWallet,
     AmortizationTransaction,
     AmortizationVirtualAccount,
+    Bank,
+    RiderPayoutTransaction,
 )
 
 
@@ -512,3 +514,47 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at",)}),
     )
+
+
+@admin.register(Bank)
+class BankAdmin(admin.ModelAdmin):
+    list_display = ["name", "bank_code", "cbn_code", "bank_short_name", "ussd_short_code", "date_added"]
+    search_fields = ["name", "bank_code", "cbn_code", "bank_short_name"]
+    list_filter = ["date_added"]
+    ordering = ["name"]
+
+
+@admin.register(RiderPayoutTransaction)
+class RiderPayoutTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        "reference",
+        "rider",
+        "amount",
+        "destination_bank_name",
+        "destination_account_number",
+        "destination_account_name",
+        "status",
+        "refunded",
+        "created_at",
+    ]
+    list_filter = ["status", "refunded", "created_at"]
+    search_fields = [
+        "reference",
+        "destination_account_number",
+        "destination_account_name",
+        "rider__rider_id",
+        "rider__user__phone",
+        "rider__user__email",
+    ]
+    readonly_fields = [
+        "id",
+        "reference",
+        "amount",
+        "charges",
+        "refunded",
+        "corebanking_response",
+        "created_at",
+        "updated_at",
+    ]
+    raw_id_fields = ["rider"]
+    ordering = ["-created_at"]

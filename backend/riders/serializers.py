@@ -991,3 +991,102 @@ class RiderRatingSerializer(serializers.Serializer):
     rider_id = serializers.CharField(required=True)
     rating = serializers.IntegerField(min_value=1, max_value=5, required=True)
     comment = serializers.CharField(required=False, allow_blank=True)
+
+
+class BankListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing supported Nigerian banks.
+    """
+
+    class Meta:
+        from wallet.models import Bank
+
+        model = Bank
+        fields = [
+            "id",
+            "name",
+            "bank_code",
+            "cbn_code",
+            "ussd_short_code",
+            "bank_short_name",
+        ]
+
+
+class VerifyAccountSerializer(serializers.Serializer):
+    """
+    Serializer for validating account enquiry input parameters.
+    """
+
+    account_number = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        account_number = str(attrs.get("account_number", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+
+        if not account_number or not bank_code:
+            raise ServiceException(
+                status_code=400, message="account_number and bank_code are required."
+            )
+
+        if not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="Account number must be a valid 10-digit NUBAN number.",
+            )
+
+        attrs["account_number"] = account_number
+        attrs["bank_code"] = bank_code
+        return attrs
+
+
+class RiderWithdrawalSerializer(serializers.Serializer):
+    """
+    Serializer for rider wallet earnings withdrawal request.
+    """
+
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    account_number = serializers.CharField(required=True)
+    account_name = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+    bank_name = serializers.CharField(required=False, allow_blank=True, default="")
+    narration = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate(self, attrs):
+        from decimal import Decimal
+
+        amount = attrs.get("amount")
+        account_number = str(attrs.get("account_number", "")).strip()
+        account_name = str(attrs.get("account_name", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+
+        if amount is None or amount <= Decimal("0.00"):
+            raise ServiceException(
+                status_code=400, message="Withdrawal amount must be greater than zero."
+            )
+
+        if amount < Decimal("100.00"):
+            raise ServiceException(
+                status_code=400, message="Minimum withdrawal amount is ₦100.00."
+            )
+
+        if not account_number or not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="A valid 10-digit account number is required.",
+            )
+
+        if not account_name:
+            raise ServiceException(
+                status_code=400, message="Account name is required."
+            )
+
+        if not bank_code:
+            raise ServiceException(
+                status_code=400, message="Bank code is required."
+            )
+
+        attrs["account_number"] = account_number
+        attrs["account_name"] = account_name
+        attrs["bank_code"] = bank_code
+        return attrs

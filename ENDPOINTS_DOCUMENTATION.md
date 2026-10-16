@@ -1840,3 +1840,140 @@ Error Response (400 Bad Request):
   }
 ```
 
+---
+
+## RIDER BANK DIRECTORY, ACCOUNT ENQUIRY & WEMA WITHDRAWAL ENDPOINTS
+
+### 1. List Supported Nigerian Banks
+```http
+GET /api/riders/banks/
+Description: Retrieves the complete directory of supported Nigerian commercial banks, microfinance banks, and fintech institutions with their corresponding 3-digit and 6-digit CBN/NIBSS codes and USSD shortcodes. Cached in Redis for low latency.
+Authentication: None (Public / AllowAny)
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Banks retrieved successfully.",
+    "data": [
+      {
+        "id": "18f50682-1234-4567-89ab-cdef01234567",
+        "name": "Access Bank",
+        "bank_code": "044",
+        "cbn_code": "000014",
+        "ussd_short_code": "*901#",
+        "bank_short_name": "Access"
+      },
+      {
+        "id": "42c38501-1234-4567-89ab-cdef01234567",
+        "name": "Guaranty Trust Bank",
+        "bank_code": "058",
+        "cbn_code": "000013",
+        "ussd_short_code": "*737#",
+        "bank_short_name": "GTBank"
+      },
+      {
+        "id": "a93bc710-1234-4567-89ab-cdef01234567",
+        "name": "Wema Bank",
+        "bank_code": "035",
+        "cbn_code": "000017",
+        "ussd_short_code": "*945#",
+        "bank_short_name": "Wema"
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+### 2. Bank Account Name Enquiry
+```http
+POST /api/riders/wallet/verify-account/
+Description: Validates a 10-digit NUBAN account number and resolves the account name using the LibertyPay Account Enquiry integration.
+Authentication: None (Public / AllowAny)
+
+Request Body:
+  {
+    "account_number": "0123456789",
+    "bank_code": "058"
+  }
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Account verified successfully.",
+    "data": {
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "cbn_code": "000013",
+      "currency_code": "NGN"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Account verification failed. Please check the account number and bank code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 3. Withdraw Earnings to Bank Account
+```http
+POST /api/riders/wallet/withdraw/
+Description: Allows independent riders (is_independent_rider=True) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout. Validates that the withdrawal amount does not exceed withdrawable_balance (wallet balance minus any unremitted Cash on Delivery). Automatically issues an instant refund if the external transfer is rejected.
+Authentication: Required (Rider Bearer Token)
+
+Request Body:
+  {
+    "amount": 25000.00,
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "058",
+    "bank_name": "Guaranty Trust Bank",
+    "narration": "Weekly earnings payout"
+  }
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Withdrawal request processed successfully.",
+    "data": {
+      "reference": "WDR-A93BC7101234",
+      "amount": 25000.0,
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "status": "success",
+      "remaining_balance": 15420.50
+    },
+    "status_code": 200
+  }
+
+Error Responses:
+  - 400 Bad Request (Insufficient Withdrawable Balance or Pending COD):
+    {
+      "status": "error",
+      "message": "Insufficient withdrawable balance. Withdrawable: ₦12,500.00 (Pending unremitted COD: ₦15,000.00)",
+      "data": {},
+      "status_code": 400
+    }
+
+  - 403 Forbidden (Non-Independent Rider):
+    {
+      "status": "error",
+      "message": "Only independent riders are permitted to withdraw wallet earnings.",
+      "data": {},
+      "status_code": 403
+    }
+
+  - 422 Unprocessable Entity (CoreBanking Failure - Auto-Refunded):
+    {
+      "status": "error",
+      "message": "Destination bank unavailable. Your wallet balance has been refunded.",
+      "data": {},
+      "status_code": 422
+    }
+```
+

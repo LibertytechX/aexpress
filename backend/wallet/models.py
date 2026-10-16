@@ -644,3 +644,102 @@ class AmortizationVirtualAccount(models.Model):
 
     def __str__(self):
         return f"{self.user.full_name} Amort Virtual Account"
+
+
+class Bank(models.Model):
+    """
+    Supported Nigerian Banking Institutions for withdrawal and disbursements.
+    """
+
+    name = models.CharField(max_length=500)
+    bank_code = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    cbn_code = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    ussd_short_code = models.CharField(max_length=50, null=True, blank=True)
+    bank_short_name = models.CharField(max_length=100, null=True, blank=True)
+    date_added = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "banks"
+        ordering = ["name"]
+        verbose_name = "Bank"
+        verbose_name_plural = "Banks"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("all_bank_list")
+
+    def delete(self, *args, **kwargs):
+        super().delete(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("all_bank_list")
+
+    @classmethod
+    def get_all_bank_list(cls):
+        """
+        Returns cached list of banks to optimize database reads.
+        """
+        from django.core.cache import cache
+
+        cache_key = "all_bank_list"
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return cached_data
+        queryset = list(cls.objects.all().order_by("name"))
+        cache.set(cache_key, queryset, 86400)
+        return queryset
+
+
+class RiderPayoutTransaction(models.Model):
+    """
+    Ledger model tracking withdrawals from independent riders' wallets
+    to external bank accounts via Wema CoreBanking payout.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.CASCADE,
+        related_name="payout_transactions",
+    )
+    destination_account_name = models.CharField(max_length=200)
+    destination_account_number = models.CharField(max_length=50)
+    destination_bank_code = models.CharField(max_length=50)
+    destination_bank_name = models.CharField(max_length=100, blank=True, default="")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reference = models.CharField(max_length=100, unique=True, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    narration = models.TextField(null=True, blank=True)
+    charges = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    refunded = models.BooleanField(default=False)
+    corebanking_response = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_payout_transactions"
+        ordering = ["-created_at"]
+        verbose_name = "Rider Payout Transaction"
+        verbose_name_plural = "Rider Payout Transactions"
+
+    def __str__(self):
+        return f"{self.rider.user.get_full_name()} - ₦{self.amount} ({self.status}) - {self.reference}"
