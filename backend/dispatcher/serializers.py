@@ -19,6 +19,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta, time
 from django.core.cache import cache
 from django.utils import timezone
+from django.db import transaction
 from django.db.models import Q, Sum
 from orders.models import Order, Delivery
 from .models import VehicleTracking
@@ -250,6 +251,7 @@ class DispatcherCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
+    @transaction.atomic
     def create(self, validated_data):
         first_name = validated_data["first_name"]
         last_name = validated_data["last_name"]
@@ -263,7 +265,12 @@ class DispatcherCreateSerializer(serializers.Serializer):
             contact_name=f"{first_name} {last_name}".strip(),
             usertype="Dispatcher",
         )
-        profile = DispatcherProfile.objects.create(user=user, role=role)
+        profile, _ = DispatcherProfile.objects.get_or_create(
+            user=user, defaults={"role": role}
+        )
+        if profile.role != role:
+            profile.role = role
+            profile.save()
         return profile
 
 

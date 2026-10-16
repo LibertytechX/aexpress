@@ -1989,3 +1989,65 @@ Error Responses:
     }
 ```
 
+---
+
+## DISPATCHER MANAGEMENT ENDPOINTS
+
+### 1. List Dispatchers
+```
+GET /api/dispatch/dispatchers/
+Description: Retrieves a list of all dispatcher profiles ordered by creation date descending.
+Authentication: Required (IsAuthenticated)
+Response (200 OK):
+  [
+    {
+      "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "name": "Jane Dispatcher",
+      "phone": "+2348011223344",
+      "email": "jane@axpress.net",
+      "role": "Admin",
+      "joined": "2026-10-16",
+      "is_active": true,
+      "affiliation_code": null,
+      "monthly_commission": "0.00",
+      "previous_month_commission": "0.00",
+      "total_commission_earned": "0.00",
+      "affiliated_riders_count": 0,
+      "affiliated_merchants_count": 0
+    }
+  ]
+```
+
+### 2. Create Dispatcher
+```
+POST /api/dispatch/dispatchers/
+Description: Creates a new user with usertype Dispatcher and assigns a DispatcherProfile atomically with role configuration.
+Authentication: Required (IsAuthenticated)
+Request Body:
+  {
+    "first_name": "Jane",
+    "last_name": "Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "password": "strongpassword123",
+    "role": "admin" | "hub_captain" | "zone_lead"
+  }
+Response (201 Created):
+  {
+    "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+    "name": "Jane Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "role": "Admin",
+    "joined": "2026-10-16",
+    "is_active": true,
+    "affiliation_code": null,
+    "monthly_commission": "0.00",
+    "previous_month_commission": "0.00",
+    "total_commission_earned": "0.00",
+    "affiliated_riders_count": 0,
+    "affiliated_merchants_count": 0
+  }
+```
+
+
