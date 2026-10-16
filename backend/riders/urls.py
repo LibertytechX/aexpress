@@ -49,6 +49,7 @@ urlpatterns = [
     path(
         "device/", RiderDeviceRegistrationView.as_view(), name="rider-device-register"
     ),
+    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path(
         "device/permissions/",
         RiderUpdatePermissionsView.as_view(),
@@ -57,7 +58,9 @@ urlpatterns = [
     path("affiliation/", RiderAffiliationView.as_view(), name="rider-affiliation"),
     path(
         "affiliation/verify/",
-        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        __import__(
+            "authentication.views", fromlist=["VerifyAffiliationCodeView"]
+        ).VerifyAffiliationCodeView.as_view(),
         name="rider-affiliation-verify",
     ),
     path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
