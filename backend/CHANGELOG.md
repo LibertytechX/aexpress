@@ -5,8 +5,9 @@ All notable changes to the AXpress backend are documented in this file.
 ## [2026-10-16] — Independent Rider Bank Directory, Account Enquiry & Wema CoreBanking Withdrawal
 
 ### Added
-- **Supported Banks Directory API (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`)**:
+- **Supported Banks Directory API & Admin Import/Export (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/admin.py`)**:
   - Implemented `Bank` model in `wallet/models.py` with CBN/NIBSS codes, USSD codes, and Redis caching (`all_bank_list`).
+  - Added `BankResource` and upgraded `BankAdmin` to inherit from `ImportExportModelAdmin` in `wallet/admin.py`, enabling CSV and Excel imports/exports directly from the Django admin interface with smart lookup across `id`, `cbn_code`, `bank_code`, and `name`.
   - Added `seed_banks` management command and automatic database migration seeding 33 standard Nigerian commercial banks, microfinance banks, and fintechs.
   - Implemented public, unauthenticated endpoint `GET /api/v1/riders/banks/` (`RiderBankListView`) returning the cached list of supported Nigerian banks.
 - **LibertyPay Account Name Enquiry Integration (`wallet/integrations.py`, `riders/views.py`, `riders/serializers.py`)**:
