@@ -17,6 +17,9 @@ class TestBankAdminImportExport:
     def test_bank_admin_inherits_import_export_model_admin(self):
         assert issubclass(BankAdmin, ImportExportModelAdmin)
         assert self.admin.resource_class == BankResource
+        # Ensure only one of resource_class/resource_classes is set so get_resource_classes() doesn't raise
+        resource_classes = self.admin.get_resource_classes(request=None)
+        assert resource_classes == [BankResource]
 
     def test_bank_resource_export(self):
         bank = Bank.objects.create(

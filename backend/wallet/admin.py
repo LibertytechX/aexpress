@@ -582,7 +582,6 @@ class BankResource(resources.ModelResource):
 
 @admin.register(Bank)
 class BankAdmin(ImportExportModelAdmin):
-    resource_classes = [BankResource]
     resource_class = BankResource
     list_display = [
         "name",
