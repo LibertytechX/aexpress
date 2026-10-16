@@ -50,10 +50,10 @@ class LibertyPayAccountEnquiryService:
                 Q(bank_code=code_to_use) | Q(cbn_code=code_to_use)
             ).first()
             if bank:
-                if bank.cbn_code and len(bank.cbn_code) >= 6:
-                    code_to_use = bank.cbn_code
-                elif bank.bank_code and len(bank.bank_code) >= 6:
+                if bank.bank_code and len(bank.bank_code) >= 6:
                     code_to_use = bank.bank_code
+                elif bank.cbn_code and len(bank.cbn_code) >= 6:
+                    code_to_use = bank.cbn_code
         except Exception as e:
             logger.warning(f"Failed to resolve bank code from Bank model: {e}")
 
@@ -81,7 +81,9 @@ class LibertyPayAccountEnquiryService:
                 res_data = response.json()
                 if res_data.get("data") and res_data.get("status") in ("success", None):
                     raw_data = res_data["data"]
-                    account_name = raw_data.get("account_name") or raw_data.get("accountName")
+                    account_name = raw_data.get("account_name") or raw_data.get(
+                        "accountName"
+                    )
                     acc_num = (
                         raw_data.get("account_number")
                         or raw_data.get("accountNumber")
@@ -94,7 +96,9 @@ class LibertyPayAccountEnquiryService:
                     )
 
                     if not account_name:
-                        logger.error(f"LibertyPay enquiry response missing account_name: {res_data}")
+                        logger.error(
+                            f"LibertyPay enquiry response missing account_name: {res_data}"
+                        )
                         return None
 
                     return {
@@ -129,12 +133,13 @@ class WemaCoreBankingPayoutSDK:
         self.mode: str = mode or getattr(settings, "COREBANKING_MODE", "LIVE")
         self.email: str = getattr(settings, "COREBANKING_EMAIL", "")
         self.password: str = getattr(settings, "COREBANKING_PASSWORD", "")
-        self.source_account: str = (
-            getattr(settings, "COREBANKING_WEMA_SOURCE_ACCOUNT", "")
-            or getattr(settings, "COREBANKING_SOURCE_ACCOUNT", "")
-        )
+        self.source_account: str = getattr(
+            settings, "COREBANKING_WEMA_SOURCE_ACCOUNT", ""
+        ) or getattr(settings, "COREBANKING_SOURCE_ACCOUNT", "")
 
-        base_url = getattr(settings, "COREBANKING_BASE_URL", "https://banking.libertypayng.com")
+        base_url = getattr(
+            settings, "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
+        )
         if not base_url.endswith("/"):
             base_url += "/"
         self.base_url: str = base_url
@@ -209,7 +214,9 @@ class WemaCoreBankingPayoutSDK:
 
         success, token = self.login()
         if not success:
-            logger.error("Cannot transfer funds: CoreBanking login authentication failed.")
+            logger.error(
+                "Cannot transfer funds: CoreBanking login authentication failed."
+            )
             return False, {"message": "Banking service authentication unavailable"}
 
         headers = {
@@ -227,7 +234,9 @@ class WemaCoreBankingPayoutSDK:
             except Exception:
                 resp_data = {"text": response.text}
 
-            logger.info(f"CoreBanking transfer response [{response.status_code}]: {resp_data}")
+            logger.info(
+                f"CoreBanking transfer response [{response.status_code}]: {resp_data}"
+            )
 
             if response.status_code in (200, 201):
                 return True, resp_data.get("data", resp_data)
@@ -235,7 +244,10 @@ class WemaCoreBankingPayoutSDK:
 
         except requests.RequestException as e:
             logger.error(f"Request exception during CoreBanking transfer: {e}")
-            return False, {"error": str(e), "message": "Network timeout or connection error"}
+            return False, {
+                "error": str(e),
+                "message": "Network timeout or connection error",
+            }
 
     def verify_status(self, reference: str) -> Tuple[bool, Dict[str, Any]]:
         """
