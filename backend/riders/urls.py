@@ -28,6 +28,9 @@ from .views import (
     RiderDocumentListCreateView,
     RiderDocumentDetailView,
     RiderAffiliationView,
+    RiderBankListView,
+    RiderVerifyAccountView,
+    RiderWithdrawalView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -85,11 +88,22 @@ urlpatterns = [
         name="rider-assignment-action",
     ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
+    path("banks/", RiderBankListView.as_view(), name="rider-banks"),
     path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),
     path(
         "wallet/transactions/",
         RiderTransactionListView.as_view(),
         name="rider-wallet-transactions",
+    ),
+    path(
+        "wallet/verify-account/",
+        RiderVerifyAccountView.as_view(),
+        name="rider-wallet-verify-account",
+    ),
+    path(
+        "wallet/withdraw/",
+        RiderWithdrawalView.as_view(),
+        name="rider-wallet-withdraw",
     ),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
     path(

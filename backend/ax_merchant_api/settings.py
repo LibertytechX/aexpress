@@ -302,6 +302,14 @@ COREBANKING_BASE_URL = os.getenv(
     "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
 )
 COREBANKING_WEBHOOK_SECRET = os.getenv("COREBANKING_WEBHOOK_SECRET", "")
+COREBANKING_SOURCE_ACCOUNT = os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+COREBANKING_WEMA_SOURCE_ACCOUNT = os.getenv(
+    "COREBANKING_WEMA_SOURCE_ACCOUNT", os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+)
+LIBERTYPAY_ACCOUNT_ENQUIRY_URL = os.getenv(
+    "LIBERTYPAY_ACCOUNT_ENQUIRY_URL",
+    "https://management.libertypayng.com/api/v1/sales/account_name_enquiry/",
+)
 
 # Mailgun Configuration
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")

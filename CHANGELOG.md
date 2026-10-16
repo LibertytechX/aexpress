@@ -1,5 +1,31 @@
 All notable changes to the AXpress project are documented in this file.
 
+# [2026-10-16] — Independent Rider Bank Directory, Account Enquiry & Wema CoreBanking Withdrawal
+
+### Backend
+#### Added
+- **Supported Banks Directory API (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`)**:
+  - Implemented `Bank` model in `wallet/models.py` with CBN/NIBSS codes, USSD codes, and Redis caching (`all_bank_list`).
+  - Added `seed_banks` management command and automatic database migration seeding 33 standard Nigerian commercial banks, microfinance banks, and fintechs.
+  - Implemented public, unauthenticated endpoint `GET /api/riders/banks/` (`RiderBankListView`) returning the cached list of supported Nigerian banks.
+- **LibertyPay Account Name Enquiry Integration (`wallet/integrations.py`, `riders/views.py`, `riders/serializers.py`)**:
+  - Implemented `LibertyPayAccountEnquiryService` in `wallet/integrations.py` replicating the `pulse-backend` verification pattern.
+  - Implemented `POST /api/riders/wallet/verify-account/` (`RiderVerifyAccountView`) with `VerifyAccountSerializer` to validate 10-digit NUBAN numbers and resolve destination account names.
+- **Wema CoreBanking Earnings Withdrawal Flow (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/integrations.py`)**:
+  - Implemented `WemaCoreBankingPayoutSDK` in `wallet/integrations.py` handling CoreBanking token authentication and disbursement to external bank accounts.
+  - Implemented `RiderPayoutTransaction` model in `wallet/models.py` to record disbursement status, destination bank details, references, and audit logs.
+  - Implemented `POST /api/riders/wallet/withdraw/` (`RiderWithdrawalView`) allowing independent riders (`is_independent_rider=True`) to withdraw wallet earnings.
+  - Enforced unremitted Cash on Delivery (COD) deductions: `withdrawable_balance = max(wallet.balance - pending_cod, 0)` to guarantee platform fund safety.
+  - Implemented atomic row-level locking (`select_for_update`) on `Wallet` to prevent race conditions during withdrawals.
+  - Implemented synchronous failure rollback with immediate wallet refund (`wallet.credit(...)`) and `422 Unprocessable Entity` response.
+  - Automatically updates rider's saved preferred bank details (`bank_name`, `bank_account_number`, `bank_routing_code`) on successful payout.
+- **Asynchronous Payout Reconciliation Task (`riders/tasks.py`)**:
+  - Created Celery background task `check_pending_rider_payout_status` to periodically verify pending CoreBanking disbursements, mark completed transfers as success, and issue automated wallet refunds if external transfers are rejected.
+- **Automated Test Coverage (`riders/tests/unit/test_rider_withdrawal.py`, `riders/tests/integration/test_rider_withdrawal_flow.py`)**:
+  - Added 21 automated unit and integration tests covering public bank directory access, account name enquiry, independent rider authorization, COD restrictions, atomic balance debits, successful payouts, and automated failure refunds.
+
+---
+
 # [2026-10-15] — Dispatcher Merchant & Rider Affiliation and Commission Deduplication
 
 ### Backend

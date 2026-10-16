@@ -46,6 +46,14 @@ from .serializers import (
     RiderDocumentCreateResponseSerializer,
     RiderDocumentUpdateSerializer,
     RiderDocumentUpdateResponseSerializer,
+    BankListSerializer,
+    VerifyAccountSerializer,
+    RiderWithdrawalSerializer,
+)
+from wallet.models import Bank, RiderPayoutTransaction, Wallet
+from wallet.integrations import (
+    LibertyPayAccountEnquiryService,
+    WemaCoreBankingPayoutSDK,
 )
 from orders.serializers import AssignedOrderSerializer
 from .models import (
@@ -1700,5 +1708,211 @@ class CustomerRatesRiderAPIView(APIView):
             return Response(
                 {"success": False, "errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+
+
+class RiderBankListView(APIView):
+    """
+    Public API endpoint to list all supported Nigerian banks.
+    Open/Unauthenticated as requested.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        banks = Bank.get_all_bank_list()
+        serializer = BankListSerializer(banks, many=True)
+        return service_response(
+            status="success",
+            message="Banks retrieved successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class RiderVerifyAccountView(APIView):
+    """
+    API endpoint to verify bank account number and bank code via LibertyPay Account Enquiry.
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        serializer = VerifyAccountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        account_number = serializer.validated_data["account_number"]
+        bank_code = serializer.validated_data["bank_code"]
+
+        enquiry_service = LibertyPayAccountEnquiryService()
+        result = enquiry_service.verify_account(
+            account_number=account_number, bank_code=bank_code
+        )
+
+        if not result:
+            raise ServiceException(
+                status_code=400,
+                message="Account verification failed. Please check the account number and bank code.",
+            )
+
+        return service_response(
+            status="success",
+            message="Account verified successfully.",
+            data=result,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class RiderWithdrawalView(APIView):
+    """
+    API endpoint for independent riders to withdraw earnings to an external bank account
+    via Wema CoreBanking payout.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        import uuid
+        from decimal import Decimal
+        from django.db.models import Sum
+
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(
+                status_code=404, message="Rider profile not found."
+            )
+
+        if not rider.is_independent_rider:
+            raise ServiceException(
+                status_code=403,
+                message="Only independent riders are permitted to withdraw wallet earnings.",
+            )
+
+        serializer = RiderWithdrawalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        amount = Decimal(str(serializer.validated_data["amount"]))
+        account_number = serializer.validated_data["account_number"]
+        account_name = serializer.validated_data["account_name"]
+        bank_code = serializer.validated_data["bank_code"]
+        bank_name = serializer.validated_data.get("bank_name", "")
+        narration = (
+            serializer.validated_data.get("narration")
+            or f"Earnings withdrawal by {rider.rider_id}"
+        )
+
+        # Double-entry balance verification & atomic wallet debit
+        with transaction.atomic():
+            wallet, _ = Wallet.objects.select_for_update().get_or_create(user=request.user)
+
+            # Pending unremitted COD deduction
+            pending_cod_agg = rider.cod_records.filter(status="pending").aggregate(
+                Sum("amount")
+            )["amount__sum"]
+            pending_cod = Decimal(str(pending_cod_agg or "0.00"))
+            withdrawable_balance = max(wallet.balance - pending_cod, Decimal("0.00"))
+
+            if amount > withdrawable_balance:
+                raise ServiceException(
+                    status_code=400,
+                    message=(
+                        f"Insufficient withdrawable balance. Withdrawable: ₦{withdrawable_balance:,.2f} "
+                        f"(Pending unremitted COD: ₦{pending_cod:,.2f})"
+                    ),
+                )
+
+            reference = f"WDR-{uuid.uuid4().hex[:12].upper()}"
+
+            wallet.debit(
+                amount=amount,
+                description=f"Withdrawal to {account_name} ({account_number})",
+                reference=reference,
+                metadata={
+                    "account_number": account_number,
+                    "account_name": account_name,
+                    "bank_code": bank_code,
+                    "bank_name": bank_name,
+                    "type": "rider_withdrawal",
+                },
+            )
+
+            payout = RiderPayoutTransaction.objects.create(
+                rider=rider,
+                destination_account_name=account_name,
+                destination_account_number=account_number,
+                destination_bank_code=bank_code,
+                destination_bank_name=bank_name,
+                amount=amount,
+                reference=reference,
+                narration=narration,
+                status=RiderPayoutTransaction.Status.PENDING,
+            )
+
+        # Dispatch payout to Wema CoreBanking
+        sdk = WemaCoreBankingPayoutSDK()
+        success, resp = sdk.transfer_funds(
+            amount=float(amount),
+            narration=narration,
+            account_name=account_name,
+            account_number=account_number,
+            bank_code=bank_code,
+            reference=reference,
+        )
+
+        if success:
+            payout.status = RiderPayoutTransaction.Status.SUCCESS
+            payout.corebanking_response = resp
+            payout.save(update_fields=["status", "corebanking_response", "updated_at"])
+
+            # Save rider preferred bank details for future withdrawals
+            rider.bank_name = bank_name or rider.bank_name
+            rider.bank_account_number = account_number
+            rider.bank_routing_code = bank_code
+            rider.save(update_fields=["bank_name", "bank_account_number", "bank_routing_code"])
+
+            wallet.refresh_from_db()
+
+            return service_response(
+                status="success",
+                message="Withdrawal request processed successfully.",
+                data={
+                    "reference": reference,
+                    "amount": float(amount),
+                    "account_number": account_number,
+                    "account_name": account_name,
+                    "bank_code": bank_code,
+                    "status": "success",
+                    "remaining_balance": float(wallet.balance),
+                },
+                status_code=status.HTTP_200_OK,
+            )
+        else:
+            # Immediate automated refund
+            refund_ref = f"REF-{uuid.uuid4().hex[:12].upper()}"
+            wallet.credit(
+                amount=amount,
+                description=f"Refund for failed payout {reference}",
+                reference=refund_ref,
+                metadata={
+                    "original_reference": reference,
+                    "reason": "CoreBanking payout rejected",
+                },
+            )
+            payout.status = RiderPayoutTransaction.Status.FAILED
+            payout.refunded = True
+            payout.corebanking_response = resp
+            payout.save(update_fields=["status", "refunded", "corebanking_response", "updated_at"])
+
+            err_msg = (
+                resp.get("message")
+                or resp.get("error")
+                or "Payout transfer could not be completed."
+            )
+            raise ServiceException(
+                status_code=422,
+                message=f"{err_msg} Your wallet balance has been refunded.",
             )
 

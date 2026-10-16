@@ -100,3 +100,94 @@ def publish_random_order_offer():
     except Exception as e:
         logger.error(f"Error in publish_random_order_offer: {str(e)}")
         return False
+
+
+@shared_task
+def check_pending_rider_payout_status():
+    """
+    Background task to verify pending Wema CoreBanking payout transactions.
+    Reconciles status and automatically issues a wallet refund if payout failed/reversed.
+    """
+    import uuid
+    from django.db import transaction
+    from wallet.models import RiderPayoutTransaction, Wallet
+    from wallet.integrations import WemaCoreBankingPayoutSDK
+
+    pending_payouts = RiderPayoutTransaction.objects.filter(
+        status__in=[
+            RiderPayoutTransaction.Status.PENDING,
+            RiderPayoutTransaction.Status.PROCESSING,
+        ]
+    )
+
+    if not pending_payouts.exists():
+        return "No pending payouts to verify"
+
+    sdk = WemaCoreBankingPayoutSDK()
+    processed_count = 0
+
+    for payout in pending_payouts:
+        try:
+            success, resp = sdk.verify_status(payout.reference)
+            if not success:
+                logger.warning(
+                    f"verify_status check failed or pending for ref {payout.reference}"
+                )
+                continue
+
+            transfer_status = str(
+                resp.get("status")
+                or resp.get("transfer_status")
+                or resp.get("transaction_status")
+                or ""
+            ).lower()
+
+            with transaction.atomic():
+                locked_payout = RiderPayoutTransaction.objects.select_for_update().get(
+                    id=payout.id
+                )
+                if locked_payout.status not in (
+                    RiderPayoutTransaction.Status.PENDING,
+                    RiderPayoutTransaction.Status.PROCESSING,
+                ):
+                    continue
+
+                if transfer_status in ("success", "successful", "completed"):
+                    locked_payout.status = RiderPayoutTransaction.Status.SUCCESS
+                    locked_payout.corebanking_response = resp
+                    locked_payout.save(
+                        update_fields=["status", "corebanking_response", "updated_at"]
+                    )
+                    processed_count += 1
+                elif transfer_status in ("failed", "rejected", "reversed") and not locked_payout.refunded:
+                    wallet = Wallet.objects.select_for_update().get(
+                        user=locked_payout.rider.user
+                    )
+                    refund_ref = f"REF-{uuid.uuid4().hex[:12].upper()}"
+                    wallet.credit(
+                        amount=locked_payout.amount,
+                        description=f"Refund for failed payout {locked_payout.reference}",
+                        reference=refund_ref,
+                        metadata={
+                            "original_reference": locked_payout.reference,
+                            "reason": f"CoreBanking status: {transfer_status}",
+                        },
+                    )
+                    locked_payout.status = RiderPayoutTransaction.Status.FAILED
+                    locked_payout.refunded = True
+                    locked_payout.corebanking_response = resp
+                    locked_payout.save(
+                        update_fields=[
+                            "status",
+                            "refunded",
+                            "corebanking_response",
+                            "updated_at",
+                        ]
+                    )
+                    processed_count += 1
+        except Exception as e:
+            logger.error(
+                f"Error verifying payout status for {payout.reference}: {e}"
+            )
+
+    return f"Processed {processed_count} pending payouts"
