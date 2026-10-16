@@ -110,7 +110,11 @@ def check_pending_rider_payout_status():
     """
     import uuid
     from django.db import transaction
-    from wallet.models import RiderPayoutTransaction, Wallet
+    from wallet.models import (
+        RiderPayoutTransaction,
+        Wallet,
+        IndependentRiderPayoutWalletPool,
+    )
     from wallet.integrations import WemaCoreBankingPayoutSDK
 
     pending_payouts = RiderPayoutTransaction.objects.filter(
@@ -160,6 +164,7 @@ def check_pending_rider_payout_status():
                     )
                     processed_count += 1
                 elif transfer_status in ("failed", "rejected", "reversed") and not locked_payout.refunded:
+                    # 1. Refund rider wallet
                     wallet = Wallet.objects.select_for_update().get(
                         user=locked_payout.rider.user
                     )
@@ -173,6 +178,25 @@ def check_pending_rider_payout_status():
                             "reason": f"CoreBanking status: {transfer_status}",
                         },
                     )
+
+                    # 2. Refund payout pool
+                    target_pool = (
+                        locked_payout.pool
+                        or IndependentRiderPayoutWalletPool.get_default_pool()
+                    )
+                    pool_refund_ref = f"POOL-REF-{uuid.uuid4().hex[:12].upper()}"
+                    target_pool.credit(
+                        amount=locked_payout.amount,
+                        reference=pool_refund_ref,
+                        rider=locked_payout.rider,
+                        payout_transaction=locked_payout,
+                        description=f"Refund for failed payout {locked_payout.reference}",
+                        metadata={
+                            "original_reference": locked_payout.reference,
+                            "reason": f"CoreBanking status: {transfer_status}",
+                        },
+                    )
+
                     locked_payout.status = RiderPayoutTransaction.Status.FAILED
                     locked_payout.refunded = True
                     locked_payout.corebanking_response = resp

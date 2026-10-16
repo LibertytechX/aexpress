@@ -8,7 +8,13 @@ from dispatcher.models import Rider
 from authentication.models import User
 from orders.models import Order, Vehicle
 from riders.models import RiderCodRecord
-from wallet.models import Wallet, Bank, RiderPayoutTransaction
+from wallet.models import (
+    Wallet,
+    Bank,
+    RiderPayoutTransaction,
+    IndependentRiderPayoutWalletPool,
+    IndependentRiderPayoutWalletPoolTransaction,
+)
 from wallet.integrations import WemaCoreBankingPayoutSDK
 
 
@@ -19,6 +25,10 @@ def api_client():
 
 @pytest.fixture
 def independent_rider_setup(db):
+    pool = IndependentRiderPayoutWalletPool.get_default_pool()
+    pool.balance = Decimal("1000000.00")
+    pool.save(update_fields=["balance", "updated_at"])
+
     user = User.objects.create_user(
         phone="08022223333",
         password="password123",
@@ -234,12 +244,27 @@ class TestRiderWithdrawalEndpoint:
         wallet.refresh_from_db()
         assert wallet.balance == Decimal("7000.00")
 
+        # Verify pool debited
+        pool = IndependentRiderPayoutWalletPool.get_default_pool()
+        assert pool.balance == Decimal("997000.00")
+
+        # Verify pool debit transaction created
+        pool_txn = IndependentRiderPayoutWalletPoolTransaction.objects.filter(
+            rider=rider, transaction_type="debit"
+        ).first()
+        assert pool_txn is not None
+        assert pool_txn.amount == Decimal("3000.00")
+        assert pool_txn.balance_before == Decimal("1000000.00")
+        assert pool_txn.balance_after == Decimal("997000.00")
+        assert pool_txn.status == "completed"
+
         # Verify RiderPayoutTransaction record created
         payout = RiderPayoutTransaction.objects.filter(rider=rider).first()
         assert payout is not None
         assert payout.amount == Decimal("3000.00")
         assert payout.status == RiderPayoutTransaction.Status.SUCCESS
         assert payout.destination_account_number == "0123456789"
+        assert payout.pool == pool
 
         # Verify rider saved preferred bank details
         rider.refresh_from_db()
@@ -276,8 +301,55 @@ class TestRiderWithdrawalEndpoint:
         wallet.refresh_from_db()
         assert wallet.balance == Decimal("10000.00")
 
+        # Payout pool must be refunded back to original balance (1000000 - 2000 + 2000 refund)
+        pool = IndependentRiderPayoutWalletPool.get_default_pool()
+        assert pool.balance == Decimal("1000000.00")
+
+        # Verify refund credit transaction created on pool
+        pool_refund_txn = IndependentRiderPayoutWalletPoolTransaction.objects.filter(
+            rider=rider, transaction_type="credit"
+        ).first()
+        assert pool_refund_txn is not None
+        assert pool_refund_txn.amount == Decimal("2000.00")
+        assert pool_refund_txn.balance_before == Decimal("998000.00")
+        assert pool_refund_txn.balance_after == Decimal("1000000.00")
+
         # Payout record marked as failed and refunded
         payout = RiderPayoutTransaction.objects.filter(rider=rider).first()
         assert payout is not None
         assert payout.status == RiderPayoutTransaction.Status.FAILED
         assert payout.refunded is True
+
+    def test_insufficient_payout_pool_funds_blocks_withdrawal(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        # Set pool balance lower than withdrawal amount
+        pool = IndependentRiderPayoutWalletPool.get_default_pool()
+        pool.balance = Decimal("500.00")
+        pool.save(update_fields=["balance", "updated_at"])
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "2000.00",
+            "account_number": "0123456789",
+            "account_name": "Indie Rider",
+            "bank_code": "044",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Insufficient funds in payout pool" in str(response.data.get("message"))
+
+        # Both wallet and pool balances must remain untouched
+        wallet.refresh_from_db()
+        assert wallet.balance == Decimal("10000.00")
+        pool.refresh_from_db()
+        assert pool.balance == Decimal("500.00")
+
+        # No payout record should have been created
+        assert not RiderPayoutTransaction.objects.filter(rider=rider).exists()
+        assert not IndependentRiderPayoutWalletPoolTransaction.objects.filter(rider=rider).exists()
+
