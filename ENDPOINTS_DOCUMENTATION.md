@@ -1936,8 +1936,11 @@ Request Body:
     "account_name": "ADE BABATUNDE",
     "bank_code": "058",
     "bank_name": "Guaranty Trust Bank",
-    "narration": "Weekly earnings payout"
+    "narration": "Weekly earnings payout",
+    "is_sandbox": false
   }
+
+*Sandbox Testing: Pass "is_sandbox": true or "mode": "SANDBOX" in the request body (or ?sandbox=true query parameter) to simulate or run sandbox payouts. Generates WDR-SBX- references and auto-seeds test pool funds if empty.*
 
 Response (200 OK):
   {
@@ -1950,7 +1953,9 @@ Response (200 OK):
       "account_name": "ADE BABATUNDE",
       "bank_code": "058",
       "status": "success",
-      "remaining_balance": 15420.50
+      "remaining_balance": 15420.50,
+      "is_sandbox": false,
+      "mode": "LIVE"
     },
     "status_code": 200
   }

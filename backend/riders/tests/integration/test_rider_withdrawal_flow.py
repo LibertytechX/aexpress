@@ -353,3 +353,91 @@ class TestRiderWithdrawalEndpoint:
         assert not RiderPayoutTransaction.objects.filter(rider=rider).exists()
         assert not IndependentRiderPayoutWalletPoolTransaction.objects.filter(rider=rider).exists()
 
+    def test_sandbox_withdrawal_flow_with_payload_flag(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "2500.00",
+            "account_number": "0123456789",
+            "account_name": "Sandbox Rider",
+            "bank_code": "044",
+            "bank_name": "Access Bank",
+            "is_sandbox": True,
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.data
+        assert data["status"] == "success"
+        assert "[Sandbox]" in data["message"]
+        assert data["data"]["is_sandbox"] is True
+        assert data["data"]["mode"] == "SANDBOX"
+        assert data["data"]["reference"].startswith("WDR-SBX-")
+        assert data["data"]["amount"] == 2500.0
+        assert data["data"]["remaining_balance"] == 7500.0
+
+        # Verify wallet debited
+        wallet.refresh_from_db()
+        assert wallet.balance == Decimal("7500.00")
+
+        # Verify payout record
+        payout = RiderPayoutTransaction.objects.filter(rider=rider).first()
+        assert payout is not None
+        assert payout.is_sandbox is True
+        assert payout.mode == "SANDBOX"
+        assert payout.status == RiderPayoutTransaction.Status.SUCCESS
+        assert payout.reference.startswith("WDR-SBX-")
+
+    def test_sandbox_withdrawal_auto_funds_empty_pool(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        # Empty the pool completely
+        pool = IndependentRiderPayoutWalletPool.get_default_pool()
+        pool.balance = Decimal("0.00")
+        pool.save(update_fields=["balance", "updated_at"])
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Sandbox Rider",
+            "bank_code": "044",
+            "mode": "SANDBOX",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["data"]["is_sandbox"] is True
+
+        # Pool was auto-funded with 1,000,000 then debited 1,000
+        pool.refresh_from_db()
+        assert pool.balance == Decimal("999000.00")
+
+    def test_sandbox_withdrawal_via_query_param(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = f"{reverse('riders:rider-wallet-withdraw')}?sandbox=true"
+        payload = {
+            "amount": "1500.00",
+            "account_number": "0123456789",
+            "account_name": "Query Param Rider",
+            "bank_code": "044",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["data"]["is_sandbox"] is True
+        assert response.data["data"]["mode"] == "SANDBOX"
+        assert response.data["data"]["reference"].startswith("WDR-SBX-")
+
+

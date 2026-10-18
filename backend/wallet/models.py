@@ -922,6 +922,17 @@ class RiderPayoutTransaction(models.Model):
         max_digits=12, decimal_places=2, default=Decimal("0.00")
     )
     refunded = models.BooleanField(default=False)
+    is_sandbox = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Designates whether this payout was processed in sandbox mode.",
+    )
+    mode = models.CharField(
+        max_length=20,
+        default="LIVE",
+        db_index=True,
+        help_text="Payout processing mode (LIVE or SANDBOX).",
+    )
     corebanking_response = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)

@@ -307,6 +307,10 @@ COREBANKING_SOURCE_ACCOUNT = os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
 COREBANKING_WEMA_SOURCE_ACCOUNT = os.getenv(
     "COREBANKING_WEMA_SOURCE_ACCOUNT", os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
 )
+COREBANKING_MODE = os.getenv("COREBANKING_MODE", "LIVE")
+COREBANKING_SIMULATE_SANDBOX = os.getenv(
+    "COREBANKING_SIMULATE_SANDBOX", "True" if DEBUG else "False"
+).lower() in ("true", "1", "t")
 LIBERTYPAY_ACCOUNT_ENQUIRY_URL = os.getenv(
     "LIBERTYPAY_ACCOUNT_ENQUIRY_URL",
     "https://management.libertypayng.com/api/v1/sales/account_name_enquiry/",
