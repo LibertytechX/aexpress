@@ -94,6 +94,45 @@ class TestWithdrawalSerializers:
         assert serializer.is_valid() is False
         assert "account_name" in serializer.errors
 
+    def test_rider_withdrawal_serializer_sandbox_flag(self):
+        data = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Jane Doe",
+            "bank_code": "044",
+            "is_sandbox": True,
+        }
+        serializer = RiderWithdrawalSerializer(data=data)
+        assert serializer.is_valid()
+        assert serializer.validated_data["is_sandbox"] is True
+        assert serializer.validated_data["mode"] == "SANDBOX"
+
+    def test_rider_withdrawal_serializer_sandbox_mode(self):
+        data = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Jane Doe",
+            "bank_code": "044",
+            "mode": "SANDBOX",
+        }
+        serializer = RiderWithdrawalSerializer(data=data)
+        assert serializer.is_valid()
+        assert serializer.validated_data["is_sandbox"] is True
+        assert serializer.validated_data["mode"] == "SANDBOX"
+
+    def test_rider_withdrawal_serializer_live_mode(self):
+        data = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Jane Doe",
+            "bank_code": "044",
+            "is_sandbox": False,
+        }
+        serializer = RiderWithdrawalSerializer(data=data)
+        assert serializer.is_valid()
+        assert serializer.validated_data["is_sandbox"] is False
+        assert serializer.validated_data["mode"] == "LIVE"
+
 
 @pytest.mark.django_db
 class TestLibertyPayAccountEnquiryService:
@@ -167,6 +206,64 @@ class TestWemaCoreBankingPayoutSDK:
 
         assert success is True
         assert data["reference"] == "WDR-123456"
+
+    def test_transfer_funds_sandbox_simulation(self):
+        sdk = WemaCoreBankingPayoutSDK(mode="SANDBOX")
+        success, data = sdk.transfer_funds(
+            amount=500.0,
+            narration="Sandbox payout",
+            account_name="Jane Rider",
+            account_number="0123456789",
+            bank_code="044",
+            reference="WDR-SBX-12345",
+        )
+
+        assert success is True
+        assert data["mode"] == "SANDBOX"
+        assert data["simulated"] is True
+        assert data["reference"] == "WDR-SBX-12345"
+
+    @patch("requests.post")
+    def test_transfer_funds_sandbox_fallback_on_gateway_error(self, mock_post):
+        # When simulate_sandbox is disabled, external call is attempted; if remote returns 403, it falls back
+        mock_login_resp = MagicMock()
+        mock_login_resp.status_code = 200
+        mock_login_resp.json.return_value = {"data": {"access": "fake-token"}}
+
+        mock_transfer_resp = MagicMock()
+        mock_transfer_resp.status_code = 403
+        mock_transfer_resp.json.return_value = {
+            "status": "failure",
+            "errors": {"message": "IP address is not whitelisted."},
+        }
+
+        mock_post.side_effect = [mock_login_resp, mock_transfer_resp]
+
+        with patch("django.conf.settings.COREBANKING_SIMULATE_SANDBOX", False):
+            sdk = WemaCoreBankingPayoutSDK(mode="SANDBOX")
+            sdk.email = "test@libertypay.com"
+            sdk.password = "password"
+
+            success, data = sdk.transfer_funds(
+                amount=500.0,
+                narration="Sandbox test",
+                account_name="Jane Rider",
+                account_number="0123456789",
+                bank_code="044",
+                reference="WDR-SBX-67890",
+            )
+
+            assert success is True
+            assert data["mode"] == "SANDBOX"
+            assert data["simulated"] is True
+            assert data["reference"] == "WDR-SBX-67890"
+
+    def test_verify_status_sandbox(self):
+        sdk = WemaCoreBankingPayoutSDK(mode="SANDBOX")
+        success, data = sdk.verify_status("WDR-SBX-12345")
+        assert success is True
+        assert data["mode"] == "SANDBOX"
+        assert data["simulated"] is True
 
 
 @pytest.mark.django_db

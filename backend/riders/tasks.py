@@ -127,11 +127,12 @@ def check_pending_rider_payout_status():
     if not pending_payouts.exists():
         return "No pending payouts to verify"
 
-    sdk = WemaCoreBankingPayoutSDK()
     processed_count = 0
 
     for payout in pending_payouts:
         try:
+            payout_mode = getattr(payout, "mode", None) or ("SANDBOX" if getattr(payout, "is_sandbox", False) else "LIVE")
+            sdk = WemaCoreBankingPayoutSDK(mode=payout_mode)
             success, resp = sdk.verify_status(payout.reference)
             if not success:
                 logger.warning(

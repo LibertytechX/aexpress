@@ -2,6 +2,7 @@ from sparky_utils.exceptions import ServiceException
 import re
 
 from rest_framework import serializers
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.utils import timezone
@@ -1043,6 +1044,7 @@ class VerifyAccountSerializer(serializers.Serializer):
 class RiderWithdrawalSerializer(serializers.Serializer):
     """
     Serializer for rider wallet earnings withdrawal request.
+    Supports optional sandbox execution for testing and simulation.
     """
 
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
@@ -1051,6 +1053,8 @@ class RiderWithdrawalSerializer(serializers.Serializer):
     bank_code = serializers.CharField(required=True)
     bank_name = serializers.CharField(required=False, allow_blank=True, default="")
     narration = serializers.CharField(required=False, allow_blank=True, default="")
+    is_sandbox = serializers.BooleanField(required=False, default=None)
+    mode = serializers.CharField(required=False, allow_blank=True, default=None)
 
     def validate(self, attrs):
         from decimal import Decimal
@@ -1089,4 +1093,20 @@ class RiderWithdrawalSerializer(serializers.Serializer):
         attrs["account_number"] = account_number
         attrs["account_name"] = account_name
         attrs["bank_code"] = bank_code
+
+        # Determine sandbox mode: explicit is_sandbox, explicit mode, or system settings default
+        is_sandbox_arg = attrs.get("is_sandbox")
+        mode_arg = (attrs.get("mode") or "").strip().upper()
+
+        if is_sandbox_arg is True or mode_arg == "SANDBOX":
+            attrs["mode"] = "SANDBOX"
+            attrs["is_sandbox"] = True
+        elif is_sandbox_arg is False or mode_arg == "LIVE":
+            attrs["mode"] = "LIVE"
+            attrs["is_sandbox"] = False
+        else:
+            default_mode = getattr(settings, "COREBANKING_MODE", "LIVE").upper()
+            attrs["mode"] = default_mode
+            attrs["is_sandbox"] = (default_mode == "SANDBOX")
+
         return attrs

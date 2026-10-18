@@ -307,6 +307,10 @@ COREBANKING_SOURCE_ACCOUNT = os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
 COREBANKING_WEMA_SOURCE_ACCOUNT = os.getenv(
     "COREBANKING_WEMA_SOURCE_ACCOUNT", os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
 )
+COREBANKING_MODE = os.getenv("COREBANKING_MODE", "LIVE")
+COREBANKING_SIMULATE_SANDBOX = os.getenv(
+    "COREBANKING_SIMULATE_SANDBOX", "True" if DEBUG else "False"
+).lower() in ("true", "1", "t")
 LIBERTYPAY_ACCOUNT_ENQUIRY_URL = os.getenv(
     "LIBERTYPAY_ACCOUNT_ENQUIRY_URL",
     "https://management.libertypayng.com/api/v1/sales/account_name_enquiry/",
@@ -336,6 +340,7 @@ MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
+WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")
 
 # LibertyPay API Configuration
 LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")

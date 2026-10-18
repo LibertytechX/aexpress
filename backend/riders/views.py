@@ -14,7 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db.models import Q
 from django.db import transaction
-
+from django.conf import settings
 from wallet.corebanking_service import generate_one_time_account
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
@@ -220,7 +220,9 @@ class OrderOfferAcceptView(APIView):
 
             if rider.hub:
                 try:
-                    zone_hubs = offer.zone.relay_nodes.all().values_list("id", flat=True)
+                    zone_hubs = offer.zone.relay_nodes.all().values_list(
+                        "id", flat=True
+                    )
                     if rider.hub.id not in zone_hubs:
                         return Response(
                             {"success": False, "message": "Rider is not in the zone."},
@@ -229,13 +231,19 @@ class OrderOfferAcceptView(APIView):
                 except Exception as exc:
                     logger.warning(f"Error getting rider hub or zone hubs: {exc}")
                     return Response(
-                        {"success": False, "message": "Error getting rider hub or zone hubs."},
+                        {
+                            "success": False,
+                            "message": "Error getting rider hub or zone hubs.",
+                        },
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     )
 
             if not rider.hub and not rider.home_zone:
                 return Response(
-                    {"success": False, "message": "Rider has no assigned hub or home zone."},
+                    {
+                        "success": False,
+                        "message": "Rider has no assigned hub or home zone.",
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
@@ -850,7 +858,8 @@ class RiderToggleDutyView(APIView):
             if request_status in ["on_duty", "online"]:
                 if not rider.is_authorized or (
                     rider.is_independent_rider
-                    and getattr(rider, "approval_status", "") != Rider.ApprovalStatus.APPROVED
+                    and getattr(rider, "approval_status", "")
+                    != Rider.ApprovalStatus.APPROVED
                 ):
                     return Response(
                         {
@@ -1498,7 +1507,11 @@ class RiderDocumentListCreateView(APIView):
         serializer = RiderDocumentCreateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
-                {"success": False, "message": "Invalid input.", "errors": serializer.errors},
+                {
+                    "success": False,
+                    "message": "Invalid input.",
+                    "errors": serializer.errors,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1600,7 +1613,11 @@ class RiderDocumentDetailView(APIView):
         serializer = RiderDocumentUpdateSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
-                {"success": False, "message": "Invalid input.", "errors": serializer.errors},
+                {
+                    "success": False,
+                    "message": "Invalid input.",
+                    "errors": serializer.errors,
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1658,7 +1675,11 @@ class RiderDocumentDetailView(APIView):
 
         document.delete()
         return Response(
-            {"success": True, "message": "Document deleted successfully.", "data": None},
+            {
+                "success": True,
+                "message": "Document deleted successfully.",
+                "data": None,
+            },
             status=status.HTTP_200_OK,
         )
 
@@ -1677,7 +1698,7 @@ class CustomerRatesRiderAPIView(APIView):
             comment = serializer.validated_data.get("comment", "")
             rating_value = serializer.validated_data["rating"]
             rider_code = serializer.validated_data["rider_code"]
-        
+
             try:
                 rider = Rider.objects.get(rider_id=rider_code)
 
@@ -1686,8 +1707,7 @@ class CustomerRatesRiderAPIView(APIView):
                     {"success": False, "message": "Rider not found."},
                     status=status.HTTP_404_NOT_FOUND,
                 )
-            
-                
+
             customer_rating = RiderRating.objects.create(
                 rider=rider,
                 customer=request.user,
@@ -1787,9 +1807,7 @@ class RiderWithdrawalView(APIView):
 
         rider = getattr(request.user, "rider_profile", None)
         if not rider:
-            raise ServiceException(
-                status_code=404, message="Rider profile not found."
-            )
+            raise ServiceException(status_code=404, message="Rider profile not found.")
 
         if not rider.is_independent_rider:
             raise ServiceException(
@@ -1797,7 +1815,24 @@ class RiderWithdrawalView(APIView):
                 message="Only independent riders are permitted to withdraw wallet earnings.",
             )
 
-        serializer = RiderWithdrawalSerializer(data=request.data)
+        request_data = (
+            request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        )
+        if "is_sandbox" not in request_data and "mode" not in request_data:
+            query_sandbox = request.query_params.get(
+                "sandbox"
+            ) or request.query_params.get("is_sandbox")
+            query_mode = request.query_params.get("mode")
+            if query_sandbox is not None:
+                request_data["is_sandbox"] = str(query_sandbox).lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                )
+            elif query_mode:
+                request_data["mode"] = query_mode
+
+        serializer = RiderWithdrawalSerializer(data=request_data)
         serializer.is_valid(raise_exception=True)
 
         amount = Decimal(str(serializer.validated_data["amount"]))
@@ -1809,9 +1844,18 @@ class RiderWithdrawalView(APIView):
             serializer.validated_data.get("narration")
             or f"Earnings withdrawal by {rider.rider_id}"
         )
+        service_mode = settings.WIHDRAWAL_MODE
+        mode = "SANDBOX"
+        is_sandbox = True
+        if service_mode == "LIVE":
+            mode = "LIVE"
+            is_sandbox = False
 
         # Double-entry balance verification & atomic wallet and pool debit
-        reference = f"WDR-{uuid.uuid4().hex[:12].upper()}"
+        ref_prefix = "WDR-SBX" if is_sandbox else "WDR"
+        reference = (
+            f"{ref_prefix}-{uuid.uuid4().hex[:10 if is_sandbox else 12].upper()}"
+        )
 
         with transaction.atomic():
             # 1. Check Independent Rider Payout Wallet Pool funds first
@@ -1822,7 +1866,19 @@ class RiderWithdrawalView(APIView):
             )
             if not pool:
                 pool = IndependentRiderPayoutWalletPool.get_default_pool()
-                pool = IndependentRiderPayoutWalletPool.objects.select_for_update().get(id=pool.id)
+                pool = IndependentRiderPayoutWalletPool.objects.select_for_update().get(
+                    id=pool.id
+                )
+
+            # In sandbox mode, ensure the company payout pool has sufficient test liquidity
+            if is_sandbox and pool.balance < amount:
+                pool.credit(
+                    amount=Decimal("1000000.00"),
+                    description="Sandbox automatic liquidity provision for payout testing",
+                    reference=f"POOL-SBX-FUND-{uuid.uuid4().hex[:8].upper()}",
+                    metadata={"sandbox": True, "auto_funded": True},
+                )
+                pool.refresh_from_db()
 
             if pool.balance < amount:
                 raise ServiceException(
@@ -1831,7 +1887,9 @@ class RiderWithdrawalView(APIView):
                 )
 
             # 2. Check rider's withdrawable balance (pending unremitted COD deduction)
-            wallet, _ = Wallet.objects.select_for_update().get_or_create(user=request.user)
+            wallet, _ = Wallet.objects.select_for_update().get_or_create(
+                user=request.user
+            )
 
             pending_cod_agg = rider.cod_records.filter(status="pending").aggregate(
                 Sum("amount")
@@ -1860,6 +1918,8 @@ class RiderWithdrawalView(APIView):
                 reference=reference,
                 narration=narration,
                 status=RiderPayoutTransaction.Status.PENDING,
+                mode=mode,
+                is_sandbox=is_sandbox,
             )
 
             # 4. Debit the payout pool and record pool debit transaction
@@ -1868,7 +1928,7 @@ class RiderWithdrawalView(APIView):
                 reference=f"POOL-{reference}",
                 rider=rider,
                 payout_transaction=payout,
-                description=f"Payout disbursement to {account_name} ({account_number})",
+                description=f"Payout disbursement to {account_name} ({account_number}){' [Sandbox]' if is_sandbox else ''}",
                 metadata={
                     "withdrawal_reference": reference,
                     "account_number": account_number,
@@ -1876,13 +1936,15 @@ class RiderWithdrawalView(APIView):
                     "bank_code": bank_code,
                     "bank_name": bank_name,
                     "type": "rider_withdrawal_pool_debit",
+                    "mode": mode,
+                    "is_sandbox": is_sandbox,
                 },
             )
 
             # 5. Debit the rider wallet and record wallet debit transaction
             wallet.debit(
                 amount=amount,
-                description=f"Withdrawal to {account_name} ({account_number})",
+                description=f"Withdrawal to {account_name} ({account_number}){' [Sandbox]' if is_sandbox else ''}",
                 reference=reference,
                 metadata={
                     "account_number": account_number,
@@ -1890,12 +1952,14 @@ class RiderWithdrawalView(APIView):
                     "bank_code": bank_code,
                     "bank_name": bank_name,
                     "type": "rider_withdrawal",
+                    "mode": mode,
+                    "is_sandbox": is_sandbox,
                 },
             )
 
         # Dispatch payout to Wema CoreBanking
         try:
-            sdk = WemaCoreBankingPayoutSDK()
+            sdk = WemaCoreBankingPayoutSDK(mode=mode)
             success, resp = sdk.transfer_funds(
                 amount=float(amount),
                 narration=narration,
@@ -1905,9 +1969,14 @@ class RiderWithdrawalView(APIView):
                 reference=reference,
             )
         except Exception as exc:
-            logger.error(f"Unexpected exception during CoreBanking payout transfer: {exc}")
+            logger.error(
+                f"Unexpected exception during CoreBanking payout transfer: {exc}"
+            )
             success = False
-            resp = {"error": str(exc), "message": "Payout transfer encountered an unexpected connection error."}
+            resp = {
+                "error": str(exc),
+                "message": "Payout transfer encountered an unexpected connection error.",
+            }
 
         if success:
             payout.status = RiderPayoutTransaction.Status.SUCCESS
@@ -1918,13 +1987,19 @@ class RiderWithdrawalView(APIView):
             rider.bank_name = bank_name or rider.bank_name
             rider.bank_account_number = account_number
             rider.bank_routing_code = bank_code
-            rider.save(update_fields=["bank_name", "bank_account_number", "bank_routing_code"])
+            rider.save(
+                update_fields=["bank_name", "bank_account_number", "bank_routing_code"]
+            )
 
             wallet.refresh_from_db()
 
             return service_response(
                 status="success",
-                message="Withdrawal request processed successfully.",
+                message=(
+                    "Withdrawal request processed successfully."
+                    if not is_sandbox
+                    else "[Sandbox] Withdrawal request processed successfully."
+                ),
                 data={
                     "reference": reference,
                     "amount": float(amount),
@@ -1933,6 +2008,8 @@ class RiderWithdrawalView(APIView):
                     "bank_code": bank_code,
                     "status": "success",
                     "remaining_balance": float(wallet.balance),
+                    "is_sandbox": is_sandbox,
+                    "mode": mode,
                 },
                 status_code=status.HTTP_200_OK,
             )
@@ -1948,12 +2025,16 @@ class RiderWithdrawalView(APIView):
                     metadata={
                         "original_reference": reference,
                         "reason": "CoreBanking payout rejected",
+                        "mode": mode,
+                        "is_sandbox": is_sandbox,
                     },
                 )
 
                 # 2. Refund payout pool
                 pool_refund_ref = f"POOL-REF-{uuid.uuid4().hex[:12].upper()}"
-                target_pool = payout.pool or IndependentRiderPayoutWalletPool.get_default_pool()
+                target_pool = (
+                    payout.pool or IndependentRiderPayoutWalletPool.get_default_pool()
+                )
                 target_pool.credit(
                     amount=amount,
                     reference=pool_refund_ref,
@@ -1963,13 +2044,22 @@ class RiderWithdrawalView(APIView):
                     metadata={
                         "original_reference": reference,
                         "reason": "CoreBanking payout rejected",
+                        "mode": mode,
+                        "is_sandbox": is_sandbox,
                     },
                 )
 
                 payout.status = RiderPayoutTransaction.Status.FAILED
                 payout.refunded = True
                 payout.corebanking_response = resp
-                payout.save(update_fields=["status", "refunded", "corebanking_response", "updated_at"])
+                payout.save(
+                    update_fields=[
+                        "status",
+                        "refunded",
+                        "corebanking_response",
+                        "updated_at",
+                    ]
+                )
 
             err_msg = (
                 resp.get("message")
@@ -1980,4 +2070,3 @@ class RiderWithdrawalView(APIView):
                 status_code=422,
                 message=f"{err_msg} Your wallet balance has been refunded.",
             )
-

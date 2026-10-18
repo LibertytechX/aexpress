@@ -610,9 +610,11 @@ class RiderPayoutTransactionAdmin(admin.ModelAdmin):
         "destination_account_name",
         "status",
         "refunded",
+        "mode",
+        "is_sandbox",
         "created_at",
     ]
-    list_filter = ["status", "refunded", "created_at"]
+    list_filter = ["status", "refunded", "is_sandbox", "mode", "created_at"]
     search_fields = [
         "reference",
         "destination_account_number",
@@ -628,6 +630,8 @@ class RiderPayoutTransactionAdmin(admin.ModelAdmin):
         "amount",
         "charges",
         "refunded",
+        "is_sandbox",
+        "mode",
         "corebanking_response",
         "created_at",
         "updated_at",

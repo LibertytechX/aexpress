@@ -276,9 +276,11 @@
   "account_name": "ADE BABATUNDE",
   "bank_code": "044",
   "bank_name": "Access Bank",
-  "narration": "Payout for deliveries"
+  "narration": "Payout for deliveries",
+  "is_sandbox": false
 }
 ```
+> **Sandbox Testing:** Pass `"is_sandbox": true` or `"mode": "SANDBOX"` in the request body (or add `?sandbox=true` query parameter) to trigger sandbox withdrawal. In sandbox mode, reference IDs use the `WDR-SBX-` prefix, CoreBanking payouts are simulated/tested without moving live funds, and test pool liquidity is automatically provisioned if the development payout pool has insufficient funds.
 
 **Success Response (200 OK):**
 ```json
@@ -292,7 +294,9 @@
     "account_name": "ADE BABATUNDE",
     "bank_code": "044",
     "status": "success",
-    "remaining_balance": 15000.0
+    "remaining_balance": 15000.0,
+    "is_sandbox": false,
+    "mode": "LIVE"
   }
 }
 ```
