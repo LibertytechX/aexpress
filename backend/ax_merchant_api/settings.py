@@ -340,6 +340,7 @@ MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
+WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")
 
 # LibertyPay API Configuration
 LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")

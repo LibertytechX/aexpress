@@ -14,7 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from django.db.models import Q
 from django.db import transaction
-
+from django.conf import settings
 from wallet.corebanking_service import generate_one_time_account
 from sparky_utils.response import service_response
 from sparky_utils.advice import exception_advice
@@ -1815,12 +1815,20 @@ class RiderWithdrawalView(APIView):
                 message="Only independent riders are permitted to withdraw wallet earnings.",
             )
 
-        request_data = request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        request_data = (
+            request.data.copy() if hasattr(request.data, "copy") else dict(request.data)
+        )
         if "is_sandbox" not in request_data and "mode" not in request_data:
-            query_sandbox = request.query_params.get("sandbox") or request.query_params.get("is_sandbox")
+            query_sandbox = request.query_params.get(
+                "sandbox"
+            ) or request.query_params.get("is_sandbox")
             query_mode = request.query_params.get("mode")
             if query_sandbox is not None:
-                request_data["is_sandbox"] = str(query_sandbox).lower() in ("true", "1", "yes")
+                request_data["is_sandbox"] = str(query_sandbox).lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                )
             elif query_mode:
                 request_data["mode"] = query_mode
 
@@ -1836,12 +1844,18 @@ class RiderWithdrawalView(APIView):
             serializer.validated_data.get("narration")
             or f"Earnings withdrawal by {rider.rider_id}"
         )
-        mode = serializer.validated_data.get("mode", "LIVE")
-        is_sandbox = serializer.validated_data.get("is_sandbox", False)
+        service_mode = settings.WIHDRAWAL_MODE
+        mode = "SANDBOX"
+        is_sandbox = True
+        if service_mode == "LIVE":
+            mode = "LIVE"
+            is_sandbox = False
 
         # Double-entry balance verification & atomic wallet and pool debit
         ref_prefix = "WDR-SBX" if is_sandbox else "WDR"
-        reference = f"{ref_prefix}-{uuid.uuid4().hex[:10 if is_sandbox else 12].upper()}"
+        reference = (
+            f"{ref_prefix}-{uuid.uuid4().hex[:10 if is_sandbox else 12].upper()}"
+        )
 
         with transaction.atomic():
             # 1. Check Independent Rider Payout Wallet Pool funds first
@@ -1981,7 +1995,11 @@ class RiderWithdrawalView(APIView):
 
             return service_response(
                 status="success",
-                message="Withdrawal request processed successfully." if not is_sandbox else "[Sandbox] Withdrawal request processed successfully.",
+                message=(
+                    "Withdrawal request processed successfully."
+                    if not is_sandbox
+                    else "[Sandbox] Withdrawal request processed successfully."
+                ),
                 data={
                     "reference": reference,
                     "amount": float(amount),
