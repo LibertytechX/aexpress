@@ -3,6 +3,13 @@ All notable changes to the AXpress project are documented in this file.
 # [2026-10-16] — Independent Rider Bank Directory, Account Enquiry & Wema CoreBanking Withdrawal
 
 ### Backend
+#### Fixed
+- **Dispatcher Creation Integrity Error (`dispatcher/serializers.py`, `dispatcher/signals.py`)**:
+  - Resolved `IntegrityError: duplicate key value violates unique constraint "dispatcher_profiles_user_id_key"` when creating dispatchers via `POST /api/dispatch/dispatchers/`.
+  - Replaced duplicate `DispatcherProfile.objects.create` invocation in `DispatcherCreateSerializer.create` with atomic `get_or_create` and dynamic role updates, preventing duplicate profile creation when Django's `post_save` User signal triggers.
+  - Hardened `create_user_profile` signal handler to use `get_or_create` for both `DispatcherProfile` and `Rider` profile allocations.
+  - Added unit test suite `test_dispatcher_creation_serializer.py` (5 tests) and integration test suite `test_dispatcher_creation_api.py` (5 tests).
+
 #### Added
 - **Supported Banks Directory API & Admin Import/Export (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/admin.py`)**:
   - Implemented `Bank` model in `wallet/models.py` with CBN/NIBSS codes, USSD codes, and Redis caching (`all_bank_list`).
