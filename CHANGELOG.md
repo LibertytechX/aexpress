@@ -5,12 +5,12 @@ All notable changes to the AXpress project are documented in this file.
 ### Backend
 #### Added
 - **Sandbox Mode for Rider Wallet Withdrawals (`riders/views.py`, `riders/serializers.py`, `wallet/integrations.py`, `wallet/models.py`)**:
-  - Enabled sandbox withdrawal execution via `is_sandbox: true` or `mode: "SANDBOX"` in request payload, `?sandbox=true` query parameter, or system settings fallback (`settings.COREBANKING_MODE`).
-  - Added `COREBANKING_MODE` and `COREBANKING_SIMULATE_SANDBOX` configurations in `ax_merchant_api/settings.py`.
-  - Upgraded `WemaCoreBankingPayoutSDK` to support sandbox simulation and graceful fallback when external CoreBanking API rejects non-whitelisted development/staging IP addresses.
+  - Enabled sandbox withdrawal execution via `is_sandbox: true` or `mode: "SANDBOX"` in request payload, `?sandbox=true` query parameter, or system settings fallback (`settings.WIHDRAWAL_MODE` / `settings.COREBANKING_MODE`).
+  - **Zero External Network Calls in Sandbox**: When `mode == "SANDBOX"` or `is_sandbox: true`, the external Wema CoreBanking API is completely bypassed across the entire pipeline (`RiderWithdrawalView`, `WemaCoreBankingPayoutSDK.transfer_funds`, `WemaCoreBankingPayoutSDK.login`, and `verify_status`), eliminating firewall IP whitelisting errors and network delays.
+  - Added `WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")` in `ax_merchant_api/settings.py`.
   - Added `is_sandbox` and `mode` database columns and admin filters to `RiderPayoutTransaction`.
-  - Added automatic sandbox test liquidity provisioning: auto-seeds ₦1,000,000 to the payout pool if the development/test pool balance is 0.00, ensuring local test withdrawals succeed without breaking double-entry ledger bookkeeping.
-  - Added unit and integration tests covering sandbox serializer validation, SDK simulation, query parameter overrides, and end-to-end sandbox withdrawal flow.
+  - Added automatic sandbox test liquidity provisioning: auto-seeds ₦1,000,000 to the payout pool if the development/test pool balance is less than the withdrawal amount, ensuring test withdrawals succeed without breaking double-entry ledger bookkeeping.
+  - Added unit and integration tests verifying that `WemaCoreBankingPayoutSDK.transfer_funds` is never called when in sandbox mode, plus serializer validation, query parameter overrides, and end-to-end sandbox withdrawal flow.
 
 # [2026-10-16] — Independent Rider Bank Directory, Account Enquiry & Wema CoreBanking Withdrawal
 

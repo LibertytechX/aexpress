@@ -231,6 +231,8 @@ class TestRiderWithdrawalEndpoint:
             "bank_code": "044",
             "bank_name": "Access Bank",
             "narration": "Payout for trips",
+            "is_sandbox": False,
+            "mode": "LIVE",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -239,6 +241,7 @@ class TestRiderWithdrawalEndpoint:
         assert data["status"] == "success"
         assert data["data"]["amount"] == 3000.0
         assert data["data"]["remaining_balance"] == 7000.0
+        mock_transfer.assert_called_once()
 
         # Verify wallet debited
         wallet.refresh_from_db()
@@ -291,11 +294,14 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Indie Rider",
             "bank_code": "044",
+            "is_sandbox": False,
+            "mode": "LIVE",
         }
         response = api_client.post(url, data=payload, format="json")
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
         assert "refunded" in str(response.data.get("message")).lower()
+        mock_transfer.assert_called_once()
 
         # Wallet must be intact (10000 - 2000 + 2000 refund)
         wallet.refresh_from_db()
@@ -337,6 +343,8 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Indie Rider",
             "bank_code": "044",
+            "is_sandbox": False,
+            "mode": "LIVE",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -439,5 +447,50 @@ class TestRiderWithdrawalEndpoint:
         assert response.data["data"]["is_sandbox"] is True
         assert response.data["data"]["mode"] == "SANDBOX"
         assert response.data["data"]["reference"].startswith("WDR-SBX-")
+
+    @patch.object(WemaCoreBankingPayoutSDK, "transfer_funds")
+    def test_sandbox_mode_does_not_hit_wema_corebanking(
+        self, mock_transfer, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1500.00",
+            "account_number": "0123456789",
+            "account_name": "Sandbox Tester",
+            "bank_code": "044",
+            "is_sandbox": True,
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "success"
+        assert response.data["data"]["is_sandbox"] is True
+        # CRITICAL: CoreBanking external API is NEVER called in sandbox mode
+        mock_transfer.assert_not_called()
+
+    @patch.object(WemaCoreBankingPayoutSDK, "transfer_funds")
+    def test_default_sandbox_mode_does_not_hit_wema_corebanking(
+        self, mock_transfer, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1200.00",
+            "account_number": "0123456789",
+            "account_name": "Default Sandbox Tester",
+            "bank_code": "044",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "success"
+        # CoreBanking external transfer must NOT be called when WIHDRAWAL_MODE is SANDBOX
+        mock_transfer.assert_not_called()
+
 
 

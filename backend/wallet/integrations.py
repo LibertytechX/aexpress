@@ -149,6 +149,10 @@ class WemaCoreBankingPayoutSDK:
         """
         Authenticate with CoreBanking API and retrieve cached bearer access token.
         """
+        # In SANDBOX mode, never hit Wema CoreBanking external API
+        if self.mode == "SANDBOX":
+            return True, "mock-sandbox-token"
+
         cache_key = "liberty_pay_corebanking_token"
         cached_token = cache.get(cache_key)
         if cached_token:
@@ -201,11 +205,10 @@ class WemaCoreBankingPayoutSDK:
         Returns:
             Tuple[bool, Dict[str, Any]]: (success, response_payload)
         """
-        # If running in sandbox mode and simulation is enabled (or in local/dev/debug environment)
-        simulate_sandbox = getattr(settings, "COREBANKING_SIMULATE_SANDBOX", True)
-        if self.mode == "SANDBOX" and simulate_sandbox and (settings.DEBUG or not self.email or not self.password):
+        # In SANDBOX mode, never hit Wema CoreBanking external API
+        if self.mode == "SANDBOX":
             logger.info(
-                f"[SANDBOX] Simulating successful CoreBanking transfer of ₦{amount} to {account_number} ({bank_code}) ref={reference}"
+                f"[SANDBOX] Simulating successful CoreBanking transfer of ₦{amount} to {account_number} ({bank_code}) ref={reference} - external API call bypassed."
             )
             return True, {
                 "status": "success",
@@ -326,7 +329,8 @@ class WemaCoreBankingPayoutSDK:
         """
         Verify transfer status by reference.
         """
-        if self.mode == "SANDBOX" and getattr(settings, "COREBANKING_SIMULATE_SANDBOX", True) and (settings.DEBUG or not self.email or not self.password):
+        # In SANDBOX mode, never hit Wema CoreBanking external API
+        if self.mode == "SANDBOX":
             return True, {
                 "status": "success",
                 "transfer_status": "success",

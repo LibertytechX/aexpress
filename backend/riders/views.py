@@ -1844,12 +1844,12 @@ class RiderWithdrawalView(APIView):
             serializer.validated_data.get("narration")
             or f"Earnings withdrawal by {rider.rider_id}"
         )
-        service_mode = settings.WIHDRAWAL_MODE
-        mode = "SANDBOX"
-        is_sandbox = True
-        if service_mode == "LIVE":
-            mode = "LIVE"
-            is_sandbox = False
+        is_sandbox = serializer.validated_data.get("is_sandbox")
+        mode = serializer.validated_data.get("mode")
+        if is_sandbox is None or mode is None:
+            service_mode = getattr(settings, "WIHDRAWAL_MODE", "SANDBOX").upper()
+            is_sandbox = (service_mode == "SANDBOX")
+            mode = "SANDBOX" if is_sandbox else "LIVE"
 
         # Double-entry balance verification & atomic wallet and pool debit
         ref_prefix = "WDR-SBX" if is_sandbox else "WDR"
@@ -1957,26 +1957,44 @@ class RiderWithdrawalView(APIView):
                 },
             )
 
-        # Dispatch payout to Wema CoreBanking
-        try:
-            sdk = WemaCoreBankingPayoutSDK(mode=mode)
-            success, resp = sdk.transfer_funds(
-                amount=float(amount),
-                narration=narration,
-                account_name=account_name,
-                account_number=account_number,
-                bank_code=bank_code,
-                reference=reference,
+        # Dispatch payout: do NOT hit Wema CoreBanking when in sandbox mode
+        if is_sandbox or mode == "SANDBOX":
+            logger.info(
+                f"[SANDBOX] Bypassing external CoreBanking payout for ₦{amount} to {account_number} ({bank_code}) ref={reference}"
             )
-        except Exception as exc:
-            logger.error(
-                f"Unexpected exception during CoreBanking payout transfer: {exc}"
-            )
-            success = False
+            success = True
             resp = {
-                "error": str(exc),
-                "message": "Payout transfer encountered an unexpected connection error.",
+                "status": "success",
+                "message": "Sandbox payout transfer simulated successfully.",
+                "reference": reference,
+                "request_reference": reference,
+                "amount": float(amount),
+                "account_name": account_name,
+                "account_number": str(account_number).strip(),
+                "bank_code": str(bank_code).strip(),
+                "mode": "SANDBOX",
+                "simulated": True,
             }
+        else:
+            try:
+                sdk = WemaCoreBankingPayoutSDK(mode=mode)
+                success, resp = sdk.transfer_funds(
+                    amount=float(amount),
+                    narration=narration,
+                    account_name=account_name,
+                    account_number=account_number,
+                    bank_code=bank_code,
+                    reference=reference,
+                )
+            except Exception as exc:
+                logger.error(
+                    f"Unexpected exception during CoreBanking payout transfer: {exc}"
+                )
+                success = False
+                resp = {
+                    "error": str(exc),
+                    "message": "Payout transfer encountered an unexpected connection error.",
+                }
 
         if success:
             payout.status = RiderPayoutTransaction.Status.SUCCESS

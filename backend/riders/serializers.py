@@ -1105,7 +1105,7 @@ class RiderWithdrawalSerializer(serializers.Serializer):
             attrs["mode"] = "LIVE"
             attrs["is_sandbox"] = False
         else:
-            default_mode = getattr(settings, "COREBANKING_MODE", "LIVE").upper()
+            default_mode = getattr(settings, "WIHDRAWAL_MODE", getattr(settings, "COREBANKING_MODE", "SANDBOX")).upper()
             attrs["mode"] = default_mode
             attrs["is_sandbox"] = (default_mode == "SANDBOX")
 
