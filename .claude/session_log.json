@@ -13,6 +13,17 @@
     "title": "Backend: Implement OSRM Table API and integrate into find_closest_zone",
     "description": "Extended the Go routing service with support for the OSRM Distance Table API. Integrated this into the Python backend's find_closest_zone function with a feature flag, enabling more efficient road-distance based zone identification without relying on Google Maps.",
     "status": "in qa"
+  },
+  {
+    "title": "Backend: Enable sandbox simulation for rider wallet withdrawals",
+    "description": "Enabled simulated processing for independent rider bank withdrawals in sandbox mode without invoking external banking gateways. This ensures testing and staging environments can test end-to-end withdrawal flows reliably while preserving full double-entry ledger tracking.",
+    "status": "in qa",
+    "url": "https://app.clickup.com/t/123nktjw2jw"
+  },
+  {
+    "title": "Backend: Add transaction PIN authorization for rider wallet withdrawals",
+    "description": "Implemented secure transaction PIN management for riders, allowing riders to configure, update, and pre-verify a 4-digit PIN. The transaction PIN is now strictly required to authorize all wallet withdrawal requests.",
+    "status": "in qa",
+    "url": "https://app.clickup.com/t/123nktjw2jx"
   }
 ]
-
