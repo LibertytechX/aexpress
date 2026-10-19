@@ -49,6 +49,8 @@ from .serializers import (
     BankListSerializer,
     VerifyAccountSerializer,
     RiderWithdrawalSerializer,
+    RiderSetTransactionPinSerializer,
+    RiderVerifyTransactionPinSerializer,
 )
 from wallet.models import (
     Bank,
@@ -1844,6 +1846,18 @@ class RiderWithdrawalView(APIView):
             serializer.validated_data.get("narration")
             or f"Earnings withdrawal by {rider.rider_id}"
         )
+        pin = serializer.validated_data["pin"]
+        if not rider.has_transaction_pin:
+            raise ServiceException(
+                status_code=400,
+                message="Transaction PIN has not been set. Please set your transaction PIN before withdrawing.",
+            )
+        if not rider.check_transaction_pin(pin):
+            raise ServiceException(
+                status_code=400,
+                message="Invalid transaction PIN. Please enter the correct PIN.",
+            )
+
         is_sandbox = serializer.validated_data.get("is_sandbox")
         mode = serializer.validated_data.get("mode")
         if is_sandbox is None or mode is None:
@@ -2088,3 +2102,102 @@ class RiderWithdrawalView(APIView):
                 status_code=422,
                 message=f"{err_msg} Your wallet balance has been refunded.",
             )
+
+
+class RiderSetTransactionPinView(APIView):
+    """
+    API endpoint for riders to set, change, or check the status of their 4-digit transaction PIN.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(status_code=404, message="Rider profile not found.")
+
+        return service_response(
+            status="success",
+            message="Transaction PIN status retrieved successfully.",
+            data={"has_transaction_pin": rider.has_transaction_pin},
+            status_code=200,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(status_code=404, message="Rider profile not found.")
+
+        serializer = RiderSetTransactionPinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        new_pin = serializer.validated_data["pin"]
+        old_pin = serializer.validated_data.get("old_pin", "").strip()
+        password = serializer.validated_data.get("password", "").strip()
+
+        is_update = rider.has_transaction_pin
+        if is_update:
+            if not old_pin and not password:
+                raise ServiceException(
+                    status_code=400,
+                    message="Current transaction PIN or account password is required to change PIN.",
+                )
+            if old_pin and not rider.check_transaction_pin(old_pin):
+                raise ServiceException(
+                    status_code=400,
+                    message="Incorrect current transaction PIN.",
+                )
+            elif not old_pin and password:
+                if not request.user.check_password(password):
+                    raise ServiceException(
+                        status_code=400,
+                        message="Incorrect account password.",
+                    )
+
+        rider.set_transaction_pin(new_pin)
+        action_msg = "updated" if is_update else "set"
+        return service_response(
+            status="success",
+            message=f"Transaction PIN {action_msg} successfully.",
+            data={"has_transaction_pin": True},
+            status_code=200,
+        )
+
+
+class RiderVerifyTransactionPinView(APIView):
+    """
+    API endpoint for verifying a rider's 4-digit transaction PIN.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(status_code=404, message="Rider profile not found.")
+
+        if not rider.has_transaction_pin:
+            raise ServiceException(
+                status_code=400,
+                message="Transaction PIN has not been set. Please set your transaction PIN before withdrawing.",
+            )
+
+        serializer = RiderVerifyTransactionPinSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        pin = serializer.validated_data["pin"]
+        if not rider.check_transaction_pin(pin):
+            raise ServiceException(
+                status_code=400,
+                message="Invalid transaction PIN. Please enter the correct PIN.",
+            )
+
+        return service_response(
+            status="success",
+            message="Transaction PIN verified successfully.",
+            data={"valid": True},
+            status_code=200,
+        )

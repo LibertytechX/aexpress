@@ -5,6 +5,14 @@ All notable changes to the AXpress backend are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Rider Transaction PIN for Wallet Withdrawals (`dispatcher/models.py`, `dispatcher/admin.py`, `riders/views.py`, `riders/serializers.py`, `riders/urls.py`)**:
+  - Added hashed 4-digit `transaction_pin` field to `Rider` model with `has_transaction_pin` property, `set_transaction_pin`, and `check_transaction_pin` helpers powered by Django password hashers (PBKDF2).
+  - Enforced mandatory transaction PIN authorization on `POST /api/riders/wallet/withdraw/` (`RiderWithdrawalView`), validating the PIN before any row-level locking or ledger operations.
+  - Implemented `POST /api/riders/wallet/pin/` (and alias `POST /api/riders/wallet/set-pin/`) for setting and changing rider transaction PINs with matching confirmation and current PIN or account password verification.
+  - Implemented `GET /api/riders/wallet/pin/` returning PIN configuration status (`has_transaction_pin`).
+  - Implemented `POST /api/riders/wallet/pin/verify/` for verifying PIN without initiating a withdrawal.
+  - Added `has_transaction_pin` to `RiderWalletInfoSerializer` (`GET /api/riders/wallet/info/`) and exposed `has_pin` in Django admin `RiderAdmin`.
+  - Added migration `0027_rider_transaction_pin` and automated unit/integration test coverage across all PIN management and withdrawal enforcement scenarios.
 - **Sandbox Mode for Rider Wallet Withdrawals (`riders/views.py`, `riders/serializers.py`, `wallet/integrations.py`, `wallet/models.py`)**:
   - Enabled sandbox withdrawal execution via `is_sandbox: true` or `mode: "SANDBOX"` in request payload, `?sandbox=true` query parameter, or system settings fallback (`settings.WIHDRAWAL_MODE` / `settings.COREBANKING_MODE`).
   - **Zero External Network Calls in Sandbox**: When `mode == "SANDBOX"` or `is_sandbox: true`, the external Wema CoreBanking API is completely bypassed across the entire pipeline (`RiderWithdrawalView`, `WemaCoreBankingPayoutSDK.transfer_funds`, `WemaCoreBankingPayoutSDK.login`, and `verify_status`), eliminating firewall IP whitelisting errors and network delays.

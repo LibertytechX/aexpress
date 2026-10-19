@@ -205,9 +205,7 @@ class DispatcherAffiliationSummarySerializer(serializers.Serializer):
     previous_month_commission = serializers.DecimalField(
         max_digits=12, decimal_places=2
     )
-    total_commission_earned = serializers.DecimalField(
-        max_digits=12, decimal_places=2
-    )
+    total_commission_earned = serializers.DecimalField(max_digits=12, decimal_places=2)
     total_affiliated_riders = serializers.IntegerField()
     active_riders_this_month = serializers.IntegerField()
     orders_completed_this_month = serializers.IntegerField()
@@ -220,7 +218,6 @@ class CommissionReconcileRequestSerializer(serializers.Serializer):
         max_length=7,
         help_text="Format: YYYY-MM (e.g. 2026-10). If omitted, defaults to current active month.",
     )
-
 
 
 class DispatcherCreateSerializer(serializers.Serializer):
@@ -452,7 +449,7 @@ class RejectedDocumentSerializer(serializers.Serializer):
 
 class RiderRejectionSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True, default="")
-    rejected_documents = RejectedDocumentSerializer(many=True, required=False, default=list)
+    documents = RejectedDocumentSerializer(many=True, required=False, default=list)
 
 
 class OrderEventSerializer(serializers.ModelSerializer):
@@ -1188,9 +1185,7 @@ class RiderOnboardingSerializer(serializers.Serializer):
         default="freelancer",
     )
     team = serializers.CharField(required=False, max_length=100, default="Main Team")
-    emergency_contact_name = serializers.CharField(
-        required=False, max_length=100
-    )
+    emergency_contact_name = serializers.CharField(required=False, max_length=100)
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
@@ -1284,7 +1279,6 @@ class RiderOnboardingSerializer(serializers.Serializer):
 
         # Create or update Rider Profile to avoid duplicate key issues if the signal already fired
         rider, _ = Rider.objects.update_or_create(user=user, defaults=validated_data)
-
 
         # Trigger Background Task for Email
         send_onboarding_email_task.delay(
@@ -1420,13 +1414,27 @@ class RelayNodeSerializer(serializers.ModelSerializer):
 
 
 class VehicleAssetSerializer(serializers.ModelSerializer):
-    assigned_rider: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    orders_today: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_orders: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    total_yesterday_orders_distance_km: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_orders_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    total_yesterday_order_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    assigned_rider: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    orders_today: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_orders_distance_km: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_order_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
 
     class Meta:
         model = VehicleAsset
@@ -1542,9 +1550,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
 
         day = timezone.localdate()
         tz = timezone.get_current_timezone()
-        start = timezone.make_aware(
-            datetime.combine(day, time.min), tz
-        )
+        start = timezone.make_aware(datetime.combine(day, time.min), tz)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")
 
@@ -1585,9 +1591,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
 
         today = timezone.localdate()
         tz = timezone.get_current_timezone()
-        yesterday_end = timezone.make_aware(
-            datetime.combine(today, time.min), tz
-        )
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
         yesterday_start = yesterday_end - timedelta(days=1)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")
@@ -1629,7 +1633,9 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
             The total completed orders distance in km yesterday (float, rounded to 2 decimal places).
         """
         yesterday = timezone.localdate() - timedelta(days=1)
-        cache_key = f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        cache_key = (
+            f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        )
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1641,9 +1647,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
 
         today = timezone.localdate()
         tz = timezone.get_current_timezone()
-        yesterday_end = timezone.make_aware(
-            datetime.combine(today, time.min), tz
-        )
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
         yesterday_start = yesterday_end - timedelta(days=1)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")

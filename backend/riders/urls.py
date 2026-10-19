@@ -31,6 +31,8 @@ from .views import (
     RiderBankListView,
     RiderVerifyAccountView,
     RiderWithdrawalView,
+    RiderSetTransactionPinView,
+    RiderVerifyTransactionPinView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -107,6 +109,21 @@ urlpatterns = [
         "wallet/withdraw/",
         RiderWithdrawalView.as_view(),
         name="rider-wallet-withdraw",
+    ),
+    path(
+        "wallet/pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-pin",
+    ),
+    path(
+        "wallet/pin/verify/",
+        RiderVerifyTransactionPinView.as_view(),
+        name="rider-wallet-pin-verify",
+    ),
+    path(
+        "wallet/set-pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-set-pin",
     ),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
     path(

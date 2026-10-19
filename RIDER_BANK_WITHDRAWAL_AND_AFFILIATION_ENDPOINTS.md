@@ -116,7 +116,8 @@ Allows independent riders to withdraw funds from their wallet to an external ban
   "account_name": "JOHN DOE",
   "bank_code": "058",
   "bank_name": "Guaranty Trust Bank",
-  "narration": "Weekly earnings payout"
+  "narration": "Weekly earnings payout",
+  "pin": "1234"
 }
 ```
 
@@ -126,8 +127,11 @@ Allows independent riders to withdraw funds from their wallet to an external ban
 | `account_number` | `string` | **Yes** | Verified 10-digit NUBAN account number. |
 | `account_name` | `string` | **Yes** | Account name verified via account enquiry. |
 | `bank_code` | `string` | **Yes** | Destination bank code or CBN institution code. |
+| `pin` | `string` | **Yes** | 4-digit transaction PIN configured by the rider. |
 | `bank_name` | `string` | No | Optional human-readable bank name. |
 | `narration` | `string` | No | Remark for the transfer (default: `"Earnings withdrawal by <rider_id>"`). |
+| `is_sandbox` | `boolean` | No | Optional sandbox simulation flag (bypasses external CoreBanking). |
+| `mode` | `string` | No | `"SANDBOX"` or `"LIVE"`. |
 
 #### Success Response (`200 OK`)
 ```json
@@ -148,6 +152,32 @@ Allows independent riders to withdraw funds from their wallet to an external ban
 ```
 
 #### Error Responses
+- **Missing or Invalid Transaction PIN:**
+  ```json
+  {
+    "status": "error",
+    "message": "Transaction PIN is required.",
+    "data": {},
+    "status_code": 400
+  }
+  ```
+  ```json
+  {
+    "status": "error",
+    "message": "Invalid transaction PIN. Please enter the correct PIN.",
+    "data": {},
+    "status_code": 400
+  }
+  ```
+- **Transaction PIN Not Configured:**
+  ```json
+  {
+    "status": "error",
+    "message": "Transaction PIN has not been set. Please set your transaction PIN before withdrawing.",
+    "data": {},
+    "status_code": 400
+  }
+  ```
 - **Insufficient Withdrawable Balance (Pending COD restriction):**
   ```json
   {
@@ -175,6 +205,101 @@ Allows independent riders to withdraw funds from their wallet to an external ban
     "status_code": 422
   }
   ```
+
+---
+
+### 1.4 Set or Change Transaction PIN
+Allows riders to configure a new 4-digit transaction PIN, or update an existing PIN by validating their current PIN or account password.
+
+- **URL:** `POST /api/riders/wallet/pin/` (alias: `POST /api/riders/wallet/set-pin/`)
+- **Authentication:** `Bearer <Rider JWT>` (`IsAuthenticated`, `IsRider`)
+- **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
+
+#### Initial Setup Request (when no PIN exists yet)
+```json
+{
+  "pin": "1234",
+  "confirm_pin": "1234"
+}
+```
+
+#### Change PIN Request (when PIN is already set)
+```json
+{
+  "old_pin": "1234",
+  "pin": "5678",
+  "confirm_pin": "5678"
+}
+```
+*Note: If `old_pin` is forgotten, pass `"password": "your_account_password"` instead.*
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `pin` | `string` | **Yes** | Exactly 4 numeric digits. |
+| `confirm_pin` | `string` | **Yes** | Must match `pin`. |
+| `old_pin` | `string` | Conditional | Current 4-digit PIN (required if updating existing PIN). |
+| `password` | `string` | Conditional | Account login password (alternative to `old_pin`). |
+
+#### Success Response (`200 OK`)
+```json
+{
+  "status": "success",
+  "message": "Transaction PIN set successfully.",
+  "data": {
+    "has_transaction_pin": true
+  },
+  "status_code": 200
+}
+```
+
+---
+
+### 1.5 Check Transaction PIN Status
+Checks if the authenticated rider has configured a transaction PIN.
+
+- **URL:** `GET /api/riders/wallet/pin/`
+- **Authentication:** `Bearer <Rider JWT>` (`IsAuthenticated`, `IsRider`)
+- **Headers:** `Authorization: Bearer <token>`
+
+#### Response (`200 OK`)
+```json
+{
+  "status": "success",
+  "message": "Transaction PIN status retrieved successfully.",
+  "data": {
+    "has_transaction_pin": true
+  },
+  "status_code": 200
+}
+```
+
+---
+
+### 1.6 Verify Transaction PIN
+Verifies a rider's 4-digit transaction PIN without triggering a withdrawal.
+
+- **URL:** `POST /api/riders/wallet/pin/verify/`
+- **Authentication:** `Bearer <Rider JWT>` (`IsAuthenticated`, `IsRider`)
+- **Headers:** `Authorization: Bearer <token>`, `Content-Type: application/json`
+
+#### Request Body
+```json
+{
+  "pin": "1234"
+}
+```
+
+#### Response (`200 OK`)
+```json
+{
+  "status": "success",
+  "message": "Transaction PIN verified successfully.",
+  "data": {
+    "valid": true
+  },
+  "status_code": 200
+}
+```
 
 ---
 

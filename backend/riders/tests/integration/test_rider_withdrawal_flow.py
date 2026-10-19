@@ -45,6 +45,7 @@ def independent_rider_setup(db):
     wallet, _ = Wallet.objects.get_or_create(user=user)
     wallet.balance = Decimal("10000.00")
     wallet.save()
+    rider.set_transaction_pin("1234")
     return user, rider, wallet
 
 
@@ -150,6 +151,7 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Company Guy",
             "bank_code": "044",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -168,6 +170,7 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Indie Rider",
             "bank_code": "044",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -204,6 +207,7 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Indie Rider",
             "bank_code": "044",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -233,6 +237,7 @@ class TestRiderWithdrawalEndpoint:
             "narration": "Payout for trips",
             "is_sandbox": False,
             "mode": "LIVE",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -296,6 +301,7 @@ class TestRiderWithdrawalEndpoint:
             "bank_code": "044",
             "is_sandbox": False,
             "mode": "LIVE",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -345,6 +351,7 @@ class TestRiderWithdrawalEndpoint:
             "bank_code": "044",
             "is_sandbox": False,
             "mode": "LIVE",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -375,6 +382,7 @@ class TestRiderWithdrawalEndpoint:
             "bank_code": "044",
             "bank_name": "Access Bank",
             "is_sandbox": True,
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -418,6 +426,7 @@ class TestRiderWithdrawalEndpoint:
             "account_name": "Sandbox Rider",
             "bank_code": "044",
             "mode": "SANDBOX",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -440,6 +449,7 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Query Param Rider",
             "bank_code": "044",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -462,6 +472,7 @@ class TestRiderWithdrawalEndpoint:
             "account_name": "Sandbox Tester",
             "bank_code": "044",
             "is_sandbox": True,
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -484,6 +495,7 @@ class TestRiderWithdrawalEndpoint:
             "account_number": "0123456789",
             "account_name": "Default Sandbox Tester",
             "bank_code": "044",
+            "pin": "1234",
         }
         response = api_client.post(url, data=payload, format="json")
 
@@ -491,6 +503,199 @@ class TestRiderWithdrawalEndpoint:
         assert response.data["status"] == "success"
         # CoreBanking external transfer must NOT be called when WIHDRAWAL_MODE is SANDBOX
         mock_transfer.assert_not_called()
+
+
+@pytest.mark.django_db
+class TestRiderTransactionPinEndpoints:
+    def test_wallet_info_includes_has_transaction_pin(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-info")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert "has_transaction_pin" in response.data["data"]
+        assert response.data["data"]["has_transaction_pin"] is True
+
+    def test_get_pin_status(self, api_client, independent_rider_setup):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        response = api_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "success"
+        assert response.data["data"]["has_transaction_pin"] is True
+
+    def test_set_pin_when_not_set(self, api_client, independent_rider_setup):
+        user, rider, wallet = independent_rider_setup
+        rider.transaction_pin = ""
+        rider.save(update_fields=["transaction_pin"])
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        payload = {"pin": "5678", "confirm_pin": "5678"}
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "success"
+        assert "set successfully" in response.data["message"]
+        rider.refresh_from_db()
+        assert rider.has_transaction_pin is True
+        assert rider.check_transaction_pin("5678") is True
+
+    def test_set_pin_mismatch_fails(self, api_client, independent_rider_setup):
+        user, rider, wallet = independent_rider_setup
+        rider.transaction_pin = ""
+        rider.save(update_fields=["transaction_pin"])
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        payload = {"pin": "5678", "confirm_pin": "1111"}
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "do not match" in str(response.data.get("message"))
+
+    def test_update_pin_with_correct_old_pin(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        rider.set_transaction_pin("1234")
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        payload = {
+            "old_pin": "1234",
+            "pin": "9876",
+            "confirm_pin": "9876",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["status"] == "success"
+        assert "updated successfully" in response.data["message"]
+        rider.refresh_from_db()
+        assert rider.check_transaction_pin("9876") is True
+        assert rider.check_transaction_pin("1234") is False
+
+    def test_update_pin_with_incorrect_old_pin(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        rider.set_transaction_pin("1234")
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        payload = {
+            "old_pin": "0000",
+            "pin": "9876",
+            "confirm_pin": "9876",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Incorrect current transaction PIN" in str(response.data.get("message"))
+
+    def test_update_pin_with_account_password_fallback(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        rider.set_transaction_pin("1234")
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin")
+        payload = {
+            "password": "password123",
+            "pin": "7777",
+            "confirm_pin": "7777",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_200_OK
+        rider.refresh_from_db()
+        assert rider.check_transaction_pin("7777") is True
+
+    def test_verify_pin_endpoint(self, api_client, independent_rider_setup):
+        user, rider, wallet = independent_rider_setup
+        rider.set_transaction_pin("1234")
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-pin-verify")
+
+        # Correct PIN
+        res = api_client.post(url, data={"pin": "1234"}, format="json")
+        assert res.status_code == status.HTTP_200_OK
+        assert res.data["data"]["valid"] is True
+
+        # Incorrect PIN
+        res_bad = api_client.post(url, data={"pin": "0000"}, format="json")
+        assert res_bad.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Invalid transaction PIN" in str(res_bad.data.get("message"))
+
+    def test_withdrawal_fails_when_pin_not_configured_on_rider(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        rider.transaction_pin = ""
+        rider.save(update_fields=["transaction_pin"])
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Pin Test",
+            "bank_code": "044",
+            "pin": "1234",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Transaction PIN has not been set" in str(response.data.get("message"))
+
+    def test_withdrawal_fails_with_incorrect_pin(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        rider.set_transaction_pin("1234")
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Pin Test",
+            "bank_code": "044",
+            "pin": "9999",  # wrong pin
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "Invalid transaction PIN" in str(response.data.get("message"))
+
+    def test_withdrawal_fails_with_missing_pin(
+        self, api_client, independent_rider_setup
+    ):
+        user, rider, wallet = independent_rider_setup
+        api_client.force_authenticate(user=user)
+
+        url = reverse("riders:rider-wallet-withdraw")
+        payload = {
+            "amount": "1000.00",
+            "account_number": "0123456789",
+            "account_name": "Pin Test",
+            "bank_code": "044",
+        }
+        response = api_client.post(url, data=payload, format="json")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "pin" in str(response.data).lower()
+
 
 
 

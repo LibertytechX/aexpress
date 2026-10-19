@@ -448,10 +448,16 @@ class Rider(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rider_profile"
     )
 
-    # Banking
+    # Banking & Transaction PIN
     bank_name = models.CharField(max_length=100, null=True, blank=True)
     bank_account_number = models.CharField(max_length=20, null=True, blank=True)
     bank_routing_code = models.CharField(max_length=20, null=True, blank=True)
+    transaction_pin = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Hashed 4-digit transaction PIN for wallet withdrawals",
+    )
 
     # Status & Settings
     WORKING_TYPE_CHOICES = (
@@ -653,6 +659,29 @@ class Rider(models.Model):
     def end_delivery(self):
         self.status = self.Status.ONLINE
         self.save()
+
+    @property
+    def has_transaction_pin(self) -> bool:
+        """Check if rider has configured a transaction PIN."""
+        return bool(self.transaction_pin)
+
+    def set_transaction_pin(self, raw_pin: str) -> None:
+        """Hash and persist rider's 4-digit transaction PIN."""
+        from django.contrib.auth.hashers import make_password
+
+        cleaned_pin = str(raw_pin).strip()
+        if not cleaned_pin.isdigit() or len(cleaned_pin) != 4:
+            raise ValueError("Transaction PIN must be exactly 4 digits.")
+        self.transaction_pin = make_password(cleaned_pin)
+        self.save(update_fields=["transaction_pin", "updated_at"])
+
+    def check_transaction_pin(self, raw_pin: str) -> bool:
+        """Verify provided transaction PIN against hashed PIN."""
+        from django.contrib.auth.hashers import check_password
+
+        if not self.transaction_pin or not raw_pin:
+            return False
+        return check_password(str(raw_pin).strip(), self.transaction_pin)
 
     @property
     def orders_completed_today(self) -> int:
