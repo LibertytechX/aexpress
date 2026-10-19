@@ -308,7 +308,7 @@ class RiderViewSet(viewsets.ModelViewSet):
         serializer = RiderRejectionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         reason = serializer.validated_data["reason"]
-        rejected_documents = serializer.validated_data["rejected_documents"]
+        rejected_documents = serializer.validated_data["documents"]
 
         for entry in rejected_documents:
             updated = RiderDocument.objects.filter(
