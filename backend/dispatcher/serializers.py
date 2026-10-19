@@ -449,7 +449,7 @@ class RejectedDocumentSerializer(serializers.Serializer):
 
 class RiderRejectionSerializer(serializers.Serializer):
     reason = serializers.CharField(required=False, allow_blank=True, default="")
-    documents = RejectedDocumentSerializer(many=True, required=False, default=list)
+    rejected_documents = RejectedDocumentSerializer(many=True, required=False, default=list)
 
 
 class OrderEventSerializer(serializers.ModelSerializer):
