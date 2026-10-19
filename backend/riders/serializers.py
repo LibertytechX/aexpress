@@ -738,6 +738,7 @@ class RiderWalletInfoSerializer(serializers.Serializer):
     available_balance = serializers.SerializerMethodField()
     pending_cod = serializers.SerializerMethodField()
     withdrawable_balance = serializers.SerializerMethodField()
+    has_transaction_pin = serializers.BooleanField(read_only=True)
 
     def get_withdrawable_balance(self, obj):
         # Withdrawable Balance = Available Balance - Pending COD
@@ -1055,6 +1056,11 @@ class RiderWithdrawalSerializer(serializers.Serializer):
     narration = serializers.CharField(required=False, allow_blank=True, default="")
     is_sandbox = serializers.BooleanField(required=False, default=None)
     mode = serializers.CharField(required=False, allow_blank=True, default=None)
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN for withdrawal authorization",
+    )
 
     def validate(self, attrs):
         from decimal import Decimal
@@ -1063,6 +1069,17 @@ class RiderWithdrawalSerializer(serializers.Serializer):
         account_number = str(attrs.get("account_number", "")).strip()
         account_name = str(attrs.get("account_name", "")).strip()
         bank_code = str(attrs.get("bank_code", "")).strip()
+        pin = str(attrs.get("pin", "")).strip()
+
+        if not pin:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN is required."
+            )
+
+        if not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
 
         if amount is None or amount <= Decimal("0.00"):
             raise ServiceException(
@@ -1090,6 +1107,7 @@ class RiderWithdrawalSerializer(serializers.Serializer):
                 status_code=400, message="Bank code is required."
             )
 
+        attrs["pin"] = pin
         attrs["account_number"] = account_number
         attrs["account_name"] = account_name
         attrs["bank_code"] = bank_code
@@ -1109,4 +1127,81 @@ class RiderWithdrawalSerializer(serializers.Serializer):
             attrs["mode"] = default_mode
             attrs["is_sandbox"] = (default_mode == "SANDBOX")
 
+        return attrs
+
+
+class RiderSetTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for setting or changing a rider's 4-digit transaction PIN.
+    """
+
+    old_pin = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Current transaction PIN (required if PIN is already configured)",
+    )
+    password = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Account login password (fallback if current PIN is forgotten)",
+    )
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="New 4-digit transaction PIN",
+    )
+    confirm_pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="Confirm new 4-digit transaction PIN",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        confirm_pin = str(attrs.get("confirm_pin", "")).strip()
+        old_pin = str(attrs.get("old_pin", "")).strip()
+
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+
+        if pin != confirm_pin:
+            raise ServiceException(
+                status_code=400, message="PIN and confirmation PIN do not match."
+            )
+
+        if old_pin and not old_pin.isdigit():
+            raise ServiceException(
+                status_code=400, message="Current transaction PIN must be numeric."
+            )
+
+        attrs["pin"] = pin
+        attrs["confirm_pin"] = confirm_pin
+        attrs["old_pin"] = old_pin
+        return attrs
+
+
+class RiderVerifyTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for validating rider transaction PIN input.
+    """
+
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN to verify",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+        attrs["pin"] = pin
         return attrs

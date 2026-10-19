@@ -16,6 +16,8 @@ from riders.serializers import (
     BankListSerializer,
     VerifyAccountSerializer,
     RiderWithdrawalSerializer,
+    RiderSetTransactionPinSerializer,
+    RiderVerifyTransactionPinSerializer,
 )
 from riders.tasks import check_pending_rider_payout_status
 from dispatcher.models import Rider
@@ -65,10 +67,12 @@ class TestWithdrawalSerializers:
             "bank_code": "044",
             "bank_name": "Access Bank",
             "narration": "Trip earnings",
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         assert serializer.is_valid()
         assert serializer.validated_data["amount"] == Decimal("1500.00")
+        assert serializer.validated_data["pin"] == "1234"
 
     def test_rider_withdrawal_serializer_min_amount(self):
         data = {
@@ -76,6 +80,7 @@ class TestWithdrawalSerializers:
             "account_number": "0123456789",
             "account_name": "John Doe",
             "bank_code": "044",
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         with pytest.raises(ServiceException) as exc:
@@ -83,12 +88,38 @@ class TestWithdrawalSerializers:
         assert exc.value.status_code == 400
         assert "Minimum withdrawal amount is ₦100.00" in exc.value.message
 
+    def test_rider_withdrawal_serializer_missing_pin(self):
+        data = {
+            "amount": "500.00",
+            "account_number": "0123456789",
+            "account_name": "John Doe",
+            "bank_code": "044",
+        }
+        serializer = RiderWithdrawalSerializer(data=data)
+        assert serializer.is_valid() is False
+        assert "pin" in serializer.errors
+
+    def test_rider_withdrawal_serializer_invalid_pin_format(self):
+        data = {
+            "amount": "500.00",
+            "account_number": "0123456789",
+            "account_name": "John Doe",
+            "bank_code": "044",
+            "pin": "12a4",
+        }
+        serializer = RiderWithdrawalSerializer(data=data)
+        with pytest.raises(ServiceException) as exc:
+            serializer.is_valid(raise_exception=True)
+        assert exc.value.status_code == 400
+        assert "Transaction PIN must be exactly 4 digits" in exc.value.message
+
     def test_rider_withdrawal_serializer_missing_account_name(self):
         data = {
             "amount": "500.00",
             "account_number": "0123456789",
             "account_name": "",
             "bank_code": "044",
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         assert serializer.is_valid() is False
@@ -101,6 +132,7 @@ class TestWithdrawalSerializers:
             "account_name": "Jane Doe",
             "bank_code": "044",
             "is_sandbox": True,
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         assert serializer.is_valid()
@@ -114,6 +146,7 @@ class TestWithdrawalSerializers:
             "account_name": "Jane Doe",
             "bank_code": "044",
             "mode": "SANDBOX",
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         assert serializer.is_valid()
@@ -127,11 +160,67 @@ class TestWithdrawalSerializers:
             "account_name": "Jane Doe",
             "bank_code": "044",
             "is_sandbox": False,
+            "pin": "1234",
         }
         serializer = RiderWithdrawalSerializer(data=data)
         assert serializer.is_valid()
         assert serializer.validated_data["is_sandbox"] is False
         assert serializer.validated_data["mode"] == "LIVE"
+
+    def test_rider_set_pin_serializer_valid(self):
+        data = {"pin": "4321", "confirm_pin": "4321"}
+        serializer = RiderSetTransactionPinSerializer(data=data)
+        assert serializer.is_valid()
+        assert serializer.validated_data["pin"] == "4321"
+
+    def test_rider_set_pin_serializer_mismatch(self):
+        data = {"pin": "4321", "confirm_pin": "1234"}
+        serializer = RiderSetTransactionPinSerializer(data=data)
+        with pytest.raises(ServiceException) as exc:
+            serializer.is_valid(raise_exception=True)
+        assert exc.value.status_code == 400
+        assert "do not match" in exc.value.message
+
+    def test_rider_set_pin_serializer_invalid_length(self):
+        data = {"pin": "12345", "confirm_pin": "12345"}
+        serializer = RiderSetTransactionPinSerializer(data=data)
+        with pytest.raises(ServiceException) as exc:
+            serializer.is_valid(raise_exception=True)
+        assert exc.value.status_code == 400
+        assert "exactly 4 digits" in exc.value.message
+
+    def test_rider_verify_pin_serializer_valid(self):
+        data = {"pin": "9999"}
+        serializer = RiderVerifyTransactionPinSerializer(data=data)
+        assert serializer.is_valid()
+        assert serializer.validated_data["pin"] == "9999"
+
+    def test_rider_verify_pin_serializer_invalid(self):
+        data = {"pin": "abc"}
+        serializer = RiderVerifyTransactionPinSerializer(data=data)
+        with pytest.raises(ServiceException) as exc:
+            serializer.is_valid(raise_exception=True)
+        assert exc.value.status_code == 400
+
+    def test_rider_model_pin_methods(self):
+        user = User.objects.create_user(
+            phone="08099991111", password="password123"
+        )
+        rider = Rider.objects.create(
+            user=user,
+            rider_id="PIN001",
+            status="online",
+            working_type="freelancer",
+            is_independent_rider=True,
+        )
+        assert rider.has_transaction_pin is False
+        assert rider.check_transaction_pin("1234") is False
+
+        rider.set_transaction_pin("1234")
+        rider.refresh_from_db()
+        assert rider.has_transaction_pin is True
+        assert rider.check_transaction_pin("1234") is True
+        assert rider.check_transaction_pin("0000") is False
 
 
 @pytest.mark.django_db

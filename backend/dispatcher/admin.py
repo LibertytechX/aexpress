@@ -287,6 +287,7 @@ class RiderAdmin(ImportExportModelAdmin):
         "overall_completed",
         "distance_all_time",
         "yesterday_completed_order_count",
+        "has_pin",
     )
     list_filter = (
         "status",
@@ -312,6 +313,10 @@ class RiderAdmin(ImportExportModelAdmin):
         "mark_as_jumia_riders",
         "create_amortization_wallet",
     ]
+
+    @admin.display(boolean=True, description="PIN Set")
+    def has_pin(self, obj):
+        return obj.has_transaction_pin
 
     def has_delete_permission(self, request, obj=None):
         return False
