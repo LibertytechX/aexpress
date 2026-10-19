@@ -574,7 +574,61 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 - If a rider moves from Vehicle Y to Vehicle X: Records unassignment of Y and assignment of X.
 - The record captures the `admin` user who initiated the request.
 
+### 3. Reject Rider Application (with Email Notification)
+**Endpoint:** `POST /api/dispatch/riders/{id}/reject/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Rejects a self-registered rider's onboarding application. Optionally flags specific submitted KYC documents as rejected (with individual reasons each) so the rider can review and re-upload them. Automatically sends a push notification and an HTML/text rejection email to the rider detailing the overall rejection reason, the specific rejected documents, and the reasons.
+
+**Request Body:**
+```json
+{
+  "reason": "Submitted KYC documents failed compliance checks.",
+  "rejected_documents": [
+    {
+      "document_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "reason": "Driver's license photo is blurry and illegible."
+    },
+    {
+      "document_id": "8bb96d74-1234-4562-b3fc-2c963f66afa7",
+      "reason": "Vehicle insurance policy has expired."
+    }
+  ]
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "rider_id": "200001",
+    "first_name": "Tunde",
+    "last_name": "Bakare",
+    "phone": "+2348123456789",
+    "email": "tunde.rider@aexpress.com",
+    "approval_status": "rejected",
+    "is_authorized": false,
+    "rejection_reason": "Submitted KYC documents failed compliance checks.",
+    "documents": [
+      {
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "doc_type": "drivers_license",
+        "status": "rejected",
+        "rejection_reason": "Driver's license photo is blurry and illegible."
+      }
+    ]
+  }
+}
+```
+
+**Email Notification:**
+Dispatches an email via Celery background task (`dispatcher.tasks.send_rider_rejection_email_task` with graceful direct fallback) using Mailgun and MailNow fallback:
+- **Subject:** `Important Update Regarding Your Rider Application - Assured Express`
+- **Content:** Outlines the review decision, the general reason, a styled table of rejected documents with corresponding rejection reasons, and step-by-step guidance on how to re-upload via the Assured Express Rider mobile app (`Profile > KYC Documents`).
+
 ---
+
 
 ### 3. List Vehicle Assets
 **Endpoint:** `GET /vehicle-assets/`  

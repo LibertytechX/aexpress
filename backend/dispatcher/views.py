@@ -340,6 +340,27 @@ class RiderViewSet(viewsets.ModelViewSet):
             or "Your rider application was rejected. Please review your documents.",
         )
 
+        # Trigger rider rejection email with documents and reasons
+        rejected_doc_ids = [str(entry["document_id"]) for entry in rejected_documents]
+        try:
+            from .tasks import send_rider_rejection_email_task
+
+            send_rider_rejection_email_task.delay(
+                str(rider.id), reason, rejected_doc_ids
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to queue rider rejection email task: {e}. Attempting direct send."
+            )
+            try:
+                from .emails import send_rider_rejection_email
+
+                send_rider_rejection_email(
+                    rider, reason=reason, rejected_doc_ids=rejected_doc_ids
+                )
+            except Exception as exc:
+                logger.error(f"Failed to send rider rejection email directly: {exc}")
+
         return Response({"success": True, "data": RiderApprovalSerializer(rider).data})
 
 
