@@ -5,6 +5,12 @@ All notable changes to the AXpress backend are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Rider Application Rejection Email with Document Feedback (`dispatcher/views.py`, `dispatcher/emails.py`, `dispatcher/tasks.py`)**:
+  - Implemented automated rejection email notification on `POST /api/dispatch/riders/{id}/reject/` (`RiderViewSet.reject`).
+  - Added `send_rider_rejection_email` and `get_rider_rejection_email_template` in `dispatcher/emails.py` with custom responsive HTML/text templates branded for Assured Express.
+  - The email explicitly lists the general application rejection reason, along with each rejected document's name and individual rejection reason, directing the rider on how to re-upload clear replacements in the rider mobile app (`Profile > KYC Documents`).
+  - Offloaded delivery to Celery background task `send_rider_rejection_email_task` in `dispatcher/tasks.py` with resilient direct fallback and error logging to ensure API responses remain fast and uninterrupted.
+  - Implemented comprehensive unit tests (`test_rider_rejection_email.py`) and integration tests (`test_rider_rejection_api.py`).
 - **Rider Transaction PIN for Wallet Withdrawals (`dispatcher/models.py`, `dispatcher/admin.py`, `riders/views.py`, `riders/serializers.py`, `riders/urls.py`)**:
   - Added hashed 4-digit `transaction_pin` field to `Rider` model with `has_transaction_pin` property, `set_transaction_pin`, and `check_transaction_pin` helpers powered by Django password hashers (PBKDF2).
   - Enforced mandatory transaction PIN authorization on `POST /api/riders/wallet/withdraw/` (`RiderWithdrawalView`), validating the PIN before any row-level locking or ledger operations.

@@ -1562,3 +1562,29 @@ def reconcile_all_dispatchers_commissions_task(month_year=None):
             logger.error(f"Reconciliation failed for dispatcher {dispatcher.id}: {e}")
     return count
 
+
+@shared_task(
+    name="dispatcher.tasks.send_rider_rejection_email_task",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=15,
+)
+def send_rider_rejection_email_task(
+    self, rider_id: str, reason: str = "", rejected_doc_ids: list = None
+):
+    """
+    Celery task to send a rejection email to a rider notifying them of their application status,
+    the specific documents rejected, and the reasons.
+    """
+    from .emails import send_rider_rejection_email
+
+    try:
+        return send_rider_rejection_email(
+            rider_id, reason=reason, rejected_doc_ids=rejected_doc_ids
+        )
+    except Exception as exc:
+        logger.error(
+            f"send_rider_rejection_email_task failed for rider {rider_id}: {exc}"
+        )
+        raise self.retry(exc=exc)
+
