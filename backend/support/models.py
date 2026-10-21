@@ -22,7 +22,7 @@ class SupportTicket(models.Model):
         TECHNICAL = "technical", "App / Technical"
         SAFETY = "safety", "Safety / Incident"
         ACCOUNT = "account", "Account"
-        OTHER = "other", "Other"
+        GENERAL = "general", "General"
 
     class Status(models.TextChoices):
         OPEN = "open", "Open"
@@ -50,7 +50,7 @@ class SupportTicket(models.Model):
         related_name="support_tickets",
     )
     category = models.CharField(
-        max_length=20, choices=Category.choices, default=Category.OTHER
+        max_length=20, choices=Category.choices, default=Category.GENERAL
     )
     subject = models.CharField(max_length=200)
     message = models.TextField()
