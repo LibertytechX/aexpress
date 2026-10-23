@@ -124,3 +124,4 @@ class RiderFaceMatchAPITests(TestCase):
         self.client.force_authenticate(user=self.user)
         response = self.client.post(self.url, {}, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+

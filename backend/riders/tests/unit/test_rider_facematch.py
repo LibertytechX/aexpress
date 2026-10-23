@@ -217,3 +217,4 @@ class RiderFaceMatchTaskTests(TestCase):
         channel, event, payload = mock_publish.call_args[0]
         self.assertEqual(payload["status"], "error")
         self.assertFalse(payload["matched"])
+
