@@ -248,3 +248,4 @@ void _handleForcedLogout(String reason) {
   // Clear local secure storage/preferences and route to Login Screen
 }
 ```
+
