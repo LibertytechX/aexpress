@@ -13,6 +13,7 @@ from .serializers import (
     LoginSerializer,
     UserProfileSerializer,
     AddressSerializer,
+    ChangePasswordSerializer,
 )
 from .emails import (
     prep_user_for_otp,
@@ -728,24 +729,17 @@ class ChangePasswordView(APIView):
 
     def post(self, request):
         """Change the logged-in user's password."""
-        old_password = request.data.get("old_password")
-        new_password = request.data.get("new_password")
-        confirm_password = request.data.get("confirm_password")
-
-        if not old_password or not new_password or not confirm_password:
+        serializer = ChangePasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            # Keep the endpoint's flat {"error": "<message>"} response shape
+            first_error = next(iter(serializer.errors.values()))[0]
             return Response(
-                {
-                    "success": False,
-                    "error": "Old password, new password, and confirm password are required.",
-                },
+                {"success": False, "error": str(first_error)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        if new_password != confirm_password:
-            return Response(
-                {"success": False, "error": "Passwords do not match"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
 
         if len(new_password) < 6:
             return Response(

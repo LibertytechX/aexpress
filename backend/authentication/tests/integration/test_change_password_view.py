@@ -118,6 +118,16 @@ class ChangePasswordViewIntegrationTest(TestCase):
         )
         self.assertTrue(self._password_unchanged())
 
+    def test_password_whitespace_is_preserved(self):
+        """Leading/trailing spaces are part of the password, not trimmed."""
+        spaced = "  Spaced Pass 1  "
+        response = self._change(new=spaced, confirm=spaced)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(spaced))
+        self.assertFalse(self.user.check_password(spaced.strip()))
+
     def test_unauthenticated_request_rejected(self):
         """Without a token the endpoint returns 401 and changes nothing."""
         response = APIClient().post(
