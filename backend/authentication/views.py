@@ -13,6 +13,7 @@ from .serializers import (
     LoginSerializer,
     UserProfileSerializer,
     AddressSerializer,
+    ChangePasswordSerializer,
 )
 from .emails import (
     prep_user_for_otp,
@@ -716,6 +717,76 @@ class ResetPasswordView(APIView):
                 {
                     "success": False,
                     "error": "An error occurred while resetting your password. Please try again.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class ChangePasswordView(APIView):
+    """API endpoint for authenticated users to change their own password."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Change the logged-in user's password."""
+        serializer = ChangePasswordSerializer(data=request.data)
+        if not serializer.is_valid():
+            # Keep the endpoint's flat {"error": "<message>"} response shape
+            first_error = next(iter(serializer.errors.values()))[0]
+            return Response(
+                {"success": False, "error": str(first_error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        old_password = serializer.validated_data["old_password"]
+        new_password = serializer.validated_data["new_password"]
+
+        if len(new_password) < 6:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Password must be at least 6 characters long",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+
+        if not user.check_password(old_password):
+            return Response(
+                {"success": False, "error": "Current password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if old_password == new_password:
+            return Response(
+                {
+                    "success": False,
+                    "error": "New password must be different from the current password.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user.set_password(new_password)
+            user.save(update_fields=["password"])
+
+            logger.info(f"Password changed successfully for user {user.email}")
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Password changed successfully!",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error changing password: {str(e)}")
+            return Response(
+                {
+                    "success": False,
+                    "error": "An error occurred while changing your password. Please try again.",
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )

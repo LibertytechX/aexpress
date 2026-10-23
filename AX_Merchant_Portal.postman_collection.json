@@ -317,6 +317,65 @@
           ]
         },
         {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/change-password/",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "change-password", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"old_password\": \"currentPassword123\",\n  \"new_password\": \"newSecurePassword456\",\n  \"confirm_password\": \"newSecurePassword456\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Change the password for the currently logged-in merchant. Requires a valid access token. Unlike Reset Password, this does not involve email/SMS codes — the caller proves identity with their current password."
+          },
+          "response": [
+            {
+              "name": "200 OK – Password Changed",
+              "status": "OK",
+              "code": 200,
+              "body": "{\n  \"success\": true,\n  \"message\": \"Password changed successfully!\"\n}"
+            },
+            {
+              "name": "400 Bad Request – Incorrect Current Password",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"Current password is incorrect.\"\n}"
+            },
+            {
+              "name": "400 Bad Request – Passwords Do Not Match",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"Passwords do not match\"\n}"
+            },
+            {
+              "name": "400 Bad Request – New Password Too Short",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"Password must be at least 6 characters long\"\n}"
+            },
+            {
+              "name": "400 Bad Request – New Password Same As Old",
+              "status": "Bad Request",
+              "code": 400,
+              "body": "{\n  \"success\": false,\n  \"error\": \"New password must be different from the current password.\"\n}"
+            },
+            {
+              "name": "401 Unauthorized – No/Invalid Token",
+              "status": "Unauthorized",
+              "code": 401,
+              "body": "{\n  \"detail\": \"Authentication credentials were not provided.\"\n}"
+            }
+          ]
+        },
+        {
           "name": "Get My Profile",
           "request": {
             "method": "GET",
