@@ -721,6 +721,83 @@ class ResetPasswordView(APIView):
             )
 
 
+class ChangePasswordView(APIView):
+    """API endpoint for authenticated users to change their own password."""
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        """Change the logged-in user's password."""
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+        confirm_password = request.data.get("confirm_password")
+
+        if not old_password or not new_password or not confirm_password:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Old password, new password, and confirm password are required.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {"success": False, "error": "Passwords do not match"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 6:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Password must be at least 6 characters long",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user = request.user
+
+        if not user.check_password(old_password):
+            return Response(
+                {"success": False, "error": "Current password is incorrect."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if old_password == new_password:
+            return Response(
+                {
+                    "success": False,
+                    "error": "New password must be different from the current password.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            user.set_password(new_password)
+            user.save(update_fields=["password"])
+
+            logger.info(f"Password changed successfully for user {user.email}")
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Password changed successfully!",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error changing password: {str(e)}")
+            return Response(
+                {
+                    "success": False,
+                    "error": "An error occurred while changing your password. Please try again.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
 class VerifyPasswordResetTokenView(APIView):
     """API endpoint for verifying if an emailed password reset OTP is valid."""
 

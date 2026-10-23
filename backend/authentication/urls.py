@@ -13,6 +13,7 @@ from .views import (
     RequestPasswordResetView,
     VerifyPasswordResetTokenView,
     ResetPasswordView,
+    ChangePasswordView,
     VerifyOTPView,
     ResendOTPView,
     MobileRequestPasswordResetView,
@@ -58,6 +59,9 @@ urlpatterns = [
         name="verify_password_reset_token",
     ),
     path("reset-password/", ResetPasswordView.as_view(), name="reset_password"),
+    path(
+        "change-password/", ChangePasswordView.as_view(), name="change_password"
+    ),
     path(
         "mobile/request-password-reset/",
         MobileRequestPasswordResetView.as_view(),
