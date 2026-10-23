@@ -66,10 +66,11 @@ class DeliverySerializer(serializers.ModelSerializer):
             "duration_minutes",
             "status",
             "sequence",
+            "drop_code",
             "created_at",
             "delivered_at",
         ]
-        read_only_fields = ["id", "created_at", "delivered_at"]
+        read_only_fields = ["id", "created_at", "delivered_at", "drop_code"]
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -140,8 +141,17 @@ class OrderSerializer(serializers.ModelSerializer):
             "dispatcher_assigned",
             "source",
             "cancellation_reason",
+            "pickup_code",
+            "drop_code",
         ]
-        read_only_fields = ["id", "order_number", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "order_number",
+            "created_at",
+            "updated_at",
+            "pickup_code",
+            "drop_code",
+        ]
 
     def get_delivery_count(self, obj):
         """Get the number of deliveries for this order."""

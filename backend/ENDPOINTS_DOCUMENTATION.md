@@ -1293,3 +1293,94 @@ Error Response (400 Bad Request):
     "status_code": 400
   }
 ```
+
+---
+
+## ORDER PICKUP & DELIVERY VERIFICATION (V2)
+
+Endpoints using 6-digit verification codes for rider pickup and delivery completion instead of GPS location proximity checks.
+
+### 1. Confirm Order Pickup (V2)
+```
+POST /api/orders/v2/pickup/
+Description: Rider marks an order as PickedUp by providing the 6-digit pickup code received from the merchant. Bypasses GPS proximity restrictions.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "pickup_code": "749201"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order picked up successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "PickedUp",
+      "picked_up_at": "2026-10-23T11:30:00Z"
+    },
+    "status_code": 200
+  }
+Error Response (400 Bad Request - Incorrect Code):
+  {
+    "status": "error",
+    "message": "Incorrect pickup code. 4 attempt(s) remaining.",
+    "data": {},
+    "status_code": 400
+  }
+Error Response (400 Bad Request - Verification Locked):
+  {
+    "status": "error",
+    "message": "Pickup verification is locked due to too many failed attempts (maximum 5). Please contact support.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 2. Complete Single-Delivery Order (V2)
+```
+POST /api/orders/v2/complete/
+Description: Rider completes a single-delivery order (Quick Send) by providing the 6-digit drop code received from the recipient. Marks the delivery as Delivered, marks the order as Done, and allocates rider earnings.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order delivery completed successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "Done",
+      "all_delivered": true
+    },
+    "status_code": 200
+  }
+```
+
+### 3. Deliver Multi-Drop Delivery Stop (V2)
+```
+POST /api/orders/v2/delivery/{delivery_id}/deliver/
+Description: Rider completes an individual delivery stop in a multi-drop order using that specific drop's 6-digit drop code. When all stops are completed, the order is automatically marked as Done and rider earnings are credited.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Delivery completed successfully.",
+    "data": {
+      "delivery_id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "status": "Delivered",
+      "delivered_at": "2026-10-23T11:45:00Z",
+      "order_number": "6158001",
+      "order_status": "Fulfilling",
+      "all_delivered": false
+    },
+    "status_code": 200
+  }
+```
