@@ -1205,3 +1205,25 @@ class RiderVerifyTransactionPinSerializer(serializers.Serializer):
             )
         attrs["pin"] = pin
         return attrs
+
+
+class RiderFaceMatchRequestSerializer(serializers.Serializer):
+    """
+    Serializer for independent rider face match request.
+    Expects the S3 storage bucket URL of the selfie snapshot.
+    """
+
+    image_url = serializers.URLField(
+        required=True,
+        max_length=500,
+        help_text="URL of the uploaded selfie snapshot image in the storage bucket",
+    )
+
+    def validate_image_url(self, value):
+        url = str(value).strip()
+        if not url:
+            raise ServiceException(
+                status_code=400, message="image_url cannot be empty."
+            )
+        return url
+

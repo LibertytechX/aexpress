@@ -4,6 +4,15 @@ All notable changes to the AXpress project are documented in this file.
 
 ### Backend
 #### Added
+- **Independent Rider Face Match Verification (`riders/views.py`, `riders/serializers.py`, `riders/tasks.py`, `riders/models.py`, `dispatcher/views.py`)**:
+  - Implemented asynchronous face match verification endpoint `POST /api/riders/facematch/` (and alias `POST /api/riders/face-match/`) for independent riders.
+  - Accepts selfie snapshot URL (`image_url`), validates that the requester is an independent rider with an existing reference profile photo (`RiderDocument` of type `profile_photo`), and returns `202 Accepted` with a dedicated Ably channel name (`facematch:<rider_id>`).
+  - Added Celery background task `process_rider_facematch_task` to download the selfie and reference profile photos into memory and invoke the 3rd-party KYC `CompareFacesView` endpoint (`/api/v1/kyc/face-match`) with multipart image payload.
+  - On match success, publishes `facematch_result` event with `status: "success"` and similarity score to the rider's Ably channel.
+  - On match failure, automatically blocks/unauthorizes the rider (`is_authorized = False`, `status = "offline"`), deactivates all active JWT `RiderSession` records, and publishes `facematch_result` with `status: "failed"` and `action: "logout"` to immediately log out the rider on the mobile app.
+  - Created `RiderFaceMatchLog` audit model and migration `0003_riderrating_riderfacematchlog` to track verification attempts, similarity scores, raw KYC responses, and error traces.
+  - Added `"facematch:*": ["subscribe"]` baseline capability to `AblyTokenView` (`GET /api/dispatch/ably-token/`) for immediate client subscription.
+  - Added unit test suite `test_rider_facematch.py` and API integration test suite `test_rider_facematch_api.py`.
 - **Rider Application Rejection Email with Document Feedback (`dispatcher/views.py`, `dispatcher/emails.py`, `dispatcher/tasks.py`)**:
   - Implemented automated rejection email notification on `POST /api/dispatch/riders/{id}/reject/` (`RiderViewSet.reject`).
   - Added `send_rider_rejection_email` and `get_rider_rejection_email_template` in `dispatcher/emails.py` with custom responsive HTML/text templates branded for Assured Express.

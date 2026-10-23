@@ -1579,6 +1579,7 @@ class AblyTokenView(views.APIView):
         capability = {
             "location-update": ["publish", "subscribe"],
             "chat:*": ["publish", "subscribe"],
+            "facematch:*": ["subscribe"],
         }
 
         if is_dispatcher:
