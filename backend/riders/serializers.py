@@ -71,6 +71,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "rider_id",
             "status",
             "firstName",
+            "is_independent_rider",
             "lastName",
             "phone",
             "email",

@@ -1,5 +1,6 @@
 from decimal import Decimal
 import random
+import secrets
 import string
 from typing import Optional
 import uuid
@@ -404,6 +405,24 @@ class Order(models.Model):
     canceled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
 
+    # Verification Codes
+    pickup_code = models.CharField(
+        max_length=6,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="6-digit verification code used by rider to confirm package pickup",
+    )
+    pickup_code_attempts = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Consecutive failed pickup code attempts (locks at 5)",
+    )
+    pickup_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when pickup code was successfully verified",
+    )
+
     class Meta:
         db_table = "orders"
         ordering = ["-created_at"]
@@ -416,6 +435,12 @@ class Order(models.Model):
         return f"Order {self.order_number}"
 
     @property
+    def drop_code(self) -> str | None:
+        """Drop code for the first delivery (convenience for single-drop orders)."""
+        first_delivery = self.deliveries.first()
+        return first_delivery.drop_code if first_delivery else None
+
+    @property
     def vertical_lead_name(self) -> str | None:
         """Get the name of the vertical lead for this order."""
         if not (self.rider and self.rider.hub and self.rider.hub.zone_id):
@@ -423,7 +448,7 @@ class Order(models.Model):
         return self.rider.hub.zone.zone_lead.user.full_name
 
     def save(self, *args, **kwargs):
-        """Generate order number if not exists."""
+        """Generate order number and pickup code if not exists."""
         if not self.order_number:
             # Generate order number: 6XXXXXX format
             last_order = Order.objects.order_by("-order_number").first()
@@ -435,6 +460,9 @@ class Order(models.Model):
                     self.order_number = str(6158000 + Order.objects.count() + 1)
             else:
                 self.order_number = "6158000"
+
+        if not self.pickup_code:
+            self.pickup_code = f"{secrets.randbelow(900000) + 100000}"
 
         super().save(*args, **kwargs)
 
@@ -526,6 +554,24 @@ class Delivery(models.Model):
         help_text="Estimated duration in minutes for this delivery leg",
     )
 
+    # Verification Codes
+    drop_code = models.CharField(
+        max_length=6,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="6-digit verification code used by rider to confirm package delivery",
+    )
+    drop_code_attempts = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Consecutive failed drop code attempts (locks at 5)",
+    )
+    drop_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when drop code was successfully verified",
+    )
+
     class Meta:
         db_table = "deliveries"
         ordering = ["order", "sequence"]
@@ -535,6 +581,12 @@ class Delivery(models.Model):
 
     def __str__(self):
         return f"Delivery to {self.receiver_name} - Order {self.order.order_number}"
+
+    def save(self, *args, **kwargs):
+        """Generate drop code if not exists."""
+        if not self.drop_code:
+            self.drop_code = f"{secrets.randbelow(900000) + 100000}"
+        super().save(*args, **kwargs)
 
 
 class OrderEvent(models.Model):

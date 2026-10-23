@@ -5,6 +5,19 @@ All notable changes to the AXpress backend are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Rider Order Pickup & Delivery Verification Codes V2 (`orders/models.py`, `orders/v2_views.py`, `orders/serializers.py`, `orders/urls.py`, `orders/migrations/0017_order_pickup_code_delivery_drop_code.py`)**:
+  - Implemented 6-digit verification codes to eliminate reliance on GPS location proximity checks for rider order pickup and delivery confirmation.
+  - Automatically generates cryptographically secure 6-digit `pickup_code` on `Order` and 6-digit `drop_code` on `Delivery` (supporting single-delivery and multi-drop orders).
+  - Exposed `pickup_code` and `drop_code` to merchants in `OrderSerializer` and `DeliverySerializer`; strictly hidden from rider order representations (`AssignedOrderSerializer`).
+  - Added dedicated V2 endpoints:
+    - `POST /api/orders/v2/pickup/`: verifies assigned rider and 6-digit `pickup_code`, advancing order to `PickedUp`.
+    - `POST /api/orders/v2/complete/`: verifies assigned rider and 6-digit `drop_code` for single-delivery orders, advancing delivery and order to `Done`.
+    - `POST /api/orders/v2/delivery/<delivery_id>/deliver/`: verifies assigned rider and 6-digit `drop_code` for individual multi-drop delivery legs, advancing order to `Done` once all legs are completed.
+  - Integrated brute-force protection: locks verification after 5 consecutive failed code attempts per order/delivery.
+  - Automatically triggers rider earnings allocation, status updates, `order_event_signal` auditing, push notifications, and `order-completed` webhooks.
+  - Retained legacy V1 proximity endpoints (`/api/orders/pickup/`, `/orders/<order_number>/complete/`, `/api/orders/delivery/<id>/deliver/`) for full backward compatibility.
+  - Added migration `0017_order_pickup_code_delivery_drop_code` to backfill active orders with verification codes.
+  - Added comprehensive integration test suite `test_code_verification_v2.py`.
 - **Rider Application Rejection Email with Document Feedback (`dispatcher/views.py`, `dispatcher/emails.py`, `dispatcher/tasks.py`)**:
   - Implemented automated rejection email notification on `POST /api/dispatch/riders/{id}/reject/` (`RiderViewSet.reject`).
   - Added `send_rider_rejection_email` and `get_rider_rejection_email_template` in `dispatcher/emails.py` with custom responsive HTML/text templates branded for Assured Express.
