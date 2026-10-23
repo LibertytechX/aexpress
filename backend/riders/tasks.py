@@ -216,3 +216,267 @@ def check_pending_rider_payout_status():
             )
 
     return f"Processed {processed_count} pending payouts"
+
+
+def _publish_to_ably_channel(channel_name: str, event: str, payload: dict):
+    """Publish a message to an Ably channel using the REST client."""
+    api_key = getattr(settings, "ABLY_API_KEY", "")
+    if not api_key:
+        logger.warning(
+            "publish_to_ably: ABLY_API_KEY not configured, skipping publish to %s",
+            channel_name,
+        )
+        return
+
+    async def _publish():
+        from ably import AblyRest
+
+        client = AblyRest(api_key)
+        channel = client.channels.get(channel_name)
+        await channel.publish(event, payload)
+        await client.close()
+
+    try:
+        asyncio.run(_publish())
+        logger.info("Published [%s] to channel %s", event, channel_name)
+    except Exception as exc:
+        logger.error(
+            "Ably publish failed for channel %s (%s): %s", channel_name, event, exc
+        )
+
+
+@shared_task
+def process_rider_facematch_task(
+    rider_id: str, selfie_url: str, channel_name: str, log_id: str = None
+):
+    """
+    Background Celery task for comparing independent rider selfie snapshot against their profile photo document.
+    Downloads both images, invokes 3rd-party KYC CompareFacesView endpoint, processes the outcome,
+    updates rider authorization/session status on failure, records audit log, and notifies via Ably.
+    """
+    import io
+    import requests
+    from dispatcher.models import Rider
+    from .models import RiderDocument, RiderFaceMatchLog, RiderSession
+
+    facematch_log = None
+    if log_id:
+        facematch_log = RiderFaceMatchLog.objects.filter(id=log_id).first()
+
+    try:
+        rider = Rider.objects.get(id=rider_id)
+    except Rider.DoesNotExist:
+        logger.error("process_rider_facematch_task: Rider %s not found", rider_id)
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.ERROR
+            facematch_log.error_message = f"Rider {rider_id} not found."
+            facematch_log.save(update_fields=["status", "error_message", "updated_at"])
+        return
+
+    # Find reference profile photo URL
+    ref_doc = (
+        RiderDocument.objects.filter(
+            rider=rider, doc_type=RiderDocument.DocType.PROFILE_PHOTO
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    ref_photo_url = (
+        ref_doc.file_url if ref_doc and ref_doc.file_url else (rider.avatar or "")
+    )
+
+    if not ref_photo_url:
+        err_msg = "No reference profile photo found for rider."
+        logger.error("process_rider_facematch_task: %s (rider_id=%s)", err_msg, rider_id)
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.ERROR
+            facematch_log.error_message = err_msg
+            facematch_log.save(update_fields=["status", "error_message", "updated_at"])
+        _publish_to_ably_channel(
+            channel_name,
+            "facematch_result",
+            {
+                "status": "error",
+                "matched": False,
+                "message": err_msg,
+            },
+        )
+        return
+
+    # 1. Download selfie and reference photos
+    try:
+        selfie_resp = requests.get(selfie_url, timeout=20)
+        selfie_resp.raise_for_status()
+        selfie_bytes = selfie_resp.content
+
+        ref_resp = requests.get(ref_photo_url, timeout=20)
+        ref_resp.raise_for_status()
+        ref_bytes = ref_resp.content
+    except Exception as exc:
+        err_msg = f"Failed to download face images: {str(exc)}"
+        logger.error("process_rider_facematch_task: %s", err_msg)
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.ERROR
+            facematch_log.error_message = err_msg
+            facematch_log.save(update_fields=["status", "error_message", "updated_at"])
+        _publish_to_ably_channel(
+            channel_name,
+            "facematch_result",
+            {
+                "status": "error",
+                "matched": False,
+                "message": err_msg,
+            },
+        )
+        return
+
+    # 2. Call KYC service CompareFacesView endpoint
+    kyc_url = getattr(
+        settings,
+        "KYC_SERVICE_URL",
+        "http://localhost:8000/api/v1/kyc/face-match",
+    )
+    kyc_token = getattr(settings, "KYC_SERVICE_TOKEN", "")
+    headers = {}
+    if kyc_token:
+        headers["Authorization"] = f"Bearer {kyc_token}"
+
+    files = {
+        "face_one": ("selfie.jpg", io.BytesIO(selfie_bytes), "image/jpeg"),
+        "face_two": ("reference.jpg", io.BytesIO(ref_bytes), "image/jpeg"),
+    }
+    form_data = {
+        "client_reference": f"rider_{rider.rider_id or rider.id}",
+    }
+
+    try:
+        kyc_resp = requests.post(
+            kyc_url,
+            files=files,
+            data=form_data,
+            headers=headers,
+            timeout=30,
+        )
+    except Exception as exc:
+        err_msg = f"KYC service connection failed: {str(exc)}"
+        logger.error("process_rider_facematch_task: %s", err_msg)
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.ERROR
+            facematch_log.error_message = err_msg
+            facematch_log.save(update_fields=["status", "error_message", "updated_at"])
+        _publish_to_ably_channel(
+            channel_name,
+            "facematch_result",
+            {
+                "status": "error",
+                "matched": False,
+                "message": err_msg,
+            },
+        )
+        return
+
+    # 3. Parse KYC response
+    raw_response = {}
+    is_match = False
+    similarity = 0.0
+    error_message = ""
+
+    try:
+        raw_response = kyc_resp.json()
+    except Exception:
+        raw_response = {"raw_text": kyc_resp.text}
+
+    if kyc_resp.status_code == 200 and isinstance(raw_response, dict):
+        data_block = raw_response.get("data", {})
+        inner_data = (
+            data_block.get("data", {}) if isinstance(data_block, dict) else {}
+        )
+        is_match = bool(inner_data.get("result", False))
+        try:
+            similarity = float(inner_data.get("similarity", 0.0) or 0.0)
+        except (ValueError, TypeError):
+            similarity = 0.0
+    else:
+        error_message = (
+            raw_response.get("error")
+            or raw_response.get("message")
+            or f"KYC returned status {kyc_resp.status_code}"
+        )
+        is_match = False
+
+    # 4. Handle Match Outcome
+    if is_match:
+        logger.info(
+            "Face match SUCCESS for rider %s (similarity=%.2f)",
+            rider.rider_id,
+            similarity,
+        )
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.SUCCESS
+            facematch_log.is_match = True
+            facematch_log.similarity = similarity
+            facematch_log.raw_response = raw_response
+            facematch_log.save(
+                update_fields=[
+                    "status",
+                    "is_match",
+                    "similarity",
+                    "raw_response",
+                    "updated_at",
+                ]
+            )
+
+        _publish_to_ably_channel(
+            channel_name,
+            "facematch_result",
+            {
+                "status": "success",
+                "matched": True,
+                "similarity": similarity,
+                "message": "Face match verification successful.",
+            },
+        )
+    else:
+        logger.warning(
+            "Face match FAILED for rider %s (similarity=%.2f, error=%s)",
+            rider.rider_id,
+            similarity,
+            error_message,
+        )
+        # Block / unauthorize the rider
+        rider.is_authorized = False
+        rider.status = Rider.Status.OFFLINE
+        rider.save(update_fields=["is_authorized", "status"])
+
+        # Deactivate all active sessions to force logout
+        RiderSession.objects.filter(rider=rider, is_active=True).update(is_active=False)
+
+        if facematch_log:
+            facematch_log.status = RiderFaceMatchLog.Status.FAILED
+            facematch_log.is_match = False
+            facematch_log.similarity = similarity
+            facematch_log.raw_response = raw_response
+            facematch_log.error_message = error_message
+            facematch_log.save(
+                update_fields=[
+                    "status",
+                    "is_match",
+                    "similarity",
+                    "raw_response",
+                    "error_message",
+                    "updated_at",
+                ]
+            )
+
+        _publish_to_ably_channel(
+            channel_name,
+            "facematch_result",
+            {
+                "status": "failed",
+                "matched": False,
+                "similarity": similarity,
+                "action": "logout",
+                "message": "Face match verification failed. Your account has been unauthorized.",
+            },
+        )
+

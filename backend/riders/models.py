@@ -895,3 +895,38 @@ class RiderRating(models.Model):
 
     def __str__(self):
         return f"Rating for {self.rider.rider_id}: {self.rating} stars"
+
+
+class RiderFaceMatchLog(models.Model):
+    """
+    Log of face match verification attempts for independent riders.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="facematch_logs"
+    )
+    selfie_url = models.URLField(max_length=500)
+    reference_photo_url = models.URLField(max_length=500)
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    similarity = models.FloatField(null=True, blank=True)
+    is_match = models.BooleanField(default=False)
+    raw_response = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_facematch_logs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"FaceMatch for {self.rider.rider_id}: {self.status} (match={self.is_match})"

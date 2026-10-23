@@ -385,6 +385,67 @@
 
 ---
 
+### 5. Independent Rider Face Match Verification
+**Endpoint:** `POST /api/riders/facematch/` (or `POST /api/riders/face-match/`)  
+**Authentication:** Required (Rider Bearer Token, independent rider only)  
+**Description:** Initiates asynchronous facial verification between a selfie snapshot taken by the rider (uploaded to S3) and their stored KYC profile photo (`RiderDocument` of type `profile_photo`). Returns an immediate `202 Accepted` response with an Ably channel name (`facematch:<rider_id>`) for real-time progress updates.
+
+A background Celery task downloads both images, calls the 3rd-party KYC `CompareFacesView` service, updates audit records (`RiderFaceMatchLog`), and publishes the verification outcome via Ably. If the match fails, the rider is immediately blocked/unauthorized (`is_authorized = False`, `status = "offline"`), active refresh tokens are revoked, and an Ably event instructs the mobile app to log out the rider.
+
+**Request Body (JSON):**
+```json
+{
+  "image_url": "https://storage.aexpress.com/selfies/RD1234_snapshot.jpg"
+}
+```
+
+**Success Response (202 Accepted):**
+```json
+{
+  "status": "success",
+  "message": "Face match verification initiated.",
+  "data": {
+    "channel": "facematch:RD1234",
+    "event": "facematch_result",
+    "status": "processing"
+  }
+}
+```
+
+**Ably Real-Time Events (`channel: "facematch:<rider_id>"`, `event: "facematch_result"`):**
+
+*Match Succeeded:*
+```json
+{
+  "status": "success",
+  "matched": true,
+  "similarity": 96.5,
+  "message": "Face match verification successful."
+}
+```
+
+*Match Failed (Account Blocked / Forced Logout):*
+```json
+{
+  "status": "failed",
+  "matched": false,
+  "similarity": 32.1,
+  "action": "logout",
+  "message": "Face match verification failed. Your account has been unauthorized."
+}
+```
+
+*Error (Download or Service Failure):*
+```json
+{
+  "status": "error",
+  "matched": false,
+  "message": "Failed to download face images: Connection timeout"
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/

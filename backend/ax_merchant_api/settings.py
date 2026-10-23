@@ -456,6 +456,12 @@ SMARTPARCEL_API_KEY = os.getenv("SMARTPARCEL_API_KEY", "")
 SMARTPARCEL_SECRET_KEY = os.getenv("SMARTPARCEL_SECRET_KEY", "")
 SMARTPARCEL_PUBLIC_KEY = os.getenv("SMARTPARCEL_PUBLIC_KEY", "")
 
+# KYC / Biometric Service Configuration
+KYC_SERVICE_URL = os.getenv(
+    "KYC_SERVICE_URL", "http://localhost:8000/api/v1/kyc/face-match"
+)
+KYC_SERVICE_TOKEN = os.getenv("KYC_SERVICE_TOKEN", "")
+
 # Logger Configuration
 LOG_LEVEL = "INFO"
 

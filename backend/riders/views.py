@@ -51,6 +51,7 @@ from .serializers import (
     RiderWithdrawalSerializer,
     RiderSetTransactionPinSerializer,
     RiderVerifyTransactionPinSerializer,
+    RiderFaceMatchRequestSerializer,
 )
 from wallet.models import (
     Bank,
@@ -74,6 +75,7 @@ from .models import (
     RiderLocation,
     RiderNotification,
     RiderDocument,
+    RiderFaceMatchLog,
 )
 from wallet.models import Wallet, Transaction
 from dispatcher.models import Rider
@@ -2201,3 +2203,78 @@ class RiderVerifyTransactionPinView(APIView):
             data={"valid": True},
             status_code=200,
         )
+
+
+class RiderFaceMatchView(APIView):
+    """
+    API endpoint for independent rider face match verification.
+    Accepts selfie snapshot URL, verifies independent rider status and profile photo presence,
+    returns 202 Accepted with dedicated Ably channel, and kicks off async Celery comparison task.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        rider = getattr(request.user, "rider_profile", None)
+        if not rider:
+            raise ServiceException(status_code=404, message="Rider profile not found.")
+
+        if not rider.is_independent_rider:
+            raise ServiceException(
+                status_code=400,
+                message="Face match verification is only applicable to independent riders.",
+            )
+
+        serializer = RiderFaceMatchRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        image_url = serializer.validated_data["image_url"]
+
+        # Ensure reference profile photo exists
+        ref_doc = (
+            RiderDocument.objects.filter(
+                rider=rider, doc_type=RiderDocument.DocType.PROFILE_PHOTO
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        ref_photo_url = (
+            ref_doc.file_url if ref_doc and ref_doc.file_url else (rider.avatar or "")
+        )
+        if not ref_photo_url:
+            raise ServiceException(
+                status_code=400,
+                message="No reference profile photo found in rider documents. Please upload a profile photo first.",
+            )
+
+        channel_name = f"facematch:{rider.rider_id or rider.id}"
+
+        # Create pending audit log entry
+        facematch_log = RiderFaceMatchLog.objects.create(
+            rider=rider,
+            selfie_url=image_url,
+            reference_photo_url=ref_photo_url,
+            status=RiderFaceMatchLog.Status.PENDING,
+        )
+
+        # Enqueue background Celery task
+        from .tasks import process_rider_facematch_task
+
+        process_rider_facematch_task.delay(
+            rider_id=str(rider.id),
+            selfie_url=image_url,
+            channel_name=channel_name,
+            log_id=str(facematch_log.id),
+        )
+
+        return service_response(
+            status="success",
+            message="Face match verification initiated.",
+            data={
+                "channel": channel_name,
+                "event": "facematch_result",
+                "status": "processing",
+            },
+            status_code=202,
+        )
+
