@@ -2,8 +2,11 @@ import base64
 import io
 import logging
 import asyncio
+from datetime import timedelta
 from celery import shared_task
 from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
 from ably import AblyRest
 from .models import OrderOffer
 from .serializers import OrderOfferListSerializer
@@ -411,6 +414,17 @@ def process_rider_facematch_task(
             rider.rider_id,
             similarity,
         )
+        rider.face_verification_required = False
+        rider.is_authorized = True
+        rider.last_face_verified_at = timezone.now()
+        rider.save(
+            update_fields=[
+                "face_verification_required",
+                "is_authorized",
+                "last_face_verified_at",
+            ]
+        )
+
         if facematch_log:
             facematch_log.status = RiderFaceMatchLog.Status.SUCCESS
             facematch_log.is_match = True
@@ -444,9 +458,16 @@ def process_rider_facematch_task(
             error_message,
         )
         # Block / unauthorize the rider
+        rider.face_verification_required = True
         rider.is_authorized = False
         rider.status = Rider.Status.OFFLINE
-        rider.save(update_fields=["is_authorized", "status"])
+        rider.save(
+            update_fields=[
+                "face_verification_required",
+                "is_authorized",
+                "status",
+            ]
+        )
 
         # Deactivate all active sessions to force logout
         RiderSession.objects.filter(rider=rider, is_active=True).update(is_active=False)
@@ -479,4 +500,83 @@ def process_rider_facematch_task(
                 "message": "Face match verification failed. Your account has been unauthorized.",
             },
         )
+
+
+@shared_task
+def trigger_monthly_face_verification_task(
+    days_threshold: int = 30, rider_id: str = None
+):
+    """
+    Periodic / monthly background task:
+    Identifies active independent riders due for face verification (last_face_verified_at
+    is None or older than `days_threshold` days, or created > days_threshold days ago if never verified).
+    Marks face_verification_required=True, deauthorizes job assignment (is_authorized=False),
+    and publishes real-time Ably event 'facematch_required' to channel 'facematch:<rider_id>'.
+    """
+    from dispatcher.models import Rider
+
+    now = timezone.now()
+    cutoff = now - timedelta(days=days_threshold)
+
+    query = Rider.objects.filter(
+        is_independent_rider=True,
+        is_active=True,
+        is_deleted=False,
+        face_verification_required=False,
+    )
+
+    if rider_id:
+        import uuid
+
+        try:
+            uuid.UUID(str(rider_id))
+            is_uuid = True
+        except (ValueError, AttributeError, TypeError):
+            is_uuid = False
+
+        if is_uuid:
+            query = query.filter(Q(rider_id=rider_id) | Q(id=rider_id))
+        else:
+            query = query.filter(rider_id=rider_id)
+    else:
+        # Riders whose last_face_verified_at is older than cutoff,
+        # or who have never verified and whose registration was on or before cutoff
+        query = query.filter(
+            Q(last_face_verified_at__isnull=False, last_face_verified_at__lte=cutoff)
+            | Q(last_face_verified_at__isnull=True, created_at__lte=cutoff)
+        )
+
+    due_riders = list(query)
+    logger.info(
+        "Found %d independent riders due for monthly face verification (threshold=%d days)",
+        len(due_riders),
+        days_threshold,
+    )
+
+    processed_ids = []
+    for rider in due_riders:
+        rider.face_verification_required = True
+        rider.is_authorized = False
+        rider.save(update_fields=["face_verification_required", "is_authorized"])
+
+        channel_name = f"facematch:{rider.rider_id or rider.id}"
+        payload = {
+            "action": "face_verification_required",
+            "rider_id": rider.rider_id,
+            "due_date": now.isoformat(),
+            "reason": "monthly_verification",
+        }
+        _publish_to_ably_channel(channel_name, "facematch_required", payload)
+        processed_ids.append(rider.rider_id or str(rider.id))
+        logger.info(
+            "Triggered monthly face verification for rider %s on channel %s",
+            rider.rider_id,
+            channel_name,
+        )
+
+    return {
+        "processed_count": len(processed_ids),
+        "due_riders": processed_ids,
+    }
+
 

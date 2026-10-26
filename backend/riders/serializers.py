@@ -61,6 +61,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
     documents_status = serializers.SerializerMethodField()
     net_earnings = serializers.SerializerMethodField()
     is_verified = serializers.SerializerMethodField()
+    face_verification_channel = serializers.SerializerMethodField()
     affiliated_to_code = serializers.SerializerMethodField()
     affiliated_to_name = serializers.SerializerMethodField()
 
@@ -88,6 +89,9 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "documents_status",
             "net_earnings",
             "is_verified",
+            "face_verification_channel",
+            "face_verification_required",
+            "last_face_verified_at",
             "is_affiliated",
             "affiliated_to_code",
             "affiliated_to_name",
@@ -109,12 +113,21 @@ class RiderMeSerializer(serializers.ModelSerializer):
         return None
 
     def get_is_verified(self, obj):
-        if obj.is_independent_rider and obj.is_authorized:
+        if (
+            obj.is_independent_rider
+            and obj.is_authorized
+            and not getattr(obj, "face_verification_required", False)
+        ):
             return True
         elif not obj.is_independent_rider:
             return True
         else:
             return False
+
+    def get_face_verification_channel(self, obj):
+        if getattr(obj, "is_independent_rider", False):
+            return f"facematch:{obj.rider_id or obj.id}"
+        return None
 
     def get_wallet_balance(self, obj):
         try:

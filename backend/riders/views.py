@@ -553,11 +553,21 @@ class RiderLoginView(APIView):
                     },
                 )
 
+            face_verification_channel = (
+                f"facematch:{rider.rider_id or rider.id}"
+                if rider.is_independent_rider
+                else None
+            )
+
             return Response(
                 {
                     "success": True,
                     "message": "Login successful!",
                     "tokens": {"access": access_token, "refresh": refresh_token},
+                    "face_verification_channel": face_verification_channel,
+                    "channels": {
+                        "face_verification": face_verification_channel,
+                    },
                     "rider": RiderMeSerializer(rider).data,
                 },
                 status=status.HTTP_200_OK,
