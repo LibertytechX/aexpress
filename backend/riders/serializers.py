@@ -19,7 +19,7 @@ from .models import (
     AreaDemand,
     RiderEarning,
     RiderNotification,
-    RiderDocument,
+    RiderFaceMatchLog,
 )
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
@@ -1240,4 +1240,39 @@ class RiderFaceMatchRequestSerializer(serializers.Serializer):
                 status_code=400, message="image_url cannot be empty."
             )
         return url
+
+
+class RiderFaceMatchLogSerializer(serializers.ModelSerializer):
+    """
+    Serializer for independent rider face verification audit logs.
+    """
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RiderFaceMatchLog
+        fields = [
+            "id",
+            "rider_id",
+            "rider_name",
+            "trigger_type",
+            "status",
+            "similarity",
+            "is_match",
+            "selfie_url",
+            "reference_photo_url",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+            )
+        return ""
+
 

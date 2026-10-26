@@ -34,6 +34,7 @@ from .views import (
     RiderSetTransactionPinView,
     RiderVerifyTransactionPinView,
     RiderFaceMatchView,
+    RiderFaceMatchLogListView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -176,6 +177,16 @@ urlpatterns = [
         "customer-order-rating/",
         CustomerRatesRiderAPIView.as_view(),
         name="customer-order-rating",
+    ),
+    path(
+        "facematch/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-facematch-logs",
+    ),
+    path(
+        "face-match/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-face-match-logs",
     ),
     path("facematch/", RiderFaceMatchView.as_view(), name="rider-facematch"),
     path("face-match/", RiderFaceMatchView.as_view(), name="rider-face-match"),

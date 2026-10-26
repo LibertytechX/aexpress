@@ -899,21 +899,33 @@ class RiderRating(models.Model):
 
 class RiderFaceMatchLog(models.Model):
     """
-    Log of face match verification attempts for independent riders.
+    Log of face match verification attempts and periodic prompts for independent riders.
     """
 
     class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
         PENDING = "pending", "Pending"
         SUCCESS = "success", "Success"
         FAILED = "failed", "Failed"
         ERROR = "error", "Error"
 
+    class TriggerType(models.TextChoices):
+        MONTHLY_CRON = "monthly_cron", "Monthly Cron"
+        MANUAL_PROMPT = "manual_prompt", "Manual Prompt"
+        ON_DEMAND = "on_demand", "On Demand"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     rider = models.ForeignKey(
         "dispatcher.Rider", on_delete=models.CASCADE, related_name="facematch_logs"
     )
-    selfie_url = models.URLField(max_length=500)
-    reference_photo_url = models.URLField(max_length=500)
+    trigger_type = models.CharField(
+        max_length=20,
+        choices=TriggerType.choices,
+        default=TriggerType.ON_DEMAND,
+        help_text="Origin of the face verification attempt",
+    )
+    selfie_url = models.URLField(max_length=500, blank=True, default="")
+    reference_photo_url = models.URLField(max_length=500, blank=True, default="")
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
@@ -929,4 +941,4 @@ class RiderFaceMatchLog(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"FaceMatch for {self.rider.rider_id}: {self.status} (match={self.is_match})"
+        return f"FaceMatch for {self.rider.rider_id}: {self.status} (trigger={self.trigger_type}, match={self.is_match})"

@@ -15,6 +15,7 @@ from .models import (
     RiderNotification,
     RiderLocation,
     AreaDemand,
+    RiderFaceMatchLog,
 )
 
 
@@ -226,3 +227,40 @@ class AreaDemandAdmin(admin.ModelAdmin):
     list_filter = ("level",)
     search_fields = ("area_name",)
     readonly_fields = ("updated_at",)
+
+
+@admin.register(RiderFaceMatchLog)
+class RiderFaceMatchLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "rider",
+        "trigger_type",
+        "status",
+        "similarity",
+        "is_match",
+        "created_at",
+    )
+    list_filter = ("status", "trigger_type", "is_match", "created_at")
+    search_fields = (
+        "rider__rider_id",
+        "rider__user__phone",
+        "rider__user__email",
+        "rider__user__contact_name",
+    )
+    raw_id_fields = ("rider",)
+    readonly_fields = (
+        "id",
+        "rider",
+        "trigger_type",
+        "selfie_url",
+        "reference_photo_url",
+        "status",
+        "similarity",
+        "is_match",
+        "raw_response",
+        "error_message",
+        "created_at",
+        "updated_at",
+    )
+    ordering = ("-created_at",)
+

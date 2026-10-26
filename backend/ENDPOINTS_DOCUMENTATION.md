@@ -416,6 +416,7 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
   "status": "success",
   "message": "Face match verification initiated.",
   "data": {
+    "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
     "channel": "facematch:RD1234",
     "event": "facematch_result",
     "status": "processing"
@@ -430,6 +431,7 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
 {
   "action": "face_verification_required",
   "rider_id": "RD1234",
+  "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
   "due_date": "2026-10-26T10:00:00.000000+00:00",
   "reason": "monthly_verification"
 }
@@ -462,6 +464,51 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
   "status": "error",
   "matched": false,
   "message": "Failed to download face images: Connection timeout"
+}
+```
+
+---
+
+### 6. Face Match Verification Logs History
+**Endpoint:** `GET /api/riders/facematch/logs/` (or `GET /api/riders/face-match/logs/`)  
+**Authentication:** Required (Rider, Dispatcher, Admin)  
+**Description:** Retrieves paginated audit logs of face verification requests and attempts.
+- Riders can view their personal verification history.
+- Dispatchers and admins can query all logs or filter by specific riders.
+
+**Query Parameters:**
+- `rider_id` (optional, dispatchers/admins only): Filter by short rider ID (e.g. `RD1234`) or UUID.
+- `status` (optional): Filter by status (`requested`, `pending`, `success`, `failed`, `error`).
+- `trigger_type` (optional): Filter by trigger source (`monthly_cron`, `manual_prompt`, `on_demand`).
+- `page` (optional, default `1`): Page number.
+- `page_size` (optional, default `20`, max `100`): Results per page.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Face match logs retrieved successfully.",
+  "data": {
+    "count": 1,
+    "page": 1,
+    "page_size": 20,
+    "results": [
+      {
+        "id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+        "rider_id": "RD1234",
+        "rider_name": "John Doe",
+        "trigger_type": "monthly_cron",
+        "status": "success",
+        "similarity": 96.5,
+        "is_match": true,
+        "selfie_url": "https://storage.aexpress.com/selfies/RD1234_snapshot.jpg",
+        "reference_photo_url": "https://storage.aexpress.com/docs/ref_profile.jpg",
+        "error_message": "",
+        "created_at": "2026-10-26T10:00:00.000000Z",
+        "updated_at": "2026-10-26T10:02:15.000000Z"
+      }
+    ]
+  }
 }
 ```
 

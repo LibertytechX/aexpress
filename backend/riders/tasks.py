@@ -553,24 +553,49 @@ def trigger_monthly_face_verification_task(
         days_threshold,
     )
 
+    from .models import RiderDocument, RiderFaceMatchLog
+
     processed_ids = []
     for rider in due_riders:
         rider.face_verification_required = True
         rider.is_authorized = False
         rider.save(update_fields=["face_verification_required", "is_authorized"])
 
+        # Fetch reference profile photo if exists
+        ref_doc = (
+            RiderDocument.objects.filter(
+                rider=rider, doc_type=RiderDocument.DocType.PROFILE_PHOTO
+            )
+            .order_by("-created_at")
+            .first()
+        )
+        ref_photo_url = (
+            ref_doc.file_url if ref_doc and ref_doc.file_url else (rider.avatar or "")
+        )
+
+        # Record requested face verification audit log
+        log = RiderFaceMatchLog.objects.create(
+            rider=rider,
+            trigger_type=RiderFaceMatchLog.TriggerType.MONTHLY_CRON,
+            status=RiderFaceMatchLog.Status.REQUESTED,
+            reference_photo_url=ref_photo_url,
+            selfie_url="",
+        )
+
         channel_name = f"facematch:{rider.rider_id or rider.id}"
         payload = {
             "action": "face_verification_required",
             "rider_id": rider.rider_id,
+            "log_id": str(log.id),
             "due_date": now.isoformat(),
             "reason": "monthly_verification",
         }
         _publish_to_ably_channel(channel_name, "facematch_required", payload)
         processed_ids.append(rider.rider_id or str(rider.id))
         logger.info(
-            "Triggered monthly face verification for rider %s on channel %s",
+            "Triggered monthly face verification for rider %s (log=%s) on channel %s",
             rider.rider_id,
+            log.id,
             channel_name,
         )
 

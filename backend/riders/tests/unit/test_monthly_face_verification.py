@@ -282,3 +282,143 @@ class ManagementCommandTests(TestCase):
         self.assertFalse(self.rider.is_authorized)
 
         mock_publish.assert_called_once()
+
+
+class FaceMatchLogApiAndLifecycleTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.rider_user = User.objects.create_user(
+            phone="08044440001",
+            email="log.rider@example.com",
+            password="testpassword123",
+            first_name="Log",
+            last_name="Rider",
+            usertype="Rider",
+        )
+        self.rider = self.rider_user.rider_profile
+        self.rider.rider_id = "RD5555"
+        self.rider.is_independent_rider = True
+        self.rider.is_authorized = True
+        self.rider.face_verification_required = False
+        self.rider.save()
+
+        from riders.models import RiderDocument
+
+        self.profile_doc = RiderDocument.objects.create(
+            rider=self.rider,
+            doc_type=RiderDocument.DocType.PROFILE_PHOTO,
+            file_url="https://storage.aexpress.com/docs/ref_profile.jpg",
+            status=RiderDocument.Status.APPROVED,
+        )
+
+        self.dispatcher_user = User.objects.create_user(
+            phone="08044440002",
+            email="log.dispatcher@example.com",
+            password="testpassword123",
+            first_name="Dispatcher",
+            last_name="User",
+            usertype="Dispatcher",
+            is_staff=True,
+        )
+
+    @patch("riders.tasks._publish_to_ably_channel")
+    def test_monthly_trigger_creates_requested_log_with_ably_payload(
+        self, mock_publish
+    ):
+        from riders.models import RiderFaceMatchLog
+
+        result = trigger_monthly_face_verification_task(rider_id="RD5555")
+        self.assertEqual(result["processed_count"], 1)
+
+        log = RiderFaceMatchLog.objects.filter(rider=self.rider).first()
+        self.assertIsNotNone(log)
+        self.assertEqual(log.status, RiderFaceMatchLog.Status.REQUESTED)
+        self.assertEqual(log.trigger_type, RiderFaceMatchLog.TriggerType.MONTHLY_CRON)
+        self.assertEqual(log.reference_photo_url, self.profile_doc.file_url)
+        self.assertEqual(log.selfie_url, "")
+
+        mock_publish.assert_called_once()
+        channel, event, payload = mock_publish.call_args[0]
+        self.assertEqual(channel, "facematch:RD5555")
+        self.assertEqual(event, "facematch_required")
+        self.assertEqual(payload["log_id"], str(log.id))
+
+    @patch("riders.tasks.process_rider_facematch_task.delay")
+    def test_facematch_submission_updates_requested_log(self, mock_task):
+        from riders.models import RiderFaceMatchLog
+
+        # Pre-existing requested log from monthly trigger
+        existing_log = RiderFaceMatchLog.objects.create(
+            rider=self.rider,
+            trigger_type=RiderFaceMatchLog.TriggerType.MONTHLY_CRON,
+            status=RiderFaceMatchLog.Status.REQUESTED,
+            reference_photo_url=self.profile_doc.file_url,
+            selfie_url="",
+        )
+
+        self.client.force_authenticate(user=self.rider_user)
+        url = reverse("riders:rider-facematch")
+        payload = {"image_url": "https://storage.aexpress.com/selfies/selfie_55.jpg"}
+        response = self.client.post(url, payload, format="json")
+
+        self.assertEqual(response.status_code, 202)
+        res_data = response.json()
+        self.assertEqual(res_data["data"]["log_id"], str(existing_log.id))
+
+        existing_log.refresh_from_db()
+        self.assertEqual(existing_log.status, RiderFaceMatchLog.Status.PENDING)
+        self.assertEqual(
+            existing_log.selfie_url,
+            "https://storage.aexpress.com/selfies/selfie_55.jpg",
+        )
+        self.assertEqual(
+            RiderFaceMatchLog.objects.filter(rider=self.rider).count(), 1
+        )
+        mock_task.assert_called_once()
+
+    def test_rider_can_view_own_logs(self):
+        from riders.models import RiderFaceMatchLog
+
+        RiderFaceMatchLog.objects.create(
+            rider=self.rider,
+            trigger_type=RiderFaceMatchLog.TriggerType.MONTHLY_CRON,
+            status=RiderFaceMatchLog.Status.SUCCESS,
+            similarity=98.2,
+            is_match=True,
+            selfie_url="https://storage.aexpress.com/selfies/1.jpg",
+            reference_photo_url=self.profile_doc.file_url,
+        )
+
+        self.client.force_authenticate(user=self.rider_user)
+        url = reverse("riders:rider-facematch-logs")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        res_data = response.json()
+        self.assertEqual(res_data["status"], "success")
+        self.assertEqual(res_data["data"]["count"], 1)
+        item = res_data["data"]["results"][0]
+        self.assertEqual(item["rider_id"], "RD5555")
+        self.assertEqual(item["status"], "success")
+        self.assertEqual(item["trigger_type"], "monthly_cron")
+
+    def test_dispatcher_can_filter_logs_by_rider_id(self):
+        from riders.models import RiderFaceMatchLog
+
+        RiderFaceMatchLog.objects.create(
+            rider=self.rider,
+            trigger_type=RiderFaceMatchLog.TriggerType.ON_DEMAND,
+            status=RiderFaceMatchLog.Status.SUCCESS,
+            similarity=95.0,
+            is_match=True,
+        )
+
+        self.client.force_authenticate(user=self.dispatcher_user)
+        url = reverse("riders:rider-facematch-logs") + "?rider_id=RD5555"
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        res_data = response.json()
+        self.assertEqual(res_data["data"]["count"], 1)
+        self.assertEqual(res_data["data"]["results"][0]["rider_id"], "RD5555")
+
