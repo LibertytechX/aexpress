@@ -118,6 +118,17 @@ class ChangePasswordViewIntegrationTest(TestCase):
         )
         self.assertTrue(self._password_unchanged())
 
+    def test_same_password_checked_before_current_password(self):
+        """Identical old/new passwords are rejected before the current password is checked."""
+        response = self._change(old="WrongPassword!", new="WrongPassword!", confirm="WrongPassword!")
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data["error"],
+            "New password must be different from the current password.",
+        )
+        self.assertTrue(self._password_unchanged())
+
     def test_password_whitespace_is_preserved(self):
         """Leading/trailing spaces are part of the password, not trimmed."""
         spaced = "  Spaced Pass 1  "

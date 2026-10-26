@@ -260,8 +260,8 @@ Authorization: Bearer <access_token>
 1. `old_password`, `new_password`, and `confirm_password` are all required.
 2. `new_password` and `confirm_password` must match.
 3. `new_password` must be at least 6 characters long.
-4. `old_password` must match the user's current password.
-5. `new_password` must be different from `old_password`.
+4. `new_password` must be different from `old_password`.
+5. `old_password` must match the user's current password.
 
 **Success Response (200 OK):**
 ```json
@@ -276,8 +276,8 @@ Authorization: Bearer <access_token>
 {"success": false, "error": "Old password, new password, and confirm password are required."}
 {"success": false, "error": "Passwords do not match"}
 {"success": false, "error": "Password must be at least 6 characters long"}
-{"success": false, "error": "Current password is incorrect."}
 {"success": false, "error": "New password must be different from the current password."}
+{"success": false, "error": "Current password is incorrect."}
 ```
 
 **Error Response (401 Unauthorized — missing/invalid access token):**

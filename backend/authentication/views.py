@@ -741,29 +741,11 @@ class ChangePasswordView(APIView):
         old_password = serializer.validated_data["old_password"]
         new_password = serializer.validated_data["new_password"]
 
-        if len(new_password) < 6:
-            return Response(
-                {
-                    "success": False,
-                    "error": "Password must be at least 6 characters long",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         user = request.user
 
         if not user.check_password(old_password):
             return Response(
                 {"success": False, "error": "Current password is incorrect."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if old_password == new_password:
-            return Response(
-                {
-                    "success": False,
-                    "error": "New password must be different from the current password.",
-                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

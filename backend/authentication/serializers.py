@@ -205,7 +205,7 @@ class ChangePasswordSerializer(serializers.Serializer):
     )
 
     def validate(self, data):
-        """Validate that all fields are present and the new passwords match."""
+        """Validate required fields, matching new passwords, minimum length, and that the password changes."""
         old_password = data.get("old_password")
         new_password = data.get("new_password")
         confirm_password = data.get("confirm_password")
@@ -217,6 +217,16 @@ class ChangePasswordSerializer(serializers.Serializer):
 
         if new_password != confirm_password:
             raise serializers.ValidationError("Passwords do not match")
+
+        if len(new_password) < 6:
+            raise serializers.ValidationError(
+                "Password must be at least 6 characters long"
+            )
+
+        if old_password == new_password:
+            raise serializers.ValidationError(
+                "New password must be different from the current password."
+            )
 
         return data
 
