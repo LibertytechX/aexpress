@@ -237,6 +237,62 @@ Authorization: Bearer <access_token>
 
 ---
 
+### 7. Change Password
+**Endpoint:** `POST /api/auth/change-password/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Change the password for the currently logged-in user. The user proves their identity with their current password — no email or SMS code is involved, which is what distinguishes this from the Request/Reset Password flow above (used when a user is locked out and can't log in at all).
+
+**Headers:**
+```
+Authorization: Bearer <access_token>
+```
+
+**Request Body:**
+```json
+{
+  "old_password": "currentPassword123",
+  "new_password": "newSecurePassword456",
+  "confirm_password": "newSecurePassword456"
+}
+```
+
+**Validation rules (checked in this order):**
+1. `old_password`, `new_password`, and `confirm_password` are all required.
+2. `new_password` and `confirm_password` must match.
+3. `new_password` must be at least 6 characters long.
+4. `new_password` must be different from `old_password`.
+5. `old_password` must match the user's current password.
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Password changed successfully!"
+}
+```
+
+**Error Responses (400 Bad Request):**
+```json
+{"success": false, "error": "Old password, new password, and confirm password are required."}
+{"success": false, "error": "Passwords do not match"}
+{"success": false, "error": "Password must be at least 6 characters long"}
+{"success": false, "error": "New password must be different from the current password."}
+{"success": false, "error": "Current password is incorrect."}
+```
+
+**Error Response (401 Unauthorized — missing/invalid access token):**
+```json
+{
+  "detail": "Authentication credentials were not provided."
+}
+```
+
+**Notes:**
+- On success, the existing password stops working immediately for login — verified end-to-end against `POST /api/auth/login/`.
+- This endpoint does **not** currently blacklist the user's existing JWT refresh tokens — a device that's already logged in stays logged in after a password change elsewhere. If "change password signs out other sessions" is required, that needs to be added separately (see `LogoutView` for the token-blacklisting pattern already used in this codebase).
+
+---
+
 ## Token Lifetimes
 - **Access Token:** 24 hours
 - **Refresh Token:** 168 hours (7 days)

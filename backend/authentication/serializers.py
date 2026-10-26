@@ -188,6 +188,49 @@ class LoginSerializer(serializers.Serializer):
         return data
 
 
+class ChangePasswordSerializer(serializers.Serializer):
+    """Serializer for validating a logged-in user's change-password request."""
+
+    # Fields are optional at the field level so a missing value produces the
+    # single combined message below rather than one error per field.
+    # trim_whitespace=False so passwords are used exactly as typed.
+    old_password = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=False, write_only=True
+    )
+    new_password = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=False, write_only=True
+    )
+    confirm_password = serializers.CharField(
+        required=False, allow_blank=True, trim_whitespace=False, write_only=True
+    )
+
+    def validate(self, data):
+        """Validate required fields, matching new passwords, minimum length, and that the password changes."""
+        old_password = data.get("old_password")
+        new_password = data.get("new_password")
+        confirm_password = data.get("confirm_password")
+
+        if not old_password or not new_password or not confirm_password:
+            raise serializers.ValidationError(
+                "Old password, new password, and confirm password are required."
+            )
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError("Passwords do not match")
+
+        if len(new_password) < 6:
+            raise serializers.ValidationError(
+                "Password must be at least 6 characters long"
+            )
+
+        if old_password == new_password:
+            raise serializers.ValidationError(
+                "New password must be different from the current password."
+            )
+
+        return data
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """Serializer for updating user profile."""
 
