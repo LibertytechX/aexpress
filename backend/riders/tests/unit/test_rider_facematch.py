@@ -111,6 +111,8 @@ class RiderFaceMatchTaskTests(TestCase):
 
         # Rider remains authorized
         self.assertTrue(self.rider.is_authorized)
+        self.assertFalse(self.rider.face_verification_required)
+        self.assertIsNotNone(self.rider.last_face_verified_at)
         self.assertTrue(self.session.is_active)
 
         # Ably event published
@@ -174,6 +176,7 @@ class RiderFaceMatchTaskTests(TestCase):
 
         # Rider MUST be blocked / unauthorized and offline
         self.assertFalse(self.rider.is_authorized)
+        self.assertTrue(self.rider.face_verification_required)
         self.assertEqual(self.rider.status, Rider.Status.OFFLINE)
 
         # Active session must be deactivated

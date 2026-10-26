@@ -52,6 +52,7 @@ from .serializers import (
     RiderSetTransactionPinSerializer,
     RiderVerifyTransactionPinSerializer,
     RiderFaceMatchRequestSerializer,
+    RiderFaceMatchLogSerializer,
 )
 from wallet.models import (
     Bank,
@@ -553,11 +554,21 @@ class RiderLoginView(APIView):
                     },
                 )
 
+            face_verification_channel = (
+                f"facematch:{rider.rider_id or rider.id}"
+                if rider.is_independent_rider
+                else None
+            )
+
             return Response(
                 {
                     "success": True,
                     "message": "Login successful!",
                     "tokens": {"access": access_token, "refresh": refresh_token},
+                    "face_verification_channel": face_verification_channel,
+                    "channels": {
+                        "face_verification": face_verification_channel,
+                    },
                     "rider": RiderMeSerializer(rider).data,
                 },
                 status=status.HTTP_200_OK,
@@ -2249,13 +2260,34 @@ class RiderFaceMatchView(APIView):
 
         channel_name = f"facematch:{rider.rider_id or rider.id}"
 
-        # Create pending audit log entry
-        facematch_log = RiderFaceMatchLog.objects.create(
-            rider=rider,
-            selfie_url=image_url,
-            reference_photo_url=ref_photo_url,
-            status=RiderFaceMatchLog.Status.PENDING,
+        # Link existing requested log or create pending audit log entry
+        facematch_log = (
+            RiderFaceMatchLog.objects.filter(
+                rider=rider, status=RiderFaceMatchLog.Status.REQUESTED
+            )
+            .order_by("-created_at")
+            .first()
         )
+        if facematch_log:
+            facematch_log.selfie_url = image_url
+            facematch_log.reference_photo_url = ref_photo_url
+            facematch_log.status = RiderFaceMatchLog.Status.PENDING
+            facematch_log.save(
+                update_fields=[
+                    "selfie_url",
+                    "reference_photo_url",
+                    "status",
+                    "updated_at",
+                ]
+            )
+        else:
+            facematch_log = RiderFaceMatchLog.objects.create(
+                rider=rider,
+                trigger_type=RiderFaceMatchLog.TriggerType.ON_DEMAND,
+                selfie_url=image_url,
+                reference_photo_url=ref_photo_url,
+                status=RiderFaceMatchLog.Status.PENDING,
+            )
 
         # Enqueue background Celery task
         from .tasks import process_rider_facematch_task
@@ -2271,10 +2303,97 @@ class RiderFaceMatchView(APIView):
             status="success",
             message="Face match verification initiated.",
             data={
+                "log_id": str(facematch_log.id),
                 "channel": channel_name,
                 "event": "facematch_result",
                 "status": "processing",
             },
             status_code=202,
         )
+
+
+class RiderFaceMatchLogListView(APIView):
+    """
+    API endpoint to list face verification audit logs.
+    Riders can view their own verification history.
+    Dispatchers and admins can filter by rider_id, status, and trigger_type, or view all logs.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        user = request.user
+        is_staff_or_dispatcher = bool(
+            user.is_staff
+            or user.is_superuser
+            or hasattr(user, "dispatcher_profile")
+            or getattr(user, "usertype", "") in ["Dispatcher", "Admin", "SuperAdmin"]
+        )
+
+        rider_id_query = request.query_params.get("rider_id")
+
+        if is_staff_or_dispatcher:
+            logs = RiderFaceMatchLog.objects.select_related("rider__user").all()
+            if rider_id_query:
+                import uuid
+
+                try:
+                    uuid.UUID(str(rider_id_query))
+                    is_uuid = True
+                except (ValueError, TypeError, AttributeError):
+                    is_uuid = False
+
+                if is_uuid:
+                    logs = logs.filter(
+                        Q(rider__rider_id=rider_id_query) | Q(rider__id=rider_id_query)
+                    )
+                else:
+                    logs = logs.filter(rider__rider_id=rider_id_query)
+        else:
+            rider = getattr(user, "rider_profile", None)
+            if not rider:
+                raise ServiceException(
+                    status_code=403,
+                    message="You do not have permission to view face match logs.",
+                )
+            logs = RiderFaceMatchLog.objects.select_related("rider__user").filter(
+                rider=rider
+            )
+
+        status_filter = request.query_params.get("status")
+        if status_filter:
+            logs = logs.filter(status=status_filter)
+
+        trigger_filter = request.query_params.get("trigger_type")
+        if trigger_filter:
+            logs = logs.filter(trigger_type=trigger_filter)
+
+        try:
+            page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 100)
+        except (ValueError, TypeError):
+            page_size = 20
+
+        try:
+            page = max(int(request.query_params.get("page", 1)), 1)
+        except (ValueError, TypeError):
+            page = 1
+
+        offset = (page - 1) * page_size
+        total_count = logs.count()
+        paginated_logs = logs[offset : offset + page_size]
+
+        serializer = RiderFaceMatchLogSerializer(paginated_logs, many=True)
+        return service_response(
+            status="success",
+            message="Face match logs retrieved successfully.",
+            data={
+                "count": total_count,
+                "page": page,
+                "page_size": page_size,
+                "results": serializer.data,
+            },
+            status_code=200,
+        )
+
 

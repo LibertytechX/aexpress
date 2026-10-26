@@ -5,6 +5,21 @@ All notable changes to the AXpress backend are documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Independent Rider Face Verification Redesign (`dispatcher/models.py`, `riders/tasks.py`, `riders/serializers.py`, `riders/views.py`, `riders/management/commands/trigger_monthly_face_verification.py`, `ax_merchant_api/settings.py`)**:
+  - Transitioned the independent rider face verification model to an event-driven periodic verification architecture:
+    - Added `last_face_verified_at` (DateTimeField) and `face_verification_required` (BooleanField) to the `Rider` model.
+    - Updated `RiderLoginView` (`POST /api/riders/auth/login/`) to supply the dedicated real-time Ably face verification channel (`facematch:<rider_id>`) at the top level and nested within `channels` and `rider` profile payloads.
+    - Added `face_verification_channel`, `face_verification_required`, and `last_face_verified_at` to `RiderMeSerializer` (`GET /api/riders/me/`), with `is_verified` returning `False` whenever verification is required.
+    - Implemented `trigger_monthly_face_verification_task` in `riders/tasks.py` and wired onto `CELERY_BEAT_SCHEDULE` (runs daily at 01:00 UTC): flags independent riders whose verification is older than 30 days (or who never verified and registered > 30 days ago), sets `face_verification_required = True` and `is_authorized = False`, and broadcasts an Ably real-time event (`facematch_required`) to `facematch:<rider_id>`.
+    - Updated `process_rider_facematch_task` lifecycle: on facial comparison match success, resets `face_verification_required = False`, restores `is_authorized = True`, updates `last_face_verified_at = timezone.now()`, and notifies the mobile client via Ably event `facematch_result`.
+    - Added Django management command `python manage.py trigger_monthly_face_verification` with `--days`, `--rider-id`, `--dry-run`, and `--async-task` options.
+    - Enhanced `RiderFaceMatchLog` (`models.py`, `serializers.py`, `views.py`, `admin.py`, `migrations/0004_riderfacematchlog_trigger_type_and_more.py`):
+      - Added `trigger_type` (`monthly_cron`, `manual_prompt`, `on_demand`) and new `requested` status to record verification prompts.
+      - Automatically creates a `REQUESTED` audit log when the monthly background task flags a rider, passing `log_id` in the Ably payload.
+      - Seamlessly links and updates the existing `REQUESTED` log to `PENDING` when the rider submits their selfie, returning `log_id` in the API response.
+      - Implemented `GET /api/riders/facematch/logs/` (and alias `GET /api/riders/face-match/logs/`) allowing riders to view their verification history and dispatchers/admins to search and filter logs across riders.
+      - Registered `RiderFaceMatchLogAdmin` in Django Admin with filters, search, and full read-only audit inspection.
+    - Added full automated test suite `backend/riders/tests/unit/test_monthly_face_verification.py`.
 - **Rider Order Pickup & Delivery Verification Codes V2 (`orders/models.py`, `orders/v2_views.py`, `orders/serializers.py`, `orders/urls.py`, `orders/migrations/0017_order_pickup_code_delivery_drop_code.py`)**:
   - Implemented 6-digit verification codes to eliminate reliance on GPS location proximity checks for rider order pickup and delivery confirmation.
   - Automatically generates cryptographically secure 6-digit `pickup_code` on `Order` and 6-digit `drop_code` on `Delivery` (supporting single-delivery and multi-drop orders).

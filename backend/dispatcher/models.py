@@ -476,6 +476,15 @@ class Rider(models.Model):
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_independent_rider = models.BooleanField(default=False)
+    last_face_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of last successful face verification",
+    )
+    face_verification_required = models.BooleanField(
+        default=False,
+        help_text="Flag indicating whether the rider must complete face verification before receiving orders",
+    )
     approval_status = models.CharField(
         max_length=20,
         choices=ApprovalStatus.choices,

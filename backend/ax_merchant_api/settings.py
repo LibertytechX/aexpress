@@ -414,6 +414,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "dispatcher.tasks.reset_monthly_dispatcher_commissions_task",
         "schedule": crontab(day_of_month=1, hour=0, minute=0),
     },
+    # Monthly Independent Rider Face Verification Daily Check
+    "trigger-monthly-face-verification-daily": {
+        "task": "riders.tasks.trigger_monthly_face_verification_task",
+        "schedule": crontab(hour=1, minute=0),  # Daily at 01:00 UTC
+    },
 }
 
 # Production Security Settings

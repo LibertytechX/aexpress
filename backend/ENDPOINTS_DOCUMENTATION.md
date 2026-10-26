@@ -390,7 +390,18 @@
 **Authentication:** Required (Rider Bearer Token, independent rider only)  
 **Description:** Initiates asynchronous facial verification between a selfie snapshot taken by the rider (uploaded to S3) and their stored KYC profile photo (`RiderDocument` of type `profile_photo`). Returns an immediate `202 Accepted` response with an Ably channel name (`facematch:<rider_id>`) for real-time progress updates.
 
-A background Celery task downloads both images, calls the 3rd-party KYC `CompareFacesView` service, updates audit records (`RiderFaceMatchLog`), and publishes the verification outcome via Ably. If the match fails, the rider is immediately blocked/unauthorized (`is_authorized = False`, `status = "offline"`), active refresh tokens are revoked, and an Ably event instructs the mobile app to log out the rider.
+#### Channel Provisioning & Periodic Trigger Architecture
+- **On Rider Login (`POST /api/riders/auth/login/`)** & **Rider Profile (`GET /api/riders/me/`)**: The backend automatically provisions the dedicated Ably channel name:
+  - `face_verification_channel: "facematch:<rider_id>"`
+  - `channels: { "face_verification": "facematch:<rider_id>" }`
+  - Profile attributes: `face_verification_required: boolean`, `last_face_verified_at: string (ISO 8601)`.
+- **Monthly Background Job (Celery Beat & Management Command)**:
+  - Runs daily via Celery Beat (`riders.tasks.trigger_monthly_face_verification_task`) or via CLI (`python manage.py trigger_monthly_face_verification`).
+  - Identifies active independent riders whose last verification was >= 30 days ago (or who never verified and registered >= 30 days ago).
+  - Sets `face_verification_required = True` and deauthorizes order assignments (`is_authorized = False`).
+  - Broadcasts the `facematch_required` real-time event to channel `facematch:<rider_id>`.
+
+A background Celery task downloads both images, calls the 3rd-party KYC `CompareFacesView` service, updates audit records (`RiderFaceMatchLog`), and publishes the verification outcome via Ably. If the match succeeds, `face_verification_required` is reset to `False`, `is_authorized` is restored to `True`, and `last_face_verified_at` is updated to current timestamp. If the match fails, the rider is immediately blocked/unauthorized (`is_authorized = False`, `status = "offline"`), active refresh tokens are revoked, and an Ably event instructs the mobile app to log out the rider.
 
 **Request Body (JSON):**
 ```json
@@ -405,6 +416,7 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
   "status": "success",
   "message": "Face match verification initiated.",
   "data": {
+    "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
     "channel": "facematch:RD1234",
     "event": "facematch_result",
     "status": "processing"
@@ -412,9 +424,20 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
 }
 ```
 
-**Ably Real-Time Events (`channel: "facematch:<rider_id>"`, `event: "facematch_result"`):**
+**Ably Real-Time Events (`channel: "facematch:<rider_id>"`):**
 
-*Match Succeeded:*
+*Monthly Verification Trigger (`event: "facematch_required"`):*
+```json
+{
+  "action": "face_verification_required",
+  "rider_id": "RD1234",
+  "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+  "due_date": "2026-10-26T10:00:00.000000+00:00",
+  "reason": "monthly_verification"
+}
+```
+
+*Match Succeeded (`event: "facematch_result"`):*
 ```json
 {
   "status": "success",
@@ -424,7 +447,7 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
 }
 ```
 
-*Match Failed (Account Blocked / Forced Logout):*
+*Match Failed (Account Blocked / Forced Logout) (`event: "facematch_result"`):*
 ```json
 {
   "status": "failed",
@@ -435,12 +458,57 @@ A background Celery task downloads both images, calls the 3rd-party KYC `Compare
 }
 ```
 
-*Error (Download or Service Failure):*
+*Error (Download or Service Failure) (`event: "facematch_result"`):*
 ```json
 {
   "status": "error",
   "matched": false,
   "message": "Failed to download face images: Connection timeout"
+}
+```
+
+---
+
+### 6. Face Match Verification Logs History
+**Endpoint:** `GET /api/riders/facematch/logs/` (or `GET /api/riders/face-match/logs/`)  
+**Authentication:** Required (Rider, Dispatcher, Admin)  
+**Description:** Retrieves paginated audit logs of face verification requests and attempts.
+- Riders can view their personal verification history.
+- Dispatchers and admins can query all logs or filter by specific riders.
+
+**Query Parameters:**
+- `rider_id` (optional, dispatchers/admins only): Filter by short rider ID (e.g. `RD1234`) or UUID.
+- `status` (optional): Filter by status (`requested`, `pending`, `success`, `failed`, `error`).
+- `trigger_type` (optional): Filter by trigger source (`monthly_cron`, `manual_prompt`, `on_demand`).
+- `page` (optional, default `1`): Page number.
+- `page_size` (optional, default `20`, max `100`): Results per page.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Face match logs retrieved successfully.",
+  "data": {
+    "count": 1,
+    "page": 1,
+    "page_size": 20,
+    "results": [
+      {
+        "id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+        "rider_id": "RD1234",
+        "rider_name": "John Doe",
+        "trigger_type": "monthly_cron",
+        "status": "success",
+        "similarity": 96.5,
+        "is_match": true,
+        "selfie_url": "https://storage.aexpress.com/selfies/RD1234_snapshot.jpg",
+        "reference_photo_url": "https://storage.aexpress.com/docs/ref_profile.jpg",
+        "error_message": "",
+        "created_at": "2026-10-26T10:00:00.000000Z",
+        "updated_at": "2026-10-26T10:02:15.000000Z"
+      }
+    ]
+  }
 }
 ```
 
