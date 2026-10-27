@@ -522,6 +522,7 @@ def trigger_monthly_face_verification_task(
         is_independent_rider=True,
         is_active=True,
         is_deleted=False,
+        is_authorized=True,
         face_verification_required=False,
     )
 
