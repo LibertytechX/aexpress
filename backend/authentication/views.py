@@ -208,6 +208,16 @@ class LogoutView(APIView):
 
     def post(self, request):
         """Logout user by blacklisting the refresh token."""
+        # Stop push notifications to this device. Done first so pushes stop
+        # even if the refresh token below is invalid.
+        device_id = request.data.get("device_id")
+        if device_id:
+            from dispatcher.models import MerchantDevice
+
+            MerchantDevice.objects.filter(
+                device_id=device_id, merchant__user=request.user
+            ).update(is_active=False)
+
         try:
             refresh_token = request.data.get("refresh_token")
 
