@@ -1,5 +1,6 @@
 from typing import Any
 from dispatcher.models import SystemSettings
+from django.db import transaction
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import Signal, receiver
 from .models import Order, OrderEvent
@@ -121,6 +122,109 @@ def send_merchant_email_on_status_change(sender, instance, created, **kwargs):
         template_code = status_template_map.get(current_status)
         if template_code:
             send_transactional_email.delay(template_code, str(instance.id))
+
+
+# Push sent to the merchant for each order status, as (title, body, category).
+# `category` matches a toggle on MerchantNotificationSettings; "general" means
+# only the master push_enabled switch applies.
+MERCHANT_STATUS_PUSHES = {
+    "Assigned": (
+        "Rider assigned",
+        "A rider has been assigned to order #{order_number}.",
+        "order_assigned",
+    ),
+    "Started": (
+        "Rider on the way to pickup",
+        "The rider is heading to pick up order #{order_number}.",
+        "general",
+    ),
+    "Pickup": (
+        "Package picked up",
+        "Order #{order_number} has been picked up.",
+        "general",
+    ),
+    "Fulfilling": (
+        "Package in transit",
+        "Order #{order_number} is on its way to the recipient.",
+        "general",
+    ),
+    "Arrived": (
+        "Rider at drop-off",
+        "The rider has arrived at the drop-off for order #{order_number}.",
+        "general",
+    ),
+    "Done": (
+        "Package delivered",
+        "Order #{order_number} has been delivered.",
+        "order_completed",
+    ),
+    "CustomerCanceled": (
+        "Order cancelled",
+        "Order #{order_number} has been cancelled.",
+        "order_cancelled",
+    ),
+    "RiderCanceled": (
+        "Order cancelled",
+        "The rider cancelled order #{order_number}. We're working on it.",
+        "order_cancelled",
+    ),
+    "Failed": (
+        "Delivery failed",
+        "Delivery of order #{order_number} could not be completed.",
+        "order_cancelled",
+    ),
+}
+
+
+@receiver(post_save, sender=Order)
+def send_merchant_push_on_status_change(sender, instance, created, **kwargs):
+    """
+    Sends a push notification to the merchant when an order changes status.
+    Relay sub-orders are skipped so the merchant gets one push per stage,
+    from the parent order only.
+    """
+    if created or instance.parent_order_id:
+        return
+
+    previous_status = getattr(instance, "_previous_status", None)
+    current_status = instance.status
+    if previous_status == current_status:
+        return
+
+    push = MERCHANT_STATUS_PUSHES.get(current_status)
+    if not push:
+        return
+
+    from dispatcher.models import Merchant
+
+    merchant_id = (
+        Merchant.objects.filter(user_id=instance.user_id)
+        .values_list("id", flat=True)
+        .first()
+    )
+    if not merchant_id:
+        return
+
+    title, body, category = push
+    # FCM data payload values must be strings
+    data = {
+        "type": "order_status",
+        "order_number": instance.order_number,
+        "status": current_status,
+    }
+
+    from dispatcher.tasks import send_merchant_notification
+
+    # Queue only after the status change is committed
+    transaction.on_commit(
+        lambda: send_merchant_notification.delay(
+            str(merchant_id),
+            title,
+            body.format(order_number=instance.order_number),
+            data=data,
+            category=category,
+        )
+    )
 
 
 @receiver(post_save, sender=Order)
