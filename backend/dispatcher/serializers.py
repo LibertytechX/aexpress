@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, time
 from django.core.cache import cache
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Q, Sum, Count
 from orders.models import Order, Delivery
 from .models import VehicleTracking
 
@@ -1426,6 +1426,168 @@ class RelayNodeSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+class VehicleAssetListSerializer(serializers.ListSerializer):
+    """
+    Custom ListSerializer that batch-precomputes today's orders count, yesterday's orders
+    count, yesterday's orders distance, and yesterday's vehicle tracking distance in O(1)
+    queries across all assets, preventing severe N+1 database queries and Gunicorn timeouts.
+    """
+
+    def to_representation(self, data):
+        iterable = list(data) if not isinstance(data, list) else data
+        if not iterable:
+            return []
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        today_start = timezone.make_aware(datetime.combine(today, time.min), tz)
+
+        yesterday = today - timedelta(days=1)
+        yesterday_end = today_start
+        yesterday_start = yesterday_end - timedelta(days=1)
+        yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+        # Map riders to assets
+        rider_to_asset = {}
+        for asset in iterable:
+            for r in asset.riders.all():
+                rider_to_asset[r.id] = asset.id
+
+        all_rider_ids = list(rider_to_asset.keys())
+
+        orders_today_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_dist_map = {asset.id: 0.0 for asset in iterable}
+
+        if all_rider_ids:
+            q_today = (
+                Q(completed_at__gte=today_start)
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=today_start,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=today_start,
+                )
+            )
+            for rider_id, cnt in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_today)
+                .values_list("rider_id")
+                .annotate(cnt=Count("id", distinct=True))
+            ):
+                asset_id = rider_to_asset.get(rider_id)
+                if asset_id:
+                    orders_today_map[asset_id] = orders_today_map.get(asset_id, 0) + cnt
+
+            q_yesterday = (
+                Q(
+                    completed_at__gte=yesterday_start,
+                    completed_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=yesterday_start,
+                    deliveries__delivered_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=yesterday_start,
+                    updated_at__lt=yesterday_end,
+                )
+            )
+            for row in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_yesterday)
+                .values("rider_id")
+                .annotate(
+                    cnt=Count("id", distinct=True),
+                    total_dist=Sum("distance_km"),
+                )
+            ):
+                asset_id = rider_to_asset.get(row["rider_id"])
+                if asset_id:
+                    orders_yesterday_map[asset_id] = (
+                        orders_yesterday_map.get(asset_id, 0) + row["cnt"]
+                    )
+                    dist = float(row["total_dist"]) if row["total_dist"] else 0.0
+                    orders_yesterday_dist_map[asset_id] = round(
+                        orders_yesterday_dist_map.get(asset_id, 0.0) + dist, 2
+                    )
+
+        # Batch compute yesterday's tracking travelled distance using indexed timestamp boundaries
+        yesterday_distance_map = {}
+        uncached_asset_ids = []
+        for asset in iterable:
+            cache_key = f"yesterday_distance_{asset.id}_{yesterday_str}"
+            val = cache.get(cache_key)
+            if val is not None:
+                yesterday_distance_map[asset.id] = val
+            else:
+                uncached_asset_ids.append(asset.id)
+
+        if uncached_asset_ids:
+            try:
+                first_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                last_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "-created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                for aid in uncached_asset_ids:
+                    f_val = first_rows.get(aid)
+                    l_val = last_rows.get(aid)
+                    d = (
+                        max(0, l_val - f_val)
+                        if (f_val is not None and l_val is not None)
+                        else 0
+                    )
+                    yesterday_distance_map[aid] = d
+                    cache.set(f"yesterday_distance_{aid}_{yesterday_str}", d, 60 * 60 * 24)
+            except Exception:
+                pass
+
+        for asset in iterable:
+            asset._precomputed_orders_today = orders_today_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders = orders_yesterday_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders_dist = orders_yesterday_dist_map.get(
+                asset.id, 0.0
+            )
+            if asset.id in yesterday_distance_map:
+                asset._precomputed_yesterday_distance = yesterday_distance_map[asset.id]
+
+        return super().to_representation(iterable)
+
+
 class VehicleAssetSerializer(serializers.ModelSerializer):
     assigned_rider: serializers.SerializerMethodField = (
         serializers.SerializerMethodField()
@@ -1451,6 +1613,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = VehicleAsset
+        list_serializer_class = VehicleAssetListSerializer
         fields = [
             "id",
             "asset_id",
@@ -1491,46 +1654,59 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 
     def get_yesterday_distance(self, obj: VehicleAsset) -> Union[float, Decimal]:
-        """Calculate and return the vehicle's travelled distance from yesterday.
+        """Calculate and return the vehicle's travelled distance from yesterday."""
+        if hasattr(obj, "_precomputed_yesterday_distance"):
+            return obj._precomputed_yesterday_distance
 
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The distance travelled yesterday.
-        """
-        yesterday = datetime.now() - timedelta(days=1)
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
         cache_key = f"yesterday_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
 
         cached_distance = cache.get(cache_key)
         if cached_distance is not None:
             return cached_distance
 
-        # get all yesterdays vehicle tracking entries
-        trackings = VehicleTracking.objects.filter(
-            vehicle_asset=obj, created_at__date=yesterday
-        ).order_by("created_at")
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_start = yesterday_end - timedelta(days=1)
 
-        distance = 0
-        if trackings.exists():
-            first_entry = trackings.first()
-            last_entry = trackings.last()
-            distance = last_entry.travelled - first_entry.travelled
+        first_val = (
+            VehicleTracking.objects.filter(
+                vehicle_asset=obj,
+                created_at__gte=yesterday_start,
+                created_at__lt=yesterday_end,
+                travelled__isnull=False,
+            )
+            .order_by("created_at")
+            .values_list("travelled", flat=True)
+            .first()
+        )
+        if first_val is not None:
+            last_val = (
+                VehicleTracking.objects.filter(
+                    vehicle_asset=obj,
+                    created_at__gte=yesterday_start,
+                    created_at__lt=yesterday_end,
+                    travelled__isnull=False,
+                )
+                .order_by("-created_at")
+                .values_list("travelled", flat=True)
+                .first()
+            )
+            distance = (
+                max(0, last_val - first_val)
+                if last_val is not None
+                else 0
+            )
+        else:
+            distance = 0
 
         # Cache for 24 hours
         cache.set(cache_key, distance, 60 * 60 * 24)
         return distance
 
     def get_assigned_rider(self, obj: VehicleAsset) -> Optional[Dict[str, Any]]:
-        """Get the details of the rider currently assigned to this vehicle asset.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            A dictionary containing rider details if assigned, otherwise None.
-        """
-        # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
+        """Get the details of the rider currently assigned to this vehicle asset."""
         rider = obj.riders.all().first()
         if rider:
             return {
@@ -1542,21 +1718,10 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return None
 
     def get_orders_today(self, obj: VehicleAsset) -> int:
-        """Calculate the count of completed orders today for riders assigned to the vehicle asset.
+        """Calculate the count of completed orders today for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_orders_today"):
+            return obj._precomputed_orders_today
 
-        It aggregates completed orders across three fallback criteria within the local timezone day:
-        Criterion A: Order status is "Done" and completed_at is today.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at is today.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at is today.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The number of completed orders today.
-        """
         riders = obj.riders.all()
         if not riders.exists():
             return 0
@@ -1583,21 +1748,10 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return orders.filter(q_a | q_b | q_c).distinct().count()
 
     def get_yesterday_orders(self, obj: VehicleAsset) -> int:
-        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset.
+        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders"):
+            return obj._precomputed_yesterday_orders
 
-        It aggregates completed orders across three fallback criteria strictly within yesterday:
-        Criterion A: Order status is "Done" and completed_at was yesterday.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at was yesterday.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The number of completed orders yesterday.
-        """
         riders = obj.riders.all()
         if not riders.exists():
             return 0
@@ -1630,21 +1784,10 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return orders.filter(q_a | q_b | q_c).distinct().count()
 
     def get_total_yesterday_orders_distance_km(self, obj: VehicleAsset) -> float:
-        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset.
+        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders_dist"):
+            return obj._precomputed_yesterday_orders_dist
 
-        It aggregates completed orders across three fallback criteria strictly within yesterday:
-        Criterion A: Order status is "Done" and completed_at was yesterday.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at was yesterday.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The total completed orders distance in km yesterday (float, rounded to 2 decimal places).
-        """
         yesterday = timezone.localdate() - timedelta(days=1)
         cache_key = (
             f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
