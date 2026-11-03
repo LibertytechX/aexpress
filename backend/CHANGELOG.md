@@ -4,6 +4,14 @@ All notable changes to the AXpress backend are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Merchant List N+1 Query & Worker Timeout Resolution (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
+  - Fixed Gunicorn `WORKER TIMEOUT` on `GET /api/dispatch/merchants/` caused by quadratic N+1 queries during serialization.
+  - Optimized `MerchantViewSet.get_queryset` to preload `merchant_profile` via `select_related` and annotate `total_orders_count` and current month `month_orders_count` in a single SQL query using `Count` and `Q` filters.
+  - Updated `MerchantSerializer` (`get_totalOrders`, `get_monthOrders`) to consume annotated counts with safe fallback to unannotated queries.
+  - Reduced database queries from $O(N)$ (thousands of sequential round-trips) to exactly 1 query ($O(1)$) across all merchants.
+  - Added unit test suite `backend/dispatcher/tests/unit/test_merchant_viewset_optimization.py`.
+
 ### Added
 - **Independent Rider Face Verification Redesign (`dispatcher/models.py`, `riders/tasks.py`, `riders/serializers.py`, `riders/views.py`, `riders/management/commands/trigger_monthly_face_verification.py`, `ax_merchant_api/settings.py`)**:
   - Transitioned the independent rider face verification model to an event-driven periodic verification architecture:

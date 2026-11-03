@@ -1645,7 +1645,24 @@ class MerchantViewSet(viewsets.ModelViewSet):
     permission_classes = [IsDispatcherAdmin]
 
     def get_queryset(self):
-        return super().get_queryset().order_by("-created_at")
+        now = timezone.now()
+        return (
+            super()
+            .get_queryset()
+            .select_related("merchant_profile")
+            .annotate(
+                total_orders_count=Count("orders", distinct=True),
+                month_orders_count=Count(
+                    "orders",
+                    filter=Q(
+                        orders__created_at__year=now.year,
+                        orders__created_at__month=now.month,
+                    ),
+                    distinct=True,
+                ),
+            )
+            .order_by("-created_at")
+        )
 
     def get_permissions(self):
         if self.action == "list":

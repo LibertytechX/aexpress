@@ -3,6 +3,14 @@ All notable changes to the AXpress project are documented in this file.
 # [Unreleased]
 
 ### Backend
+#### Fixed
+- **Merchant List N+1 Query & Worker Timeout Resolution (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
+  - Fixed Gunicorn `WORKER TIMEOUT` on `GET /api/dispatch/merchants/` caused by quadratic N+1 queries during serialization.
+  - Optimized `MerchantViewSet.get_queryset` to preload `merchant_profile` via `select_related` and annotate `total_orders_count` and current month `month_orders_count` in a single SQL query using `Count` and `Q` filters.
+  - Updated `MerchantSerializer` (`get_totalOrders`, `get_monthOrders`) to consume annotated counts with safe fallback to unannotated queries.
+  - Reduced database queries from $O(N)$ (thousands of sequential round-trips) to exactly 1 query ($O(1)$) across all merchants.
+  - Added unit test suite `backend/dispatcher/tests/unit/test_merchant_viewset_optimization.py`.
+
 #### Added
 - **Rider Order Pickup & Delivery Verification Codes V2 (`orders/models.py`, `orders/v2_views.py`, `orders/serializers.py`, `orders/urls.py`, `orders/migrations/0017_order_pickup_code_delivery_drop_code.py`)**:
   - Implemented 6-digit verification codes to eliminate reliance on GPS location proximity checks for rider order pickup and delivery confirmation.
