@@ -4,6 +4,11 @@ All notable changes to the AXpress project are documented in this file.
 
 ### Backend
 #### Fixed
+- **Vehicle Assets N+1 Query & Worker Timeout Resolution (`dispatcher/serializers.py`)**:
+  - Fixed Gunicorn `WORKER TIMEOUT` and `SIGKILL` 502 Bad Gateway on `GET /api/dispatch/vehicle-assets/` caused by quadratic N+1 queries and sequential table scans on `VehicleTracking` during serialization.
+  - Implemented `VehicleAssetListSerializer` to batch precompute today's orders count, yesterday's orders count, yesterday's orders distance, and yesterday's vehicle tracking odometer difference in bounded $O(1)$ queries across all vehicle assets.
+  - Optimized `get_yesterday_distance` single-asset fallback to query `VehicleTracking` by timestamp range (`created_at__gte`, `created_at__lt`), leveraging the composite B-tree index on `(vehicle_asset, created_at)` instead of unindexed `__date` function calls.
+  - Added unit test suite `backend/dispatcher/tests/unit/test_vehicle_asset_optimization.py`.
 - **Merchant List N+1 Query & Worker Timeout Resolution (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
   - Fixed Gunicorn `WORKER TIMEOUT` on `GET /api/dispatch/merchants/` caused by quadratic N+1 queries during serialization.
   - Optimized `MerchantViewSet.get_queryset` to preload `merchant_profile` via `select_related` and annotate `total_orders_count` and current month `month_orders_count` in a single SQL query using `Count` and `Q` filters.
