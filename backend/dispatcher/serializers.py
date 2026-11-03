@@ -1133,9 +1133,15 @@ class MerchantSerializer(serializers.ModelSerializer):
         return "Retail"  # Mock
 
     def get_totalOrders(self, obj):
+        total = getattr(obj, "total_orders_count", None)
+        if total is not None:
+            return total
         return obj.orders.count()
 
     def get_monthOrders(self, obj):
+        month_count = getattr(obj, "month_orders_count", None)
+        if month_count is not None:
+            return month_count
         from django.utils import timezone
 
         now = timezone.now()
