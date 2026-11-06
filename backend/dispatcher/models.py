@@ -1,4 +1,5 @@
-from dispatcher.utils import generate_notification_id
+from decimal import Decimal
+from dispatcher.utils import generate_notification_id, generate_random_code
 from email.policy import default
 import hashlib
 import math
@@ -447,10 +448,16 @@ class Rider(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rider_profile"
     )
 
-    # Banking
+    # Banking & Transaction PIN
     bank_name = models.CharField(max_length=100, null=True, blank=True)
     bank_account_number = models.CharField(max_length=20, null=True, blank=True)
     bank_routing_code = models.CharField(max_length=20, null=True, blank=True)
+    transaction_pin = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Hashed 4-digit transaction PIN for wallet withdrawals",
+    )
 
     # Status & Settings
     WORKING_TYPE_CHOICES = (
@@ -458,7 +465,7 @@ class Rider(models.Model):
         ("full_time", "Full Time"),
     )
     working_type = models.CharField(
-        max_length=20, choices=WORKING_TYPE_CHOICES, default="freelancer"
+        max_length=20, choices=WORKING_TYPE_CHOICES, default="full_time"
     )
     team = models.CharField(max_length=100, default="Main Team")
     is_authorized = models.BooleanField(
@@ -469,6 +476,15 @@ class Rider(models.Model):
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
     is_deleted = models.BooleanField(default=False, db_index=True)
     is_independent_rider = models.BooleanField(default=False)
+    last_face_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of last successful face verification",
+    )
+    face_verification_required = models.BooleanField(
+        default=False,
+        help_text="Flag indicating whether the rider must complete face verification before receiving orders",
+    )
     approval_status = models.CharField(
         max_length=20,
         choices=ApprovalStatus.choices,
@@ -557,6 +573,15 @@ class Rider(models.Model):
     current_latitude = models.DecimalField(
         max_digits=30, decimal_places=20, null=True, blank=True
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_riders",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
     current_longitude = models.DecimalField(
         max_digits=30, decimal_places=20, null=True, blank=True
     )
@@ -645,6 +670,29 @@ class Rider(models.Model):
         self.save()
 
     @property
+    def has_transaction_pin(self) -> bool:
+        """Check if rider has configured a transaction PIN."""
+        return bool(self.transaction_pin)
+
+    def set_transaction_pin(self, raw_pin: str) -> None:
+        """Hash and persist rider's 4-digit transaction PIN."""
+        from django.contrib.auth.hashers import make_password
+
+        cleaned_pin = str(raw_pin).strip()
+        if not cleaned_pin.isdigit() or len(cleaned_pin) != 4:
+            raise ValueError("Transaction PIN must be exactly 4 digits.")
+        self.transaction_pin = make_password(cleaned_pin)
+        self.save(update_fields=["transaction_pin", "updated_at"])
+
+    def check_transaction_pin(self, raw_pin: str) -> bool:
+        """Verify provided transaction PIN against hashed PIN."""
+        from django.contrib.auth.hashers import check_password
+
+        if not self.transaction_pin or not raw_pin:
+            return False
+        return check_password(str(raw_pin).strip(), self.transaction_pin)
+
+    @property
     def orders_completed_today(self) -> int:
         from django.utils import timezone
         from orders.models import Order
@@ -725,6 +773,14 @@ class Rider(models.Model):
 
     yesterday_distance_covered.short_description = "Prev Day Distance (km)"
 
+    def update_rider_average_rating(self):
+        from riders.models import RiderRating
+
+        all_ratings = RiderRating.objects.filter(rider=self)
+        avg_rating = all_ratings.aggregate(models.Avg("rating"))["rating__avg"]
+        self.rating = round(avg_rating, 2) if avg_rating else 0.00
+        self.save(update_fields=["rating"])
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 
@@ -788,7 +844,34 @@ class DispatcherProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="dispatcher_profile",
     )
+    affiliation_code = models.CharField(
+        max_length=100, null=True, blank=True
+    )
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
+    monthly_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Current month accumulated commission",
+    )
+    previous_month_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Previous month total commission",
+    )
+    total_commission_earned = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Lifetime accumulated commission",
+    )
+    last_commission_month = models.CharField(
+        max_length=7,
+        default="",
+        blank=True,
+        help_text="YYYY-MM of current active commission month",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -796,7 +879,27 @@ class DispatcherProfile(models.Model):
         db_table = "dispatcher_profiles"
 
     def __str__(self):
-        return f"Dispatcher: {self.user.contact_name or self.user.phone}"
+        return f"Dispatcher: {self.user.contact_name or self.user.phone} ({self.affiliation_code})"
+
+    def save(self, *args, **kwargs):
+        if self.role in [self.Role.ZONE_LEAD, self.Role.HUB_CAPTAIN]:
+            if not self.affiliation_code:
+                self.affiliation_code = generate_random_code()
+                while (
+                    DispatcherProfile.objects.filter(affiliation_code=self.affiliation_code)
+                    .exclude(pk=self.pk)
+                    .exists()
+                ):
+                    self.affiliation_code = generate_random_code()
+        super().save(*args, **kwargs)
+
+    @property
+    def affiliated_riders_count(self) -> int:
+        return self.affiliated_riders.count()
+
+    @property
+    def affiliated_merchants_count(self) -> int:
+        return self.affiliated_merchants.count()
 
 
 class Merchant(models.Model):
@@ -818,6 +921,15 @@ class Merchant(models.Model):
         on_delete=models.CASCADE,
         related_name="merchant_profile",
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_merchants",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
     can_group_orders = models.BooleanField(default=False)
     zone = models.ForeignKey(
         Zone,
@@ -934,6 +1046,12 @@ class SystemSettings(models.Model):
     cod_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=500)
     cod_pct_fee = models.DecimalField(max_digits=4, decimal_places=2, default=1.5)
     commission_pct = models.DecimalField(max_digits=4, decimal_places=2, default=20)
+    affiliation_commission_per_order = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("3000.00"),
+        help_text="Commission earned by dispatcher per completed order of affiliated rider",
+    )
 
     # Notifications
     notif_new_order = models.BooleanField(default=True)
@@ -1356,3 +1474,108 @@ class MerchantNotificationSettings(models.Model):
 
     def __str__(self):
         return f"Settings for {self.merchant.merchant_id}"
+
+
+class DispatcherCommission(models.Model):
+    """
+    Immutable ledger entry for each commission earned by a dispatcher
+    from an affiliated rider's completed order.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="commissions",
+    )
+    rider = models.ForeignKey(
+        Rider,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dispatcher_commissions",
+    )
+    merchant = models.ForeignKey(
+        "dispatcher.Merchant",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dispatcher_commissions",
+    )
+    affiliation_source = models.CharField(
+        max_length=20,
+        choices=[
+            ("rider", "Rider"),
+            ("merchant", "Merchant"),
+            ("both", "Both / Deduplicated"),
+        ],
+        default="rider",
+    )
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.CASCADE,
+        related_name="dispatcher_commissions",
+    )
+    order_number = models.CharField(max_length=100, blank=True, db_index=True)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("3000.00")
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    description = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "dispatcher_commissions"
+        unique_together = ("dispatcher", "order")
+        ordering = ["-created_at"]
+        verbose_name = "Dispatcher Commission"
+        verbose_name_plural = "Dispatcher Commissions"
+
+    def __str__(self):
+        return f"Commission #{self.id}: ₦{self.amount} for {self.dispatcher} (Order: {self.order_number})"
+
+
+class DispatcherMonthlyEarning(models.Model):
+    """
+    Aggregated monthly summary for dispatcher earnings and monthly salary reconciliation.
+    """
+
+    class SettlementStatus(models.TextChoices):
+        ACCUMULATING = "accumulating", "Accumulating"
+        PENDING_PAYMENT = "pending_payment", "Pending Payment"
+        PAID = "paid", "Paid"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="monthly_earnings",
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    total_orders = models.PositiveIntegerField(default=0)
+    total_commission = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=SettlementStatus.choices,
+        default=SettlementStatus.ACCUMULATING,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dispatcher_monthly_earnings"
+        unique_together = ("dispatcher", "month_year")
+        ordering = ["-month_year"]
+        verbose_name = "Dispatcher Monthly Earning"
+        verbose_name_plural = "Dispatcher Monthly Earnings"
+
+    def __str__(self):
+        return f"{self.dispatcher} - {self.month_year}: ₦{self.total_commission} ({self.total_orders} orders)"

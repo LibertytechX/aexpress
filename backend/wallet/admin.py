@@ -10,6 +10,10 @@ from .models import (
     AmortizationWallet,
     AmortizationTransaction,
     AmortizationVirtualAccount,
+    Bank,
+    RiderPayoutTransaction,
+    IndependentRiderPayoutWalletPool,
+    IndependentRiderPayoutWalletPoolTransaction,
 )
 
 
@@ -512,3 +516,169 @@ class AmortizationVirtualAccountAdmin(admin.ModelAdmin):
         ),
         ("Timestamps", {"fields": ("created_at",)}),
     )
+
+
+class BankResource(resources.ModelResource):
+    """
+    Resource for importing and exporting Nigerian Banks via CSV/Excel.
+    Supports smart matching on id, cbn_code, bank_code, or bank name.
+    """
+
+    class Meta:
+        model = Bank
+        fields = (
+            "id",
+            "name",
+            "bank_code",
+            "cbn_code",
+            "bank_short_name",
+            "ussd_short_code",
+            "date_added",
+            "last_updated",
+        )
+        export_order = (
+            "id",
+            "name",
+            "bank_code",
+            "cbn_code",
+            "bank_short_name",
+            "ussd_short_code",
+            "date_added",
+            "last_updated",
+        )
+        skip_unchanged = True
+        report_skipped = True
+
+    def get_instance(self, instance_loader, row):
+        instance = super().get_instance(instance_loader, row)
+        if instance:
+            return instance
+
+        cbn_code = row.get("cbn_code")
+        if cbn_code:
+            bank = Bank.objects.filter(cbn_code=str(cbn_code).strip()).first()
+            if bank:
+                return bank
+
+        bank_code = row.get("bank_code")
+        if bank_code:
+            bank = Bank.objects.filter(bank_code=str(bank_code).strip()).first()
+            if bank:
+                return bank
+
+        name = row.get("name")
+        if name:
+            bank = Bank.objects.filter(name__iexact=str(name).strip()).first()
+            if bank:
+                return bank
+
+        return None
+
+    def after_import(self, dataset, result, **kwargs):
+        super().after_import(dataset, result, **kwargs)
+        if not kwargs.get("dry_run", False):
+            from django.core.cache import cache
+
+            cache.delete("all_bank_list")
+
+
+@admin.register(Bank)
+class BankAdmin(ImportExportModelAdmin):
+    resource_class = BankResource
+    list_display = [
+        "name",
+        "bank_code",
+        "cbn_code",
+        "bank_short_name",
+        "ussd_short_code",
+        "date_added",
+    ]
+    search_fields = ["name", "bank_code", "cbn_code", "bank_short_name"]
+    list_filter = ["date_added"]
+    ordering = ["name"]
+
+
+@admin.register(RiderPayoutTransaction)
+class RiderPayoutTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        "reference",
+        "rider",
+        "pool",
+        "amount",
+        "destination_bank_name",
+        "destination_account_number",
+        "destination_account_name",
+        "status",
+        "refunded",
+        "mode",
+        "is_sandbox",
+        "created_at",
+    ]
+    list_filter = ["status", "refunded", "is_sandbox", "mode", "created_at"]
+    search_fields = [
+        "reference",
+        "destination_account_number",
+        "destination_account_name",
+        "rider__rider_id",
+        "rider__user__phone",
+        "rider__user__email",
+    ]
+    readonly_fields = [
+        "id",
+        "pool",
+        "reference",
+        "amount",
+        "charges",
+        "refunded",
+        "is_sandbox",
+        "mode",
+        "corebanking_response",
+        "created_at",
+        "updated_at",
+    ]
+    raw_id_fields = ["rider", "pool"]
+    ordering = ["-created_at"]
+
+
+@admin.register(IndependentRiderPayoutWalletPool)
+class IndependentRiderPayoutWalletPoolAdmin(admin.ModelAdmin):
+    list_display = ["name", "balance", "currency", "is_active", "created_at", "updated_at"]
+    list_filter = ["is_active", "created_at"]
+    search_fields = ["name"]
+    readonly_fields = ["id", "created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+
+@admin.register(IndependentRiderPayoutWalletPoolTransaction)
+class IndependentRiderPayoutWalletPoolTransactionAdmin(admin.ModelAdmin):
+    list_display = [
+        "reference",
+        "pool",
+        "rider",
+        "transaction_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "status",
+        "created_at",
+    ]
+    list_filter = ["transaction_type", "status", "created_at"]
+    search_fields = ["reference", "rider__rider_id", "description"]
+    readonly_fields = [
+        "id",
+        "pool",
+        "rider",
+        "payout_transaction",
+        "transaction_type",
+        "amount",
+        "balance_before",
+        "balance_after",
+        "reference",
+        "description",
+        "status",
+        "metadata",
+        "created_at",
+    ]
+    raw_id_fields = ["pool", "rider", "payout_transaction"]
+    ordering = ["-created_at"]
+

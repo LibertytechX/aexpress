@@ -39,6 +39,8 @@ ABLY_API_KEY = "ably_test_key"
 RESPOND_IO_API_KEY = "respond_io_test_key"
 GOOGLE_MAPS_API_KEY = "google_maps_test_key"
 ROUTING_SERVICE_API_KEY = "routing_test_key"
+KYC_SERVICE_URL = "http://localhost:8000/api/v1/kyc/face-match"
+KYC_SERVICE_TOKEN = "kyc_test_token"
 
 # Disable SSL redirect and HSTS in test environment to avoid 301 redirects
 SECURE_SSL_REDIRECT = False

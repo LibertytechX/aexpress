@@ -10,6 +10,7 @@ class UserAdmin(BaseUserAdmin):
     list_display = [
         "phone",
         "business_name",
+        "usertype",
         "contact_name",
         "email",
         "is_active",
@@ -21,6 +22,7 @@ class UserAdmin(BaseUserAdmin):
         "is_staff",
         "email_verified",
         "phone_verified",
+        "usertype",
         "created_at",
     ]
     search_fields = ["phone", "email", "business_name", "contact_name"]
@@ -99,7 +101,12 @@ class MerchantEmailLogAdmin(admin.ModelAdmin):
 
     list_display = ["merchant", "template_code", "sent_at"]
     list_filter = ["template_code", "sent_at"]
-    search_fields = ["merchant__business_name", "merchant__phone", "merchant__email", "template_code"]
+    search_fields = [
+        "merchant__business_name",
+        "merchant__phone",
+        "merchant__email",
+        "template_code",
+    ]
     ordering = ["-sent_at"]
     readonly_fields = ["sent_at"]
     actions = ["trigger_weekly_reports", "trigger_daily_drip_campaigns"]
@@ -107,11 +114,17 @@ class MerchantEmailLogAdmin(admin.ModelAdmin):
     @admin.action(description="Trigger process_weekly_monday_reports task")
     def trigger_weekly_reports(self, request, queryset):
         from orders.tasks import process_weekly_monday_reports
+
         process_weekly_monday_reports.delay()
-        self.message_user(request, "Triggered process_weekly_monday_reports task successfully.")
+        self.message_user(
+            request, "Triggered process_weekly_monday_reports task successfully."
+        )
 
     @admin.action(description="Trigger process_daily_drip_campaigns task")
     def trigger_daily_drip_campaigns(self, request, queryset):
         from orders.tasks import process_daily_drip_campaigns
+
         process_daily_drip_campaigns.delay()
-        self.message_user(request, "Triggered process_daily_drip_campaigns task successfully.")
+        self.message_user(
+            request, "Triggered process_daily_drip_campaigns task successfully."
+        )

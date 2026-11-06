@@ -222,6 +222,16 @@ def handle_order_completion_tasks(order_id):
             f"handle_order_completion_tasks: Failed to update leaderboard for rider {rider.id}"
         )
 
+    # 6. Fire dispatcher affiliation commission
+    try:
+        from dispatcher.services import record_dispatcher_affiliation_commission
+
+        record_dispatcher_affiliation_commission(order)
+    except Exception:
+        logger.exception(
+            f"handle_order_completion_tasks: Failed to record dispatcher affiliation commission for order {order.order_number}"
+        )
+
     return True
 
 

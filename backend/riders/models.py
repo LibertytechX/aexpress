@@ -1,4 +1,5 @@
 import uuid
+from authentication.models import User
 from django.db import models
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
@@ -870,3 +871,74 @@ class LeaderboardEntry(models.Model):
 
     def __str__(self):
         return f"#{self.rank} {self.rider.rider_id} — {self.period_type} ({self.period_key})"
+
+
+class RiderRating(models.Model):
+    """
+    Rider ratings given by customers after order completion.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    customer = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="ratings_given"
+    )
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="ratings"
+    )
+    rating = models.IntegerField()
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "rider_ratings"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Rating for {self.rider.rider_id}: {self.rating} stars"
+
+
+class RiderFaceMatchLog(models.Model):
+    """
+    Log of face match verification attempts and periodic prompts for independent riders.
+    """
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        PENDING = "pending", "Pending"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+        ERROR = "error", "Error"
+
+    class TriggerType(models.TextChoices):
+        MONTHLY_CRON = "monthly_cron", "Monthly Cron"
+        MANUAL_PROMPT = "manual_prompt", "Manual Prompt"
+        ON_DEMAND = "on_demand", "On Demand"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider", on_delete=models.CASCADE, related_name="facematch_logs"
+    )
+    trigger_type = models.CharField(
+        max_length=20,
+        choices=TriggerType.choices,
+        default=TriggerType.ON_DEMAND,
+        help_text="Origin of the face verification attempt",
+    )
+    selfie_url = models.URLField(max_length=500, blank=True, default="")
+    reference_photo_url = models.URLField(max_length=500, blank=True, default="")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    similarity = models.FloatField(null=True, blank=True)
+    is_match = models.BooleanField(default=False)
+    raw_response = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_facematch_logs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"FaceMatch for {self.rider.rider_id}: {self.status} (trigger={self.trigger_type}, match={self.is_match})"

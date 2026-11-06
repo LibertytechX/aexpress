@@ -122,6 +122,46 @@ Request Body:
   }
 ```
 
+### 2. Request Password Reset
+```
+POST /api/auth/request-password-reset/
+Description: Requests a 6-digit password reset code. Generates token and triggers Celery background task (send_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone_number required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone_number": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that email, you will receive a password reset code shortly."
+  }
+```
+
+### 3. Mobile Request Password Reset
+```
+POST /api/auth/mobile/request-password-reset/
+Description: Requests a 6-digit password reset code for mobile app. Generates token and triggers Celery background task (send_mobile_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email."
+  }
+```
+
 ---
 
 ## SUBSCRIPTION ENDPOINTS
@@ -1131,20 +1171,71 @@ These endpoints support rider mobile application interactions:
 ### 1. Toggle Duty Status
 ```
 POST /api/riders/duty/
-Description: Toggles the online/offline duty status of the rider.
+Description: Toggles the online/offline duty status of the rider. Blocked with 403 Forbidden if unverified independent rider attempts to go online.
 Authentication: Required (Rider)
 Request Body:
   {
-    "status": "online" | "offline"
+    "status": "online" | "offline",
+    "latitude": 6.5244,
+    "longitude": 3.3792
   }
-Response:
+Response (200 OK):
   {
     "success": true,
-    "data": {
-      "status": "online",
-      "working_type": "freelancer",
-      "is_authorized": true
+    "status": "online",
+    "timestamp": "2026-10-13T12:00:00Z"
+  }
+Error Response (403 Forbidden):
+  {
+    "success": false,
+    "message": "Account is not verified or authorized to go online."
+  }
+```
+
+### 1a. Order Offers List
+```
+GET /api/riders/orders/offers/
+Description: Returns pending available order offers. Forbidden for unverified independent riders pending KYC review.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  [
+    {
+      "id": "uuid",
+      "order_number": "AX-123456",
+      "pickup_address": "123 Marina St",
+      "estimated_earnings": "400.00",
+      "status": "pending"
     }
+  ]
+Error Response (403 Forbidden):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+```
+
+### 1b. Accept Order Offer
+```
+POST /api/riders/orders/offers/<uuid:offer_id>/accept/
+Description: Accepts an order offer and assigns the order to the rider. Forbidden for unverified riders and riders whose assigned home zone or hub does not match the offer's zone.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  {
+    "success": true,
+    "message": "Order offer accepted."
+  }
+Error Response (403 Forbidden - Unverified):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+Error Response (403 Forbidden - Out of Zone):
+  {
+    "success": false,
+    "message": "Rider is not in the zone."
+  }
+Error Response (400 Bad Request - Missing Zone Assignment):
+  {
+    "success": false,
+    "message": "Rider has no assigned hub or home zone."
   }
 ```
 
@@ -1528,4 +1619,531 @@ Response (200 OK):
     "status_code": 200
   }
 ```
+
+---
+
+## DISPATCHER AFFILIATION & MERCHANT COMMISSION ENDPOINTS
+
+### 1. Get Merchant Affiliation Status
+```http
+GET /api/auth/merchant/affiliation/
+GET /api/merchant/affiliation/
+Description: Retrieves the current dispatcher affiliation details for the authenticated merchant profile.
+Authentication: Required (Merchant)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Merchant affiliation retrieved successfully",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 2. Affiliate Merchant to Dispatcher
+```http
+POST /api/auth/merchant/affiliation/
+POST /api/merchant/affiliation/
+Description: Affiliates the authenticated merchant to a dispatcher using their unique affiliation code.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "affiliation_code": "HUB001"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Successfully affiliated with dispatcher Ikeja Hub Logistics",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 3. List Affiliated Merchants (Dispatcher View)
+```http
+GET /api/dispatch/affiliation/merchants/
+Description: Lists all merchants affiliated to the authenticated dispatcher with pagination, search, and activity counts.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - search (optional): Filter by merchant ID, business name, phone, or email
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliated merchants retrieved successfully",
+    "data": {
+      "count": 12,
+      "next": null,
+      "previous": null,
+      "results": [
+        {
+          "id": 105,
+          "merchant_id": "261603",
+          "name": "Acme Ventures",
+          "email": "acme@example.com",
+          "phone": "+2348011112222",
+          "business_name": "Acme Retail Ltd",
+          "merchant_type": "Retail",
+          "status": "active",
+          "affiliated_at": "2026-10-15T12:00:00Z",
+          "total_orders": 34,
+          "monthly_orders": 8,
+          "monthly_commission": 24000.0
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 4. Dispatcher Affiliation Summary
+```http
+GET /api/dispatch/affiliation/summary/
+Description: Retrieves aggregated performance and earnings for the dispatcher, including affiliated riders, affiliated merchants, and monthly commission totals.
+Authentication: Required (Dispatcher)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation summary retrieved successfully",
+    "data": {
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "affiliation_code": "HUB001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "monthly_commission": 45000.0,
+      "previous_month_commission": 30000.0,
+      "total_commission_earned": 75000.0,
+      "commission_per_order": 3000.0,
+      "affiliated_riders_count": 5,
+      "total_affiliated_riders": 5,
+      "active_riders_this_month": 3,
+      "affiliated_merchants_count": 8,
+      "total_affiliated_merchants": 8,
+      "active_merchants_this_month": 4,
+      "current_month": "October 2026",
+      "currency": "NGN"
+    },
+    "status_code": 200
+  }
+```
+
+### 5. Dispatcher Commission History
+```http
+GET /api/dispatch/affiliation/commissions/
+Description: Lists ledgered commission records for the authenticated dispatcher with optional source and merchant filtering.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - month (optional): Filter by month string (format: YYYY-MM)
+  - rider_id (optional): Filter by rider ID
+  - merchant_id (optional): Filter by merchant ID
+  - source (optional): Filter by affiliation source ('rider' or 'merchant')
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Commissions retrieved successfully",
+    "data": {
+      "count": 15,
+      "results": [
+        {
+          "id": "b968fc24-...",
+          "order_number": "6158045",
+          "amount": 3000.0,
+          "affiliation_source": "merchant",
+          "rider_id": null,
+          "rider_name": null,
+          "merchant_id": "261603",
+          "merchant_name": "Acme Retail Ltd",
+          "month_year": "2026-10",
+          "description": "Affiliation commission for completed order #6158045 from merchant 261603",
+          "created_at": "2026-10-15T14:30:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 6. Verify Affiliation Code (Public)
+```http
+GET /api/auth/affiliation/verify/?code=HUB001
+GET /api/merchant/affiliation/verify/?code=HUB001
+GET /api/riders/affiliation/verify/?code=HUB001
+GET /api/affiliation/verify/?code=HUB001
+POST /api/auth/affiliation/verify/
+POST /api/merchant/affiliation/verify/
+POST /api/riders/affiliation/verify/
+POST /api/affiliation/verify/
+Description: Validates a dispatcher affiliation code and returns the dispatcher's details (name, phone, role, hub, zone) without requiring authentication. Used during rider/merchant onboarding and profile linking.
+Authentication: None (Public - AllowAny)
+
+Query Parameters (GET):
+  - code or affiliation_code (required): The affiliation code to verify (e.g. 'HUB001'). Case-insensitive.
+
+Request Body (POST):
+  {
+    "affiliation_code": "HUB001"
+  }
+  // Or alias: {"code": "HUB001"}
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation code is valid.",
+    "data": {
+      "is_valid": true,
+      "affiliation_code": "HUB001",
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "name": "Alice Hub Captain",
+      "phone": "+2348011110001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "hub_name": "Ikeja Central Hub",
+      "zone_name": "Ikeja Zone"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Invalid affiliation code. No active dispatcher found with this code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+---
+
+## RIDER BANK DIRECTORY, ACCOUNT ENQUIRY & WEMA WITHDRAWAL ENDPOINTS
+
+### 1. List Supported Nigerian Banks
+```http
+GET /api/riders/banks/
+Description: Retrieves the complete directory of supported Nigerian commercial banks, microfinance banks, and fintech institutions with their corresponding 3-digit and 6-digit CBN/NIBSS codes and USSD shortcodes. Cached in Redis for low latency.
+Authentication: None (Public / AllowAny)
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Banks retrieved successfully.",
+    "data": [
+      {
+        "id": "18f50682-1234-4567-89ab-cdef01234567",
+        "name": "Access Bank",
+        "bank_code": "044",
+        "cbn_code": "000014",
+        "ussd_short_code": "*901#",
+        "bank_short_name": "Access"
+      },
+      {
+        "id": "42c38501-1234-4567-89ab-cdef01234567",
+        "name": "Guaranty Trust Bank",
+        "bank_code": "058",
+        "cbn_code": "000013",
+        "ussd_short_code": "*737#",
+        "bank_short_name": "GTBank"
+      },
+      {
+        "id": "a93bc710-1234-4567-89ab-cdef01234567",
+        "name": "Wema Bank",
+        "bank_code": "035",
+        "cbn_code": "000017",
+        "ussd_short_code": "*945#",
+        "bank_short_name": "Wema"
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+### 2. Bank Account Name Enquiry
+```http
+POST /api/riders/wallet/verify-account/
+Description: Validates a 10-digit NUBAN account number and resolves the account name using the LibertyPay Account Enquiry integration.
+Authentication: None (Public / AllowAny)
+
+Request Body:
+  {
+    "account_number": "0123456789",
+    "bank_code": "058"
+  }
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Account verified successfully.",
+    "data": {
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "cbn_code": "000013",
+      "currency_code": "NGN"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Account verification failed. Please check the account number and bank code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 3. Withdraw Earnings to Bank Account
+```http
+POST /api/riders/wallet/withdraw/
+Description: Allows independent riders (is_independent_rider=True) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout.
+1. Validates that the platform Independent Rider Payout Wallet Pool has sufficient funds to disburse the withdrawal.
+2. Validates that the withdrawal amount does not exceed withdrawable_balance (wallet balance minus any unremitted Cash on Delivery).
+3. Atomically debits both the Independent Rider Payout Wallet Pool and the rider's personal wallet.
+4. Triggers Wema CoreBanking payout. If rejected or failed, automatically issues an immediate automated refund to both the rider's wallet and the payout pool.
+Authentication: Required (Rider Bearer Token)
+
+Request Body:
+  {
+    "amount": 25000.00,
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "058",
+    "bank_name": "Guaranty Trust Bank",
+    "narration": "Weekly earnings payout",
+    "is_sandbox": false
+  }
+
+*Sandbox Testing: Pass "is_sandbox": true or "mode": "SANDBOX" in the request body (or ?sandbox=true query parameter) to simulate or run sandbox payouts. Generates WDR-SBX- references and auto-seeds test pool funds if empty.*
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Withdrawal request processed successfully.",
+    "data": {
+      "reference": "WDR-A93BC7101234",
+      "amount": 25000.0,
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "status": "success",
+      "remaining_balance": 15420.50,
+      "is_sandbox": false,
+      "mode": "LIVE"
+    },
+    "status_code": 200
+  }
+
+Error Responses:
+  - 400 Bad Request (Insufficient Payout Pool Balance):
+    {
+      "status": "error",
+      "message": "Insufficient funds in payout pool. Unable to process withdrawal at this time.",
+      "data": {},
+      "status_code": 400
+    }
+
+  - 400 Bad Request (Insufficient Withdrawable Balance or Pending COD):
+    {
+      "status": "error",
+      "message": "Insufficient withdrawable balance. Withdrawable: ₦12,500.00 (Pending unremitted COD: ₦15,000.00)",
+      "data": {},
+      "status_code": 400
+    }
+
+  - 403 Forbidden (Non-Independent Rider):
+    {
+      "status": "error",
+      "message": "Only independent riders are permitted to withdraw wallet earnings.",
+      "data": {},
+      "status_code": 403
+    }
+
+  - 422 Unprocessable Entity (CoreBanking Failure - Auto-Refunded to Wallet & Pool):
+    {
+      "status": "error",
+      "message": "Destination bank unavailable. Your wallet balance has been refunded.",
+      "data": {},
+      "status_code": 422
+    }
+```
+
+---
+
+## DISPATCHER MANAGEMENT ENDPOINTS
+
+### 1. List Dispatchers
+```
+GET /api/dispatch/dispatchers/
+Description: Retrieves a list of all dispatcher profiles ordered by creation date descending.
+Authentication: Required (IsAuthenticated)
+Response (200 OK):
+  [
+    {
+      "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "name": "Jane Dispatcher",
+      "phone": "+2348011223344",
+      "email": "jane@axpress.net",
+      "role": "Admin",
+      "joined": "2026-10-16",
+      "is_active": true,
+      "affiliation_code": null,
+      "monthly_commission": "0.00",
+      "previous_month_commission": "0.00",
+      "total_commission_earned": "0.00",
+      "affiliated_riders_count": 0,
+      "affiliated_merchants_count": 0
+    }
+  ]
+```
+
+### 2. Create Dispatcher
+```
+POST /api/dispatch/dispatchers/
+Description: Creates a new user with usertype Dispatcher and assigns a DispatcherProfile atomically with role configuration.
+Authentication: Required (IsAuthenticated)
+Request Body:
+  {
+    "first_name": "Jane",
+    "last_name": "Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "password": "strongpassword123",
+    "role": "admin" | "hub_captain" | "zone_lead"
+  }
+Response (201 Created):
+  {
+    "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+    "name": "Jane Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "role": "Admin",
+    "joined": "2026-10-16",
+    "is_active": true,
+    "affiliation_code": null,
+    "monthly_commission": "0.00",
+    "previous_month_commission": "0.00",
+    "total_commission_earned": "0.00",
+    "affiliated_riders_count": 0,
+    "affiliated_merchants_count": 0
+  }
+```
+
+---
+
+## ORDER PICKUP & DELIVERY VERIFICATION (V2)
+
+Endpoints using 6-digit verification codes for rider pickup and delivery completion instead of GPS location proximity checks.
+
+### 1. Confirm Order Pickup (V2)
+```
+POST /api/orders/v2/pickup/
+Description: Rider marks an order as PickedUp by providing the 6-digit pickup code received from the merchant. Bypasses GPS proximity restrictions.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "pickup_code": "749201"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order picked up successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "PickedUp",
+      "picked_up_at": "2026-10-23T11:30:00Z"
+    },
+    "status_code": 200
+  }
+Error Response (400 Bad Request - Incorrect Code):
+  {
+    "status": "error",
+    "message": "Incorrect pickup code. 4 attempt(s) remaining.",
+    "data": {},
+    "status_code": 400
+  }
+Error Response (400 Bad Request - Verification Locked):
+  {
+    "status": "error",
+    "message": "Pickup verification is locked due to too many failed attempts (maximum 5). Please contact support.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 2. Complete Single-Delivery Order (V2)
+```
+POST /api/orders/v2/complete/
+Description: Rider completes a single-delivery order (Quick Send) by providing the 6-digit drop code received from the recipient. Marks the delivery as Delivered, marks the order as Done, and allocates rider earnings.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order delivery completed successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "Done",
+      "all_delivered": true
+    },
+    "status_code": 200
+  }
+```
+
+### 3. Deliver Multi-Drop Delivery Stop (V2)
+```
+POST /api/orders/v2/delivery/{delivery_id}/deliver/
+Description: Rider completes an individual delivery stop in a multi-drop order using that specific drop's 6-digit drop code. When all stops are completed, the order is automatically marked as Done and rider earnings are credited.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Delivery completed successfully.",
+    "data": {
+      "delivery_id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "status": "Delivered",
+      "delivered_at": "2026-10-23T11:45:00Z",
+      "order_number": "6158001",
+      "order_status": "Fulfilling",
+      "all_delivered": false
+    },
+    "status_code": 200
+  }
+```
+
 

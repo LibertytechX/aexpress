@@ -1528,3 +1528,63 @@ def send_merchant_notification(self, merchant_id, title, body, data=None, catego
         logger.error(f"send_merchant_notification failed for merchant {merchant_id}: {exc}")
         raise self.retry(exc=exc)
     return True
+
+
+@shared_task
+def reset_monthly_dispatcher_commissions_task():
+    """
+    Periodic task to roll over monthly commissions for all dispatchers at month boundary.
+    Runs at 00:00 on the 1st of every month.
+    """
+    from .services import reset_monthly_commissions_service
+
+    count = reset_monthly_commissions_service()
+    logger.info(
+        f"reset_monthly_dispatcher_commissions_task completed. Reset {count} dispatchers."
+    )
+    return count
+
+
+@shared_task
+def reconcile_all_dispatchers_commissions_task(month_year=None):
+    """
+    Periodic or on-demand task to reconcile commission ledgers for all dispatchers.
+    """
+    from .models import DispatcherProfile
+    from .services import reconcile_dispatcher_monthly_commission
+
+    count = 0
+    for dispatcher in DispatcherProfile.objects.all():
+        try:
+            reconcile_dispatcher_monthly_commission(dispatcher, month_year=month_year)
+            count += 1
+        except Exception as e:
+            logger.error(f"Reconciliation failed for dispatcher {dispatcher.id}: {e}")
+    return count
+
+
+@shared_task(
+    name="dispatcher.tasks.send_rider_rejection_email_task",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=15,
+)
+def send_rider_rejection_email_task(
+    self, rider_id: str, reason: str = "", rejected_doc_ids: list = None
+):
+    """
+    Celery task to send a rejection email to a rider notifying them of their application status,
+    the specific documents rejected, and the reasons.
+    """
+    from .emails import send_rider_rejection_email
+
+    try:
+        return send_rider_rejection_email(
+            rider_id, reason=reason, rejected_doc_ids=rejected_doc_ids
+        )
+    except Exception as exc:
+        logger.error(
+            f"send_rider_rejection_email_task failed for rider {rider_id}: {exc}"
+        )
+        raise self.retry(exc=exc)
+

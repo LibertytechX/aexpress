@@ -11,9 +11,9 @@ User = get_user_model()
 def create_user_profile(sender, instance, created, **kwargs):
     if created:
         if instance.usertype == "Dispatcher":
-            DispatcherProfile.objects.create(user=instance)
+            DispatcherProfile.objects.get_or_create(user=instance)
         elif instance.usertype == "Rider":
-            Rider.objects.create(user=instance)
+            Rider.objects.get_or_create(user=instance)
         elif instance.usertype == "Merchant":
             referral_code = getattr(instance, "referral_code", None)
             acquisition_source = instance.registration_source

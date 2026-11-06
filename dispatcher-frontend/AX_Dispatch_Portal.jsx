@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI } from "./src/api.js";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI, AffiliationAPI } from "./src/api.js";
 import { Realtime } from "ably";
 
 // ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
@@ -4566,11 +4566,72 @@ function PendingRiderApprovalsScreen({ riders, onRefresh }) {
 
 function RiderApprovalReviewModal({ rider, onClose, onDone }) {
   const [mode, setMode] = useState("view"); // "view" | "reject"
+  const [currentSlide, setCurrentSlide] = useState(0);
   const [reason, setReason] = useState("");
   const [flagged, setFlagged] = useState({}); // { [docId]: reasonString }
+  const [imgErrors, setImgErrors] = useState({}); // { [slideId]: boolean }
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null); // "approved" | "rejected"
+
+  const documents = rider.documents || [];
+
+  const slides = useMemo(() => {
+    const list = documents.map(doc => ({
+      id: doc.id,
+      docId: doc.id,
+      docType: doc.doc_type,
+      title: DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type,
+      url: doc.file_url,
+      status: doc.status,
+      rejectionReason: doc.rejection_reason,
+      isDoc: true,
+    }));
+    if (rider.vehicle_photo) {
+      list.push({
+        id: "vehicle_photo",
+        docId: null,
+        docType: "vehicle_photo",
+        title: "Vehicle Photo",
+        url: rider.vehicle_photo,
+        status: "submitted",
+        rejectionReason: "",
+        isDoc: false,
+      });
+    }
+    return list;
+  }, [documents, rider.vehicle_photo]);
+
+  // Ensure currentSlide is within bounds if slides change
+  useEffect(() => {
+    if (currentSlide >= slides.length && slides.length > 0) {
+      setCurrentSlide(slides.length - 1);
+    }
+  }, [slides.length, currentSlide]);
+
+  // Reset zoom when switching slides
+  useEffect(() => {
+    setIsZoomed(false);
+  }, [currentSlide]);
+
+  // Keyboard navigation for slideshow
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (mode !== "view") return;
+      if (e.key === "ArrowLeft") {
+        setCurrentSlide(prev => (prev > 0 ? prev - 1 : Math.max(0, slides.length - 1)));
+      } else if (e.key === "ArrowRight") {
+        setCurrentSlide(prev => (prev < slides.length - 1 ? prev + 1 : 0));
+      } else if (e.key === "Escape" && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [slides.length, mode, loading, onClose]);
 
   const toggleFlag = (docId) => {
     setFlagged(prev => {
@@ -4580,9 +4641,29 @@ function RiderApprovalReviewModal({ rider, onClose, onDone }) {
       return next;
     });
   };
+
   const setFlagReason = (docId, val) => setFlagged(prev => ({ ...prev, [docId]: val }));
 
+  const resolveDocUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+      return url;
+    }
+    const base = (import.meta.env.VITE_API_BASE_URL || "https://www.orders.axpress.net/api").replace(/\/api\/?$/, "");
+    return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+  };
+
+  const handleImgError = (slideId) => {
+    setImgErrors(prev => ({ ...prev, [slideId]: true }));
+  };
+
   const handleApprove = async () => {
+    const flaggedCount = Object.keys(flagged).length;
+    if (flaggedCount > 0) {
+      if (!window.confirm(`You have flagged ${flaggedCount} document(s) for rejection. Are you sure you want to approve this application?`)) {
+        return;
+      }
+    }
     setError(null);
     setLoading(true);
     try {
@@ -4597,14 +4678,28 @@ function RiderApprovalReviewModal({ rider, onClose, onDone }) {
 
   const handleReject = async () => {
     setError(null);
-    if (!reason.trim()) { setError("Please provide a reason for rejection."); return; }
+    const overallReason = reason.trim();
+    const flaggedEntries = Object.entries(flagged).filter(([docId]) => docId && docId !== "vehicle_photo");
+
+    if (!overallReason && flaggedEntries.length === 0) {
+      setError("Please provide a rejection note or select at least one document to reject with a reason.");
+      return;
+    }
+
     setLoading(true);
     try {
-      const rejectedDocuments = Object.entries(flagged).map(([docId, docReason]) => ({
+      const rejectedDocuments = flaggedEntries.map(([docId, docReason]) => ({
         document_id: docId,
-        reason: docReason.trim() || reason.trim(),
+        reason: docReason.trim() || overallReason || "Document rejected during application review.",
       }));
-      await RidersAPI.rejectRider(rider.id, reason.trim(), rejectedDocuments);
+
+      // If overall reason was empty but documents had notes, generate concise overall note
+      const finalOverallReason = overallReason || Object.entries(flagged).map(([docId, r]) => {
+        const found = slides.find(s => s.docId === docId);
+        return `${found ? found.title : "Document"}: ${r.trim() || "Rejected"}`;
+      }).join("; ") || "Your application was rejected. Please review flagged documents and re-upload.";
+
+      await RidersAPI.rejectRider(rider.id, finalOverallReason, rejectedDocuments);
       setSuccess("rejected");
     } catch (err) {
       setError(err?.message || err?.error || err?.detail || "Failed to reject application.");
@@ -4613,123 +4708,974 @@ function RiderApprovalReviewModal({ rider, onClose, onDone }) {
     }
   };
 
-  const documents = rider.documents || [];
+  const flaggedCount = Object.keys(flagged).length;
+  const currentDoc = slides[currentSlide] || null;
+
+  const quickDocumentReasons = [
+    "Blurry / Unreadable",
+    "Expired Document",
+    "Name Mismatch with BVN",
+    "Wrong Document Type",
+    "Cut Off / Incomplete",
+  ];
+
+  const quickOverallReasons = [
+    "Blurry or unreadable document scans submitted.",
+    "Driver's license has expired. Please re-upload a valid license.",
+    "Name on uploaded documents does not match BVN records.",
+    "Vehicle registration or insurance details are incomplete or invalid.",
+    "Incomplete documentation. Please review flagged items and re-upload.",
+  ];
+
+  const autoFillFromFlagged = () => {
+    const parts = Object.entries(flagged).map(([docId, note]) => {
+      const found = slides.find(s => s.docId === docId);
+      return `${found ? found.title : "Document"}: ${note.trim() || "Needs re-upload"}`;
+    });
+    if (parts.length > 0) {
+      const compiled = `Application rejected due to document issues: ${parts.join("; ")}. Please re-upload valid documents.`;
+      setReason(compiled);
+    }
+  };
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, padding: 24 }} onClick={e => { if (e.target === e.currentTarget && !loading) onClose(); }}>
-      <div style={{ background: S.card, borderRadius: 20, width: 640, maxHeight: "90vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)" }}>
-        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{rider.first_name} {rider.last_name}</div>
-            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2, fontFamily: "'Space Mono',monospace" }}>#{rider.rider_id} · {rider.phone}</div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <StatusPill status={rider.approval_status} />
-            {!loading && <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>}
-          </div>
-        </div>
-
-        {success ? (
-          <div style={{ padding: "40px 24px", textAlign: "center" }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>{success === "approved" ? "✅" : "🚫"}</div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: success === "approved" ? S.green : S.red, marginBottom: 6 }}>
-              {success === "approved" ? "Rider Approved" : "Application Rejected"}
-            </div>
-            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>
-              {success === "approved" ? "The rider is now authorized to receive jobs." : "The rider has been notified and can re-upload flagged documents."}
-            </div>
-            <button onClick={() => onDone(success === "approved" ? "Rider approved successfully" : "Application rejected")} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
-          </div>
-        ) : (
-          <>
-            <div style={{ padding: "20px 24px", overflowY: "auto", flex: 1 }}>
-              {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Personal Info</div>
-                  <InfoRow label="Email" value={rider.email} />
-                  <InfoRow label="Address" value={rider.address} />
-                  <InfoRow label="BVN" value={rider.bvn} />
-                  <InfoRow label="Working Type" value={rider.working_type} />
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(11, 19, 43, 0.78)",
+        backdropFilter: "blur(6px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1100,
+        padding: "16px",
+      }}
+      onClick={e => {
+        if (e.target === e.currentTarget && !loading) onClose();
+      }}
+    >
+      <div
+        style={{
+          background: S.card,
+          borderRadius: 20,
+          width: "min(1120px, 96vw)",
+          height: "min(90vh, 880px)",
+          maxHeight: "92vh",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 25px 60px -15px rgba(0,0,0,0.5)",
+          border: `1px solid ${S.border}`,
+        }}
+      >
+        {/* MODAL HEADER */}
+        <div
+          style={{
+            padding: "14px 20px",
+            borderBottom: `1px solid ${S.border}`,
+            background: "#fff",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, display: "flex", alignItems: "center", justifyContent: "center", color: S.navy, fontWeight: 900, fontSize: 16 }}>
+                {(rider.first_name?.[0] || "") + (rider.last_name?.[0] || "")}
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>
+                    {rider.first_name} {rider.last_name}
+                  </span>
+                  <StatusPill status={rider.approval_status} />
+                  {flaggedCount > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, display: "flex", alignItems: "center", gap: 4 }}>
+                      🚩 {flaggedCount} flagged for rejection
+                    </span>
+                  )}
                 </div>
-                <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 8 }}>Vehicle Info</div>
-                  <InfoRow label="Model" value={rider.vehicle_model} />
-                  <InfoRow label="Plate Number" value={rider.vehicle_plate_number} />
-                  <InfoRow label="Color" value={rider.vehicle_color} />
-                  {rider.vehicle_photo && (
-                    <a href={rider.vehicle_photo} target="_blank" rel="noreferrer" style={{ display: "inline-block", marginTop: 6, fontSize: 11, color: S.blue, fontWeight: 600 }}>View vehicle photo →</a>
+                <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2, fontFamily: "'Space Mono',monospace", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>#{rider.rider_id}</span>
+                  <span>·</span>
+                  <span>{rider.phone}</span>
+                  {rider.email && (
+                    <>
+                      <span>·</span>
+                      <span style={{ fontFamily: "inherit" }}>{rider.email}</span>
+                    </>
                   )}
                 </div>
               </div>
+            </div>
 
-              <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>
-                Submitted Documents ({documents.length})
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {documents.map(doc => {
-                  const isFlagged = doc.id in flagged;
-                  return (
-                    <div key={doc.id} style={{ border: `1px solid ${isFlagged ? S.red : S.border}`, borderRadius: 12, overflow: "hidden", background: S.bg }}>
-                      <a href={doc.file_url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative" }}>
-                        <img src={doc.file_url} alt={doc.doc_type} style={{ width: "100%", height: 100, objectFit: "cover", display: "block" }} />
-                      </a>
-                      <div style={{ padding: "8px 10px" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: S.navy }}>{DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}</span>
-                          <StatusPill status={doc.status} />
-                        </div>
-                        {doc.rejection_reason && <div style={{ fontSize: 10, color: S.red, marginBottom: 4 }}>Previously: {doc.rejection_reason}</div>}
-                        {mode === "reject" && (
-                          <div style={{ marginTop: 6 }}>
-                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: S.textDim, cursor: "pointer" }}>
-                              <input type="checkbox" checked={isFlagged} onChange={() => toggleFlag(doc.id)} />
-                              Flag as rejected
-                            </label>
-                            {isFlagged && (
-                              <input
-                                value={flagged[doc.id]}
-                                onChange={e => setFlagReason(doc.id, e.target.value)}
-                                placeholder="Reason for this document (optional)"
-                                style={{ width: "100%", marginTop: 6, padding: "6px 8px", borderRadius: 6, border: `1px solid ${S.border}`, fontSize: 11, fontFamily: "inherit", boxSizing: "border-box" }}
-                              />
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setShowInfo(v => !v)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${showInfo ? S.gold : S.border}`,
+                  background: showInfo ? S.goldPale : "#fff",
+                  color: showInfo ? S.gold : S.textDim,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <span>ℹ</span>
+                <span>{showInfo ? "Hide Rider Details" : "View Rider Details"}</span>
+              </button>
 
-              {mode === "reject" && (
-                <div style={{ marginTop: 20 }}>
-                  <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Overall Rejection Reason *</label>
-                  <textarea
-                    value={reason}
-                    onChange={e => setReason(e.target.value)}
-                    placeholder="Explain why this application is being rejected..."
-                    style={{ width: "100%", height: 90, padding: 12, borderRadius: 12, border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 13, color: S.text, fontFamily: "inherit", resize: "none", outline: "none", boxSizing: "border-box" }}
-                  />
+              {!loading && (
+                <button
+                  onClick={onClose}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "none",
+                    border: `1px solid ${S.border}`,
+                    cursor: "pointer",
+                    fontSize: 14,
+                    color: S.textMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.color = S.navy; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = S.textMuted; }}
+                  title="Close (Esc)"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* EXPANDABLE / COMPACT METADATA STRIP */}
+          {showInfo && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${S.border}`, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, background: S.bg, padding: "10px 14px", borderRadius: 10 }}>
+              <InfoRow label="Address" value={rider.address} />
+              <InfoRow label="BVN" value={rider.bvn} />
+              <InfoRow label="Plate Number" value={rider.vehicle_plate_number} />
+              <InfoRow label="Vehicle Model" value={rider.vehicle_model} />
+              <InfoRow label="Vehicle Color" value={rider.vehicle_color} />
+              <InfoRow label="Working Type" value={rider.working_type} />
+              {rider.rejection_reason && (
+                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: S.red, background: S.redBg, padding: "6px 10px", borderRadius: 6 }}>
+                  <strong>Previous Rejection:</strong> {rider.rejection_reason}
                 </div>
               )}
             </div>
+          )}
+        </div>
 
-            <div style={{ padding: "16px 24px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 10, flexShrink: 0 }}>
-              {mode === "view" ? (
-                <>
-                  <button onClick={() => setMode("reject")} disabled={loading} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.red}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: S.red }}>Reject Application</button>
-                  <button onClick={handleApprove} disabled={loading} style={{ flex: 2, padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Approving…" : "Approve Rider"}</button>
-                </>
-              ) : (
-                <>
-                  <button onClick={() => setMode("view")} disabled={loading} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
-                  <button onClick={handleReject} disabled={loading} style={{ flex: 2, padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg, ${S.red}, #c1121f)`, color: "#fff", opacity: loading ? 0.7 : 1 }}>{loading ? "Rejecting…" : "Confirm Rejection"}</button>
-                </>
-              )}
+        {/* MAIN BODY AREA */}
+        {success ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>{success === "approved" ? "✅" : "🚫"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: success === "approved" ? S.green : S.red, marginBottom: 8 }}>
+              {success === "approved" ? "Rider Approved Successfully" : "Rider Application Rejected"}
             </div>
-          </>
+            <div style={{ fontSize: 13, color: S.textMuted, maxWidth: 440, lineHeight: 1.6, marginBottom: 24 }}>
+              {success === "approved"
+                ? "The rider has been authorized to accept orders and start operating on the platform."
+                : "The rider has been notified with your rejection notes so they can correct and re-upload the required documents."}
+            </div>
+            <button
+              onClick={() => onDone(success === "approved" ? "Rider approved successfully" : "Application rejected")}
+              style={{
+                padding: "12px 36px",
+                borderRadius: 12,
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 14,
+                fontWeight: 700,
+                background: `linear-gradient(135deg,${S.gold},${S.goldLight})`,
+                color: S.navy,
+                boxShadow: "0 4px 14px rgba(232,168,56,0.3)",
+              }}
+            >
+              Done
+            </button>
+          </div>
+        ) : mode === "reject" ? (
+          /* REJECTION COMPOSER VIEW */
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#f8fafc" }}>
+            <div style={{ padding: "16px 24px", background: "#fff", borderBottom: `1px solid ${S.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.navy }}>
+                    Reject Submission — Rejection Notes
+                  </h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: S.textDim }}>
+                    Provide clear feedback explaining why this submission is rejected. The rider will be notified immediately to fix these items.
+                  </p>
+                </div>
+                {flaggedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={autoFillFromFlagged}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${S.gold}`,
+                      background: S.goldPale,
+                      color: S.navy,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ⚡ Auto-fill note from flagged documents
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+              {error && (
+                <div style={{ padding: "12px 16px", background: S.redBg, color: S.red, borderRadius: 10, fontSize: 13, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>⚠️</span> {error}
+                </div>
+              )}
+
+              {/* OVERALL NOTE INPUT */}
+              <div style={{ background: "#fff", padding: "18px 20px", borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 20 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Overall Rejection Note / Summary *
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder="Explain clearly to the rider why their application was rejected and what steps they need to take..."
+                  rows={4}
+                  style={{
+                    width: "100%",
+                    padding: 14,
+                    borderRadius: 10,
+                    border: `1.5px solid ${S.border}`,
+                    background: S.bg,
+                    fontSize: 13,
+                    color: S.text,
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    outline: "none",
+                    boxSizing: "border-box",
+                    lineHeight: 1.5,
+                  }}
+                  onFocus={e => { e.target.style.borderColor = S.red; }}
+                  onBlur={e => { e.target.style.borderColor = S.border; }}
+                />
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 6 }}>
+                    Quick Suggestions (click to add):
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {quickOverallReasons.map((chip, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setReason(prev => (prev ? `${prev.trim()} ${chip}` : chip))}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 20,
+                          border: `1px solid ${S.border}`,
+                          background: "#fff",
+                          color: S.textDim,
+                          fontSize: 11,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = S.red; e.currentTarget.style.color = S.red; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.color = S.textDim; }}
+                      >
+                        + {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* SPECIFIC FLAGGED DOCUMENTS REVIEW */}
+              <div style={{ background: "#fff", padding: "18px 20px", borderRadius: 14, border: `1px solid ${S.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: S.navy, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Documents To Flag / Reject ({slides.filter(s => s.isDoc).length})
+                  </div>
+                  <span style={{ fontSize: 11, color: S.textMuted }}>
+                    Flagged documents allow the rider to re-upload only the rejected items
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {slides.map(doc => {
+                    const isFlagged = doc.id in flagged;
+                    return (
+                      <div
+                        key={doc.id}
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 12,
+                          border: `1.5px solid ${isFlagged ? S.red : S.border}`,
+                          background: isFlagged ? "#fff5f5" : "#fff",
+                          transition: "all 0.2s",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 13, color: S.navy }}>
+                            <input
+                              type="checkbox"
+                              checked={isFlagged}
+                              onChange={() => toggleFlag(doc.id)}
+                              style={{ width: 16, height: 16, accentColor: S.red, cursor: "pointer" }}
+                            />
+                            <span>{doc.title}</span>
+                            <StatusPill status={doc.status} />
+                          </label>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {doc.url && (
+                              <a
+                                href={resolveDocUrl(doc.url)}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: 11, color: S.blue, fontWeight: 600, textDecoration: "none" }}
+                              >
+                                View file ↗
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const idx = slides.findIndex(s => s.id === doc.id);
+                                if (idx >= 0) setCurrentSlide(idx);
+                                setMode("view");
+                              }}
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 6,
+                                border: `1px solid ${S.border}`,
+                                background: "#fff",
+                                color: S.textDim,
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Show in Slideshow
+                            </button>
+                          </div>
+                        </div>
+
+                        {isFlagged && (
+                          <div style={{ marginTop: 10, paddingLeft: 24 }}>
+                            <input
+                              value={flagged[doc.id] || ""}
+                              onChange={e => setFlagReason(doc.id, e.target.value)}
+                              placeholder={`Specific reason for rejecting ${doc.title} (e.g. Expired on Jan 2024, Unreadable, Wrong type)...`}
+                              style={{
+                                width: "100%",
+                                padding: "8px 12px",
+                                borderRadius: 8,
+                                border: `1px solid ${S.border}`,
+                                background: "#fff",
+                                fontSize: 12,
+                                fontFamily: "inherit",
+                                boxSizing: "border-box",
+                              }}
+                            />
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                              {quickDocumentReasons.map((chip, cIdx) => (
+                                <button
+                                  key={cIdx}
+                                  type="button"
+                                  onClick={() => setFlagReason(doc.id, chip)}
+                                  style={{
+                                    padding: "2px 8px",
+                                    borderRadius: 12,
+                                    border: `1px solid ${S.border}`,
+                                    background: "#fff",
+                                    color: S.textDim,
+                                    fontSize: 10,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {chip}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* REJECTION VIEW FOOTER */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: `1px solid ${S.border}`,
+                background: "#fff",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setMode("view")}
+                disabled={loading}
+                style={{
+                  padding: "11px 20px",
+                  borderRadius: 10,
+                  border: `1px solid ${S.border}`,
+                  background: "#fff",
+                  color: S.navy,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                ← Back to Slideshow
+              </button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>
+                  {flaggedCount > 0 ? `${flaggedCount} document(s) flagged` : "Rejecting entire submission"}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleReject}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 28px",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: `linear-gradient(135deg, ${S.red}, #b91c1c)`,
+                    color: "#fff",
+                    boxShadow: "0 4px 14px rgba(220,38,38,0.3)",
+                    opacity: loading ? 0.7 : 1,
+                  }}
+                >
+                  {loading ? "Rejecting Application…" : "Confirm Rejection & Send Note"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* SLIDESHOW VIEW (Almost the entire modal!) */
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+            {error && (
+              <div style={{ margin: "10px 16px 0", padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13 }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            {slides.length === 0 ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: S.textMuted }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📁</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>No Documents Found</div>
+                <div style={{ fontSize: 12 }}>This rider has not uploaded any documents yet.</div>
+              </div>
+            ) : (
+              <>
+                {/* SLIDESHOW STAGE */}
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    background: "#080d1a",
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: isZoomed ? "auto" : "hidden",
+                    userSelect: "none",
+                  }}
+                >
+                  {/* FLOATING PREVIOUS BUTTON */}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentSlide(prev => (prev > 0 ? prev - 1 : slides.length - 1))}
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 46,
+                      height: 46,
+                      borderRadius: "50%",
+                      background: "rgba(255, 255, 255, 0.15)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 20,
+                      boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"; e.currentTarget.style.transform = "translateY(-50%) scale(1.08)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)"; e.currentTarget.style.transform = "translateY(-50%) scale(1)"; }}
+                    title="Previous Document (← Left Arrow)"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
+
+                  {/* FLOATING NEXT BUTTON */}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentSlide(prev => (prev < slides.length - 1 ? prev + 1 : 0))}
+                    style={{
+                      position: "absolute",
+                      right: 16,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 46,
+                      height: 46,
+                      borderRadius: "50%",
+                      background: "rgba(255, 255, 255, 0.15)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 20,
+                      boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"; e.currentTarget.style.transform = "translateY(-50%) scale(1.08)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)"; e.currentTarget.style.transform = "translateY(-50%) scale(1)"; }}
+                    title="Next Document (→ Right Arrow)"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+
+                  {/* STAGE TOP OVERLAY BAR */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 14,
+                      left: 16,
+                      right: 16,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      zIndex: 15,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, pointerEvents: "auto", background: "rgba(11, 19, 43, 0.8)", backdropFilter: "blur(8px)", padding: "6px 14px", borderRadius: 30, border: "1px solid rgba(255,255,255,0.15)" }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: S.goldLight, fontFamily: "'Space Mono',monospace" }}>
+                        {currentSlide + 1} / {slides.length}
+                      </span>
+                      <span style={{ color: "rgba(255,255,255,0.4)" }}>|</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                        {currentDoc.title}
+                      </span>
+                      <StatusPill status={currentDoc.status} />
+                      {currentDoc.docId && currentDoc.docId in flagged && (
+                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: S.red, color: "#fff" }}>
+                          FLAGGED
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, pointerEvents: "auto" }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsZoomed(z => !z)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 20,
+                          background: isZoomed ? S.gold : "rgba(11, 19, 43, 0.8)",
+                          backdropFilter: "blur(8px)",
+                          border: "1px solid rgba(255,255,255,0.18)",
+                          color: isZoomed ? S.navy : "#fff",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                        }}
+                      >
+                        <span>🔍</span>
+                        <span>{isZoomed ? "Reset Zoom" : "Zoom 1.7x"}</span>
+                      </button>
+
+                      {currentDoc.url && (
+                        <a
+                          href={resolveDocUrl(currentDoc.url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 20,
+                            background: "rgba(11, 19, 43, 0.8)",
+                            backdropFilter: "blur(8px)",
+                            border: "1px solid rgba(255,255,255,0.18)",
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            textDecoration: "none",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                          }}
+                        >
+                          <span>Open Original</span>
+                          <span>↗</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ACTIVE IMAGE DISPLAY */}
+                  {imgErrors[currentDoc.id] || !currentDoc.url ? (
+                    <div style={{ textAlign: "center", padding: "40px 24px", color: "rgba(255,255,255,0.7)" }}>
+                      <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.8 }}>🖼️</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 6 }}>
+                        {currentDoc.title} Preview Unavailable
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 16, maxWidth: 360, margin: "0 auto 16px" }}>
+                        The image link could not be loaded in the browser. You can still inspect the direct link or flag this document.
+                      </div>
+                      {currentDoc.url && (
+                        <a
+                          href={resolveDocUrl(currentDoc.url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: "inline-block",
+                            padding: "8px 18px",
+                            borderRadius: 8,
+                            background: "rgba(255,255,255,0.15)",
+                            color: "#fff",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            textDecoration: "none",
+                          }}
+                        >
+                          Try opening direct file URL ↗
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "48px 72px 16px",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <img
+                        key={currentDoc.id}
+                        src={resolveDocUrl(currentDoc.url)}
+                        alt={currentDoc.title}
+                        onError={() => handleImgError(currentDoc.id)}
+                        style={{
+                          maxWidth: "100%",
+                          maxHeight: "100%",
+                          objectFit: "contain",
+                          borderRadius: 8,
+                          boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+                          transform: isZoomed ? "scale(1.7)" : "scale(1)",
+                          transformOrigin: "center center",
+                          transition: "transform 0.25s ease",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* CURRENT DOCUMENT REJECTION NOTE TOOLBAR */}
+                <div
+                  style={{
+                    padding: "8px 16px",
+                    background: currentDoc.docId && currentDoc.docId in flagged ? "#fff1f2" : "#f8fafc",
+                    borderTop: `1px solid ${S.border}`,
+                    borderBottom: `1px solid ${S.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    minHeight: 46,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: S.navy }}>
+                      {currentDoc.title}:
+                    </span>
+                    {currentDoc.docId ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleFlag(currentDoc.docId)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: `1px solid ${currentDoc.docId in flagged ? S.red : S.border}`,
+                          background: currentDoc.docId in flagged ? S.red : "#fff",
+                          color: currentDoc.docId in flagged ? "#fff" : S.textDim,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                        }}
+                      >
+                        <span>🚩</span>
+                        <span>{currentDoc.docId in flagged ? "Flagged for Rejection" : "Flag for Rejection"}</span>
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: S.textMuted }}>Vehicle Asset Photo</span>
+                    )}
+                  </div>
+
+                  {currentDoc.docId && currentDoc.docId in flagged && (
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, minWidth: 260 }}>
+                      <input
+                        value={flagged[currentDoc.docId] || ""}
+                        onChange={e => setFlagReason(currentDoc.docId, e.target.value)}
+                        placeholder="Rejection note for this document (e.g. Expired, Blurry, Invalid)..."
+                        style={{
+                          flex: 1,
+                          padding: "5px 10px",
+                          borderRadius: 6,
+                          border: `1.5px solid ${S.red}`,
+                          background: "#fff",
+                          fontSize: 12,
+                          fontFamily: "inherit",
+                          outline: "none",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {quickDocumentReasons.slice(0, 3).map((chip, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFlagReason(currentDoc.docId, chip)}
+                            style={{
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                              border: `1px solid ${S.border}`,
+                              background: "#fff",
+                              color: S.textDim,
+                              fontSize: 10,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {currentDoc.rejectionReason && (
+                    <div style={{ fontSize: 11, color: S.red, marginLeft: "auto" }}>
+                      <strong>Previously:</strong> {currentDoc.rejectionReason}
+                    </div>
+                  )}
+                </div>
+
+                {/* THUMBNAIL FILMSTRIP */}
+                <div
+                  style={{
+                    background: "#080d1a",
+                    padding: "8px 16px",
+                    display: "flex",
+                    gap: 10,
+                    overflowX: "auto",
+                    flexShrink: 0,
+                    alignItems: "center",
+                  }}
+                >
+                  {slides.map((s, idx) => {
+                    const isActive = idx === currentSlide;
+                    const isFlagged = s.docId && s.docId in flagged;
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => setCurrentSlide(idx)}
+                        style={{
+                          width: 86,
+                          height: 64,
+                          borderRadius: 8,
+                          background: "#1e293b",
+                          border: `2px solid ${isActive ? S.gold : isFlagged ? S.red : "rgba(255,255,255,0.15)"}`,
+                          cursor: "pointer",
+                          position: "relative",
+                          overflow: "hidden",
+                          flexShrink: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          transition: "all 0.15s ease",
+                          boxShadow: isActive ? `0 0 12px ${S.gold}80` : "none",
+                        }}
+                      >
+                        {imgErrors[s.id] || !s.url ? (
+                          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
+                            📄
+                          </div>
+                        ) : (
+                          <img
+                            src={resolveDocUrl(s.url)}
+                            alt={s.title}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            onError={() => handleImgError(s.id)}
+                          />
+                        )}
+
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: "rgba(11, 19, 43, 0.85)",
+                            color: "#fff",
+                            fontSize: 9,
+                            fontWeight: 700,
+                            textAlign: "center",
+                            padding: "2px 4px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {s.title}
+                        </div>
+
+                        {isFlagged && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 3,
+                              right: 3,
+                              width: 14,
+                              height: 14,
+                              borderRadius: "50%",
+                              background: S.red,
+                              color: "#fff",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 8,
+                              fontWeight: 900,
+                            }}
+                          >
+                            !
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* MODAL BOTTOM ACTION BAR */}
+            <div
+              style={{
+                padding: "14px 20px",
+                borderTop: `1px solid ${S.border}`,
+                background: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>
+                  Use <strong>← / → keys</strong> to cycle documents
+                </span>
+                {flaggedCount > 0 && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: S.red }}>
+                    • {flaggedCount} document(s) flagged for rejection
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setMode("reject")}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 22px",
+                    borderRadius: 10,
+                    border: `1.5px solid ${S.red}`,
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: S.red,
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = S.redBg; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#fff"; }}
+                >
+                  Reject Application & Add Note
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 28px",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: `linear-gradient(135deg,${S.gold},${S.goldLight})`,
+                    color: S.navy,
+                    opacity: loading ? 0.7 : 1,
+                    boxShadow: "0 4px 14px rgba(232,168,56,0.35)",
+                  }}
+                >
+                  {loading ? "Approving…" : "Approve Rider"}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -7713,91 +8659,599 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
 // ─── TEAMS SCREEN ────────────────────────────────────────────────
 function TeamsScreen({ dispatchers, onDispatcherCreated }) {
+  const [activeTab, setActiveTab] = useState("members"); // "members" | "riders" | "merchants" | "earnings"
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [toast, setToast] = useState("");
+  const [copiedCode, setCopiedCode] = useState(null);
+  const [affiliationSummary, setAffiliationSummary] = useState(null);
+  const [affiliatedRiders, setAffiliatedRiders] = useState([]);
+  const [affiliatedMerchants, setAffiliatedMerchants] = useState([]);
+  const [monthlyEarnings, setMonthlyEarnings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
 
-  const filtered = dispatchers.filter(d => {
+  const loadAffiliationData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sum, riders, merchants, earnings] = await Promise.all([
+        AffiliationAPI.getSummary().catch(() => null),
+        AffiliationAPI.getAffiliatedRiders().catch(() => []),
+        AffiliationAPI.getAffiliatedMerchants().catch(() => []),
+        AffiliationAPI.getMonthlyEarnings().catch(() => []),
+      ]);
+      setAffiliationSummary(sum);
+      setAffiliatedRiders(riders);
+      setAffiliatedMerchants(merchants);
+      setMonthlyEarnings(earnings);
+    } catch (e) {
+      console.error("Failed to load affiliation data:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAffiliationData();
+  }, [loadAffiliationData]);
+
+  const copyToClipboard = (code) => {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setToast(`Affiliation Code "${code}" copied to clipboard!`);
+    setTimeout(() => {
+      setCopiedCode(null);
+      setToast("");
+    }, 3000);
+  };
+
+  const handleReconcile = async () => {
+    setReconciling(true);
+    try {
+      const res = await AffiliationAPI.reconcile();
+      setToast(`Reconciliation complete! Verified ${res.total_orders || 0} orders (₦${parseFloat(res.total_commission || 0).toLocaleString()})`);
+      await loadAffiliationData();
+    } catch (err) {
+      setToast(err.message || "Reconciliation failed.");
+    } finally {
+      setReconciling(false);
+      setTimeout(() => setToast(""), 4000);
+    }
+  };
+
+  const roleBadgeStyle = (role) => {
+    const r = (role || "").toLowerCase();
+    if (r.includes("hub") || r.includes("captain")) {
+      return { background: S.purpleBg, color: S.purple, border: `1px solid ${S.purple}30` };
+    }
+    if (r.includes("zone") || r.includes("lead")) {
+      return { background: S.blueBg, color: S.blue, border: `1px solid ${S.blue}30` };
+    }
+    return { background: S.goldPale, color: S.gold, border: `1px solid ${S.gold}30` };
+  };
+
+  const filteredDispatchers = (dispatchers || []).filter(d => {
+    if (!search) return true;
     const q = search.toLowerCase();
-    return (
-      (d.name || "").toLowerCase().includes(q) ||
-      (d.phone || "").includes(q) ||
-      (d.email || "").toLowerCase().includes(q)
-    );
+    const name = (d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`).toLowerCase();
+    const phone = (d.phone || "").toLowerCase();
+    const code = (d.affiliation_code || "").toLowerCase();
+    const role = (d.role || "").toLowerCase();
+    return name.includes(q) || phone.includes(q) || code.includes(q) || role.includes(q);
+  });
+
+  const filteredRiders = (affiliatedRiders || []).filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const name = (r.name || "").toLowerCase();
+    const id = (r.rider_id || "").toLowerCase();
+    const phone = (r.phone || "").toLowerCase();
+    return name.includes(q) || id.includes(q) || phone.includes(q);
+  });
+
+  const filteredMerchants = (affiliatedMerchants || []).filter(m => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const bName = (m.business_name || "").toLowerCase();
+    const cName = (m.contact_name || "").toLowerCase();
+    const id = (m.merchant_id || "").toLowerCase();
+    const phone = (m.phone || "").toLowerCase();
+    return bName.includes(q) || cName.includes(q) || id.includes(q) || phone.includes(q);
   });
 
   return (
-    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%" }}>
-      {/* Header bar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: S.navy }}>Dispatch Team</div>
-          <div style={{ fontSize: 13, color: S.textMuted, marginTop: 2 }}>{dispatchers.length} dispatcher{dispatchers.length !== 1 ? "s" : ""} • manage access and roles</div>
-        </div>
-        <button onClick={() => setShowAdd(true)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>
-          {I.plus} Add Dispatcher
-        </button>
+    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* ─── STAT CARDS ─── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+        <StatCard
+          label="Total Dispatchers"
+          value={dispatchers.length}
+          subtext="Hub Captains & Leads"
+        />
+        <StatCard
+          label="Affiliated Fleet"
+          value={affiliationSummary?.total_affiliated_riders || affiliatedRiders.length || 0}
+          subtext="Active fleet linked to hubs"
+          color={S.blue}
+        />
+        <StatCard
+          label="Affiliated Merchants"
+          value={affiliationSummary?.total_affiliated_merchants || affiliatedMerchants.length || 0}
+          subtext="Businesses linked to hubs"
+          color={S.purple}
+        />
+        <StatCard
+          label="Monthly Commission"
+          value={`₦${parseFloat(affiliationSummary?.monthly_commission || 0).toLocaleString()}`}
+          subtext={`Current month (${affiliationSummary?.current_month || "Active"})`}
+          color={S.green}
+        />
+        <StatCard
+          label="Lifetime Commission"
+          value={`₦${parseFloat(affiliationSummary?.total_commission_earned || 0).toLocaleString()}`}
+          subtext={`Rate: ₦${parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} / completed order`}
+          color={S.gold}
+        />
       </div>
 
-      {/* Search */}
-      <div style={{ position: "relative", marginBottom: 18, maxWidth: 360 }}>
-        <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted }}>{I.search}</span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, phone or email…" style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 10, border: `1px solid ${S.border}`, fontSize: 13, fontFamily: "inherit", color: S.text, background: "#fff", outline: "none" }} />
-      </div>
-
-      {/* Table */}
-      <div style={{ background: "#fff", borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-        {/* Table header */}
-        <div style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 2fr 1fr 1fr", padding: "12px 20px", borderBottom: `1px solid ${S.border}`, background: S.bg }}>
-          {["Name", "Phone", "Email", "Role", "Status"].map(h => (
-            <div key={h} style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>{h}</div>
-          ))}
-        </div>
-
-        {filtered.length === 0 ? (
-          <div style={{ padding: "48px 24px", textAlign: "center" }}>
-            <div style={{ fontSize: 32, marginBottom: 10 }}>👥</div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: S.navy, marginBottom: 6 }}>
-              {search ? "No dispatchers match your search" : "No dispatchers yet"}
-            </div>
-            <div style={{ fontSize: 13, color: S.textMuted }}>
-              {search ? "Try a different query" : "Click 'Add Dispatcher' to onboard your first team member."}
-            </div>
-          </div>
-        ) : filtered.map((d, idx) => (
-          <div key={d.id || idx} style={{ display: "grid", gridTemplateColumns: "2fr 1.5fr 2fr 1fr 1fr", padding: "14px 20px", borderBottom: idx < filtered.length - 1 ? `1px solid ${S.borderLight}` : "none", alignItems: "center", transition: "background 0.15s", cursor: "default" }}
-            onMouseEnter={e => e.currentTarget.style.background = S.bg}
-            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-            {/* Name */}
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: "50%", background: `linear-gradient(135deg,${S.navy},${S.navyLight})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, color: S.gold, flexShrink: 0 }}>
-                {(d.name || "?").split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{d.name || "—"}</div>
-                <div style={{ fontSize: 11, color: S.textMuted }}>Joined {d.joined || "—"}</div>
-              </div>
-            </div>
-            {/* Phone */}
-            <div style={{ fontSize: 13, color: S.text, display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ color: S.textMuted, flexShrink: 0 }}>{I.phone}</span>
-              {d.phone || "—"}
-            </div>
-            {/* Email */}
-            <div style={{ fontSize: 13, color: S.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.email || "—"}</div>
-            {/* Role */}
-            <div>
-              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: S.purpleBg, color: S.purple }}>{d.role || "Dispatcher"}</span>
-            </div>
-            {/* Status */}
-            <div>
-              <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: d.is_active !== false ? S.greenBg : S.redBg, color: d.is_active !== false ? S.green : S.red }}>
-                {d.is_active !== false ? "Active" : "Inactive"}
+      {/* ─── AFFILIATION CODE PROMO BANNER ─── */}
+      {affiliationSummary?.affiliation_code && (
+        <div style={{
+          background: `linear-gradient(135deg, ${S.navy} 0%, #17233c 100%)`,
+          borderRadius: 16, padding: "20px 24px", color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ color: S.gold }}>{I.idCard}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px" }}>
+                Hub Captain Affiliation Program
               </span>
             </div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              Share your affiliation code with riders and merchants to onboard or link them to your hub.
+            </div>
+            <div style={{ fontSize: 12, color: S.textMuted }}>
+              Earn ₦{parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} commission for each completed order by your affiliated riders or merchants.
+            </div>
           </div>
-        ))}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", padding: "10px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)" }}>
+            <div>
+              <div style={{ fontSize: 10, color: S.textMuted, textTransform: "uppercase", fontWeight: 700 }}>Your Affiliation Code</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: S.gold, fontFamily: "'Space Mono', monospace", letterSpacing: "2px" }}>
+                {affiliationSummary.affiliation_code}
+              </div>
+            </div>
+            <button
+              onClick={() => copyToClipboard(affiliationSummary.affiliation_code)}
+              style={{
+                background: copiedCode === affiliationSummary.affiliation_code ? S.green : S.gold,
+                color: S.navy, border: "none", padding: "8px 14px", borderRadius: 8,
+                fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                transition: "all 0.2s"
+              }}
+            >
+              {copiedCode === affiliationSummary.affiliation_code ? (
+                <>{I.check} Copied</>
+              ) : (
+                <>{I.copy} Copy Code</>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── TABS & CONTROLS ─── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", gap: 6, background: S.borderLight, padding: 4, borderRadius: 10 }}>
+          <button
+            onClick={() => setActiveTab("members")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "members" ? S.card : "transparent",
+              color: activeTab === "members" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "members" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.teams} Team Dispatchers ({dispatchers.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("riders")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "riders" ? S.card : "transparent",
+              color: activeTab === "riders" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "riders" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.riders} Affiliated Fleet ({affiliatedRiders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("merchants")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "merchants" ? S.card : "transparent",
+              color: activeTab === "merchants" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "merchants" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🏪 Affiliated Merchants ({affiliatedMerchants.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("earnings")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "earnings" ? S.card : "transparent",
+              color: activeTab === "earnings" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "earnings" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.revenue} Monthly Ledgers ({monthlyEarnings.length})
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            background: S.card, borderRadius: 10, border: `1px solid ${S.border}`,
+            display: "flex", alignItems: "center", gap: 8, padding: "0 12px", width: 240
+          }}>
+            <span style={{ opacity: 0.4 }}>{I.search}</span>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search..."
+              style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, height: 36, outline: "none" }}
+            />
+          </div>
+
+          <button
+            onClick={handleReconcile}
+            disabled={reconciling}
+            style={{
+              padding: "8px 14px", borderRadius: 10, border: `1px solid ${S.border}`,
+              background: S.card, color: S.navy, fontSize: 12, fontWeight: 700,
+              cursor: reconciling ? "not-allowed" : "pointer", opacity: reconciling ? 0.6 : 1,
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🔄 {reconciling ? "Reconciling..." : "Reconcile Commissions"}
+          </button>
+
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 16px",
+              borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12,
+              background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy,
+              boxShadow: `0 4px 12px ${S.gold}40`
+            }}
+          >
+            {I.plus} Add Dispatcher
+          </button>
+        </div>
       </div>
+
+      {/* ─── TAB 1: TEAM MEMBERS ─── */}
+      {activeTab === "members" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Dispatcher / Captain</span>
+            <span>Role</span>
+            <span>Phone</span>
+            <span>Affiliation Code</span>
+            <span style={{ textAlign: "right" }}>Riders</span>
+            <span style={{ textAlign: "right" }}>This Month</span>
+            <span style={{ textAlign: "right" }}>Lifetime</span>
+          </div>
+
+          <div>
+            {filteredDispatchers.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                No dispatchers found matching "{search}".
+              </div>
+            ) : (
+              filteredDispatchers.map((d, idx) => {
+                const name = d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`.trim() || d.phone || "Dispatcher";
+                const role = d.role_display || d.role || "Dispatcher";
+                const code = d.affiliation_code || "—";
+                return (
+                  <div
+                    key={d.id || idx}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: S.navy, color: "#fff", display: "flex",
+                        alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13
+                      }}>
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: S.navy }}>{name}</div>
+                        <div style={{ fontSize: 11, color: S.textMuted }}>{d.email || d.username || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        ...roleBadgeStyle(role)
+                      }}>
+                        {role}
+                      </span>
+                    </div>
+
+                    <div style={{ color: S.textDim, fontSize: 12 }}>
+                      {d.phone || "—"}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        fontFamily: "'Space Mono', monospace", fontWeight: 700,
+                        fontSize: 12, color: S.navy, background: S.borderLight,
+                        padding: "3px 8px", borderRadius: 6
+                      }}>
+                        {code}
+                      </span>
+                      {code !== "—" && (
+                        <button
+                          onClick={() => copyToClipboard(code)}
+                          title="Copy Code"
+                          style={{
+                            background: "transparent", border: "none", cursor: "pointer",
+                            color: copiedCode === code ? S.green : S.textMuted, padding: 4
+                          }}
+                        >
+                          {copiedCode === code ? I.check : I.copy}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {d.affiliated_riders_count || 0}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.monthly_commission || 0).toLocaleString()}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.gold, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.total_commission_earned || 0).toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 2: AFFILIATED RIDERS ─── */}
+      {activeTab === "riders" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Rider ID</span>
+            <span>Rider Name</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredRiders.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated riders..." : "No affiliated riders found for your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredRiders.map(r => (
+                <div
+                  key={r.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {r.rider_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{r.name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Affiliated: {r.affiliated_at ? new Date(r.affiliated_at).toLocaleDateString() : "Active"}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{r.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: r.status === "online" ? S.greenBg : S.borderLight,
+                      color: r.status === "online" ? S.green : S.textMuted
+                    }}>
+                      {r.status || "offline"}
+                    </span>
+                  </div>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {r.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {r.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(r.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 3: AFFILIATED MERCHANTS ─── */}
+      {activeTab === "merchants" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Merchant ID</span>
+            <span>Business / Contact</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span>Type</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredMerchants.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated merchants..." : "No affiliated merchants linked to your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredMerchants.map(m => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {m.merchant_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{m.business_name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Contact: {m.contact_name} {m.affiliated_at ? `• Affiliated: ${new Date(m.affiliated_at).toLocaleDateString()}` : ""}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{m.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: m.activity_status === "active" ? S.greenBg : m.activity_status === "watch" ? S.goldPale : S.borderLight,
+                      color: m.activity_status === "active" ? S.green : m.activity_status === "watch" ? S.gold : S.textMuted
+                    }}>
+                      {m.activity_status || "active"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12, color: S.textDim, textTransform: "capitalize" }}>
+                    {m.merchant_type || "regular"}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {m.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {m.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(m.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 4: MONTHLY LEDGERS ─── */}
+      {activeTab === "earnings" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Month</span>
+            <span style={{ textAlign: "right" }}>Total Orders</span>
+            <span style={{ textAlign: "right" }}>Commission (₦)</span>
+            <span>Settlement Status</span>
+            <span>Last Updated</span>
+          </div>
+
+          <div>
+            {monthlyEarnings.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading monthly records..." : "No monthly commission ledger entries yet."}
+              </div>
+            ) : (
+              monthlyEarnings.map(m => {
+                const isPaid = m.status === "paid";
+                return (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 800, color: S.navy }}>
+                      {m.month_year}
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {m.total_orders} orders
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(m.total_commission || 0).toLocaleString()}
+                    </span>
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: isPaid ? S.greenBg : S.goldPale,
+                        color: isPaid ? S.green : S.gold
+                      }}>
+                        {m.status_display || m.status}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 12, color: S.textMuted }}>
+                      {m.updated_at ? new Date(m.updated_at).toLocaleString() : "—"}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
 
       {showAdd && (
         <AddDispatcherModal
@@ -7805,7 +9259,8 @@ function TeamsScreen({ dispatchers, onDispatcherCreated }) {
           onCreated={(d) => {
             onDispatcherCreated(d);
             setShowAdd(false);
-            setToast(`Dispatcher ${d.name || ''} created successfully`);
+            loadAffiliationData();
+            setToast(`Dispatcher ${d.name || d.first_name || ''} created successfully`);
             setTimeout(() => setToast(""), 3500);
           }}
         />
@@ -7972,3 +9427,4 @@ function PaymentDetailsModal({ order, onClose }) {
     </div>
   );
 }
+

@@ -3,6 +3,8 @@ from rest_framework import serializers
 from .models import (
     Rider,
     DispatcherProfile,
+    DispatcherCommission,
+    DispatcherMonthlyEarning,
     ActivityFeed,
     Zone,
     ZoneTarget,
@@ -17,7 +19,8 @@ from decimal import Decimal
 from datetime import datetime, timedelta, time
 from django.core.cache import cache
 from django.utils import timezone
-from django.db.models import Q, Sum
+from django.db import transaction
+from django.db.models import Q, Sum, Count
 from orders.models import Order, Delivery
 from .models import VehicleTracking
 
@@ -26,10 +29,23 @@ User = get_user_model()
 
 class DispatcherProfileSerializer(serializers.ModelSerializer):
     user_details = UserSerializer(source="user", read_only=True)
+    # Flat convenience fields so the frontend doesn't need to dig into user_details
+    name = serializers.CharField(source="user.contact_name", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    is_active = serializers.BooleanField(source="user.is_active", read_only=True)
 
     class Meta:
         model = DispatcherProfile
-        fields = ["id", "user_details", "created_at"]
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "email",
+            "is_active",
+            "user_details",
+            "created_at",
+        ]
 
 
 class DispatcherSignupSerializer(serializers.ModelSerializer):
@@ -39,9 +55,38 @@ class DispatcherSignupSerializer(serializers.ModelSerializer):
         model = User
         fields = ["phone", "email", "password", "contact_name", "business_name"]
 
+    def validate_phone(self, value):
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "A user with this phone number already exists."
+            )
+        return value
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
     def create(self, validated_data):
+        from django.db import IntegrityError
+
         validated_data["usertype"] = "Dispatcher"
-        user = User.objects.create_user(**validated_data)
+        try:
+            user = User.objects.create_user(**validated_data)
+        except IntegrityError as e:
+            if "phone" in str(e).lower():
+                raise serializers.ValidationError(
+                    {"phone": "A user with this phone number already exists."}
+                )
+            if "email" in str(e).lower():
+                raise serializers.ValidationError(
+                    {"email": "A user with this email already exists."}
+                )
+            raise serializers.ValidationError(
+                "An error occurred while creating the dispatcher."
+            )
+        # Atomically create the dispatcher profile
+        DispatcherProfile.objects.create(user=user)
         return user
 
 
@@ -56,10 +101,26 @@ class DispatcherListSerializer(serializers.ModelSerializer):
         source="created_at", format="%Y-%m-%d", read_only=True
     )
     is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+    affiliated_riders_count = serializers.IntegerField(read_only=True)
+    affiliated_merchants_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = DispatcherProfile
-        fields = ["id", "name", "phone", "email", "role", "joined", "is_active"]
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "email",
+            "role",
+            "joined",
+            "is_active",
+            "affiliation_code",
+            "monthly_commission",
+            "previous_month_commission",
+            "total_commission_earned",
+            "affiliated_riders_count",
+            "affiliated_merchants_count",
+        ]
 
     def get_name(self, obj):
         return (
@@ -70,6 +131,136 @@ class DispatcherListSerializer(serializers.ModelSerializer):
 
     def get_role(self, obj):
         return obj.get_role_display()
+
+
+class DispatcherCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for individual dispatcher commission entries."""
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+    merchant_id = serializers.CharField(source="merchant.merchant_id", read_only=True)
+    merchant_name = serializers.SerializerMethodField()
+    order_id = serializers.UUIDField(source="order.id", read_only=True)
+
+    class Meta:
+        model = DispatcherCommission
+        fields = [
+            "id",
+            "order_id",
+            "order_number",
+            "rider_id",
+            "rider_name",
+            "merchant_id",
+            "merchant_name",
+            "affiliation_source",
+            "amount",
+            "month_year",
+            "description",
+            "created_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+                or obj.rider.user.phone
+            )
+        return None
+
+    def get_merchant_name(self, obj):
+        if obj.merchant and obj.merchant.user:
+            return (
+                obj.merchant.user.business_name
+                or obj.merchant.user.contact_name
+                or obj.merchant.user.phone
+            )
+        return None
+
+
+class DispatcherMonthlyEarningSerializer(serializers.ModelSerializer):
+    """Serializer for monthly earning summaries and salary tracking."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = DispatcherMonthlyEarning
+        fields = [
+            "id",
+            "month_year",
+            "total_orders",
+            "total_commission",
+            "status",
+            "status_display",
+            "paid_at",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class DispatcherAffiliatedRiderSerializer(serializers.ModelSerializer):
+    """Serializer for riders affiliated to a dispatcher."""
+
+    name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    total_completed_orders = serializers.IntegerField(read_only=True)
+    orders_this_month = serializers.IntegerField(read_only=True)
+    commission_this_month = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = Rider
+        fields = [
+            "id",
+            "rider_id",
+            "name",
+            "phone",
+            "email",
+            "status",
+            "working_type",
+            "is_authorized",
+            "affiliated_at",
+            "total_completed_orders",
+            "orders_this_month",
+            "commission_this_month",
+        ]
+
+    def get_name(self, obj):
+        if obj.user:
+            return (
+                obj.user.contact_name
+                or f"{obj.user.first_name} {obj.user.last_name}".strip()
+                or obj.user.phone
+            )
+        return "Unknown"
+
+
+class DispatcherAffiliationSummarySerializer(serializers.Serializer):
+    dispatcher_id = serializers.UUIDField()
+    dispatcher_name = serializers.CharField()
+    role = serializers.CharField()
+    affiliation_code = serializers.CharField()
+    current_month = serializers.CharField()
+    monthly_commission = serializers.DecimalField(max_digits=12, decimal_places=2)
+    previous_month_commission = serializers.DecimalField(
+        max_digits=12, decimal_places=2
+    )
+    total_commission_earned = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_affiliated_riders = serializers.IntegerField()
+    active_riders_this_month = serializers.IntegerField()
+    orders_completed_this_month = serializers.IntegerField()
+    commission_per_order = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class CommissionReconcileRequestSerializer(serializers.Serializer):
+    month = serializers.CharField(
+        required=False,
+        max_length=7,
+        help_text="Format: YYYY-MM (e.g. 2026-10). If omitted, defaults to current active month.",
+    )
 
 
 class DispatcherCreateSerializer(serializers.Serializer):
@@ -99,6 +290,7 @@ class DispatcherCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
+    @transaction.atomic
     def create(self, validated_data):
         first_name = validated_data["first_name"]
         last_name = validated_data["last_name"]
@@ -112,7 +304,12 @@ class DispatcherCreateSerializer(serializers.Serializer):
             contact_name=f"{first_name} {last_name}".strip(),
             usertype="Dispatcher",
         )
-        profile = DispatcherProfile.objects.create(user=user, role=role)
+        profile, _ = DispatcherProfile.objects.get_or_create(
+            user=user, defaults={"role": role}
+        )
+        if profile.role != role:
+            profile.role = role
+            profile.save()
         return profile
 
 
@@ -978,9 +1175,15 @@ class MerchantSerializer(serializers.ModelSerializer):
         return "Retail"  # Mock
 
     def get_totalOrders(self, obj):
+        total = getattr(obj, "total_orders_count", None)
+        if total is not None:
+            return total
         return obj.orders.count()
 
     def get_monthOrders(self, obj):
+        month_count = getattr(obj, "month_orders_count", None)
+        if month_count is not None:
+            return month_count
         from django.utils import timezone
 
         now = timezone.now()
@@ -1037,9 +1240,7 @@ class RiderOnboardingSerializer(serializers.Serializer):
         default="freelancer",
     )
     team = serializers.CharField(required=False, max_length=100, default="Main Team")
-    emergency_contact_name = serializers.CharField(
-        required=False, max_length=100
-    )
+    emergency_contact_name = serializers.CharField(required=False, max_length=100)
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
@@ -1133,7 +1334,6 @@ class RiderOnboardingSerializer(serializers.Serializer):
 
         # Create or update Rider Profile to avoid duplicate key issues if the signal already fired
         rider, _ = Rider.objects.update_or_create(user=user, defaults=validated_data)
-
 
         # Trigger Background Task for Email
         send_onboarding_email_task.delay(
@@ -1268,17 +1468,194 @@ class RelayNodeSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
 
+class VehicleAssetListSerializer(serializers.ListSerializer):
+    """
+    Custom ListSerializer that batch-precomputes today's orders count, yesterday's orders
+    count, yesterday's orders distance, and yesterday's vehicle tracking distance in O(1)
+    queries across all assets, preventing severe N+1 database queries and Gunicorn timeouts.
+    """
+
+    def to_representation(self, data):
+        iterable = list(data) if not isinstance(data, list) else data
+        if not iterable:
+            return []
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        today_start = timezone.make_aware(datetime.combine(today, time.min), tz)
+
+        yesterday = today - timedelta(days=1)
+        yesterday_end = today_start
+        yesterday_start = yesterday_end - timedelta(days=1)
+        yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+        # Map riders to assets
+        rider_to_asset = {}
+        for asset in iterable:
+            for r in asset.riders.all():
+                rider_to_asset[r.id] = asset.id
+
+        all_rider_ids = list(rider_to_asset.keys())
+
+        orders_today_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_dist_map = {asset.id: 0.0 for asset in iterable}
+
+        if all_rider_ids:
+            q_today = (
+                Q(completed_at__gte=today_start)
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=today_start,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=today_start,
+                )
+            )
+            for rider_id, cnt in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_today)
+                .values_list("rider_id")
+                .annotate(cnt=Count("id", distinct=True))
+            ):
+                asset_id = rider_to_asset.get(rider_id)
+                if asset_id:
+                    orders_today_map[asset_id] = orders_today_map.get(asset_id, 0) + cnt
+
+            q_yesterday = (
+                Q(
+                    completed_at__gte=yesterday_start,
+                    completed_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=yesterday_start,
+                    deliveries__delivered_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=yesterday_start,
+                    updated_at__lt=yesterday_end,
+                )
+            )
+            for row in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_yesterday)
+                .values("rider_id")
+                .annotate(
+                    cnt=Count("id", distinct=True),
+                    total_dist=Sum("distance_km"),
+                )
+            ):
+                asset_id = rider_to_asset.get(row["rider_id"])
+                if asset_id:
+                    orders_yesterday_map[asset_id] = (
+                        orders_yesterday_map.get(asset_id, 0) + row["cnt"]
+                    )
+                    dist = float(row["total_dist"]) if row["total_dist"] else 0.0
+                    orders_yesterday_dist_map[asset_id] = round(
+                        orders_yesterday_dist_map.get(asset_id, 0.0) + dist, 2
+                    )
+
+        # Batch compute yesterday's tracking travelled distance using indexed timestamp boundaries
+        yesterday_distance_map = {}
+        uncached_asset_ids = []
+        for asset in iterable:
+            cache_key = f"yesterday_distance_{asset.id}_{yesterday_str}"
+            val = cache.get(cache_key)
+            if val is not None:
+                yesterday_distance_map[asset.id] = val
+            else:
+                uncached_asset_ids.append(asset.id)
+
+        if uncached_asset_ids:
+            try:
+                first_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                last_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "-created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                for aid in uncached_asset_ids:
+                    f_val = first_rows.get(aid)
+                    l_val = last_rows.get(aid)
+                    d = (
+                        max(0, l_val - f_val)
+                        if (f_val is not None and l_val is not None)
+                        else 0
+                    )
+                    yesterday_distance_map[aid] = d
+                    cache.set(f"yesterday_distance_{aid}_{yesterday_str}", d, 60 * 60 * 24)
+            except Exception:
+                pass
+
+        for asset in iterable:
+            asset._precomputed_orders_today = orders_today_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders = orders_yesterday_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders_dist = orders_yesterday_dist_map.get(
+                asset.id, 0.0
+            )
+            if asset.id in yesterday_distance_map:
+                asset._precomputed_yesterday_distance = yesterday_distance_map[asset.id]
+
+        return super().to_representation(iterable)
+
+
 class VehicleAssetSerializer(serializers.ModelSerializer):
-    assigned_rider: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    orders_today: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_orders: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    total_yesterday_orders_distance_km: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    yesterday_orders_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
-    total_yesterday_order_distance: serializers.SerializerMethodField = serializers.SerializerMethodField()
+    assigned_rider: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    orders_today: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_orders_distance_km: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_order_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
 
     class Meta:
         model = VehicleAsset
+        list_serializer_class = VehicleAssetListSerializer
         fields = [
             "id",
             "asset_id",
@@ -1319,46 +1696,59 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
 
     def get_yesterday_distance(self, obj: VehicleAsset) -> Union[float, Decimal]:
-        """Calculate and return the vehicle's travelled distance from yesterday.
+        """Calculate and return the vehicle's travelled distance from yesterday."""
+        if hasattr(obj, "_precomputed_yesterday_distance"):
+            return obj._precomputed_yesterday_distance
 
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The distance travelled yesterday.
-        """
-        yesterday = datetime.now() - timedelta(days=1)
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
         cache_key = f"yesterday_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
 
         cached_distance = cache.get(cache_key)
         if cached_distance is not None:
             return cached_distance
 
-        # get all yesterdays vehicle tracking entries
-        trackings = VehicleTracking.objects.filter(
-            vehicle_asset=obj, created_at__date=yesterday
-        ).order_by("created_at")
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_start = yesterday_end - timedelta(days=1)
 
-        distance = 0
-        if trackings.exists():
-            first_entry = trackings.first()
-            last_entry = trackings.last()
-            distance = last_entry.travelled - first_entry.travelled
+        first_val = (
+            VehicleTracking.objects.filter(
+                vehicle_asset=obj,
+                created_at__gte=yesterday_start,
+                created_at__lt=yesterday_end,
+                travelled__isnull=False,
+            )
+            .order_by("created_at")
+            .values_list("travelled", flat=True)
+            .first()
+        )
+        if first_val is not None:
+            last_val = (
+                VehicleTracking.objects.filter(
+                    vehicle_asset=obj,
+                    created_at__gte=yesterday_start,
+                    created_at__lt=yesterday_end,
+                    travelled__isnull=False,
+                )
+                .order_by("-created_at")
+                .values_list("travelled", flat=True)
+                .first()
+            )
+            distance = (
+                max(0, last_val - first_val)
+                if last_val is not None
+                else 0
+            )
+        else:
+            distance = 0
 
         # Cache for 24 hours
         cache.set(cache_key, distance, 60 * 60 * 24)
         return distance
 
     def get_assigned_rider(self, obj: VehicleAsset) -> Optional[Dict[str, Any]]:
-        """Get the details of the rider currently assigned to this vehicle asset.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            A dictionary containing rider details if assigned, otherwise None.
-        """
-        # Prefer prefetch cache when VehicleAssetViewSet prefetches riders.
+        """Get the details of the rider currently assigned to this vehicle asset."""
         rider = obj.riders.all().first()
         if rider:
             return {
@@ -1370,30 +1760,17 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return None
 
     def get_orders_today(self, obj: VehicleAsset) -> int:
-        """Calculate the count of completed orders today for riders assigned to the vehicle asset.
+        """Calculate the count of completed orders today for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_orders_today"):
+            return obj._precomputed_orders_today
 
-        It aggregates completed orders across three fallback criteria within the local timezone day:
-        Criterion A: Order status is "Done" and completed_at is today.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at is today.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at is today.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The number of completed orders today.
-        """
         riders = obj.riders.all()
         if not riders.exists():
             return 0
 
         day = timezone.localdate()
         tz = timezone.get_current_timezone()
-        start = timezone.make_aware(
-            datetime.combine(day, time.min), tz
-        )
+        start = timezone.make_aware(datetime.combine(day, time.min), tz)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")
 
@@ -1413,30 +1790,17 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return orders.filter(q_a | q_b | q_c).distinct().count()
 
     def get_yesterday_orders(self, obj: VehicleAsset) -> int:
-        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset.
+        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders"):
+            return obj._precomputed_yesterday_orders
 
-        It aggregates completed orders across three fallback criteria strictly within yesterday:
-        Criterion A: Order status is "Done" and completed_at was yesterday.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at was yesterday.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The number of completed orders yesterday.
-        """
         riders = obj.riders.all()
         if not riders.exists():
             return 0
 
         today = timezone.localdate()
         tz = timezone.get_current_timezone()
-        yesterday_end = timezone.make_aware(
-            datetime.combine(today, time.min), tz
-        )
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
         yesterday_start = yesterday_end - timedelta(days=1)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")
@@ -1462,23 +1826,14 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
         return orders.filter(q_a | q_b | q_c).distinct().count()
 
     def get_total_yesterday_orders_distance_km(self, obj: VehicleAsset) -> float:
-        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset.
+        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders_dist"):
+            return obj._precomputed_yesterday_orders_dist
 
-        It aggregates completed orders across three fallback criteria strictly within yesterday:
-        Criterion A: Order status is "Done" and completed_at was yesterday.
-        Criterion B: Order status is "Done", completed_at is null, and any related Delivery's
-            delivered_at was yesterday.
-        Criterion C: Order status is "Done", completed_at is null, any related Delivery is
-            "Delivered" with a null delivered_at, and the order's updated_at was yesterday.
-
-        Args:
-            obj: The VehicleAsset instance.
-
-        Returns:
-            The total completed orders distance in km yesterday (float, rounded to 2 decimal places).
-        """
         yesterday = timezone.localdate() - timedelta(days=1)
-        cache_key = f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        cache_key = (
+            f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        )
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1490,9 +1845,7 @@ class VehicleAssetSerializer(serializers.ModelSerializer):
 
         today = timezone.localdate()
         tz = timezone.get_current_timezone()
-        yesterday_end = timezone.make_aware(
-            datetime.combine(today, time.min), tz
-        )
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
         yesterday_start = yesterday_end - timedelta(days=1)
 
         orders = Order.objects.filter(rider__in=riders, status="Done")

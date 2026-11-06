@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    CustomerRatesRiderAPIView,
     RiderSelfRegisterView,
     RiderDocumentListView,
     RiderDocumentReuploadView,
@@ -26,6 +27,14 @@ from .views import (
     RiderAssignmentActionView,
     RiderDocumentListCreateView,
     RiderDocumentDetailView,
+    RiderAffiliationView,
+    RiderBankListView,
+    RiderVerifyAccountView,
+    RiderWithdrawalView,
+    RiderSetTransactionPinView,
+    RiderVerifyTransactionPinView,
+    RiderFaceMatchView,
+    RiderFaceMatchLogListView,
 )
 from .gamification_views import (
     RideToOwnView,
@@ -44,12 +53,20 @@ urlpatterns = [
     path(
         "device/", RiderDeviceRegistrationView.as_view(), name="rider-device-register"
     ),
+    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path(
         "device/permissions/",
         RiderUpdatePermissionsView.as_view(),
         name="rider-device-permissions",
     ),
-    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
+    path("affiliation/", RiderAffiliationView.as_view(), name="rider-affiliation"),
+    path(
+        "affiliation/verify/",
+        __import__(
+            "authentication.views", fromlist=["VerifyAffiliationCodeView"]
+        ).VerifyAffiliationCodeView.as_view(),
+        name="rider-affiliation-verify",
+    ),
     path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
     path(
         "documents/<uuid:pk>/reupload/",
@@ -78,11 +95,37 @@ urlpatterns = [
         name="rider-assignment-action",
     ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
+    path("banks/", RiderBankListView.as_view(), name="rider-banks"),
     path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),
     path(
         "wallet/transactions/",
         RiderTransactionListView.as_view(),
         name="rider-wallet-transactions",
+    ),
+    path(
+        "wallet/verify-account/",
+        RiderVerifyAccountView.as_view(),
+        name="rider-wallet-verify-account",
+    ),
+    path(
+        "wallet/withdraw/",
+        RiderWithdrawalView.as_view(),
+        name="rider-wallet-withdraw",
+    ),
+    path(
+        "wallet/pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-pin",
+    ),
+    path(
+        "wallet/pin/verify/",
+        RiderVerifyTransactionPinView.as_view(),
+        name="rider-wallet-pin-verify",
+    ),
+    path(
+        "wallet/set-pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-set-pin",
     ),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
     path(
@@ -130,4 +173,21 @@ urlpatterns = [
         DashboardSummaryView.as_view(),
         name="rider-dashboard-summary",
     ),
+    path(
+        "customer-order-rating/",
+        CustomerRatesRiderAPIView.as_view(),
+        name="customer-order-rating",
+    ),
+    path(
+        "facematch/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-facematch-logs",
+    ),
+    path(
+        "face-match/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-face-match-logs",
+    ),
+    path("facematch/", RiderFaceMatchView.as_view(), name="rider-facematch"),
+    path("face-match/", RiderFaceMatchView.as_view(), name="rider-face-match"),
 ]

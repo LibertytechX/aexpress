@@ -41,6 +41,11 @@ from .views import (
     SmartParcelSimulateDropView,
     SmartParcelSimulateCollectView,
 )
+from .v2_views import (
+    OrderPickupV2View,
+    OrderCompleteV2View,
+    DeliveryCompleteV2View,
+)
 from .escrow_views import (
     ReleaseEscrowView,
     RefundEscrowView,
@@ -99,10 +104,12 @@ urlpatterns = [
     path("<str:order_number>/events/", OrderEventAPIView.as_view(), name="order_events"),
     path("assigned-routes/", AssignedRoutesView.as_view(), name="assigned_routes"),
     path("pickup/", OrderPickupView.as_view(), name="order_pickup"),
+    path("v2/pickup/", OrderPickupV2View.as_view(), name="order_pickup_v2"),
     path("start/", OrderStartView.as_view(), name="order_start"),
     path("arrived/", OrderArrivedView.as_view(), name="order_arrived"),
     path("status/", OrderStatusChangeView.as_view(), name="order_status_change"),
     # path("<str:order_number>/complete/", OrderCompleteView.as_view(), name="order_complete"),
+    path("v2/complete/", OrderCompleteV2View.as_view(), name="order_complete_v2"),
     path(
         "delivery/<uuid:delivery_id>/start/",
         DeliveryStartView.as_view(),
@@ -112,6 +119,11 @@ urlpatterns = [
         "delivery/<uuid:delivery_id>/deliver/",
         DeliveryCompleteView.as_view(),
         name="delivery_deliver",
+    ),
+    path(
+        "v2/delivery/<uuid:delivery_id>/deliver/",
+        DeliveryCompleteV2View.as_view(),
+        name="delivery_deliver_v2",
     ),
     path("stats/", OrderStatsView.as_view(), name="order_stats"),
     # Escrow management endpoints

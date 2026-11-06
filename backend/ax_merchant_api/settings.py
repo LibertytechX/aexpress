@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "subscriptions",
     "oprtn_dashboard",
     "devs",
+    "support",
 ]
 
 MIDDLEWARE = [
@@ -302,6 +303,18 @@ COREBANKING_BASE_URL = os.getenv(
     "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
 )
 COREBANKING_WEBHOOK_SECRET = os.getenv("COREBANKING_WEBHOOK_SECRET", "")
+COREBANKING_SOURCE_ACCOUNT = os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+COREBANKING_WEMA_SOURCE_ACCOUNT = os.getenv(
+    "COREBANKING_WEMA_SOURCE_ACCOUNT", os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+)
+COREBANKING_MODE = os.getenv("COREBANKING_MODE", "LIVE")
+COREBANKING_SIMULATE_SANDBOX = os.getenv(
+    "COREBANKING_SIMULATE_SANDBOX", "True" if DEBUG else "False"
+).lower() in ("true", "1", "t")
+LIBERTYPAY_ACCOUNT_ENQUIRY_URL = os.getenv(
+    "LIBERTYPAY_ACCOUNT_ENQUIRY_URL",
+    "https://management.libertypayng.com/api/v1/sales/account_name_enquiry/",
+)
 
 # Mailgun Configuration
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
@@ -327,6 +340,7 @@ MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
+WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")
 
 # LibertyPay API Configuration
 LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")
@@ -395,12 +409,16 @@ CELERY_BEAT_SCHEDULE = {
         "task": "oprtn_dashboard.tasks.refresh_dashboard_cache",
         "schedule": crontab(minute="*/30"),
     },
-    # Optional fast lane (uncomment once telemetry sync is on beat, guide §14.8):
-    # "generate-ops-alerts-fast": {
-    #     "task": "oprtn_dashboard.tasks.generate_alerts",
-    #     "schedule": crontab(minute="*/2"),
-    #     "kwargs": {"only_types": ["BIKE_AFTER_HOURS", "SPEED_VIOLATION", "GHOST_RIDE"]},
-    # },
+    # Monthly Dispatcher Affiliation Commission Rollover
+    "reset-monthly-dispatcher-commissions": {
+        "task": "dispatcher.tasks.reset_monthly_dispatcher_commissions_task",
+        "schedule": crontab(day_of_month=1, hour=0, minute=0),
+    },
+    # Monthly Independent Rider Face Verification Daily Check
+    "trigger-monthly-face-verification-daily": {
+        "task": "riders.tasks.trigger_monthly_face_verification_task",
+        "schedule": crontab(hour=1, minute=0),  # Daily at 01:00 UTC
+    },
 }
 
 # Production Security Settings
@@ -442,6 +460,12 @@ SMARTPARCEL_BASE_URL = os.getenv("SMARTPARCEL_BASE_URL", "")
 SMARTPARCEL_API_KEY = os.getenv("SMARTPARCEL_API_KEY", "")
 SMARTPARCEL_SECRET_KEY = os.getenv("SMARTPARCEL_SECRET_KEY", "")
 SMARTPARCEL_PUBLIC_KEY = os.getenv("SMARTPARCEL_PUBLIC_KEY", "")
+
+# KYC / Biometric Service Configuration
+KYC_SERVICE_URL = os.getenv(
+    "KYC_SERVICE_URL", "http://localhost:8000/api/v1/kyc/face-match"
+)
+KYC_SERVICE_TOKEN = os.getenv("KYC_SERVICE_TOKEN", "")
 
 # Logger Configuration
 LOG_LEVEL = "INFO"

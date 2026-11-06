@@ -25,6 +25,8 @@ from .views import (
     MerchantNotificationSettingsView,
     MerchantNotificationDeleteView,
     MerchantNotificationDeleteAllView,
+    MerchantAffiliationView,
+    VerifyAffiliationCodeView,
 )
 
 app_name = "authentication"
@@ -121,5 +123,15 @@ urlpatterns = [
         "notifications/<int:pk>/delete/",
         MerchantNotificationDeleteView.as_view(),
         name="merchant_notification_delete",
+    ),
+    path(
+        "merchant/affiliation/",
+        MerchantAffiliationView.as_view(),
+        name="merchant_affiliation",
+    ),
+    path(
+        "affiliation/verify/",
+        VerifyAffiliationCodeView.as_view(),
+        name="verify_affiliation_code",
     ),
 ]

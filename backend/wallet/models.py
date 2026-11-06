@@ -644,3 +644,304 @@ class AmortizationVirtualAccount(models.Model):
 
     def __str__(self):
         return f"{self.user.full_name} Amort Virtual Account"
+
+
+class Bank(models.Model):
+    """
+    Supported Nigerian Banking Institutions for withdrawal and disbursements.
+    """
+
+    name = models.CharField(max_length=500)
+    bank_code = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    cbn_code = models.CharField(max_length=50, null=True, blank=True, db_index=True)
+    ussd_short_code = models.CharField(max_length=50, null=True, blank=True)
+    bank_short_name = models.CharField(max_length=100, null=True, blank=True)
+    date_added = models.DateTimeField(auto_now_add=True)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "banks"
+        ordering = ["name"]
+        verbose_name = "Bank"
+        verbose_name_plural = "Banks"
+
+    def __str__(self) -> str:
+        return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("all_bank_list")
+
+    def delete(self, *args, **kwargs):
+        super().delete(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("all_bank_list")
+
+    @classmethod
+    def get_all_bank_list(cls):
+        """
+        Returns cached list of banks to optimize database reads.
+        """
+        from django.core.cache import cache
+
+        cache_key = "all_bank_list"
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return cached_data
+        queryset = list(cls.objects.all().order_by("name"))
+        cache.set(cache_key, queryset, 86400)
+        return queryset
+
+
+class IndependentRiderPayoutWalletPool(models.Model):
+    """
+    Dedicated liquidity pool from which payouts to independent riders are funded.
+    Enforces double-entry balance consistency and pessimistic row-level locking.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=255, default="Independent Rider Payout Pool"
+    )
+    balance = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Available funds in the payout pool",
+    )
+    currency = models.CharField(max_length=10, default="NGN")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "independent_rider_payout_wallet_pools"
+        verbose_name = "Independent Rider Payout Wallet Pool"
+        verbose_name_plural = "Independent Rider Payout Wallet Pools"
+
+    def __str__(self):
+        return f"{self.name} - ₦{self.balance:,.2f}"
+
+    @classmethod
+    def get_default_pool(cls):
+        """
+        Retrieves the primary active payout pool, or creates one if it doesn't exist.
+        """
+        pool = cls.objects.filter(is_active=True).first()
+        if not pool:
+            pool = cls.objects.create(
+                name="Independent Rider Payout Pool",
+                balance=Decimal("0.00"),
+                is_active=True,
+            )
+        return pool
+
+    def has_sufficient_funds(self, amount: Decimal) -> bool:
+        """Checks if pool has enough balance to cover amount."""
+        return self.balance >= amount
+
+    @db_transaction.atomic
+    def credit(
+        self,
+        amount: Decimal,
+        reference: str = "",
+        rider=None,
+        payout_transaction=None,
+        description: str = "",
+        metadata=None,
+    ):
+        """Credits the payout pool and creates an immutable credit ledger entry."""
+        pool = IndependentRiderPayoutWalletPool.objects.select_for_update().get(id=self.id)
+        prev_balance = pool.balance
+        pool.balance += amount
+        pool.save(update_fields=["balance", "updated_at"])
+
+        self.balance = pool.balance
+
+        txn = IndependentRiderPayoutWalletPoolTransaction.objects.create(
+            pool=pool,
+            rider=rider,
+            payout_transaction=payout_transaction,
+            transaction_type=IndependentRiderPayoutWalletPoolTransaction.TransactionType.CREDIT,
+            amount=amount,
+            balance_before=prev_balance,
+            balance_after=self.balance,
+            reference=reference,
+            description=description,
+            metadata=metadata or {},
+        )
+        return txn
+
+    @db_transaction.atomic
+    def debit(
+        self,
+        amount: Decimal,
+        reference: str = "",
+        rider=None,
+        payout_transaction=None,
+        description: str = "",
+        metadata=None,
+    ):
+        """Debits the payout pool and creates an immutable debit ledger entry."""
+        pool = IndependentRiderPayoutWalletPool.objects.select_for_update().get(id=self.id)
+        if pool.balance < amount:
+            raise ValueError(
+                f"Insufficient funds in payout pool. Available: ₦{pool.balance:,.2f}, Required: ₦{amount:,.2f}"
+            )
+
+        prev_balance = pool.balance
+        pool.balance -= amount
+        pool.save(update_fields=["balance", "updated_at"])
+
+        self.balance = pool.balance
+
+        txn = IndependentRiderPayoutWalletPoolTransaction.objects.create(
+            pool=pool,
+            rider=rider,
+            payout_transaction=payout_transaction,
+            transaction_type=IndependentRiderPayoutWalletPoolTransaction.TransactionType.DEBIT,
+            amount=amount,
+            balance_before=prev_balance,
+            balance_after=self.balance,
+            reference=reference,
+            description=description,
+            metadata=metadata or {},
+        )
+        return txn
+
+
+class IndependentRiderPayoutWalletPoolTransaction(models.Model):
+    """
+    Immutable ledger entries for all credits and debits on the Independent Rider Payout Wallet Pool.
+    """
+
+    class TransactionType(models.TextChoices):
+        CREDIT = "credit", "Credit"
+        DEBIT = "debit", "Debit"
+
+    class Status(models.TextChoices):
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    pool = models.ForeignKey(
+        IndependentRiderPayoutWalletPool,
+        on_delete=models.CASCADE,
+        related_name="transactions",
+    )
+    rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pool_transactions",
+    )
+    payout_transaction = models.ForeignKey(
+        "wallet.RiderPayoutTransaction",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pool_transactions",
+    )
+    transaction_type = models.CharField(
+        max_length=20,
+        choices=TransactionType.choices,
+        db_index=True,
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    balance_before = models.DecimalField(max_digits=14, decimal_places=2)
+    balance_after = models.DecimalField(max_digits=14, decimal_places=2)
+    reference = models.CharField(max_length=100, db_index=True)
+    description = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.COMPLETED,
+    )
+    metadata = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "independent_rider_payout_wallet_pool_transactions"
+        ordering = ["-created_at"]
+        verbose_name = "Payout Pool Transaction"
+        verbose_name_plural = "Payout Pool Transactions"
+
+    def __str__(self):
+        return f"{self.transaction_type.upper()} ₦{self.amount} - {self.reference} ({self.status})"
+
+
+# Convenient aliases for naming flexibility
+PayoutWalletPool = IndependentRiderPayoutWalletPool
+PayoutWalletPoolTransaction = IndependentRiderPayoutWalletPoolTransaction
+
+
+class RiderPayoutTransaction(models.Model):
+    """
+    Ledger model tracking withdrawals from independent riders' wallets
+    to external bank accounts via Wema CoreBanking payout.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        SUCCESS = "success", "Success"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        "dispatcher.Rider",
+        on_delete=models.CASCADE,
+        related_name="payout_transactions",
+    )
+    pool = models.ForeignKey(
+        IndependentRiderPayoutWalletPool,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payout_transactions",
+        help_text="Payout pool from which this withdrawal was funded",
+    )
+    destination_account_name = models.CharField(max_length=200)
+    destination_account_number = models.CharField(max_length=50)
+    destination_bank_code = models.CharField(max_length=50)
+    destination_bank_name = models.CharField(max_length=100, blank=True, default="")
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    reference = models.CharField(max_length=100, unique=True, db_index=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    narration = models.TextField(null=True, blank=True)
+    charges = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    refunded = models.BooleanField(default=False)
+    is_sandbox = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Designates whether this payout was processed in sandbox mode.",
+    )
+    mode = models.CharField(
+        max_length=20,
+        default="LIVE",
+        db_index=True,
+        help_text="Payout processing mode (LIVE or SANDBOX).",
+    )
+    corebanking_response = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "rider_payout_transactions"
+        ordering = ["-created_at"]
+        verbose_name = "Rider Payout Transaction"
+        verbose_name_plural = "Rider Payout Transactions"
+
+    def __str__(self):
+        return f"{self.rider.user.get_full_name()} - ₦{self.amount} ({self.status}) - {self.reference}"

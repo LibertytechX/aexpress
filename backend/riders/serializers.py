@@ -2,6 +2,7 @@ from sparky_utils.exceptions import ServiceException
 import re
 
 from rest_framework import serializers
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.utils import timezone
@@ -18,7 +19,7 @@ from .models import (
     AreaDemand,
     RiderEarning,
     RiderNotification,
-    RiderDocument,
+    RiderFaceMatchLog,
 )
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
@@ -59,6 +60,10 @@ class RiderMeSerializer(serializers.ModelSerializer):
     on_time_rate = serializers.SerializerMethodField()
     documents_status = serializers.SerializerMethodField()
     net_earnings = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
+    face_verification_channel = serializers.SerializerMethodField()
+    affiliated_to_code = serializers.SerializerMethodField()
+    affiliated_to_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -67,6 +72,7 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "rider_id",
             "status",
             "firstName",
+            "is_independent_rider",
             "lastName",
             "phone",
             "email",
@@ -82,7 +88,46 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "on_time_rate",
             "documents_status",
             "net_earnings",
+            "is_verified",
+            "face_verification_channel",
+            "face_verification_required",
+            "last_face_verified_at",
+            "is_affiliated",
+            "affiliated_to_code",
+            "affiliated_to_name",
+            "affiliated_at",
         ]
+
+    def get_affiliated_to_code(self, obj):
+        if obj.affiliated_to:
+            return obj.affiliated_to.affiliation_code
+        return None
+
+    def get_affiliated_to_name(self, obj):
+        if obj.affiliated_to and obj.affiliated_to.user:
+            return (
+                obj.affiliated_to.user.contact_name
+                or f"{obj.affiliated_to.user.first_name} {obj.affiliated_to.user.last_name}".strip()
+                or obj.affiliated_to.user.phone
+            )
+        return None
+
+    def get_is_verified(self, obj):
+        if (
+            obj.is_independent_rider
+            and obj.is_authorized
+            and not getattr(obj, "face_verification_required", False)
+        ):
+            return True
+        elif not obj.is_independent_rider:
+            return True
+        else:
+            return False
+
+    def get_face_verification_channel(self, obj):
+        if getattr(obj, "is_independent_rider", False):
+            return f"facematch:{obj.rider_id or obj.id}"
+        return None
 
     def get_wallet_balance(self, obj):
         try:
@@ -288,6 +333,9 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
     vehicle_color = serializers.CharField(required=True)
     vehicle_photo = serializers.URLField(required=True)
     rider_documents = RiderDocumentInputSerializer(many=True, required=True)
+    affiliation_code = serializers.CharField(
+        required=False, allow_blank=True, max_length=100
+    )
 
     def validate_phone(self, value):
         phone = re.sub(r"[\s\-()]", "", value)
@@ -342,11 +390,27 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
     def validate(self, data):
         if data.get("password") != data.get("confirm_password"):
             raise serializers.ValidationError("Passwords do not match.")
+
+        affiliation_code = data.get("affiliation_code")
+        if affiliation_code and affiliation_code.strip():
+            from dispatcher.models import DispatcherProfile
+
+            dispatcher = DispatcherProfile.objects.filter(
+                affiliation_code__iexact=affiliation_code.strip()
+            ).first()
+            if not dispatcher:
+                raise serializers.ValidationError(
+                    {"affiliation_code": "Invalid affiliation code."}
+                )
+            data["_dispatcher"] = dispatcher
+
         return data
 
     def create(self, validated_data):
         validated_data.pop("confirm_password")
         rider_documents = validated_data.pop("rider_documents")
+        dispatcher = validated_data.pop("_dispatcher", None)
+        validated_data.pop("affiliation_code", None)
 
         with transaction.atomic():
             user = User.objects.create_user(
@@ -374,6 +438,9 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
                 vehicle_plate_number=validated_data["vehicle_plate_number"],
                 vehicle_color=validated_data["vehicle_color"],
                 vehicle_photo=validated_data["vehicle_photo"],
+                affiliated_to=dispatcher,
+                is_affiliated=bool(dispatcher),
+                affiliated_at=timezone.now() if dispatcher else None,
             )
 
             RiderDocument.objects.bulk_create(
@@ -386,6 +453,38 @@ class RiderSelfRegistrationSerializer(serializers.Serializer):
             )
 
         return {"user": user, "rider": rider}
+
+
+class RiderAffiliationSerializer(serializers.Serializer):
+    """
+    Serializer for existing riders to affiliate with a dispatcher.
+    """
+
+    affiliation_code = serializers.CharField(required=True, max_length=100)
+
+    def validate_affiliation_code(self, value):
+        from dispatcher.models import DispatcherProfile
+
+        if not value or not value.strip():
+            raise serializers.ValidationError("Affiliation code is required.")
+        dispatcher = DispatcherProfile.objects.filter(
+            affiliation_code__iexact=value.strip()
+        ).first()
+        if not dispatcher:
+            raise serializers.ValidationError(
+                "Invalid affiliation code. No dispatcher found with this code."
+            )
+        return value.strip().upper()
+
+
+class RiderAffiliationResponseSerializer(serializers.Serializer):
+    """
+    Serializer for returning rider affiliation status and details.
+    """
+
+    is_affiliated = serializers.BooleanField()
+    affiliated_at = serializers.DateTimeField(allow_null=True)
+    dispatcher = serializers.DictField(allow_null=True)
 
 
 class RiderDocumentSerializer(serializers.ModelSerializer):
@@ -653,6 +752,7 @@ class RiderWalletInfoSerializer(serializers.Serializer):
     available_balance = serializers.SerializerMethodField()
     pending_cod = serializers.SerializerMethodField()
     withdrawable_balance = serializers.SerializerMethodField()
+    has_transaction_pin = serializers.BooleanField(read_only=True)
 
     def get_withdrawable_balance(self, obj):
         # Withdrawable Balance = Available Balance - Pending COD
@@ -897,3 +997,282 @@ class RiderDocumentUpdateResponseSerializer(serializers.ModelSerializer):
             "rejection_reason",
             "updated_at",
         ]
+
+
+class RiderRatingSerializer(serializers.Serializer):
+    """
+    Serializer for rider rating input.
+    """
+
+    rider_id = serializers.CharField(required=True)
+    rating = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    comment = serializers.CharField(required=False, allow_blank=True)
+
+
+class BankListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing supported Nigerian banks.
+    """
+
+    class Meta:
+        from wallet.models import Bank
+
+        model = Bank
+        fields = [
+            "id",
+            "name",
+            "bank_code",
+            "cbn_code",
+            "ussd_short_code",
+            "bank_short_name",
+        ]
+
+
+class VerifyAccountSerializer(serializers.Serializer):
+    """
+    Serializer for validating account enquiry input parameters.
+    """
+
+    account_number = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        account_number = str(attrs.get("account_number", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+
+        if not account_number or not bank_code:
+            raise ServiceException(
+                status_code=400, message="account_number and bank_code are required."
+            )
+
+        if not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="Account number must be a valid 10-digit NUBAN number.",
+            )
+
+        attrs["account_number"] = account_number
+        attrs["bank_code"] = bank_code
+        return attrs
+
+
+class RiderWithdrawalSerializer(serializers.Serializer):
+    """
+    Serializer for rider wallet earnings withdrawal request.
+    Supports optional sandbox execution for testing and simulation.
+    """
+
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    account_number = serializers.CharField(required=True)
+    account_name = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+    bank_name = serializers.CharField(required=False, allow_blank=True, default="")
+    narration = serializers.CharField(required=False, allow_blank=True, default="")
+    is_sandbox = serializers.BooleanField(required=False, default=None)
+    mode = serializers.CharField(required=False, allow_blank=True, default=None)
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN for withdrawal authorization",
+    )
+
+    def validate(self, attrs):
+        from decimal import Decimal
+
+        amount = attrs.get("amount")
+        account_number = str(attrs.get("account_number", "")).strip()
+        account_name = str(attrs.get("account_name", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+        pin = str(attrs.get("pin", "")).strip()
+
+        if not pin:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN is required."
+            )
+
+        if not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+
+        if amount is None or amount <= Decimal("0.00"):
+            raise ServiceException(
+                status_code=400, message="Withdrawal amount must be greater than zero."
+            )
+
+        if amount < Decimal("100.00"):
+            raise ServiceException(
+                status_code=400, message="Minimum withdrawal amount is ₦100.00."
+            )
+
+        if not account_number or not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="A valid 10-digit account number is required.",
+            )
+
+        if not account_name:
+            raise ServiceException(
+                status_code=400, message="Account name is required."
+            )
+
+        if not bank_code:
+            raise ServiceException(
+                status_code=400, message="Bank code is required."
+            )
+
+        attrs["pin"] = pin
+        attrs["account_number"] = account_number
+        attrs["account_name"] = account_name
+        attrs["bank_code"] = bank_code
+
+        # Determine sandbox mode: explicit is_sandbox, explicit mode, or system settings default
+        is_sandbox_arg = attrs.get("is_sandbox")
+        mode_arg = (attrs.get("mode") or "").strip().upper()
+
+        if is_sandbox_arg is True or mode_arg == "SANDBOX":
+            attrs["mode"] = "SANDBOX"
+            attrs["is_sandbox"] = True
+        elif is_sandbox_arg is False or mode_arg == "LIVE":
+            attrs["mode"] = "LIVE"
+            attrs["is_sandbox"] = False
+        else:
+            default_mode = getattr(settings, "WIHDRAWAL_MODE", getattr(settings, "COREBANKING_MODE", "SANDBOX")).upper()
+            attrs["mode"] = default_mode
+            attrs["is_sandbox"] = (default_mode == "SANDBOX")
+
+        return attrs
+
+
+class RiderSetTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for setting or changing a rider's 4-digit transaction PIN.
+    """
+
+    old_pin = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Current transaction PIN (required if PIN is already configured)",
+    )
+    password = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Account login password (fallback if current PIN is forgotten)",
+    )
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="New 4-digit transaction PIN",
+    )
+    confirm_pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="Confirm new 4-digit transaction PIN",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        confirm_pin = str(attrs.get("confirm_pin", "")).strip()
+        old_pin = str(attrs.get("old_pin", "")).strip()
+
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+
+        if pin != confirm_pin:
+            raise ServiceException(
+                status_code=400, message="PIN and confirmation PIN do not match."
+            )
+
+        if old_pin and not old_pin.isdigit():
+            raise ServiceException(
+                status_code=400, message="Current transaction PIN must be numeric."
+            )
+
+        attrs["pin"] = pin
+        attrs["confirm_pin"] = confirm_pin
+        attrs["old_pin"] = old_pin
+        return attrs
+
+
+class RiderVerifyTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for validating rider transaction PIN input.
+    """
+
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN to verify",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+        attrs["pin"] = pin
+        return attrs
+
+
+class RiderFaceMatchRequestSerializer(serializers.Serializer):
+    """
+    Serializer for independent rider face match request.
+    Expects the S3 storage bucket URL of the selfie snapshot.
+    """
+
+    image_url = serializers.URLField(
+        required=True,
+        max_length=500,
+        help_text="URL of the uploaded selfie snapshot image in the storage bucket",
+    )
+
+    def validate_image_url(self, value):
+        url = str(value).strip()
+        if not url:
+            raise ServiceException(
+                status_code=400, message="image_url cannot be empty."
+            )
+        return url
+
+
+class RiderFaceMatchLogSerializer(serializers.ModelSerializer):
+    """
+    Serializer for independent rider face verification audit logs.
+    """
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RiderFaceMatchLog
+        fields = [
+            "id",
+            "rider_id",
+            "rider_name",
+            "trigger_type",
+            "status",
+            "similarity",
+            "is_match",
+            "selfie_url",
+            "reference_photo_url",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+            )
+        return ""
+
+

@@ -42,6 +42,7 @@ urlpatterns = [
     path("api/occ/", include("dispatcher.occ_urls")),
     path("api/ops/", include("oprtn_dashboard.urls")),
     path("api/riders/referrals/", include("referrals.urls")),
+    path("api/riders/support/", include("support.urls")),
     path("api/chats/", include("chats.urls")),
     path("api/whatsapp/", include("whatsapp_messaging.urls")),
     path("api/subscriptions/", include("subscriptions.urls")),
@@ -62,5 +63,20 @@ urlpatterns = [
         "api/merchant/apikey/retrieve/",
         MerchantAPIKeyRetrieveView.as_view(),
         name="merchant_apikey_retrieve",
+    ),
+    path(
+        "api/merchant/affiliation/",
+        __import__("authentication.views", fromlist=["MerchantAffiliationView"]).MerchantAffiliationView.as_view(),
+        name="merchant_affiliation_direct",
+    ),
+    path(
+        "api/merchant/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="merchant_affiliation_verify_direct",
+    ),
+    path(
+        "api/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="affiliation_verify_direct",
     ),
 ]

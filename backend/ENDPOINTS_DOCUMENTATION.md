@@ -185,6 +185,154 @@
     }
   ]
 }
+---
+
+### 3a. Supported Banks Directory
+**Endpoint:** `GET /banks/`  
+**Authentication:** None (Public / Open)  
+**Description:** Retrieves the complete directory of supported Nigerian commercial banks, microfinance banks, and fintech institutions with their corresponding 3-digit and 6-digit CBN/NIBSS codes and USSD shortcodes. Cached in Redis for ultra-low latency.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Banks retrieved successfully.",
+  "data": [
+    {
+      "id": 1,
+      "name": "Access Bank",
+      "bank_code": "044",
+      "cbn_code": "000014",
+      "ussd_short_code": "*901#",
+      "bank_short_name": "ACCESS"
+    },
+    {
+      "id": 6,
+      "name": "Wema Bank",
+      "bank_code": "035",
+      "cbn_code": "000017",
+      "ussd_short_code": "*945#",
+      "bank_short_name": "WEMA"
+    }
+  ]
+}
+```
+
+---
+
+### 3b. Verify Bank Account Number
+**Endpoint:** `POST /wallet/verify-account/`  
+**Authentication:** None (Public / AllowAny)  
+**Description:** Validates a 10-digit NUBAN account number and resolves the account name using the LibertyPay Account Enquiry integration.
+
+**Request Body:**
+```json
+{
+  "account_number": "0123456789",
+  "bank_code": "044"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Account verified successfully.",
+  "data": {
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "044",
+    "cbn_code": "000014",
+    "currency_code": "NGN"
+  }
+}
+```
+
+**Error Response (400 Bad Request):**
+```json
+{
+  "status": "error",
+  "message": "Account verification failed. Please check the account number and bank code.",
+  "data": null
+}
+```
+
+---
+
+### 3c. Withdraw Earnings (Independent Riders)
+**Endpoint:** `POST /wallet/withdraw/`  
+**Authentication:** Required (Rider Bearer Token)  
+**Description:** Allows independent riders (`is_independent_rider=True`) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout.
+1. Checks whether the platform **Independent Rider Payout Wallet Pool** has sufficient funds to disburse the withdrawal.
+2. Validates that the withdrawal amount does not exceed the rider's `withdrawable_balance` (wallet balance minus any unremitted Cash on Delivery).
+3. Atomically debits both the **Independent Rider Payout Wallet Pool** (creating an immutable debit ledger entry) and the rider's personal wallet.
+4. Triggers the external Wema CoreBanking payout. If rejected or failed, automatically issues an immediate automated refund to **both** the rider's wallet and the payout pool.
+
+**Request Body:**
+```json
+{
+  "amount": "5000.00",
+  "account_number": "0123456789",
+  "account_name": "ADE BABATUNDE",
+  "bank_code": "044",
+  "bank_name": "Access Bank",
+  "narration": "Payout for deliveries",
+  "is_sandbox": false
+}
+```
+> **Sandbox Testing:** Pass `"is_sandbox": true` or `"mode": "SANDBOX"` in the request body (or add `?sandbox=true` query parameter) to trigger sandbox withdrawal. In sandbox mode, reference IDs use the `WDR-SBX-` prefix, CoreBanking payouts are simulated/tested without moving live funds, and test pool liquidity is automatically provisioned if the development payout pool has insufficient funds.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Withdrawal request processed successfully.",
+  "data": {
+    "reference": "WDR-A1B2C3D4E5F6",
+    "amount": 5000.0,
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "044",
+    "status": "success",
+    "remaining_balance": 15000.0,
+    "is_sandbox": false,
+    "mode": "LIVE"
+  }
+}
+```
+
+**Error Responses:**
+- **400 Bad Request (Insufficient Payout Pool Balance):**
+```json
+{
+  "status": "error",
+  "message": "Insufficient funds in payout pool. Unable to process withdrawal at this time.",
+  "data": null
+}
+```
+- **400 Bad Request (Insufficient Withdrawable Balance or Unremitted COD):**
+```json
+{
+  "status": "error",
+  "message": "Insufficient withdrawable balance. Withdrawable: ₦2,000.00 (Pending unremitted COD: ₦8,000.00)",
+  "data": null
+}
+```
+- **403 Forbidden (Non-Independent Rider):**
+```json
+{
+  "status": "error",
+  "message": "Only independent riders are permitted to withdraw wallet earnings.",
+  "data": null
+}
+```
+- **422 Unprocessable Entity (Transfer Rejected, Wallet & Pool Refunded):**
+```json
+{
+  "status": "error",
+  "message": "Destination bank connection timeout. Your wallet balance has been refunded.",
+  "data": null
+}
 ```
 
 ---
@@ -237,6 +385,135 @@
 
 ---
 
+### 5. Independent Rider Face Match Verification
+**Endpoint:** `POST /api/riders/facematch/` (or `POST /api/riders/face-match/`)  
+**Authentication:** Required (Rider Bearer Token, independent rider only)  
+**Description:** Initiates asynchronous facial verification between a selfie snapshot taken by the rider (uploaded to S3) and their stored KYC profile photo (`RiderDocument` of type `profile_photo`). Returns an immediate `202 Accepted` response with an Ably channel name (`facematch:<rider_id>`) for real-time progress updates.
+
+#### Channel Provisioning & Periodic Trigger Architecture
+- **On Rider Login (`POST /api/riders/auth/login/`)** & **Rider Profile (`GET /api/riders/me/`)**: The backend automatically provisions the dedicated Ably channel name:
+  - `face_verification_channel: "facematch:<rider_id>"`
+  - `channels: { "face_verification": "facematch:<rider_id>" }`
+  - Profile attributes: `face_verification_required: boolean`, `last_face_verified_at: string (ISO 8601)`.
+- **Monthly Background Job (Celery Beat & Management Command)**:
+  - Runs daily via Celery Beat (`riders.tasks.trigger_monthly_face_verification_task`) or via CLI (`python manage.py trigger_monthly_face_verification`).
+  - Identifies active independent riders whose last verification was >= 30 days ago (or who never verified and registered >= 30 days ago).
+  - Sets `face_verification_required = True` and deauthorizes order assignments (`is_authorized = False`).
+  - Broadcasts the `facematch_required` real-time event to channel `facematch:<rider_id>`.
+
+A background Celery task downloads both images, calls the 3rd-party KYC `CompareFacesView` service, updates audit records (`RiderFaceMatchLog`), and publishes the verification outcome via Ably. If the match succeeds, `face_verification_required` is reset to `False`, `is_authorized` is restored to `True`, and `last_face_verified_at` is updated to current timestamp. If the match fails, the rider is immediately blocked/unauthorized (`is_authorized = False`, `status = "offline"`), active refresh tokens are revoked, and an Ably event instructs the mobile app to log out the rider.
+
+**Request Body (JSON):**
+```json
+{
+  "image_url": "https://storage.aexpress.com/selfies/RD1234_snapshot.jpg"
+}
+```
+
+**Success Response (202 Accepted):**
+```json
+{
+  "status": "success",
+  "message": "Face match verification initiated.",
+  "data": {
+    "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+    "channel": "facematch:RD1234",
+    "event": "facematch_result",
+    "status": "processing"
+  }
+}
+```
+
+**Ably Real-Time Events (`channel: "facematch:<rider_id>"`):**
+
+*Monthly Verification Trigger (`event: "facematch_required"`):*
+```json
+{
+  "action": "face_verification_required",
+  "rider_id": "RD1234",
+  "log_id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+  "due_date": "2026-10-26T10:00:00.000000+00:00",
+  "reason": "monthly_verification"
+}
+```
+
+*Match Succeeded (`event: "facematch_result"`):*
+```json
+{
+  "status": "success",
+  "matched": true,
+  "similarity": 96.5,
+  "message": "Face match verification successful."
+}
+```
+
+*Match Failed (Account Blocked / Forced Logout) (`event: "facematch_result"`):*
+```json
+{
+  "status": "failed",
+  "matched": false,
+  "similarity": 32.1,
+  "action": "logout",
+  "message": "Face match verification failed. Your account has been unauthorized."
+}
+```
+
+*Error (Download or Service Failure) (`event: "facematch_result"`):*
+```json
+{
+  "status": "error",
+  "matched": false,
+  "message": "Failed to download face images: Connection timeout"
+}
+```
+
+---
+
+### 6. Face Match Verification Logs History
+**Endpoint:** `GET /api/riders/facematch/logs/` (or `GET /api/riders/face-match/logs/`)  
+**Authentication:** Required (Rider, Dispatcher, Admin)  
+**Description:** Retrieves paginated audit logs of face verification requests and attempts.
+- Riders can view their personal verification history.
+- Dispatchers and admins can query all logs or filter by specific riders.
+
+**Query Parameters:**
+- `rider_id` (optional, dispatchers/admins only): Filter by short rider ID (e.g. `RD1234`) or UUID.
+- `status` (optional): Filter by status (`requested`, `pending`, `success`, `failed`, `error`).
+- `trigger_type` (optional): Filter by trigger source (`monthly_cron`, `manual_prompt`, `on_demand`).
+- `page` (optional, default `1`): Page number.
+- `page_size` (optional, default `20`, max `100`): Results per page.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Face match logs retrieved successfully.",
+  "data": {
+    "count": 1,
+    "page": 1,
+    "page_size": 20,
+    "results": [
+      {
+        "id": "0df6b88b-f286-4bb6-b1ea-271d1844b2f1",
+        "rider_id": "RD1234",
+        "rider_name": "John Doe",
+        "trigger_type": "monthly_cron",
+        "status": "success",
+        "similarity": 96.5,
+        "is_match": true,
+        "selfie_url": "https://storage.aexpress.com/selfies/RD1234_snapshot.jpg",
+        "reference_photo_url": "https://storage.aexpress.com/docs/ref_profile.jpg",
+        "error_message": "",
+        "created_at": "2026-10-26T10:00:00.000000Z",
+        "updated_at": "2026-10-26T10:02:15.000000Z"
+      }
+    ]
+  }
+}
+```
+
+---
+
 ## Authentication Endpoints (Merchant Facing)
 ```
 /api/auth/
@@ -257,6 +534,58 @@
   "message": "Your account has been deactivated successfully.",
   "data": {},
   "status_code": 200
+}
+```
+
+---
+
+### 10. Order Offers List
+**Endpoint:** `GET /orders/offers/`  
+**Authentication:** Required (Verified Rider)  
+**Description:** Returns pending unassigned order offers in the rider's zone. Unverified independent riders (pending KYC review) are forbidden from viewing offers.
+
+**Error Response (403 Forbidden - Unverified Rider):**
+```json
+{
+  "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+}
+```
+
+---
+
+### 11. Accept Order Offer
+**Endpoint:** `POST /orders/offers/<uuid:offer_id>/accept/`  
+**Authentication:** Required (Verified Rider)  
+**Description:** Accepts a pending order offer and assigns the order to the rider. Unverified independent riders cannot accept offers.
+
+**Error Response (403 Forbidden - Unverified Rider):**
+```json
+{
+  "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+}
+```
+
+---
+
+### 12. Toggle Duty Status
+**Endpoint:** `POST /duty/`  
+**Authentication:** Required (Rider)  
+**Description:** Toggles the rider's duty status (`online` / `offline`). Toggling to `online` is blocked if the rider is not authorized or verified.
+
+**Request Body:**
+```json
+{
+  "status": "online",
+  "latitude": 6.5244,
+  "longitude": 3.3792
+}
+```
+
+**Error Response (403 Forbidden - Unverified Rider going online):**
+```json
+{
+  "success": false,
+  "message": "Account is not verified or authorized to go online."
 }
 ```
 
@@ -374,7 +703,61 @@ Every assignment/unassignment creates a `VehicleReassignment` record:
 - If a rider moves from Vehicle Y to Vehicle X: Records unassignment of Y and assignment of X.
 - The record captures the `admin` user who initiated the request.
 
+### 3. Reject Rider Application (with Email Notification)
+**Endpoint:** `POST /api/dispatch/riders/{id}/reject/`  
+**Authentication:** Required (Dispatcher Admin)  
+**Description:** Rejects a self-registered rider's onboarding application. Optionally flags specific submitted KYC documents as rejected (with individual reasons each) so the rider can review and re-upload them. Automatically sends a push notification and an HTML/text rejection email to the rider detailing the overall rejection reason, the specific rejected documents, and the reasons.
+
+**Request Body:**
+```json
+{
+  "reason": "Submitted KYC documents failed compliance checks.",
+  "rejected_documents": [
+    {
+      "document_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "reason": "Driver's license photo is blurry and illegible."
+    },
+    {
+      "document_id": "8bb96d74-1234-4562-b3fc-2c963f66afa7",
+      "reason": "Vehicle insurance policy has expired."
+    }
+  ]
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "rider_id": "200001",
+    "first_name": "Tunde",
+    "last_name": "Bakare",
+    "phone": "+2348123456789",
+    "email": "tunde.rider@aexpress.com",
+    "approval_status": "rejected",
+    "is_authorized": false,
+    "rejection_reason": "Submitted KYC documents failed compliance checks.",
+    "documents": [
+      {
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "doc_type": "drivers_license",
+        "status": "rejected",
+        "rejection_reason": "Driver's license photo is blurry and illegible."
+      }
+    ]
+  }
+}
+```
+
+**Email Notification:**
+Dispatches an email via Celery background task (`dispatcher.tasks.send_rider_rejection_email_task` with graceful direct fallback) using Mailgun and MailNow fallback:
+- **Subject:** `Important Update Regarding Your Rider Application - Assured Express`
+- **Content:** Outlines the review decision, the general reason, a styled table of rejected documents with corresponding rejection reasons, and step-by-step guidance on how to re-upload via the Assured Express Rider mobile app (`Profile > KYC Documents`).
+
 ---
+
 
 ### 3. List Vehicle Assets
 **Endpoint:** `GET /vehicle-assets/`  
@@ -757,4 +1140,315 @@ The `QuickSendView` supports automated SmartParcel locker workflows.
   },
   "status_code": 200
 }
+```
+
+---
+
+## DISPATCHER AFFILIATION & MERCHANT COMMISSION ENDPOINTS
+
+### 1. Get Merchant Affiliation Status
+```http
+GET /api/auth/merchant/affiliation/
+GET /api/merchant/affiliation/
+Description: Retrieves the current dispatcher affiliation details for the authenticated merchant profile.
+Authentication: Required (Merchant)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Merchant affiliation retrieved successfully",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 2. Affiliate Merchant to Dispatcher
+```http
+POST /api/auth/merchant/affiliation/
+POST /api/merchant/affiliation/
+Description: Affiliates the authenticated merchant to a dispatcher using their unique affiliation code.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "affiliation_code": "HUB001"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Successfully affiliated with dispatcher Ikeja Hub Logistics",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 3. List Affiliated Merchants (Dispatcher View)
+```http
+GET /api/dispatch/affiliation/merchants/
+Description: Lists all merchants affiliated to the authenticated dispatcher with pagination, search, and activity counts.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - search (optional): Filter by merchant ID, business name, phone, or email
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliated merchants retrieved successfully",
+    "data": {
+      "count": 12,
+      "next": null,
+      "previous": null,
+      "results": [
+        {
+          "id": 105,
+          "merchant_id": "261603",
+          "name": "Acme Ventures",
+          "email": "acme@example.com",
+          "phone": "+2348011112222",
+          "business_name": "Acme Retail Ltd",
+          "merchant_type": "Retail",
+          "status": "active",
+          "affiliated_at": "2026-10-15T12:00:00Z",
+          "total_orders": 34,
+          "monthly_orders": 8,
+          "monthly_commission": 24000.0
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 4. Dispatcher Affiliation Summary
+```http
+GET /api/dispatch/affiliation/summary/
+Description: Retrieves aggregated performance and earnings for the dispatcher, including affiliated riders, affiliated merchants, and monthly commission totals.
+Authentication: Required (Dispatcher)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation summary retrieved successfully",
+    "data": {
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "affiliation_code": "HUB001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "monthly_commission": 45000.0,
+      "previous_month_commission": 30000.0,
+      "total_commission_earned": 75000.0,
+      "commission_per_order": 3000.0,
+      "affiliated_riders_count": 5,
+      "total_affiliated_riders": 5,
+      "active_riders_this_month": 3,
+      "affiliated_merchants_count": 8,
+      "total_affiliated_merchants": 8,
+      "active_merchants_this_month": 4,
+      "current_month": "October 2026",
+      "currency": "NGN"
+    },
+    "status_code": 200
+  }
+```
+
+### 5. Dispatcher Commission History
+```http
+GET /api/dispatch/affiliation/commissions/
+Description: Lists ledgered commission records for the authenticated dispatcher with optional source and merchant filtering.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - month (optional): Filter by month string (format: YYYY-MM)
+  - rider_id (optional): Filter by rider ID
+  - merchant_id (optional): Filter by merchant ID
+  - source (optional): Filter by affiliation source ('rider' or 'merchant')
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Commissions retrieved successfully",
+    "data": {
+      "count": 15,
+      "results": [
+        {
+          "id": "b968fc24-...",
+          "order_number": "6158045",
+          "amount": 3000.0,
+          "affiliation_source": "merchant",
+          "rider_id": null,
+          "rider_name": null,
+          "merchant_id": "261603",
+          "merchant_name": "Acme Retail Ltd",
+          "month_year": "2026-10",
+          "description": "Affiliation commission for completed order #6158045 from merchant 261603",
+          "created_at": "2026-10-15T14:30:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 6. Verify Affiliation Code (Public)
+```http
+GET /api/auth/affiliation/verify/?code=HUB001
+GET /api/merchant/affiliation/verify/?code=HUB001
+GET /api/riders/affiliation/verify/?code=HUB001
+GET /api/affiliation/verify/?code=HUB001
+POST /api/auth/affiliation/verify/
+POST /api/merchant/affiliation/verify/
+POST /api/riders/affiliation/verify/
+POST /api/affiliation/verify/
+Description: Validates a dispatcher affiliation code and returns the dispatcher's details (name, phone, role, hub, zone) without requiring authentication. Used during rider/merchant onboarding and profile linking.
+Authentication: None (Public - AllowAny)
+
+Query Parameters (GET):
+  - code or affiliation_code (required): The affiliation code to verify (e.g. 'HUB001'). Case-insensitive.
+
+Request Body (POST):
+  {
+    "affiliation_code": "HUB001"
+  }
+  // Or alias: {"code": "HUB001"}
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation code is valid.",
+    "data": {
+      "is_valid": true,
+      "affiliation_code": "HUB001",
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "name": "Alice Hub Captain",
+      "phone": "+2348011110001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "hub_name": "Ikeja Central Hub",
+      "zone_name": "Ikeja Zone"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Invalid affiliation code. No active dispatcher found with this code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+---
+
+## ORDER PICKUP & DELIVERY VERIFICATION (V2)
+
+Endpoints using 6-digit verification codes for rider pickup and delivery completion instead of GPS location proximity checks.
+
+### 1. Confirm Order Pickup (V2)
+```
+POST /api/orders/v2/pickup/
+Description: Rider marks an order as PickedUp by providing the 6-digit pickup code received from the merchant. Bypasses GPS proximity restrictions.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "pickup_code": "749201"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order picked up successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "PickedUp",
+      "picked_up_at": "2026-10-23T11:30:00Z"
+    },
+    "status_code": 200
+  }
+Error Response (400 Bad Request - Incorrect Code):
+  {
+    "status": "error",
+    "message": "Incorrect pickup code. 4 attempt(s) remaining.",
+    "data": {},
+    "status_code": 400
+  }
+Error Response (400 Bad Request - Verification Locked):
+  {
+    "status": "error",
+    "message": "Pickup verification is locked due to too many failed attempts (maximum 5). Please contact support.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 2. Complete Single-Delivery Order (V2)
+```
+POST /api/orders/v2/complete/
+Description: Rider completes a single-delivery order (Quick Send) by providing the 6-digit drop code received from the recipient. Marks the delivery as Delivered, marks the order as Done, and allocates rider earnings.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order delivery completed successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "Done",
+      "all_delivered": true
+    },
+    "status_code": 200
+  }
+```
+
+### 3. Deliver Multi-Drop Delivery Stop (V2)
+```
+POST /api/orders/v2/delivery/{delivery_id}/deliver/
+Description: Rider completes an individual delivery stop in a multi-drop order using that specific drop's 6-digit drop code. When all stops are completed, the order is automatically marked as Done and rider earnings are credited.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Delivery completed successfully.",
+    "data": {
+      "delivery_id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "status": "Delivered",
+      "delivered_at": "2026-10-23T11:45:00Z",
+      "order_number": "6158001",
+      "order_status": "Fulfilling",
+      "all_delivered": false
+    },
+    "status_code": 200
+  }
 ```
