@@ -55,12 +55,12 @@ def upload_document_to_s3(
     return upload_image_file_to_s3(file_obj, filename, folder)
 
 
-def generate_presigned_url(object_name, expiration=3600):
+def generate_presigned_url(object_name, expiration=3600, client_method="put_object"):
     """Generate a presigned URL to share an S3 object"""
     s3_client = get_aws_s3_client()
     try:
         response = s3_client.generate_presigned_url(
-            "put_object",
+            client_method,
             Params={
                 "Bucket": os.getenv("AWS_STORAGE_BUCKET_NAME", "secourhub"),
                 "Key": object_name,

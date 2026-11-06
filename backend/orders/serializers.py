@@ -1,7 +1,30 @@
 from django.db import models
 from rest_framework import serializers
+from sparky_utils.exceptions import ServiceException
+from django.utils import timezone
+from datetime import timedelta
 from .models import Order, Delivery, Vehicle
 from authentication.serializers import UserSerializer
+
+
+class CreateParcelSerializer(serializers.Serializer):
+    """Validate the payload required to create a SmartParcel parcel."""
+
+    sender_name = serializers.CharField(max_length=120)
+    sender_phone = serializers.CharField(max_length=20)
+    sender_email = serializers.EmailField(required=False, allow_blank=True)
+    receiver_name = serializers.CharField(max_length=120)
+    receiver_phone = serializers.CharField(max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
+    box_id = serializers.CharField(
+        max_length=100, help_text="SmartParcel box / locker station identifier."
+    )
+    locker_size_id = serializers.CharField(
+        max_length=100, help_text="Chosen locker size identifier."
+    )
+    description = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
 
 
 class VehicleSerializer(serializers.ModelSerializer):
@@ -39,12 +62,15 @@ class DeliverySerializer(serializers.ModelSerializer):
             "package_type",
             "notes",
             "cod_amount",
+            "distance_km",
+            "duration_minutes",
             "status",
             "sequence",
+            "drop_code",
             "created_at",
             "delivered_at",
         ]
-        read_only_fields = ["id", "created_at", "delivered_at"]
+        read_only_fields = ["id", "created_at", "delivered_at", "drop_code"]
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -72,12 +98,21 @@ class OrderSerializer(serializers.ModelSerializer):
     )
     delivery_count = serializers.SerializerMethodField()
 
+    # Rider contact (merchant-facing)
+    rider_code = serializers.SerializerMethodField()
+    rider_name = serializers.SerializerMethodField()
+    rider_phone = serializers.SerializerMethodField()
+    charge = serializers.SerializerMethodField()
+
     class Meta:
         model = Order
         fields = [
             "id",
             "order_number",
             "user_business_name",
+            "rider_code",
+            "rider_name",
+            "rider_phone",
             "mode",
             "vehicle_name",
             "vehicle_price",
@@ -93,18 +128,87 @@ class OrderSerializer(serializers.ModelSerializer):
             "distance_km",
             "duration_minutes",
             "status",
+            "payment_info",
             "created_at",
             "updated_at",
             "scheduled_pickup_time",
             "notes",
+            "collect_on_delivery",
+            "cod_amount",
             "deliveries",
             "delivery_count",
+            "charge",
+            "dispatcher_assigned",
+            "source",
+            "cancellation_reason",
+            "pickup_code",
+            "drop_code",
         ]
-        read_only_fields = ["id", "order_number", "created_at", "updated_at"]
+        read_only_fields = [
+            "id",
+            "order_number",
+            "created_at",
+            "updated_at",
+            "pickup_code",
+            "drop_code",
+        ]
 
     def get_delivery_count(self, obj):
         """Get the number of deliveries for this order."""
         return obj.deliveries.count()
+
+    def _get_rider(self, obj):
+        """Return the best rider object for merchant-facing 'assigned rider' display.
+
+        For standard (non-relay) orders we use Order.rider.
+        For relay orders, Order.rider may be null while each OrderLeg has its own rider.
+        In that case we fall back to the most relevant leg rider.
+        """
+        rider = getattr(obj, "rider", None)
+        if rider:
+            return rider
+
+        # Relay fallback: pick an active leg rider if present.
+        if getattr(obj, "is_relay_order", False):
+            legs = (
+                obj.legs.filter(rider__isnull=False)
+                .select_related("rider__user")
+                .order_by("leg_number")
+            )
+            # Prefer an 'active' leg first.
+            for st in ["InTransit", "PickedUp", "Assigned"]:
+                leg = legs.filter(status=st).first()
+                if leg and getattr(leg, "rider", None):
+                    return leg.rider
+            # Otherwise fall back to the first leg that has a rider.
+            leg = legs.first()
+            return getattr(leg, "rider", None) if leg else None
+
+        return None
+
+    def get_rider_code(self, obj):
+        rider = self._get_rider(obj)
+        return getattr(rider, "rider_id", None) if rider else None
+
+    def get_rider_name(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "contact_name", None) if user else None
+
+    def get_rider_phone(self, obj):
+        rider = self._get_rider(obj)
+        user = getattr(rider, "user", None) if rider else None
+        return getattr(user, "phone", None) if user else None
+
+    def get_charge(self, obj):
+        charge = obj.charges.first()
+        if charge:
+            return {
+                "amount": float(charge.amount),
+                "status": charge.status,
+                "created_at": charge.created_at.isoformat(),
+            }
+        return None
 
 
 class QuickSendSerializer(serializers.Serializer):
@@ -119,9 +223,11 @@ class QuickSendSerializer(serializers.Serializer):
     dropoff_address = serializers.CharField(required=True)
     receiver_name = serializers.CharField(required=True, max_length=255)
     receiver_phone = serializers.CharField(required=True, max_length=20)
+    receiver_email = serializers.EmailField(required=False, allow_blank=True)
 
     # Order details
     vehicle = serializers.CharField(required=True)
+    mode = serializers.ChoiceField(choices=["quick", "grouped"], default="quick")
     payment_method = serializers.ChoiceField(
         choices=["wallet", "cash", "cash_on_pickup", "receiver_pays"], default="wallet"
     )
@@ -132,11 +238,50 @@ class QuickSendSerializer(serializers.Serializer):
     )
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
 
+    # Cash on Delivery
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
+    cod_amount = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=12, decimal_places=2, default=None
+    )
+
     # Route information for pricing
     distance_km = serializers.DecimalField(
         required=True, max_digits=10, decimal_places=2
     )
     duration_minutes = serializers.IntegerField(required=True)
+
+    # SmartParcel specific fields
+    is_pickup_percel = serializers.BooleanField(required=False, default=False)
+    isdelivery_percel = serializers.BooleanField(required=False, default=False)
+    collect_code = serializers.CharField(required=False, allow_blank=True)
+    box_id = serializers.CharField(required=False, allow_blank=True)
+    locker_size_id = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        # Existing COD validation
+        if data.get("collect_on_delivery") and not data.get("cod_amount"):
+            raise serializers.ValidationError(
+                {
+                    "cod_amount": "cod_amount is required when collect_on_delivery is true."
+                }
+            )
+
+        # SmartParcel Pickup validation
+        if data.get("is_pickup_percel") and not data.get("collect_code"):
+            raise serializers.ValidationError(
+                {"collect_code": "collect_code is required for parcel pickup."}
+            )
+
+        # SmartParcel Delivery validation
+        if data.get("isdelivery_percel"):
+            if not data.get("box_id") or not data.get("locker_size_id"):
+                raise serializers.ValidationError(
+                    {
+                        "box_id": "box_id and locker_size_id are required for parcel delivery."
+                    }
+                )
+
+        return data
 
     def validate_vehicle(self, value):
         """Validate that the vehicle exists."""
@@ -164,6 +309,12 @@ class MultiDropDeliverySerializer(serializers.Serializer):
         required=False, max_digits=10, decimal_places=2, default=0
     )
 
+    # Optional per-stop/leg route metrics (frontend-calculated preferred)
+    distance_km = serializers.DecimalField(
+        required=False, allow_null=True, max_digits=10, decimal_places=2
+    )
+    duration_minutes = serializers.IntegerField(required=False, allow_null=True)
+
 
 class MultiDropSerializer(serializers.Serializer):
     """Serializer for Multi-Drop order creation."""
@@ -183,6 +334,9 @@ class MultiDropSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
 
     # Route information for pricing
     distance_km = serializers.DecimalField(
@@ -225,6 +379,9 @@ class BulkImportSerializer(serializers.Serializer):
     )
     notes = serializers.CharField(required=False, allow_blank=True)
     scheduled_pickup_time = serializers.DateTimeField(required=False, allow_null=True)
+
+    # Cash on Delivery (order-level flag; per-stop amounts are in each delivery item)
+    collect_on_delivery = serializers.BooleanField(required=False, default=False)
 
     # Route information for pricing
     distance_km = serializers.DecimalField(
@@ -289,6 +446,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "pickup_contact_name",
             "pickup_contact_phone",
             "pickup_notes",
+            "total_amount",
             "dropoff_address",
             "dropoff_latitude",
             "dropoff_longitude",
@@ -308,6 +466,7 @@ class AssignedOrderSerializer(serializers.ModelSerializer):
             "delivered_at",
             "delivery_proofs",
             "package_type",
+            "mode",
         ]
 
     def _get_first_delivery(self, obj):
@@ -419,6 +578,7 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
             "id",
             "ref",
             "status",
+            "total_amount",
             "vehicle_type",
             "pickup_address",
             "pickup_contact",
@@ -427,6 +587,7 @@ class AssignedRouteSerializer(serializers.ModelSerializer):
             "total_estimated_time_mins",
             "total_earnings",
             "total_cod",
+            "created_at",
             "completed_stops",
             "stops",
         ]
@@ -463,3 +624,34 @@ class OrderStatusUpdateSerializer(serializers.Serializer):
     latitude = serializers.FloatField(required=False)
     longitude = serializers.FloatField(required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class MergeGroupedOrdersSerializer(serializers.Serializer):
+    """Serializer for merging multiple grouped orders into a parent order."""
+
+    order_ids = serializers.ListField(
+        child=serializers.CharField(max_length=255), required=True, min_length=1
+    )
+
+    def validate_order_ids(self, value):
+        orders = Order.objects.filter(order_number__in=value)
+        if orders.count() != len(value):
+            raise serializers.ValidationError("Some order IDs are invalid.")
+
+        # Check modes
+        if any(o.mode != "grouped" for o in orders):
+            raise serializers.ValidationError("All orders must be in 'grouped' mode.")
+
+        # Check status
+        if any(o.status != "Pending" for o in orders):
+            raise serializers.ValidationError("All orders must be in 'Pending' status.")
+
+        # Check vehicle (must be same for all to be picked up by one rider)
+        # We check the first one and compare against the rest.
+        first_order = orders.first()
+        if any(o.vehicle_id != first_order.vehicle_id for o in orders):
+            raise serializers.ValidationError(
+                "All orders must use the same vehicle type."
+            )
+
+        return value

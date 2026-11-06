@@ -8,15 +8,26 @@ from django.db import models
 from django.utils import timezone
 
 
+from typing import Optional, Any
+
+
 class UserManager(BaseUserManager):
     """Custom user manager for User model."""
 
-    def create_user(self, phone, email, password=None, **extra_fields):
+    def create_user(
+        self,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        **extra_fields: Any,
+    ) -> "User":
         """Create and return a regular user."""
         if not phone:
-            raise ValueError("Phone number is required")
+            import random
+
+            phone = f"+23480{random.randint(10000000, 99999999)}"
         if not email:
-            raise ValueError("Email is required")
+            email = f"{phone.replace('+', '')}@aexpress.com"
 
         email = self.normalize_email(email)
         user = self.model(phone=phone, email=email, **extra_fields)
@@ -24,7 +35,13 @@ class UserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, phone, email, password=None, **extra_fields):
+    def create_superuser(
+        self,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+        **extra_fields: Any,
+    ) -> "User":
         """Create and return a superuser."""
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
@@ -46,6 +63,8 @@ class User(AbstractBaseUser, PermissionsMixin):
         ("Rider", "Rider"),
         ("Customer", "Customer"),
         ("Dispatcher", "Dispatcher"),
+        ("ZoneCaptain", "Zone Captain"),
+        ("VerticalLead", "Vertical Lead"),
     )
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -59,6 +78,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     email = models.EmailField(unique=True, db_index=True)
     address = models.TextField(null=True, blank=True)
+    bvn = models.CharField(max_length=11, null=True, blank=True)
+    registration_source = models.CharField(max_length=100, null=True, blank=True)
+    referral_code = models.CharField(max_length=100, null=True, blank=True)
 
     # Status fields
     is_active = models.BooleanField(default=True)
@@ -73,9 +95,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email_verification_token_created = models.DateTimeField(null=True, blank=True)
 
     # Password reset
-    password_reset_token = models.CharField(
-        max_length=100, null=True, blank=True, unique=True
-    )
+    password_reset_token = models.CharField(max_length=100, null=True, blank=True)
     password_reset_token_created = models.DateTimeField(null=True, blank=True)
 
     # OTP verification
@@ -99,15 +119,25 @@ class User(AbstractBaseUser, PermissionsMixin):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.business_name} ({self.phone})"
+        return f"{self.get_full_name()} - ({self.phone})"
 
     def get_full_name(self):
         if self.first_name and self.last_name:
             return f"{self.first_name} {self.last_name}"
         return self.contact_name or self.phone
 
+    # fullname getter
+    @property
+    def full_name(self):
+        return self.get_full_name()
+
     def get_short_name(self):
         return self.business_name
+
+    @property
+    def is_merchant(self):
+        """Check if user is a merchant."""
+        return hasattr(self, "merchant_profile")
 
 
 class Address(models.Model):
@@ -155,3 +185,25 @@ class Address(models.Model):
                 raise ValidationError("Maximum of 3 addresses allowed per user.")
 
         super().save(*args, **kwargs)
+
+
+class MerchantEmailLog(models.Model):
+    """Tracks which marketing/drip emails have been sent to a merchant."""
+
+    merchant = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name="marketing_email_logs"
+    )
+    template_code = models.CharField(max_length=50, help_text="e.g. A1, B1, C2")
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "merchant_email_logs"
+        # unique_together = [("merchant", "template_code")]
+        indexes = [
+            models.Index(fields=["template_code"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.merchant.get_full_name()} - {self.template_code} at {self.sent_at}"
+        )

@@ -1,7 +1,28 @@
+from typing import Any, Dict, Optional, Union
 from rest_framework import serializers
-from .models import Rider, DispatcherProfile, ActivityFeed, Zone, RelayNode
+from .models import (
+    Rider,
+    DispatcherProfile,
+    DispatcherCommission,
+    DispatcherMonthlyEarning,
+    ActivityFeed,
+    Zone,
+    ZoneTarget,
+    RelayNode,
+    VehicleAsset,
+    Vertical,
+)
 from authentication.serializers import UserSerializer
+from orders.serializers import DeliverySerializer
 from django.contrib.auth import get_user_model
+from decimal import Decimal
+from datetime import datetime, timedelta, time
+from django.core.cache import cache
+from django.utils import timezone
+from django.db import transaction
+from django.db.models import Q, Sum, Count
+from orders.models import Order, Delivery
+from .models import VehicleTracking
 
 User = get_user_model()
 
@@ -69,20 +90,125 @@ class DispatcherSignupSerializer(serializers.ModelSerializer):
         return user
 
 
-class RiderSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(source="user.contact_name", read_only=True)
+class DispatcherListSerializer(serializers.ModelSerializer):
+    """Read-only serializer for listing dispatcher profiles."""
+
+    name = serializers.SerializerMethodField()
     phone = serializers.CharField(source="user.phone", read_only=True)
-
-    # Vehicle fields from Rider model
-    vehicle = serializers.SerializerMethodField()
-
-    # Mock/Computed fields to match frontend interface
-    todayOrders = serializers.IntegerField(default=0, read_only=True)
-    todayEarnings = serializers.IntegerField(default=0, read_only=True)
-    completionRate = serializers.IntegerField(default=98, read_only=True)
-    avgTime = serializers.CharField(default="25 mins", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    role = serializers.SerializerMethodField()
     joined = serializers.DateTimeField(
         source="created_at", format="%Y-%m-%d", read_only=True
+    )
+    is_active = serializers.BooleanField(source="user.is_active", read_only=True)
+    affiliated_riders_count = serializers.IntegerField(read_only=True)
+    affiliated_merchants_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = DispatcherProfile
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "email",
+            "role",
+            "joined",
+            "is_active",
+            "affiliation_code",
+            "monthly_commission",
+            "previous_month_commission",
+            "total_commission_earned",
+            "affiliated_riders_count",
+            "affiliated_merchants_count",
+        ]
+
+    def get_name(self, obj):
+        return (
+            obj.user.contact_name
+            or f"{obj.user.first_name} {obj.user.last_name}".strip()
+            or obj.user.phone
+        )
+
+    def get_role(self, obj):
+        return obj.get_role_display()
+
+
+class DispatcherCommissionSerializer(serializers.ModelSerializer):
+    """Serializer for individual dispatcher commission entries."""
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+    merchant_id = serializers.CharField(source="merchant.merchant_id", read_only=True)
+    merchant_name = serializers.SerializerMethodField()
+    order_id = serializers.UUIDField(source="order.id", read_only=True)
+
+    class Meta:
+        model = DispatcherCommission
+        fields = [
+            "id",
+            "order_id",
+            "order_number",
+            "rider_id",
+            "rider_name",
+            "merchant_id",
+            "merchant_name",
+            "affiliation_source",
+            "amount",
+            "month_year",
+            "description",
+            "created_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+                or obj.rider.user.phone
+            )
+        return None
+
+    def get_merchant_name(self, obj):
+        if obj.merchant and obj.merchant.user:
+            return (
+                obj.merchant.user.business_name
+                or obj.merchant.user.contact_name
+                or obj.merchant.user.phone
+            )
+        return None
+
+
+class DispatcherMonthlyEarningSerializer(serializers.ModelSerializer):
+    """Serializer for monthly earning summaries and salary tracking."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = DispatcherMonthlyEarning
+        fields = [
+            "id",
+            "month_year",
+            "total_orders",
+            "total_commission",
+            "status",
+            "status_display",
+            "paid_at",
+            "notes",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class DispatcherAffiliatedRiderSerializer(serializers.ModelSerializer):
+    """Serializer for riders affiliated to a dispatcher."""
+
+    name = serializers.SerializerMethodField()
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    total_completed_orders = serializers.IntegerField(read_only=True)
+    orders_this_month = serializers.IntegerField(read_only=True)
+    commission_this_month = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
     )
 
     class Meta:
@@ -92,7 +218,144 @@ class RiderSerializer(serializers.ModelSerializer):
             "rider_id",
             "name",
             "phone",
+            "email",
+            "status",
+            "working_type",
+            "is_authorized",
+            "affiliated_at",
+            "total_completed_orders",
+            "orders_this_month",
+            "commission_this_month",
+        ]
+
+    def get_name(self, obj):
+        if obj.user:
+            return (
+                obj.user.contact_name
+                or f"{obj.user.first_name} {obj.user.last_name}".strip()
+                or obj.user.phone
+            )
+        return "Unknown"
+
+
+class DispatcherAffiliationSummarySerializer(serializers.Serializer):
+    dispatcher_id = serializers.UUIDField()
+    dispatcher_name = serializers.CharField()
+    role = serializers.CharField()
+    affiliation_code = serializers.CharField()
+    current_month = serializers.CharField()
+    monthly_commission = serializers.DecimalField(max_digits=12, decimal_places=2)
+    previous_month_commission = serializers.DecimalField(
+        max_digits=12, decimal_places=2
+    )
+    total_commission_earned = serializers.DecimalField(max_digits=12, decimal_places=2)
+    total_affiliated_riders = serializers.IntegerField()
+    active_riders_this_month = serializers.IntegerField()
+    orders_completed_this_month = serializers.IntegerField()
+    commission_per_order = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+
+class CommissionReconcileRequestSerializer(serializers.Serializer):
+    month = serializers.CharField(
+        required=False,
+        max_length=7,
+        help_text="Format: YYYY-MM (e.g. 2026-10). If omitted, defaults to current active month.",
+    )
+
+
+class DispatcherCreateSerializer(serializers.Serializer):
+    """Write serializer: create a User with usertype=Dispatcher and its DispatcherProfile."""
+
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150)
+    phone = serializers.CharField(max_length=20)
+    email = serializers.EmailField()
+    password = serializers.CharField(
+        min_length=6, write_only=True, style={"input_type": "password"}
+    )
+    role = serializers.ChoiceField(
+        choices=DispatcherProfile.Role.choices,
+        default=DispatcherProfile.Role.ADMIN,
+    )
+
+    def validate_phone(self, value):
+        if User.objects.filter(phone=value).exists():
+            raise serializers.ValidationError(
+                "A user with this phone number already exists."
+            )
+        return value
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+        first_name = validated_data["first_name"]
+        last_name = validated_data["last_name"]
+        role = validated_data.get("role", DispatcherProfile.Role.ADMIN)
+        user = User.objects.create_user(
+            phone=validated_data["phone"],
+            email=validated_data["email"],
+            password=validated_data["password"],
+            first_name=first_name,
+            last_name=last_name,
+            contact_name=f"{first_name} {last_name}".strip(),
+            usertype="Dispatcher",
+        )
+        profile, _ = DispatcherProfile.objects.get_or_create(
+            user=user, defaults={"role": role}
+        )
+        if profile.role != role:
+            profile.role = role
+            profile.save()
+        return profile
+
+
+class RiderSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source="user.contact_name", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
+
+    # Zone derived from hub (RelayNode) → zone FK
+    zone = serializers.SerializerMethodField()
+
+    # Hub field (maps to the rider's assigned relay node)
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.filter(is_active=True),
+        required=False,
+        allow_null=True,
+    )
+
+    # Vehicle fields from Rider model
+    vehicle = serializers.SerializerMethodField()
+
+    # Assigned vehicle asset details
+    vehicle_asset_detail = serializers.SerializerMethodField()
+
+    # Mock/Computed fields to match frontend interface
+    current_order = serializers.SerializerMethodField()
+    todayOrders = serializers.SerializerMethodField()
+    todayEarnings = serializers.SerializerMethodField()
+    completionRate = serializers.IntegerField(default=98, read_only=True)
+    avgTime = serializers.CharField(default="25 mins", read_only=True)
+    joined = serializers.DateTimeField(
+        source="created_at", format="%Y-%m-%d", read_only=True
+    )
+    total_yesterday_order_distance = serializers.SerializerMethodField()
+    total_yesterday_orders_distance_km = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Rider
+        fields = [
+            "id",
+            "rider_id",
+            "name",
+            "phone",
+            "hub",
+            "zone",
             "vehicle",
+            "vehicle_asset_detail",
             "status",
             "rating",
             "total_deliveries",
@@ -105,12 +368,161 @@ class RiderSerializer(serializers.ModelSerializer):
             "current_latitude",
             "current_longitude",
             "last_location_update",
+            "total_yesterday_order_distance",
+            "total_yesterday_orders_distance_km",
         ]
+
+    def get_zone(self, obj):
+        if obj.hub and obj.hub.zone_id:
+            return str(obj.hub.zone_id)
+        return None
+
+    def get_todayOrders(self, obj):
+        today = timezone.localdate()
+        return obj.rider_orders.filter(status="Done", created_at__date=today).count()
+
+    def get_todayEarnings(self, obj):
+        today = timezone.localdate()
+        total = obj.rider_orders.filter(
+            status="Done", created_at__date=today
+        ).aggregate(total=Sum("total_amount"))["total"]
+        return float(total) if total else 0
+
+    def get_current_order(self, obj):
+        active_order = (
+            obj.rider_orders.filter(
+                status__in=["Assigned", "PickedUp", "Started", "Arrived", "Done"]
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if active_order:
+            return active_order.order_number
+        return None
+
+    def get_total_yesterday_order_distance(self, obj):
+        yesterday = timezone.localdate() - timedelta(days=1)
+        cache_key = (
+            f"total_yesterday_order_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        )
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return cached_distance
+
+        # get the riders yesterdays order
+        orders = obj.rider_orders.filter(created_at__date=yesterday)
+        total_distance = 0.0
+        for order in orders:
+            if order.distance_km is not None:
+                total_distance += float(order.distance_km)
+
+        total_distance = round(total_distance, 2)
+        # cache for 24 hours
+        cache.set(cache_key, total_distance, 60 * 60 * 24)
+        return total_distance
+
+    def get_total_yesterday_orders_distance_km(self, obj):
+        return self.get_total_yesterday_order_distance(obj)
 
     def get_vehicle(self, obj):
         if obj.vehicle_type:
             return obj.vehicle_type.name
         return "None"
+
+    def get_vehicle_asset_detail(self, obj):
+        va = obj.vehicle_asset
+        if not va:
+            return None
+        return {
+            "id": str(va.id),
+            "asset_id": va.asset_id,
+            "plate_number": va.plate_number,
+            "make": va.make,
+            "model": va.model,
+            "vehicle_type": va.vehicle_type,
+            "color": va.color,
+            "year": va.year,
+        }
+
+
+class RiderApprovalSerializer(serializers.ModelSerializer):
+    """
+    Serializer for dispatcher admins reviewing a self-registered rider's
+    application (profile, vehicle, and submitted KYC documents).
+    """
+
+    first_name = serializers.CharField(source="user.first_name", read_only=True)
+    last_name = serializers.CharField(source="user.last_name", read_only=True)
+    phone = serializers.CharField(source="user.phone", read_only=True)
+    email = serializers.CharField(source="user.email", read_only=True)
+    bvn = serializers.CharField(source="user.bvn", read_only=True)
+    documents = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Rider
+        fields = [
+            "id",
+            "rider_id",
+            "first_name",
+            "last_name",
+            "phone",
+            "email",
+            "bvn",
+            "emergency_contact_name",
+            "emergency_phone",
+            "address",
+            "working_type",
+            "is_independent_rider",
+            "approval_status",
+            "is_authorized",
+            "rejection_reason",
+            "vehicle_model",
+            "vehicle_plate_number",
+            "vehicle_color",
+            "vehicle_photo",
+            "documents",
+            "created_at",
+        ]
+
+    def get_documents(self, obj):
+        from riders.serializers import RiderDocumentSerializer
+
+        return RiderDocumentSerializer(obj.documents.all(), many=True).data
+
+
+class RejectedDocumentSerializer(serializers.Serializer):
+    document_id = serializers.UUIDField()
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class RiderRejectionSerializer(serializers.Serializer):
+    reason = serializers.CharField(required=False, allow_blank=True, default="")
+    rejected_documents = RejectedDocumentSerializer(many=True, required=False, default=list)
+
+
+class OrderEventSerializer(serializers.ModelSerializer):
+    event_type = serializers.CharField(source="event", read_only=True)
+    created_by = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(format="%Y-%m-%dT%H:%M:%S", read_only=True)
+
+    class Meta:
+        from orders.models import OrderEvent
+
+        model = OrderEvent
+        fields = ["event_type", "old_value", "new_value", "created_by", "created_at"]
+
+    def get_created_by(self, obj):
+        if obj.created_by is None:
+            return None
+        user = obj.created_by
+        name = (
+            getattr(user, "get_full_name", lambda: "")()
+            or getattr(user, "business_name", None)
+            or getattr(user, "contact_name", None)
+            or user.username
+        )
+        return name.strip() or user.username
 
 
 class OrderSerializer(serializers.ModelSerializer):
@@ -124,6 +536,7 @@ class OrderSerializer(serializers.ModelSerializer):
     created = serializers.DateTimeField(
         source="created_at", format="%Y-%m-%d %H:%M", read_only=True
     )
+    deliveries = DeliverySerializer(many=True, read_only=True)
 
     # Computed fields
     pickup = serializers.CharField(source="pickup_address", read_only=True)
@@ -134,6 +547,7 @@ class OrderSerializer(serializers.ModelSerializer):
     status = serializers.SerializerMethodField()
     pkg = serializers.SerializerMethodField()
     codFee = serializers.SerializerMethodField()
+    collect_on_delivery = serializers.BooleanField(read_only=True)
 
     # Extra fields for backward compatibility or extra detail
     items = serializers.SerializerMethodField()
@@ -142,6 +556,12 @@ class OrderSerializer(serializers.ModelSerializer):
     distance = serializers.SerializerMethodField()
     time = serializers.SerializerMethodField()
     timeline = serializers.SerializerMethodField()
+    price_per_km = serializers.SerializerMethodField()
+    events = OrderEventSerializer(many=True, read_only=True)
+
+    waiting_time = serializers.SerializerMethodField()
+    delivery_time = serializers.SerializerMethodField()
+    total_order_time = serializers.SerializerMethodField()
 
     # Relay routing (async)
     routing_status = serializers.CharField(read_only=True)
@@ -158,6 +578,59 @@ class OrderSerializer(serializers.ModelSerializer):
     dropoff_lng = serializers.SerializerMethodField()
 
     relay_legs = serializers.SerializerMethodField()
+    charge = serializers.SerializerMethodField()
+    parent_order_number = serializers.CharField(
+        source="parent_order.order_number", read_only=True, allow_null=True
+    )
+    sub_order_numbers = serializers.SerializerMethodField()
+    sub_orders = serializers.SerializerMethodField()
+    vertical_lead_name = serializers.SerializerMethodField()
+
+    def get_sub_order_numbers(self, obj):
+        """Return list of sub-order order_numbers if this is a relay or grouped parent order."""
+        if not obj.parent_order_id:
+            order_field = "relay_leg_number" if obj.is_relay_order else "created_at"
+            return list(
+                obj.sub_orders.values_list("order_number", flat=True).order_by(
+                    order_field
+                )
+            )
+        return []
+
+    def get_sub_orders(self, obj):
+        """Return simplified sub-order details if this is a relay or grouped parent order."""
+        is_parent = not obj.parent_order_id
+        if (obj.is_relay_order or obj.mode == "grouped") and is_parent:
+            order_field = "relay_leg_number" if obj.is_relay_order else "created_at"
+            sub_orders = obj.sub_orders.all().order_by(order_field)
+            return [
+                {
+                    "id": so.order_number,
+                    "status": so.status,
+                    "rider": (
+                        so.rider.user.contact_name
+                        if so.rider and getattr(so.rider, "user", None)
+                        else None
+                    ),
+                    "riderId": so.rider.rider_id if so.rider else None,
+                    "created": (
+                        so.created_at.strftime("%Y-%m-%d %H:%M")
+                        if getattr(so, "created_at", None)
+                        else None
+                    ),
+                    "amount": (
+                        float(so.total_amount)
+                        if getattr(so, "total_amount", None)
+                        else 0.0
+                    ),
+                    "relay_leg_number": so.relay_leg_number,
+                }
+                for so in sub_orders
+            ]
+        return []
+
+    def get_vertical_lead_name(self, obj):
+        return obj.vertical_lead_name
 
     class Meta:
         from orders.models import Order
@@ -171,20 +644,30 @@ class OrderSerializer(serializers.ModelSerializer):
             "riderId",
             "rider",
             "status",
+            "mode",
             "amount",
             "distance",
             "time",
             "created",
             "cod",
             "codFee",
+            "collect_on_delivery",
             "payment",
             "items",
+            "vertical_lead_name",
             "pkg",
             "notes",
             "timeline",
             "customer",
+            "payment_info",
+            "is_partner_order",
+            "partner_order_count",
+            "day_returned_count",
+            "rider_completed_count",
+            "file_uploaded_urls",
             "customerPhone",
             "vehicle",
+            "payment_status",
             # Relay routing details (populated for relay orders)
             "is_relay_order",
             "routing_status",
@@ -196,6 +679,21 @@ class OrderSerializer(serializers.ModelSerializer):
             "dropoff_lat",
             "dropoff_lng",
             "relay_legs",
+            "price_per_km",
+            "events",
+            "waiting_time",
+            "delivery_time",
+            "total_order_time",
+            "charge",
+            # Sub-order linkage
+            "parent_order_number",
+            "relay_leg_number",
+            "sub_order_numbers",
+            "sub_orders",
+            "dispatcher_assigned",
+            "source",
+            "cancellation_reason",
+            "deliveries",
         ]
 
     def get_pickup_lat(self, obj):
@@ -242,7 +740,11 @@ class OrderSerializer(serializers.ModelSerializer):
         return first.receiver_phone if first else ""
 
     def get_vehicle(self, obj):
-        return obj.vehicle.name if obj.vehicle else "Bike"
+        vehicle = getattr(obj, "vehicle", None)
+        try:
+            return vehicle.name if vehicle else "Bike"
+        except Exception:
+            return "Bike"
 
     def get_pkg(self, obj):
         first = obj.deliveries.first()
@@ -255,7 +757,9 @@ class OrderSerializer(serializers.ModelSerializer):
         order_map = {
             "Pending": "Pending",
             "Assigned": "Assigned",
+            "PickedUp": "Picked Up",  # rider app can set this directly
             "Started": "In Transit",
+            "Arrived": "At Dropoff",  # rider is at the dropoff location
             "Done": "Delivered",
             "CustomerCanceled": "Cancelled",
             "RiderCanceled": "Cancelled",
@@ -263,9 +767,12 @@ class OrderSerializer(serializers.ModelSerializer):
         }
         order_status = order_map.get(obj.status, "Pending")
 
-        # If the Order-level status hasn't advanced past Assigned, check the
-        # Delivery's own status so changes made there are reflected here too.
-        if order_status in ("Pending", "Assigned"):
+        # Safety fallback: if the Delivery record has advanced further than the
+        # Order (e.g. rider-app update vs dispatcher update out of sync), prefer
+        # the more advanced delivery status.  Covers Pending, Assigned, and
+        # In Transit so a rider-completed delivery surfaces as "Delivered" even
+        # when Order.status is still "Started".
+        if order_status in ("Pending", "Assigned", "In Transit"):
             first = obj.deliveries.first()
             if first:
                 delivery_map = {
@@ -284,7 +791,9 @@ class OrderSerializer(serializers.ModelSerializer):
         return [d.package_type for d in obj.deliveries.all()]
 
     def get_cod(self, obj):
-        return 0  # Mock for now
+        if obj.collect_on_delivery and obj.cod_amount:
+            return float(obj.cod_amount)
+        return 0
 
     def get_payment(self, obj):
         method_map = {
@@ -295,27 +804,144 @@ class OrderSerializer(serializers.ModelSerializer):
         return method_map.get(obj.payment_method, "Wallet")
 
     def get_distance(self, obj):
-        return "5.2 km"  # Mock
+        # Frontend expects a human-readable string.
+        # Persisted at create time (from frontend-calculated routing) on Order.distance_km.
+        val = getattr(obj, "distance_km", None)
+        if val is None:
+            return None
+        try:
+            km = Decimal(str(val))
+        except Exception:
+            return None
+        return f"{km:.2f} km"
 
     def get_time(self, obj):
-        return "25 mins"  # Mock
+        val = getattr(obj, "duration_minutes", None)
+        if val is None:
+            return None
+        try:
+            minutes = int(val)
+        except Exception:
+            return None
+        return f"{minutes} mins"
+
+    def get_price_per_km(self, obj):
+        """Effective rate: total_amount / distance_km, rounded to 2 dp.
+
+        Returns None if distance_km is missing or zero so the frontend
+        can display a dash instead of a nonsensical number.
+        """
+        try:
+            dist = Decimal(str(obj.distance_km))
+            if dist <= 0:
+                return None
+            rate = obj.total_amount / dist
+            return float(rate.quantize(Decimal("0.01")))
+        except Exception:
+            return None
 
     def get_timeline(self, obj):
         return [{"time": obj.created_at.strftime("%H:%M"), "event": "Order Placed"}]
 
+    def _format_timedelta(self, td):
+        if not td:
+            return None
+        minutes = int(td.total_seconds() / 60)
+        if minutes < 60:
+            return f"{minutes} mins"
+        else:
+            hours = minutes // 60
+            mins = minutes % 60
+            return f"{hours}h {mins}m" if mins > 0 else f"{hours}h"
+
+    def get_waiting_time(self, obj):
+        if not getattr(obj, "assigned_at", None):
+            return None
+        return self._format_timedelta(obj.assigned_at - obj.created_at)
+
+    def get_delivery_time(self, obj):
+        if not getattr(obj, "assigned_at", None) or not getattr(
+            obj, "completed_at", None
+        ):
+            return None
+        return self._format_timedelta(obj.completed_at - obj.assigned_at)
+
+    def get_total_order_time(self, obj):
+        if not getattr(obj, "completed_at", None):
+            return None
+        return self._format_timedelta(obj.completed_at - obj.created_at)
+
+    def get_charge(self, obj):
+        charge = obj.charges.first()
+        if charge:
+            return {
+                "amount": float(charge.amount),
+                "status": charge.status,
+                "created_at": charge.created_at.isoformat(),
+            }
+        return None
+
+
+class OrderPriceUpdateSerializer(serializers.Serializer):
+    """Write serializer for dispatcher price edits (Order.total_amount).
+
+    Frontend uses `amount`. For backward-compatibility we also accept `price`.
+    """
+
+    amount = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+    price = serializers.DecimalField(
+        required=False, max_digits=10, decimal_places=2, min_value=Decimal("0")
+    )
+
+    def validate(self, attrs):
+        amt = attrs.get("amount")
+        price = attrs.get("price")
+        if amt is None and price is None:
+            raise serializers.ValidationError(
+                {"amount": "Provide 'amount' (or legacy 'price')."}
+            )
+
+        val = amt if amt is not None else price
+        # Normalize to 2dp in case caller sends integer/float-ish decimal.
+        try:
+            val = Decimal(str(val)).quantize(Decimal("0.01"))
+        except Exception:
+            # DecimalField normally prevents this, but keep a friendly error.
+            raise serializers.ValidationError({"amount": "Invalid amount."})
+
+        attrs["amount"] = val
+        return attrs
+
 
 class OrderCreateSerializer(serializers.ModelSerializer):
     # Input fields from Frontend
-    pickup = serializers.CharField(write_only=True)
-    dropoff = serializers.CharField(write_only=True)
-    senderName = serializers.CharField(write_only=True)
-    senderPhone = serializers.CharField(write_only=True)
-    receiverName = serializers.CharField(write_only=True)
-    receiverPhone = serializers.CharField(write_only=True)
-    vehicle = serializers.CharField(write_only=True)  # "Bike", "Car", etc.
-    packageType = serializers.CharField(write_only=True)
+    pickup = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    dropoff = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    senderName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    senderPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverName = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    receiverPhone = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
+    vehicle = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )  # "Bike", "Car", etc.
+    packageType = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
     price = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
+    )
+    manual_price = serializers.BooleanField(
+        write_only=True, required=False, default=False
     )
     cod = serializers.DecimalField(
         write_only=True, required=False, max_digits=10, decimal_places=2
@@ -348,6 +974,13 @@ class OrderCreateSerializer(serializers.ModelSerializer):
     is_relay_order = serializers.BooleanField(
         write_only=True, required=False, default=False
     )
+    is_partner_order = serializers.BooleanField(
+        write_only=True, required=False, default=False
+    )
+    partner_order_count = serializers.IntegerField(write_only=True, required=False)
+    file_uploaded_urls = serializers.ListField(
+        child=serializers.URLField(), required=False, default=list
+    )
 
     class Meta:
         from orders.models import Order
@@ -368,115 +1001,65 @@ class OrderCreateSerializer(serializers.ModelSerializer):
             "vehicle",
             "packageType",
             "price",
+            "manual_price",
             "cod",
             "riderId",
             "merchantId",
             "distance_km",
             "duration_minutes",
             "is_relay_order",
+            "is_partner_order",
+            "partner_order_count",
+            "file_uploaded_urls",
+            "payment_method",
         ]
 
     def create(self, validated_data):
-        from orders.models import Order, Delivery, Vehicle
-        from .models import Rider
-        from authentication.models import User
+        from orders.services import get_order_service
 
-        # Extract non-model fields
-        pickup = validated_data.pop("pickup")
-        dropoff = validated_data.pop("dropoff")
-        pickup_lat = validated_data.pop("pickup_lat", None)
-        pickup_lng = validated_data.pop("pickup_lng", None)
-        dropoff_lat = validated_data.pop("dropoff_lat", None)
-        dropoff_lng = validated_data.pop("dropoff_lng", None)
-        is_relay_order = validated_data.pop("is_relay_order", False)
-        sender_name = validated_data.pop("senderName")
-        sender_phone = validated_data.pop("senderPhone")
-        receiver_name = validated_data.pop("receiverName")
-        receiver_phone = validated_data.pop("receiverPhone")
-        vehicle_name = validated_data.pop("vehicle")
-        package_type = validated_data.pop("packageType")
-        price = validated_data.get("price")
-        # cod = validated_data.get("cod") # Unused
-        rider_id = validated_data.get("riderId")
-        merchant_id = validated_data.get("merchantId")
-        distance_km = validated_data.get("distance_km")
-        duration_minutes = validated_data.get("duration_minutes")
-
-        # Resolve Vehicle
-        vehicle_obj = Vehicle.objects.filter(name__iexact=vehicle_name).first()
-        if not vehicle_obj:
-            vehicle_obj = Vehicle.objects.first()
-
-        # Resolve Rider
-        rider_obj = None
-        if rider_id:
-            rider_obj = Rider.objects.filter(id=rider_id).first()
-
-        # Resolve User (Merchant or Request User)
-        order_user = self.context["request"].user
-        if merchant_id:
-            # Try to find merchant by profile id (6 chars) or user id (uuid)
-            # The frontend sends the 6-char ID usually if using the dropdown which likely uses the proper ID
-            # But wait, Merchant object in frontend has `id` (6 chars) and `userId` (UUID).
-            # Let's check how we want to look it up.
-            # If we send the UUID (userId), it's a direct User lookup.
-            # If we send the 6-char ID, we need to look up via Merchant profile.
-            # Let's assume we might send the 6-char ID.
-            from .models import Merchant as MerchantProfile
-
-            try:
-                profile = MerchantProfile.objects.filter(
-                    merchant_id=merchant_id
-                ).first()
-                if profile:
-                    order_user = profile.user
-            except Exception:
-                pass
-
-        # Calculate Price
-        total_amount = price if price else vehicle_obj.base_price
-
-        # Create Order
-        order = Order.objects.create(
-            user=order_user,
-            pickup_address=pickup,
-            pickup_latitude=pickup_lat,
-            pickup_longitude=pickup_lng,
-            sender_name=sender_name,
-            sender_phone=sender_phone,
-            vehicle=vehicle_obj,
-            total_amount=total_amount,
-            rider=rider_obj,
-            status="Assigned" if rider_obj else "Pending",
-            distance_km=distance_km,
-            duration_minutes=duration_minutes,
-            is_relay_order=is_relay_order,
-            routing_status=(
-                Order.RoutingStatus.PENDING
-                if is_relay_order
-                else Order.RoutingStatus.READY
-            ),
-            routing_error="",
-            suggested_rider=None,
+        order_service = get_order_service()
+        return order_service.create_dispatcher_order(
+            self.context["request"].user, validated_data
         )
 
-        # Create Delivery
-        Delivery.objects.create(
-            order=order,
-            pickup_address=pickup,
-            pickup_latitude=pickup_lat,
-            pickup_longitude=pickup_lng,
-            sender_name=sender_name,
-            sender_phone=sender_phone,
-            dropoff_address=dropoff,
-            dropoff_latitude=dropoff_lat,
-            dropoff_longitude=dropoff_lng,
-            receiver_name=receiver_name,
-            receiver_phone=receiver_phone,
-            package_type=package_type,
-        )
 
-        return order
+class MerchantPricingOverrideSerializer(serializers.ModelSerializer):
+    """Upsert serializer for per-merchant/per-vehicle pricing overrides."""
+
+    vehicle_name = serializers.CharField(source="vehicle.name", read_only=True)
+    merchant_user_id = serializers.CharField(source="merchant.id", read_only=True)
+
+    class Meta:
+        from orders.models import MerchantPricingOverride
+
+        model = MerchantPricingOverride
+        fields = [
+            "id",
+            "merchant",
+            "merchant_user_id",
+            "vehicle",
+            "vehicle_name",
+            "flat_fee",
+            "pricing_tiers",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        # Remove default UniqueTogetherValidator to allow POST upsert (update_or_create)
+        validators = []
+
+    def create(self, validated_data):
+        from orders.models import MerchantPricingOverride
+
+        merchant = validated_data["merchant"]
+        vehicle = validated_data["vehicle"]
+        defaults = {
+            k: v for k, v in validated_data.items() if k not in ("merchant", "vehicle")
+        }
+        obj, _ = MerchantPricingOverride.objects.update_or_create(
+            merchant=merchant, vehicle=vehicle, defaults=defaults
+        )
+        return obj
 
 
 class RelayNodeMiniSerializer(serializers.ModelSerializer):
@@ -491,6 +1074,33 @@ class OrderLegSerializer(serializers.ModelSerializer):
     start_relay_node = RelayNodeMiniSerializer(read_only=True)
     end_relay_node = RelayNodeMiniSerializer(read_only=True)
     rider_id = serializers.CharField(source="rider.id", read_only=True, allow_null=True)
+    rider_name = serializers.CharField(
+        source="rider.user.contact_name", read_only=True, allow_null=True
+    )
+    suggested_rider_id = serializers.CharField(
+        source="suggested_rider.id", read_only=True, allow_null=True
+    )
+    suggested_rider_name = serializers.CharField(
+        source="suggested_rider.user.contact_name", read_only=True, allow_null=True
+    )
+    sub_order_number = serializers.SerializerMethodField()
+
+    def get_sub_order_number(self, obj):
+        """Return the order_number of the sub-order created for this leg, if any."""
+        from orders.models import Order
+
+        try:
+            sub = (
+                Order.objects.filter(
+                    parent_order=obj.order,
+                    relay_leg_number=obj.leg_number,
+                )
+                .values_list("order_number", flat=True)
+                .first()
+            )
+            return sub
+        except Exception:
+            return None
 
     class Meta:
         from orders.models import OrderLeg
@@ -506,6 +1116,10 @@ class OrderLegSerializer(serializers.ModelSerializer):
             "rider_payout",
             "zone_compliance_bonus",
             "rider_id",
+            "rider_name",
+            "suggested_rider_id",
+            "suggested_rider_name",
+            "sub_order_number",
             "start_relay_node",
             "end_relay_node",
         ]
@@ -523,6 +1137,15 @@ class MerchantSerializer(serializers.ModelSerializer):
     walletBalance = serializers.SerializerMethodField()
     status = serializers.SerializerMethodField()
     joined = serializers.DateTimeField(source="created_at", read_only=True)
+    isPartner = serializers.BooleanField(
+        source="merchant_profile.is_partner", read_only=True
+    )
+    partnerBasePrice = serializers.DecimalField(
+        source="merchant_profile.partner_base_price",
+        max_digits=10,
+        decimal_places=2,
+        read_only=True,
+    )
 
     class Meta:
         model = User
@@ -538,6 +1161,8 @@ class MerchantSerializer(serializers.ModelSerializer):
             "walletBalance",
             "status",
             "joined",
+            "isPartner",
+            "partnerBasePrice",
         ]
 
     def get_name(self, obj):
@@ -550,9 +1175,15 @@ class MerchantSerializer(serializers.ModelSerializer):
         return "Retail"  # Mock
 
     def get_totalOrders(self, obj):
+        total = getattr(obj, "total_orders_count", None)
+        if total is not None:
+            return total
         return obj.orders.count()
 
     def get_monthOrders(self, obj):
+        month_count = getattr(obj, "month_orders_count", None)
+        if month_count is not None:
+            return month_count
         from django.utils import timezone
 
         now = timezone.now()
@@ -582,13 +1213,16 @@ class RiderOnboardingSerializer(serializers.Serializer):
     first_name = serializers.CharField(max_length=150)
     last_name = serializers.CharField(max_length=150)
     password = serializers.CharField(
-        required=False, write_only=True, min_length=6,
+        required=False,
+        write_only=True,
+        min_length=6,
         style={"input_type": "password"},
-        help_text="If omitted a random password is generated and e-mailed to the rider."
+        help_text="If omitted a random password is generated and e-mailed to the rider.",
     )
     is_verified = serializers.BooleanField(
-        required=False, default=False,
-        help_text="Mark phone and email as verified immediately."
+        required=False,
+        default=False,
+        help_text="Mark phone and email as verified immediately.",
     )
 
     # Rider Profile fields
@@ -606,9 +1240,16 @@ class RiderOnboardingSerializer(serializers.Serializer):
         default="freelancer",
     )
     team = serializers.CharField(required=False, max_length=100, default="Main Team")
+    emergency_contact_name = serializers.CharField(required=False, max_length=100)
     emergency_phone = serializers.CharField(required=False, max_length=20)
     city = serializers.CharField(required=False, max_length=100)
     address = serializers.CharField(required=False)
+    hub = serializers.PrimaryKeyRelatedField(
+        queryset=RelayNode.objects.all(),
+        required=False,
+        allow_null=True,
+        help_text="Relay hub (node) to assign this rider to.",
+    )
     driving_license_number = serializers.CharField(required=False, max_length=50)
     national_id = serializers.CharField(required=False, max_length=50)
 
@@ -656,7 +1297,9 @@ class RiderOnboardingSerializer(serializers.Serializer):
         # Use provided password or generate a random one
         password = validated_data.pop("password", None)
         if not password:
-            password = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+            password = "".join(
+                random.choices(string.ascii_letters + string.digits, k=8)
+            )
 
         from django.db import IntegrityError
 
@@ -689,8 +1332,8 @@ class RiderOnboardingSerializer(serializers.Serializer):
                 "An error occurred while creating the user."
             )
 
-        # Create Rider Profile
-        rider = Rider.objects.create(user=user, **validated_data)
+        # Create or update Rider Profile to avoid duplicate key issues if the signal already fired
+        rider, _ = Rider.objects.update_or_create(user=user, defaults=validated_data)
 
         # Trigger Background Task for Email
         send_onboarding_email_task.delay(
@@ -763,12 +1406,15 @@ class ActivityFeedSerializer(serializers.ModelSerializer):
 
 class ZoneSerializer(serializers.ModelSerializer):
     relay_nodes_count = serializers.SerializerMethodField()
+    vertical_name = serializers.CharField(source="vertical.name", read_only=True)
 
     class Meta:
         model = Zone
         fields = [
             "id",
             "name",
+            "vertical",
+            "vertical_name",
             "center_lat",
             "center_lng",
             "radius_km",
@@ -780,6 +1426,26 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     def get_relay_nodes_count(self, obj):
         return obj.relay_nodes.count()
+
+
+class ZoneTargetSerializer(serializers.ModelSerializer):
+    zone_name = serializers.CharField(source="zone.name", read_only=True)
+
+    class Meta:
+        model = ZoneTarget
+        fields = [
+            "id",
+            "zone",
+            "zone_name",
+            "month",
+            "target_orders",
+            "target_revenue",
+        ]
+        read_only_fields = ["id"]
+
+    def validate_month(self, value):
+        """Ensure month is always the first day of the month."""
+        return value.replace(day=1)
 
 
 class RelayNodeSerializer(serializers.ModelSerializer):
@@ -800,3 +1466,439 @@ class RelayNodeSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "created_at"]
+
+
+class VehicleAssetListSerializer(serializers.ListSerializer):
+    """
+    Custom ListSerializer that batch-precomputes today's orders count, yesterday's orders
+    count, yesterday's orders distance, and yesterday's vehicle tracking distance in O(1)
+    queries across all assets, preventing severe N+1 database queries and Gunicorn timeouts.
+    """
+
+    def to_representation(self, data):
+        iterable = list(data) if not isinstance(data, list) else data
+        if not iterable:
+            return []
+
+        tz = timezone.get_current_timezone()
+        today = timezone.localdate()
+        today_start = timezone.make_aware(datetime.combine(today, time.min), tz)
+
+        yesterday = today - timedelta(days=1)
+        yesterday_end = today_start
+        yesterday_start = yesterday_end - timedelta(days=1)
+        yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+        # Map riders to assets
+        rider_to_asset = {}
+        for asset in iterable:
+            for r in asset.riders.all():
+                rider_to_asset[r.id] = asset.id
+
+        all_rider_ids = list(rider_to_asset.keys())
+
+        orders_today_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_map = {asset.id: 0 for asset in iterable}
+        orders_yesterday_dist_map = {asset.id: 0.0 for asset in iterable}
+
+        if all_rider_ids:
+            q_today = (
+                Q(completed_at__gte=today_start)
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=today_start,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=today_start,
+                )
+            )
+            for rider_id, cnt in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_today)
+                .values_list("rider_id")
+                .annotate(cnt=Count("id", distinct=True))
+            ):
+                asset_id = rider_to_asset.get(rider_id)
+                if asset_id:
+                    orders_today_map[asset_id] = orders_today_map.get(asset_id, 0) + cnt
+
+            q_yesterday = (
+                Q(
+                    completed_at__gte=yesterday_start,
+                    completed_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__gte=yesterday_start,
+                    deliveries__delivered_at__lt=yesterday_end,
+                )
+                | Q(
+                    completed_at__isnull=True,
+                    deliveries__status="Delivered",
+                    deliveries__delivered_at__isnull=True,
+                    updated_at__gte=yesterday_start,
+                    updated_at__lt=yesterday_end,
+                )
+            )
+            for row in (
+                Order.objects.filter(
+                    rider_id__in=all_rider_ids,
+                    status="Done",
+                )
+                .filter(q_yesterday)
+                .values("rider_id")
+                .annotate(
+                    cnt=Count("id", distinct=True),
+                    total_dist=Sum("distance_km"),
+                )
+            ):
+                asset_id = rider_to_asset.get(row["rider_id"])
+                if asset_id:
+                    orders_yesterday_map[asset_id] = (
+                        orders_yesterday_map.get(asset_id, 0) + row["cnt"]
+                    )
+                    dist = float(row["total_dist"]) if row["total_dist"] else 0.0
+                    orders_yesterday_dist_map[asset_id] = round(
+                        orders_yesterday_dist_map.get(asset_id, 0.0) + dist, 2
+                    )
+
+        # Batch compute yesterday's tracking travelled distance using indexed timestamp boundaries
+        yesterday_distance_map = {}
+        uncached_asset_ids = []
+        for asset in iterable:
+            cache_key = f"yesterday_distance_{asset.id}_{yesterday_str}"
+            val = cache.get(cache_key)
+            if val is not None:
+                yesterday_distance_map[asset.id] = val
+            else:
+                uncached_asset_ids.append(asset.id)
+
+        if uncached_asset_ids:
+            try:
+                first_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                last_rows = dict(
+                    VehicleTracking.objects.filter(
+                        vehicle_asset_id__in=uncached_asset_ids,
+                        created_at__gte=yesterday_start,
+                        created_at__lt=yesterday_end,
+                        travelled__isnull=False,
+                    )
+                    .order_by("vehicle_asset_id", "-created_at")
+                    .distinct("vehicle_asset_id")
+                    .values_list("vehicle_asset_id", "travelled")
+                )
+                for aid in uncached_asset_ids:
+                    f_val = first_rows.get(aid)
+                    l_val = last_rows.get(aid)
+                    d = (
+                        max(0, l_val - f_val)
+                        if (f_val is not None and l_val is not None)
+                        else 0
+                    )
+                    yesterday_distance_map[aid] = d
+                    cache.set(f"yesterday_distance_{aid}_{yesterday_str}", d, 60 * 60 * 24)
+            except Exception:
+                pass
+
+        for asset in iterable:
+            asset._precomputed_orders_today = orders_today_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders = orders_yesterday_map.get(asset.id, 0)
+            asset._precomputed_yesterday_orders_dist = orders_yesterday_dist_map.get(
+                asset.id, 0.0
+            )
+            if asset.id in yesterday_distance_map:
+                asset._precomputed_yesterday_distance = yesterday_distance_map[asset.id]
+
+        return super().to_representation(iterable)
+
+
+class VehicleAssetSerializer(serializers.ModelSerializer):
+    assigned_rider: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    orders_today: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_orders_distance_km: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    yesterday_orders_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+    total_yesterday_order_distance: serializers.SerializerMethodField = (
+        serializers.SerializerMethodField()
+    )
+
+    class Meta:
+        model = VehicleAsset
+        list_serializer_class = VehicleAssetListSerializer
+        fields = [
+            "id",
+            "asset_id",
+            "plate_number",
+            "vehicle_type",
+            "make",
+            "model",
+            "year",
+            "color",
+            "vin",
+            "photo",
+            "insurance_expiry",
+            "registration_expiry",
+            "road_worthiness_expiry",
+            "engine_status",
+            "total_distance",
+            "unit_of_distance",
+            "distance_today",
+            "orders_today",
+            "stop_duration",
+            "moved_timestamp",
+            "latitude",
+            "longitude",
+            "course",
+            "speed",
+            "last_telemetry_at",
+            "is_active",
+            "assigned_rider",
+            "created_at",
+            "updated_at",
+            "yesterday_distance",
+            "yesterday_orders",
+            "total_yesterday_orders_distance_km",
+            "yesterday_orders_distance",
+            "total_yesterday_order_distance",
+            "target_ratio",
+        ]
+        read_only_fields = ["id", "asset_id", "created_at", "updated_at"]
+
+    def get_yesterday_distance(self, obj: VehicleAsset) -> Union[float, Decimal]:
+        """Calculate and return the vehicle's travelled distance from yesterday."""
+        if hasattr(obj, "_precomputed_yesterday_distance"):
+            return obj._precomputed_yesterday_distance
+
+        today = timezone.localdate()
+        yesterday = today - timedelta(days=1)
+        cache_key = f"yesterday_distance_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return cached_distance
+
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_start = yesterday_end - timedelta(days=1)
+
+        first_val = (
+            VehicleTracking.objects.filter(
+                vehicle_asset=obj,
+                created_at__gte=yesterday_start,
+                created_at__lt=yesterday_end,
+                travelled__isnull=False,
+            )
+            .order_by("created_at")
+            .values_list("travelled", flat=True)
+            .first()
+        )
+        if first_val is not None:
+            last_val = (
+                VehicleTracking.objects.filter(
+                    vehicle_asset=obj,
+                    created_at__gte=yesterday_start,
+                    created_at__lt=yesterday_end,
+                    travelled__isnull=False,
+                )
+                .order_by("-created_at")
+                .values_list("travelled", flat=True)
+                .first()
+            )
+            distance = (
+                max(0, last_val - first_val)
+                if last_val is not None
+                else 0
+            )
+        else:
+            distance = 0
+
+        # Cache for 24 hours
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return distance
+
+    def get_assigned_rider(self, obj: VehicleAsset) -> Optional[Dict[str, Any]]:
+        """Get the details of the rider currently assigned to this vehicle asset."""
+        rider = obj.riders.all().first()
+        if rider:
+            return {
+                "id": str(rider.id),
+                "rider_id": rider.rider_id,
+                "name": rider.user.contact_name if rider.user else "Unknown",
+                "phone": rider.user.phone if rider.user else "",
+            }
+        return None
+
+    def get_orders_today(self, obj: VehicleAsset) -> int:
+        """Calculate the count of completed orders today for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_orders_today"):
+            return obj._precomputed_orders_today
+
+        riders = obj.riders.all()
+        if not riders.exists():
+            return 0
+
+        day = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        start = timezone.make_aware(datetime.combine(day, time.min), tz)
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(completed_at__gte=start)
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=start,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=start,
+        )
+
+        return orders.filter(q_a | q_b | q_c).distinct().count()
+
+    def get_yesterday_orders(self, obj: VehicleAsset) -> int:
+        """Calculate the count of completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders"):
+            return obj._precomputed_yesterday_orders
+
+        riders = obj.riders.all()
+        if not riders.exists():
+            return 0
+
+        today = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_start = yesterday_end - timedelta(days=1)
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(
+            completed_at__gte=yesterday_start,
+            completed_at__lt=yesterday_end,
+        )
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=yesterday_start,
+            deliveries__delivered_at__lt=yesterday_end,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=yesterday_start,
+            updated_at__lt=yesterday_end,
+        )
+
+        return orders.filter(q_a | q_b | q_c).distinct().count()
+
+    def get_total_yesterday_orders_distance_km(self, obj: VehicleAsset) -> float:
+        """Calculate the total distance in km for completed orders yesterday for riders assigned to the vehicle asset."""
+        if hasattr(obj, "_precomputed_yesterday_orders_dist"):
+            return obj._precomputed_yesterday_orders_dist
+
+        yesterday = timezone.localdate() - timedelta(days=1)
+        cache_key = (
+            f"vehicle_yesterday_orders_dist_{obj.id}_{yesterday.strftime('%Y-%m-%d')}"
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        riders = obj.riders.all()
+        if not riders.exists():
+            cache.set(cache_key, 0.0, 60 * 60 * 24)
+            return 0.0
+
+        today = timezone.localdate()
+        tz = timezone.get_current_timezone()
+        yesterday_end = timezone.make_aware(datetime.combine(today, time.min), tz)
+        yesterday_start = yesterday_end - timedelta(days=1)
+
+        orders = Order.objects.filter(rider__in=riders, status="Done")
+
+        q_a = Q(
+            completed_at__gte=yesterday_start,
+            completed_at__lt=yesterday_end,
+        )
+        q_b = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__gte=yesterday_start,
+            deliveries__delivered_at__lt=yesterday_end,
+        )
+        q_c = Q(
+            completed_at__isnull=True,
+            deliveries__status="Delivered",
+            deliveries__delivered_at__isnull=True,
+            updated_at__gte=yesterday_start,
+            updated_at__lt=yesterday_end,
+        )
+
+        matching_orders = orders.filter(q_a | q_b | q_c).distinct()
+        total_dist = matching_orders.aggregate(total=Sum("distance_km"))["total"]
+        result = float(round(total_dist, 2)) if total_dist else 0.0
+        cache.set(cache_key, result, 60 * 60 * 24)
+        return result
+
+    def get_yesterday_orders_distance(self, obj: VehicleAsset) -> float:
+        """Alias for total_yesterday_orders_distance_km."""
+        return self.get_total_yesterday_orders_distance_km(obj)
+
+    def get_total_yesterday_order_distance(self, obj: VehicleAsset) -> float:
+        """Alias for total_yesterday_orders_distance_km."""
+        return self.get_total_yesterday_orders_distance_km(obj)
+
+
+class VerticalSerializer(serializers.ModelSerializer):
+    zone_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Vertical
+        fields = [
+            "id",
+            "name",
+            "code",
+            "lead_name",
+            "is_active",
+            "zone_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_zone_count(self, obj):
+        return obj.zones.count()

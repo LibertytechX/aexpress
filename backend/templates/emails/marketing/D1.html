@@ -1,0 +1,29 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>We've been busy behind the scenes — and we can't hold this news in any longer.</p>
+
+<p><strong>Introducing: Assured Express WebPOS 💳</strong></p>
+
+<p>We're making POS terminals available to our merchants so you can accept card payments directly from customers — right at the point of sale.</p>
+
+<p>What this means for your business:</p>
+<ul>
+    <li>Never lose a sale because a customer doesn't have cash</li>
+    <li>Accept payments from all major banks and cards</li>
+    <li>Seamlessly integrated with your Assured Express merchant account</li>
+    <li>Take a real step toward running a cashless business</li>
+</ul>
+
+<p>This feature is coming soon — and our most active merchants will be first in line for access.</p>
+
+<p>Stay active on the platform and you'll be among the first to benefit.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🔔 Register for Early Access</a>
+</div>
+
+<p>More exciting news is on the way. Watch this space.</p>
+{% endblock %}

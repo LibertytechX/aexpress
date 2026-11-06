@@ -4,14 +4,25 @@ from .views import (
     RiderViewSet,
     OrderViewSet,
     MerchantViewSet,
+    MerchantPricingOverrideViewSet,
     SystemSettingsView,
     RiderOnboardingView,
     S3PresignedUrlView,
+    S3FileUploadView,
     ActivityFeedView,
     AblyTokenView,
     ZoneViewSet,
     RelayNodeViewSet,
-    DispatcherListCreateView,
+    DispatcherViewSet,
+    VehicleAssetViewSet,
+    VerticalViewSet,
+    VehicleRevenueReportView,
+    DispatcherAffiliationSummaryView,
+    DispatcherCommissionListView,
+    DispatcherMonthlyEarningsListView,
+    DispatcherAffiliatedRidersListView,
+    DispatcherAffiliatedMerchantsListView,
+    DispatcherCommissionReconcileView,
     DispatcherDetailView,
 )
 
@@ -19,19 +30,54 @@ router = DefaultRouter()
 router.register(r"riders", RiderViewSet)
 router.register(r"orders", OrderViewSet)
 router.register(r"merchants", MerchantViewSet)
+router.register(
+    r"merchant-pricing-overrides",
+    MerchantPricingOverrideViewSet,
+    basename="merchant-pricing-override",
+)
 router.register(r"zones", ZoneViewSet)
 router.register(r"relay-nodes", RelayNodeViewSet)
+router.register(r"dispatchers", DispatcherViewSet, basename="dispatcher")
+router.register(r"vehicle-assets", VehicleAssetViewSet)
+router.register(r"verticals", VerticalViewSet)
 
 urlpatterns = [
     path("settings/", SystemSettingsView.as_view(), name="system-settings"),
     path("riders/onboarding/", RiderOnboardingView.as_view(), name="rider-onboarding"),
     path("s3/presigned-url/", S3PresignedUrlView.as_view(), name="s3-presigned-url"),
+    path("s3/upload/", S3FileUploadView.as_view(), name="s3-upload"),
     path("activity/", ActivityFeedView.as_view(), name="activity-feed"),
     path("ably-token/", AblyTokenView.as_view(), name="ably-token"),
+    path("revenue/", VehicleRevenueReportView.as_view(), name="vehicle-revenue-report"),
     path(
-        "dispatchers/",
-        DispatcherListCreateView.as_view(),
-        name="dispatcher-list-create",
+        "affiliation/summary/",
+        DispatcherAffiliationSummaryView.as_view(),
+        name="dispatcher-affiliation-summary",
+    ),
+    path(
+        "affiliation/commissions/",
+        DispatcherCommissionListView.as_view(),
+        name="dispatcher-affiliation-commissions",
+    ),
+    path(
+        "affiliation/monthly-earnings/",
+        DispatcherMonthlyEarningsListView.as_view(),
+        name="dispatcher-affiliation-monthly-earnings",
+    ),
+    path(
+        "affiliation/riders/",
+        DispatcherAffiliatedRidersListView.as_view(),
+        name="dispatcher-affiliation-riders",
+    ),
+    path(
+        "affiliation/merchants/",
+        DispatcherAffiliatedMerchantsListView.as_view(),
+        name="dispatcher-affiliation-merchants",
+    ),
+    path(
+        "affiliation/reconcile/",
+        DispatcherCommissionReconcileView.as_view(),
+        name="dispatcher-affiliation-reconcile",
     ),
     path(
         "dispatchers/<uuid:pk>/",

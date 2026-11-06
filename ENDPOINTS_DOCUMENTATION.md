@@ -1,0 +1,2149 @@
+# Assured Express - Complete API & Endpoint Documentation
+
+**Generated:** March 4, 2026
+**Project:** Assured Express
+**Integration:** ONRO Platform
+
+---
+
+## Table of Contents
+1. [ONRO Integration Webhooks (Receive Data)](#onro-webhooks-receive-data)
+2. [ONRO POST Endpoints (Send Data)](#onro-post-endpoints-send-data)
+3. [ONRO Support & Management Endpoints](#onro-support--management-endpoints)
+4. [Dashboard Endpoints](#dashboard-endpoints)
+5. [Dashboard Analytics Endpoints](#dashboard-analytics-endpoints)
+6. [Key Configuration Files](#key-configuration-files)
+7. [Wallet Endpoints](#wallet-endpoints)
+8. [Auth & Signup Endpoints](#auth--signup-endpoints)
+9. [Subscription Endpoints](#subscription-endpoints)
+10. [SmartParcel Locker Integration](#smartparcel-locker-integration)
+11. [Dispatcher Orders](#dispatcher-orders)
+12. [Google Places AWS Fallback](#google-places-aws-fallback)
+13. [AI Agent & MCP Logistics Endpoints](#ai-agent--mcp-logistics-endpoints)
+
+---
+
+## WALLET ENDPOINTS
+
+### 1. Get Virtual Account
+```
+GET /wallet/virtual-account/
+Description: Retrieves or creates a dedicated virtual account for the merchant to fund their wallet via bank transfer.
+Authentication: Required (Merchant)
+Response:
+  {
+    "success": true,
+    "data": {
+      "account_number": "7924567890",
+      "account_name": "AXPRESS/JOHN DOE",
+      "bank_name": "Wema Bank"
+    }
+  }
+```
+
+---
+
+### 2. Get Amortization Wallet Info
+```
+GET /wallet/amortization-wallet/
+Description: Retrieves bike hire-purchase progress for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "status": "success",
+    "message": "Amortization wallet info retrieved successfully",
+    "data": {
+      "balance": "5000.00",
+      "total_paid_to_date": "150000.00",
+      "cost": "1200000.00",
+      "expected_daily_payment": "1700.00",
+      "ownership_percentage": 12.5,
+      "is_active": true,
+      "virtual_account": {
+        "account_number": "1234567890",
+        "account_name": "AX-AMORT-JOHN",
+        "bank_name": "Wema Bank",
+        "bank_code": "000017",
+        "is_active": true
+      },
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  }
+```
+
+---
+
+### 3. Get Amortization Wallet Transactions
+```
+GET /wallet/amortization-transactions/
+Description: Retrieves paginated transaction history for the rider's amortization wallet.
+Authentication: Required (Rider)
+Query Parameters:
+  - page: Page number (default: 1)
+  - page_size: Items per page (default: 20)
+Response:
+  {
+    "count": 45,
+    "next": "...",
+    "previous": null,
+    "results": [
+      {
+        "id": "uuid",
+        "type": "credit",
+        "amount": "1700.00",
+        "description": "Daily bike payment",
+        "reference": "REF-123",
+        "balance_before": "5000.00",
+        "balance_after": "6700.00",
+        "status": "success",
+        "created_at": "...",
+        "updated_at": "..."
+      },
+      ...
+    ]
+  }
+```
+
+---
+
+## AUTH & SIGNUP ENDPOINTS
+
+### 1. Merchant Signup
+```
+POST /api/auth/signup/
+Description: Register a new merchant account.
+Request Body:
+  {
+    "email": "user@example.com",
+    "password": "password123",
+    "business_name": "My Business",
+    "referral_code": "OPTIONAL_CODE"
+  }
+```
+
+### 2. Request Password Reset
+```
+POST /api/auth/request-password-reset/
+Description: Requests a 6-digit password reset code. Generates token and triggers Celery background task (send_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone_number required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone_number": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that email, you will receive a password reset code shortly."
+  }
+```
+
+### 3. Mobile Request Password Reset
+```
+POST /api/auth/mobile/request-password-reset/
+Description: Requests a 6-digit password reset code for mobile app. Generates token and triggers Celery background task (send_mobile_password_reset_otp_task) delivering OTP to both user's email and phone.
+Authentication: None (Public)
+Request Body (either email or phone required):
+  {
+    "email": "user@example.com"
+  }
+  or
+  {
+    "phone": "+2348012345678"
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email."
+  }
+```
+
+---
+
+## SUBSCRIPTION ENDPOINTS
+
+### 1. Get Subscription Plans
+```
+GET /subscriptions/plans/
+Description: Retrieves all available subscription plans (Starter, Growth, Enterprise).
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Enterprise",
+        "price": "75000.00",
+        "free_orders_limit": 400,
+        "overage_fee": "300.00",
+        "has_dedicated_rider": true
+      },
+      ...
+    ]
+  }
+```
+
+### 2. Subscribe to a Plan
+```
+POST /subscriptions/plans/{plan_id}/subscribe/
+Description: Subscribes the merchant to a specific plan.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "id": "uuid",
+      "plan": { ... },
+      "start_date": "...",
+      "end_date": "...",
+      "status": "active"
+    }
+  }
+```
+
+### 3. Get Postpaid Plans
+```
+GET /subscriptions/postpaid/plans/
+Description: Retrieves all available postpaid subscription plans.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": [
+      {
+        "id": "uuid",
+        "name": "Monthly Postpaid",
+        "plan_type": "monthly",
+        "is_active": true
+      },
+      ...
+    ]
+  }
+```
+
+### 4. Activate Postpaid Plan
+```
+POST /subscriptions/postpaid/plans/{plan_id}/activate/
+Description: Activates a postpaid plan for the merchant.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "message": "Plan activated successfully"
+  }
+```
+
+### 5. Get Active Postpaid Subscription
+```
+GET /subscriptions/postpaid/active/
+Description: Retrieves the current active postpaid subscription details.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+       "id": "uuid",
+       "name": "Monthly Postpaid",
+       "status": "active"
+    }
+  }
+```
+
+### 3. Get Active Subscription
+```
+GET /subscriptions/active/
+Description: Retrieves the merchant's current active subscription.
+Authentication: Required (Merchant)
+Response:
+  {
+    "status": "success",
+    "data": {
+      "subscriptions": [ ... ],
+      "current_active": {
+        "id": "uuid",
+        "plan": { ... },
+        "status": "active",
+        "end_date": "..."
+      }
+    }
+  }
+```
+
+---
+
+## ONRO WEBHOOKS (RECEIVE DATA)
+
+These endpoints receive real-time data from the ONRO platform:
+
+### 1. Pickup & Delivery Orders Webhook
+```
+POST /onro/webhooks/pd-orders/
+Handler: OnroUniversalWebhookView
+File: onro_integration/webhook_handlers.py
+Authentication: CSRF-exempt
+Description: Receives pickup and delivery order events from ONRO
+Data Storage: OnroOrder, OnroOrderDetail tables
+```
+
+### 2. On-Demand Orders Webhook
+```
+POST /onro/webhooks/ondemand-orders/
+Handler: OnroUniversalWebhookView
+File: onro_integration/webhook_handlers.py
+Authentication: CSRF-exempt
+Description: Receives on-demand order events from ONRO
+Data Storage: OnroOrder, OnroOnDemandOrder tables
+```
+
+### 3. Driver Webhooks
+```
+POST /onro/webhooks/drivers/
+Handler: OnroUniversalWebhookView
+File: onro_integration/webhook_handlers.py
+Authentication: CSRF-exempt
+Description: Receives driver-related events from ONRO
+```
+
+### 4. Merchant Webhooks
+```
+POST /onro/webhooks/merchants/
+Handler: OnroMerchantWebhookView
+File: onro_integration/merchant_webhooks.py
+Authentication: CSRF-exempt
+Description: Receives merchant events from ONRO
+Event Types:
+  - Registered (New merchant registration)
+  - Send password reset url
+  - Send verification code
+  - New withdraw request
+  - Complete withdraw request
+  - Reject withdraw request
+```
+
+### 5. Driver Location Webhook
+```
+POST /onro/driver-location-webhook/
+Handler: OnroDriverLocationWebhookView
+File: onro_integration/driver_tracking.py
+Authentication: None (allows real-time location updates)
+Description: Receives real-time driver location updates for active orders
+```
+
+---
+
+## ONRO POST ENDPOINTS (SEND DATA)
+
+These endpoints send operations to ONRO platform:
+
+### Pickup & Delivery Orders
+
+```
+POST /onro/pd-orders/create/
+Handler: File - onro_integration/order_views.py
+Description: Create a new pickup and delivery order
+Request Body: Order details (pickup location, delivery location, etc.)
+
+POST /onro/pd-orders/draft/
+Description: Save order as draft without confirming
+
+POST /onro/pd-orders/confirm/
+Description: Confirm a drafted order
+
+POST /onro/pd-orders/calculate-price/
+Description: Calculate order price before confirmation
+Response: Estimated cost breakdown
+
+POST /onro/pd-orders/cancel/
+Description: Cancel an existing P&D order
+Request Body: Order ID, cancellation reason
+
+POST /onro/pd-orders/sync/
+Description: Sync order data with ONRO
+Response: Updated order status and details
+```
+
+### On-Demand Orders
+
+```
+POST /onro/ondemand-orders/create/
+Handler: File - onro_integration/ondemand_views.py
+Description: Create a new on-demand order
+Request Body: Order details
+
+POST /onro/ondemand-orders/calculate-price/
+Description: Calculate on-demand order price
+
+POST /onro/ondemand-orders/cancel/
+Description: Cancel on-demand order
+
+POST /onro/ondemand-orders/sync/
+Description: Sync on-demand orders with ONRO
+Response: All on-demand orders and their current status
+```
+
+---
+
+## ONRO SUPPORT & MANAGEMENT ENDPOINTS
+
+### Webhook & Sync Management
+
+```
+GET /onro/webhook-logs/
+Description: View all webhook logs received from ONRO
+Response: Paginated list of webhook events with timestamps and payloads
+
+GET /onro/sync/logs/
+Description: View sync operation logs
+Response: History of sync operations, timestamps, statuses
+
+POST /onro/sync/full/
+Description: Trigger a complete data sync with ONRO
+Response: Sync job ID, status, and statistics
+
+POST /onro/cancellation-reasons/sync/
+Description: Sync cancellation reasons from ONRO
+Response: Updated list of available cancellation reasons
+
+POST /onro/track-driver/
+Description: Get real-time driver location
+Request Body: Driver ID or Order ID
+Response: Current GPS coordinates, last update time
+```
+
+---
+
+## DASHBOARD ENDPOINTS
+
+All dashboard endpoints return JSON responses with comprehensive analytics and metrics.
+
+### Main Dashboard Views
+
+```
+GET /onro_integration/dashboard/
+Handler: OnroDashboardView
+Description: Basic dashboard overview
+Response: Summary widgets and key metrics
+```
+
+### Order Dashboard
+
+```
+GET /onro_integration/order-dashboard/
+Handler: OrderDashboardView
+Description: Complete order pipeline and metrics
+Response:
+  - Total orders by status (pending, confirmed, in-transit, delivered, cancelled)
+  - Order pipeline visualization
+  - Average delivery time
+  - Zone-wise order distribution
+  - Order trends (hourly, daily, weekly)
+Query Parameters:
+  - date_filter: today, last_7_days, monthly, biannual, annual, custom_range
+  - start_date / end_date: For custom date ranges
+```
+
+### Management Dashboard
+
+```
+GET /onro_integration/management-dashboard/
+Handler: ManagementDashboardView
+Description: Executive-level dashboard with comprehensive metrics
+Response:
+  - Revenue trends
+  - Cost analysis
+  - Profitability metrics
+  - Key performance indicators
+  - Team performance
+```
+
+### Rider Dashboard
+
+```
+GET /onro_integration/rider-dashboard/
+Handler: RiderDashboardView
+Description: Rider/driver management and performance
+Response:
+  - Rider tier distribution
+  - GPS sync status
+  - Performance metrics
+  - Active vs inactive riders
+  - Earnings summary
+Query Parameters:
+  - tier: Filter by rider tier
+  - activity: Filter by activity status
+  - page, page_size: For pagination
+```
+
+### Merchant Dashboard
+
+```
+GET /onro_integration/merchant-dashboard/
+Handler: MerchantDashboardView
+Description: Merchant analytics and intelligence
+Response:
+  - Merchant activity metrics
+  - Credit score analysis
+  - Transaction history
+  - Merchant growth trends
+```
+
+### COD Dashboard
+
+```
+GET /onro_integration/cod-dashboard/
+Handler: CODDashboardView
+Description: Cash on Delivery tracking and reconciliation
+Response:
+  - COD collection status
+  - Settlement details
+  - Pending reconciliations
+  - Dispute logs
+```
+
+### Financial P&L Dashboard
+
+```
+GET /onro_integration/financial-pl-dashboard/
+Handler: FinancialPLDashboardView
+Description: Financial Profit & Loss analysis
+Response:
+  - Revenue breakdown by source
+  - Cost categories
+  - Profit/Loss trends
+  - Monthly P&L statements
+Query Parameters:
+  - tab: revenue, expenses, profit, summary
+  - date_filter: Time period filter
+```
+
+### Fleet Management Dashboard
+
+```
+GET /onro_integration/fleet-management-dashboard/
+Handler: FleetManagementDashboardView
+Description: Fleet and vehicle management with GPS tracking
+Response:
+  - Fleet status overview
+  - Vehicle maintenance schedule
+  - GPS real-time tracking
+  - Bike utilization rates
+  - Fuel consumption analysis
+```
+
+### Fraud Alert Dashboard
+
+```
+GET /onro_integration/fraud-alert-dashboard/
+Handler: FraudAlertDashboardView
+Description: Fraud detection and alert management
+Response:
+  - Active fraud alerts
+  - Risk assessment scores
+  - Triggering metrics
+  - Alert history
+  - Recommended actions
+```
+
+### On-Demand Order Dashboard
+
+```
+GET /onro_integration/ondemand-orders/dashboard/
+Handler: OnDemandOrderDashboardView
+Description: On-demand specific order metrics
+Response: On-demand order analytics and pipeline
+```
+
+---
+
+## DASHBOARD ANALYTICS ENDPOINTS
+
+Advanced analytics endpoints for super admin:
+
+### Analytics API
+
+```
+POST /onro_integration/admin-dashboard/analytics/
+Handler: AnalyticsAPIView
+Description: Flexible custom analytics based on parameters
+Request Body:
+  {
+    "metric": "revenue|orders|drivers|merchants",
+    "date_range": "today|week|month|custom",
+    "start_date": "2026-03-01",
+    "end_date": "2026-03-04",
+    "group_by": "daily|weekly|monthly|zone",
+    "status_filter": "all|completed|pending|cancelled"
+  }
+Response: Custom analytics data formatted as requested
+Example Response:
+  {
+    "total": 15000,
+    "average": 500,
+    "trend": "increasing",
+    "data_points": [...],
+    "summary": {...}
+  }
+```
+
+### Chart Data API
+
+```
+POST /onro_integration/admin-dashboard/charts/
+Handler: ChartDataAPIView
+Description: Pre-formatted chart data for frontend visualization
+Request Body:
+  {
+    "chart_type": "pie|bar|line",
+    "metric": "orders|revenue|riders",
+    "period": "month|week|day"
+  }
+Response: Chart-ready data with labels, values, colors
+Supported Formats:
+  - Pie Charts: Category distribution
+  - Bar Charts: Comparative metrics
+  - Line Charts: Trends over time
+```
+
+### Real-Time Data API
+
+```
+GET /onro_integration/admin-dashboard/realtime/
+Handler: RealTimeDataAPIView
+Description: Real-time dashboard updates
+Query Parameters:
+  - last_update: Timestamp to get updates since
+Response:
+  {
+    "last_update": "2026-03-04T10:30:00Z",
+    "active_orders": 250,
+    "active_drivers": 45,
+    "online_merchants": 127,
+    "current_revenue": 5500,
+    "updates": [...]
+  }
+```
+
+### Export Data API
+
+```
+POST /onro_integration/admin-dashboard/export/
+Handler: ExportDataAPIView
+Description: Export dashboard data as CSV or JSON
+Request Body:
+  {
+    "format": "csv|json",
+    "report_type": "orders|riders|merchants|financial",
+    "date_range": "custom",
+    "start_date": "2026-03-01",
+    "end_date": "2026-03-04"
+  }
+Response: File download with report data
+File Format: CSV with headers or JSON structure
+```
+
+### Health Check API
+
+```
+GET /onro_integration/admin-dashboard/health/
+Handler: DashboardHealthAPIView
+Description: System health status and diagnostics
+No Parameters Required
+Response:
+  {
+    "status": "healthy|warning|error",
+    "database": {
+      "connected": true,
+      "response_time_ms": 45
+    },
+    "cache": {
+      "status": "active",
+      "hit_rate": 0.87
+    },
+    "uptime_seconds": 1234567,
+    "last_sync": "2026-03-04T10:25:00Z",
+    "webhook_queue": 0
+  }
+```
+
+---
+
+## Common Query Parameters
+
+These parameters are supported across most dashboard endpoints:
+
+| Parameter | Values | Description |
+|-----------|--------|-------------|
+| `date_filter` | today, last_7_days, monthly, biannual, annual, custom_range | Time period to filter data |
+| `start_date` | YYYY-MM-DD | Start date for custom range |
+| `end_date` | YYYY-MM-DD | End date for custom range |
+| `page` | Integer | Pagination page number (starts from 1) |
+| `page_size` | Integer | Number of items per page |
+| `status` | Specific values | Filter by status (pending, completed, cancelled, etc.) |
+| `tier` | Specific values | Filter by tier/category |
+| `activity` | active, inactive | Filter by activity status |
+| `tab` | Specific values | For multi-tab dashboards (revenue, expenses, etc.) |
+
+---
+
+## Key Configuration Files
+
+### Backend Files (Python/Django)
+
+```
+onro_integration/
+├── webhook_handlers.py
+│   └── OnroUniversalWebhookView, OnroWebhookEventListener
+├── merchant_webhooks.py
+│   └── OnroMerchantWebhookView
+├── driver_tracking.py
+│   └── OnroDriverLocationWebhookView
+├── order_views.py
+│   └── P&D order CRUD endpoints
+├── ondemand_views.py
+│   └── On-demand order endpoints
+├── dashboard_views.py (3,133 lines)
+│   ├── SuperAdminDashboardView
+│   ├── OrderDashboardView
+│   ├── RiderDashboardView
+│   ├── MerchantDashboardView
+│   ├── ManagementDashboardView
+│   ├── CODDashboardView
+│   ├── FinancialPLDashboardView
+│   ├── FleetManagementDashboardView
+│   ├── FraudAlertDashboardView
+│   ├── AnalyticsAPIView
+│   ├── ChartDataAPIView
+│   ├── RealTimeDataAPIView
+│   ├── ExportDataAPIView
+│   └── DashboardHealthAPIView
+├── dashboard_serializers.py
+│   └── Data validation and serialization
+├── dashboard_utils.py
+│   └── Analytics calculation utilities
+├── dashboard_tasks.py
+│   └── Celery async tasks
+└── urls.py
+    └── All route definitions (lines 126-143 for dashboards)
+```
+
+### Frontend Files (TypeScript/React)
+
+```
+frontend/pages/
+├── scheduler/dashboard.tsx
+│   └── Scheduler dashboard UI
+└── dispatcher/dashboard.tsx
+    └── Dispatcher dashboard UI
+```
+
+---
+
+## Authentication & Security
+
+**CSRF Settings:**
+- All webhook endpoints: `csrf_exempt = True` (allows ONRO to POST without CSRF token)
+- Dashboard endpoints: Protected by Django session authentication
+- API endpoints: May require authentication tokens or session cookies
+
+**Rate Limiting:**
+- Webhook endpoints: No rate limiting (to ensure no data loss)
+- Dashboard endpoints: Standard Django rate limiting
+- Export endpoints: May have concurrent request limits
+
+---
+
+## Response Format
+
+All endpoints return JSON responses. Standard response format:
+
+### Success Response
+```json
+{
+  "status": "success",
+  "data": { /* endpoint-specific data */ },
+  "timestamp": "2026-03-04T10:30:00Z",
+  "message": "Optional success message"
+}
+```
+
+### Error Response
+```json
+{
+  "status": "error",
+  "error": "Error code or message",
+  "details": "Detailed error description",
+  "timestamp": "2026-03-04T10:30:00Z"
+}
+```
+
+---
+
+## Testing Webhooks
+
+To test webhook integration:
+
+1. **Merchant Webhook Test:**
+   ```
+   POST /onro/webhooks/merchants/
+   Content-Type: application/json
+
+   {
+     "event_type": "Registered",
+     "merchant_id": "MERCHANT_123",
+     "timestamp": "2026-03-04T10:30:00Z"
+   }
+   ```
+
+2. **Order Webhook Test:**
+   ```
+   POST /onro/webhooks/pd-orders/
+   Content-Type: application/json
+
+   {
+     "event_type": "order_created",
+     "order_id": "ORD_123",
+     "timestamp": "2026-03-04T10:30:00Z"
+   }
+   ```
+
+---
+
+## Performance Optimization Tips
+
+1. **Dashboard Caching:** Most dashboard data is cached for 5 minutes for better performance
+2. **Pagination:** Use `page` and `page_size` parameters to limit data volume
+3. **Date Filtering:** Always specify `date_filter` to reduce query load
+4. **Async Tasks:** Use Celery tasks for heavy data export operations
+5. **Real-time Updates:** Use the `/realtime/` endpoint for incremental updates instead of full dashboard refreshes
+
+---
+
+## Support & Troubleshooting
+
+**Webhook Issues:**
+- Check `/onro/webhook-logs/` for recent webhook events
+- Verify ONRO server can reach your endpoint
+- Check firewall/NAT rules
+
+**Dashboard Performance:**
+- Check `/admin-dashboard/health/` for system status
+- Review database response times
+- Clear cache if data seems stale
+
+**Data Sync Issues:**
+- Use `POST /onro/sync/full/` to trigger full sync
+- Check `/onro/sync/logs/` for sync history
+- Verify API credentials in ONRO settings
+
+---
+
+**Last Updated:** May 20, 2026
+**Version:** 1.4
+**Recent Changes:** Added comprehensive Rider App Endpoints section covering Today's Trips period list, Rider Wallet Info balance aggregation, and duty toggle endpoints.
+**Document Type:** API Reference Documentation
+
+For more information, refer to individual view implementations in the source files listed above.
+
+---
+
+## SMARTPARCEL LOCKER INTEGRATION
+
+This suite of endpoints manages integration with the SmartParcel locker network.
+
+### 1. List States
+```
+GET /api/orders/smart-parcel/states/
+Description: Retrieves all states where SmartParcel operates.
+Authentication: Required (Merchant)
+```
+
+### 2. List Cities by State
+```
+GET /api/orders/smart-parcel/states/{state_id}/cities/
+Description: Retrieves all cities for a specific SmartParcel state.
+Authentication: Required (Merchant)
+```
+
+### 3. List Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/city/{city_id}/
+Description: Retrieves all available SmartParcel boxes in a city.
+Authentication: Required (Merchant)
+```
+
+### 4. List Assigned Boxes by City
+```
+GET /api/orders/smart-parcel/boxes/assigned/city/{city_id}/
+Description: Retrieves SmartParcel boxes assigned to the merchant in a city.
+Authentication: Required (Merchant)
+```
+
+### 5. Get Box Details
+```
+GET /api/orders/smart-parcel/boxes/{box_id}/
+Description: Retrieves details for a specific SmartParcel box.
+Authentication: Required (Merchant)
+```
+
+### 6. List Locker Sizes
+```
+GET /api/orders/smart-parcel/locker-sizes/
+Description: Retrieves all available locker sizes on the network.
+Authentication: Required (Merchant)
+```
+
+### 7. Create Parcel
+```
+POST /api/orders/smart-parcel/parcels/
+Description: Create a new SmartParcel parcel for locker pickup/delivery directly. Note: Quick Send orders (`POST /api/orders/quick-send/`) also support integrated SmartParcel locker pickup and delivery creation by passing `is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, and `locker_size_id` in the request body.
+Authentication: Required (Merchant)
+
+Response (201 Created):
+  {
+    "status": "success",
+    "message": "SmartParcel parcel created successfully.",
+    "data": {
+      "parcel": { ... },
+      "statuscode": "00",
+      "statusmessage": "New parcel request successful. Locker Number (5) has been reserved for you at (SmartParcel Sterling Bank Adeola Odeku)."
+    }
+  }
+
+Response (502 Bad Gateway - API Error / Validation Error / Business Logic Error):
+  {
+    "status": "error",
+    "message": "No (Medium) locker available at (SmartParcel Sterling Bank Adeola Odeku).",
+    "data": {}
+  }
+```
+
+### 8. List Pending Pickups
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves SmartParcel parcels awaiting pickup.
+Authentication: Required (Merchant)
+
+---
+
+## MERCHANT ORDERS
+
+### 1. Cancel Order
+```
+POST /api/orders/cancel/{order_number}/
+Description: Cancels an active order and processes refunds if applicable.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "reason": "Customer requested cancellation" (Optional)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order 6158001 has been canceled",
+    "data": {
+      "order": {
+        "order_number": "6158001",
+        "old_status": "Pending",
+        "new_status": "CustomerCanceled",
+        "payment_method": "wallet",
+        "total_amount": 2500.00,
+        "canceled_at": "2026-05-04T15:00:00Z"
+      },
+      "refund": {
+        "processed": true,
+        "amount": 2500.00,
+        "reason": "Customer requested cancellation"
+      }
+    }
+  }
+```
+
+---
+
+### 2. Bulk / Multi-Drop Calculate Fare
+```
+POST /api/orders/bulk-calculate-fare/
+Description: Calculates route distance, duration, and fare across available vehicles for quick, multi, or bulk delivery modes. For multi and bulk modes, price per vehicle is capped at 20,000 as a guardrail.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "mode": "multi",
+    "pickup": {"lat": 6.5244, "long": 3.3792},
+    "deliveries": [
+      {"lat": 6.6018, "long": 3.3515}
+    ]
+  }
+Response:
+  {
+    "success": true,
+    "mode": "multi",
+    "vehicles": {
+      "Bike": {
+        "price": 4100.0,
+        "distance_km": 19.0,
+        "duration_minutes": 60,
+        "drop_details": [...]
+      }
+    }
+  }
+```
+
+---
+
+## DISPATCHER ORDERS
+
+### 1. Create Order
+```
+POST /dispatch/orders/
+Description: Creates a new order manually from the dispatcher portal.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "pickup": "Pickup Address",
+    "dropoff": "Dropoff Address",
+    "senderName": "Sender Name",
+    "senderPhone": "08012345678",
+    "receiverName": "Receiver Name",
+    "receiverPhone": "08087654321",
+    "vehicle": "Bike",
+    "packageType": "Box",
+    "price": 2500.00,
+    "cod": 0.00,
+    "riderId": "RIDER_UUID",
+    "merchantId": "MERCHANT_UUID",
+    "is_partner_order": true,
+    "partner_order_count": 10,
+    "file_uploaded_urls": [
+      "https://example.com/image1.jpg",
+      "https://example.com/image2.jpg"
+    ]
+  }
+Response: Created Order object.
+```
+
+### 2. Update Partner Stats
+```
+PATCH /dispatch/orders/{order_number}/update-partner-stats/
+Description: Updates processing metrics for a partner bulk order.
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "rider_completed_count": 50,
+    "day_returned_count": 2
+  }
+Response: Updated Order object.
+```
+
+### 3. Update Order Status
+```
+POST /dispatch/orders/{order_number}/update_status/
+Description: Updates the status of an order (e.g., In Transit, Delivered, Cancelled).
+Authentication: Required (Dispatcher)
+Request Body:
+  {
+    "status": "Cancelled",
+    "reason": "Customer changed their mind" (Optional, used for cancellation)
+  }
+Response:
+  {
+    "status": "success",
+    "message": "Order status updated to CustomerCanceled",
+    "data": {
+      "id": "6158001",
+      "status": "CustomerCanceled",
+      "cancellation_reason": "Customer changed their mind",
+      ...
+    }
+  }
+```
+```
+GET /api/orders/smart-parcel/parcels/pending-pickups/
+Description: Retrieves all pending parcels ready for pickup from the SmartParcel network.
+Authentication: Required (Merchant)
+```
+
+### 9. Resolve Collect Code
+```
+GET /api/orders/smart-parcel/parcels/resolve-collect-code/{collect_code}/
+Description: Resolves a collect code to a pending parcel for pickup.
+Authentication: Required (Merchant)
+```
+
+### 10. Get Parcel Details
+```
+GET /api/orders/smart-parcel/parcels/{tracking_number}/
+Description: Retrieves full details for a SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 11. Cancel Parcel
+```
+POST /api/orders/smart-parcel/parcels/{tracking_number}/cancel/
+Description: Cancels an existing SmartParcel parcel.
+Authentication: Required (Merchant)
+```
+
+### 12. Simulate Drop Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/locker/simulate/drop/
+Description: Triggers a simulated "dropped" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "CJ95"
+  }
+```
+
+### 13. Simulate Collect Parcel (Sandbox Only)
+```
+POST /api/orders/smart-parcel/locker/simulate/collect/
+Description: Triggers a simulated "collected" state for a parcel in sandbox mode.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "box_id": "14",
+    "unlock_code": "J6E7"
+  }
+```
+
+---
+
+## DISPATCHER MERCHANTS
+
+### 1. List Merchants
+```
+GET /merchants/
+Description: Retrieves a list of all merchants.
+Authentication: Required (Dispatcher)
+Response: Paginated list of Merchant objects.
+```
+
+### 2. Deactivate Merchant
+```
+DELETE /merchants/{id}/
+Description: Soft-deactivates a merchant account.
+Authentication: Required (Dispatcher Admin)
+Response:
+  {
+    "status": "success",
+    "message": "Merchant deactivated successfully."
+  }
+```
+
+### 3. Merchant Pricing Overrides
+```
+POST /merchant-pricing-overrides/
+Description: Create or update (upsert) a pricing override for a specific merchant and vehicle type.
+Authentication: Required (Dispatcher Admin)
+Request Body:
+  {
+    "merchant": "USER_UUID",
+    "vehicle": VEHICLE_ID,
+    "flat_fee": 1500.00, (Optional)
+    "pricing_tiers": { ... }, (Optional)
+    "is_active": true
+  }
+Response: The created or updated Pricing Override object.
+```
+
+```
+GET /merchant-pricing-overrides/
+Description: List all merchant pricing overrides. Supports filtering.
+Authentication: Required (Dispatcher Admin)
+Query Parameters:
+  - merchant: USER_UUID
+  - vehicle: VEHICLE_ID
+  - active: true|false
+Response: Paginated list of Pricing Override objects.
+```
+
+---
+
+## RIDER APP ENDPOINTS
+
+These endpoints support rider mobile application interactions:
+
+### 1. Toggle Duty Status
+```
+POST /api/riders/duty/
+Description: Toggles the online/offline duty status of the rider. Blocked with 403 Forbidden if unverified independent rider attempts to go online.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "status": "online" | "offline",
+    "latitude": 6.5244,
+    "longitude": 3.3792
+  }
+Response (200 OK):
+  {
+    "success": true,
+    "status": "online",
+    "timestamp": "2026-10-13T12:00:00Z"
+  }
+Error Response (403 Forbidden):
+  {
+    "success": false,
+    "message": "Account is not verified or authorized to go online."
+  }
+```
+
+### 1a. Order Offers List
+```
+GET /api/riders/orders/offers/
+Description: Returns pending available order offers. Forbidden for unverified independent riders pending KYC review.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  [
+    {
+      "id": "uuid",
+      "order_number": "AX-123456",
+      "pickup_address": "123 Marina St",
+      "estimated_earnings": "400.00",
+      "status": "pending"
+    }
+  ]
+Error Response (403 Forbidden):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+```
+
+### 1b. Accept Order Offer
+```
+POST /api/riders/orders/offers/<uuid:offer_id>/accept/
+Description: Accepts an order offer and assigns the order to the rider. Forbidden for unverified riders and riders whose assigned home zone or hub does not match the offer's zone.
+Authentication: Required (Verified Rider)
+Response (200 OK):
+  {
+    "success": true,
+    "message": "Order offer accepted."
+  }
+Error Response (403 Forbidden - Unverified):
+  {
+    "detail": "Account is not verified or authorized. You cannot access order offers until approved."
+  }
+Error Response (403 Forbidden - Out of Zone):
+  {
+    "success": false,
+    "message": "Rider is not in the zone."
+  }
+Error Response (400 Bad Request - Missing Zone Assignment):
+  {
+    "success": false,
+    "message": "Rider has no assigned hub or home zone."
+  }
+```
+
+### 2. Today's Trips
+```
+GET /api/riders/orders/today/
+Description: Retrieves completed trips (orders) for the authenticated rider during the active period (today, week, month).
+Authentication: Required (Rider)
+Query Parameters:
+  - period: today (default), week, month
+Response:
+  {
+    "success": true,
+    "data": [
+      {
+        "id": "ORDER001",
+        "route": "Surulere -> V.I.",
+        "time": "7:16 AM",
+        "distance": "12.40km",
+        "earned": 2500.0,
+        "cod": 8037.0
+      },
+      ...
+    ]
+  }
+```
+
+### 3. Rider Wallet Info
+```
+GET /api/riders/wallet/info/
+Description: Retrieves available balance, pending COD, and withdrawable balance details for the authenticated rider.
+Authentication: Required (Rider)
+Response:
+  {
+    "success": true,
+    "data": {
+      "available_balance": 5000.0,
+      "pending_cod": 0.0,
+      "withdrawable_balance": 5000.0
+    }
+  }
+```
+
+### 4. Rider Real-Time Leaderboard
+```
+GET /api/riders/leaderboard/
+Description: Retrieves real-time ranked list of top 50 riders and current rider's rank, trips count, and earnings. Powered by Redis Sorted Sets with automatic PostgreSQL failover.
+Authentication: Required (Rider)
+Query Parameters:
+  - period (optional): this_week, this_month (default), or all_time.
+Response:
+  {
+    "period": "this_month",
+    "period_key": "2026-09",
+    "my_rank": 3,
+    "entries": [
+      {
+        "rank": 1,
+        "rider_id": "R-101",
+        "name": "Ade Babatunde",
+        "zone": "Ikeja",
+        "trips_count": 45,
+        "earnings": "67500.00",
+        "is_me": false
+      },
+      {
+        "rank": 2,
+        "rider_id": "R-105",
+        "name": "Emeka Okafor",
+        "zone": "Lekki Phase 1",
+        "trips_count": 42,
+        "earnings": "63000.00",
+        "is_me": false
+      },
+      {
+        "rank": 3,
+        "rider_id": "R-102",
+        "name": "Musa Danjuma",
+        "zone": "Victoria Island",
+        "trips_count": 39,
+        "earnings": "58500.00",
+        "is_me": true
+      }
+    ]
+  }
+```
+
+---
+
+## Places API (Google Places / Fallbacks & Session Usage Tracking)
+
+### 1. Places Autocomplete
+```
+GET /api/orders/places/autocomplete/
+Description: Retrieves location autocomplete suggestions using Google Places API (with fallback chain: Geoapify -> Mapbox -> AWS Location Service). Automatically records session token usage in GoogleAutoCompleteSessionUsage (status: IN_PROGRESS, price per session: $0.005).
+Authentication: Required (Merchant)
+Query Parameters:
+  - q (required): The partial query text to search for.
+  - session_token (optional): A UUID string to group suggestions and details retrieve requests for Google / Mapbox session billing.
+Response:
+  {
+    "status": "success",
+    "message": "Autocomplete suggestions retrieved successfully From Google",
+    "data": [
+      {
+        "place_id": "google:ChIJb_google_place_id",
+        "description": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+        "is_google": true,
+        "structured_formatting": {
+          "main_text": "15a Kunle Ogunba St",
+          "secondary_text": "Lekki, Lagos, Nigeria"
+        }
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+---
+
+### 2. Place Details
+```
+GET /api/orders/places/details/
+Description: Retrieves details (formatted address and coordinates) for a given PlaceId (supports google:, geoapify:, mapbox:, or aws: prefixes). When called with session_token for a Google place, marks the GoogleAutoCompleteSessionUsage as RESOLVED with the resolved place_id and timestamp.
+Authentication: Required (Merchant)
+Query Parameters:
+  - place_id (required): The PlaceId returned by the autocomplete suggestion (e.g. google:ChIJ...).
+  - session_token (optional): A UUID string matching the autocomplete session_token.
+Response:
+  {
+    "status": "success",
+    "message": "Place details retrieved successfully",
+    "data": {
+      "formatted_address": "15a Kunle Ogunba St, Lekki, Lagos, Nigeria",
+      "lat": 6.4399005,
+      "lng": 3.4701005
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 3. Reverse Geocode Coordinates
+```
+GET /api/orders/places/reverse-geocode/
+Description: Reverse geocodes coordinates to a human-readable address.
+Authentication: Required (Merchant)
+Query Parameters:
+  - lat (required): Latitude float.
+  - lng (required): Longitude float.
+Response:
+  {
+    "status": "success",
+    "message": "Coordinates reverse geocoded successfully",
+    "data": {
+      "address": "Lekki Peninsula, Victoria Island, Lagos, NGA"
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 4. Geocode Address
+```
+GET /api/orders/places/geocode/
+Description: Geocodes an address string to coordinates.
+Authentication: Required (Merchant)
+Query Parameters:
+  - address (required): The address string to geocode.
+Response:
+  {
+    "status": "success",
+    "message": "Address geocoded successfully",
+    "data": {
+      "lat": 6.5244,
+      "lng": 3.3792
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+## AI AGENT & MCP LOGISTICS ENDPOINTS
+
+### 1. Calculate Delivery Quote (get_quote)
+```http
+POST /api/orders/quote/
+Description: Calculates delivery price estimates and route travel duration between pickup and delivery locations. Defaults to 'Bike' and returns all active vehicle quotes.
+Authentication: None / API Key / JWT (Permissive)
+Request Headers:
+  - Content-Type: application/json
+Request Body:
+  {
+    "pickup_location": "12 Admiralty Way, Lekki Phase 1, Lagos",
+    "delivery_location": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+    "vehicle": "Bike" // Optional: "Bike", "Car", "Van" (defaults to "Bike")
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Quote calculated successfully",
+    "data": {
+      "pickup_location": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "delivery_location": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+      "distance_km": 15.2,
+      "duration_minutes": 32,
+      "selected_vehicle": "Bike",
+      "estimated_price": 2500.0,
+      "formatted_price": "₦2,500.00",
+      "quotes": [
+        {
+          "vehicle": "Bike",
+          "price": 2500.0,
+          "formatted_price": "₦2,500.00",
+          "base_fare": 500.0,
+          "distance_km": 15.2,
+          "duration_minutes": 32
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 2. Book Order via AI Agent (book_order)
+```http
+POST /api/orders/agent/book/
+Description: Creates a quick-send delivery order. Automatically geocodes addresses and calculates route distance/duration if omitted.
+Authentication: None / API Key / JWT (Associates order with sender_phone user)
+Request Headers:
+  - Content-Type: application/json
+Request Body:
+  {
+    "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+    "sender_name": "Adeola Johnson",
+    "sender_phone": "+2348012345678",
+    "dropoff_address": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+    "receiver_name": "Chidi Okafor",
+    "receiver_phone": "+2348098765432",
+    "vehicle": "Bike", // Optional, defaults to "Bike"
+    "package_type": "Box", // Optional (Box, Envelope, Fragile, Food, Document, Other)
+    "notes": "Urgent package", // Optional
+    "payment_method": "wallet" // Optional (wallet, cash, cash_on_pickup, receiver_pays)
+  }
+Response (201 Created):
+  {
+    "status": "success",
+    "message": "Order booked successfully",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "status": "Pending",
+      "mode": "quick",
+      "vehicle": "Bike",
+      "total_amount": 2500.0,
+      "payment_method": "wallet",
+      "payment_status": "Pending",
+      "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "dropoff_address": "Ikeja City Mall, Alausa, Ikeja, Lagos",
+      "distance_km": 15.2,
+      "duration_minutes": 32,
+      "created_at": "2026-09-03T13:00:00Z"
+    },
+    "status_code": 201
+  }
+```
+
+---
+
+### 3. Track Order (track_order)
+```http
+GET /api/orders/track/<order_id>/
+Description: Retrieves order tracking status, assigned rider details, and lifecycle milestone events. Accepts numeric order_number (e.g. 6158045) or UUID.
+Authentication: None / API Key / JWT
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order tracking details retrieved",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "status": "InTransit",
+      "payment_status": "Paid",
+      "total_amount": 2500.0,
+      "pickup_address": "12 Admiralty Way, Lekki Phase 1, Lagos",
+      "sender_name": "Adeola Johnson",
+      "dropoff_address": "Ikeja City Mall, Alausa, Lagos",
+      "receiver_name": "Chidi Okafor",
+      "vehicle": "Bike",
+      "rider": {
+        "rider_id": "RD-101",
+        "name": "Musa Ibrahim",
+        "phone": "+234805551234",
+        "vehicle_type": "Bike",
+        "status": "InTransit"
+      },
+      "deliveries": [...],
+      "timeline": [
+        {
+          "event": "created",
+          "description": "Order created",
+          "created_at": "2026-09-03T12:00:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 4. Customer Deliveries History (get_user_deliveries)
+```http
+GET /api/orders/customer-deliveries/?phone=<phone>&limit=10&status=<status>
+Description: Lists active and historical orders and shipments associated with a phone number (as sender or receiver).
+Authentication: None / API Key / JWT
+Query Parameters:
+  - phone (required): Customer phone number (e.g. 08012345678 or +2348012345678).
+  - limit (optional): Maximum records (1-50, default 10).
+  - status (optional): Filter by order status (e.g. Pending, InTransit, Done).
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Customer deliveries retrieved successfully",
+    "data": {
+      "phone": "+2348012345678",
+      "count": 1,
+      "deliveries": [
+        {
+          "order_number": "6158045",
+          "id": "e89c314a-...",
+          "role": "Sender",
+          "status": "InTransit",
+          "payment_status": "Paid",
+          "total_amount": 2500.0,
+          "vehicle": "Bike",
+          "pickup_address": "12 Admiralty Way, Lekki",
+          "dropoff_address": "Ikeja City Mall, Alausa",
+          "sender_name": "Adeola Johnson",
+          "receiver_name": "Chidi Okafor",
+          "created_at": "2026-09-03T12:00:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+### 5. Order Payment Info & Virtual Account (get_payment_info)
+```http
+GET /api/orders/<order_id>/payment-info/
+Description: Retrieves order payment status, total amount, and dedicated CoreBanking virtual account details for direct bank transfer funding.
+Authentication: None / API Key / JWT
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Payment details retrieved successfully",
+    "data": {
+      "order_number": "6158045",
+      "id": "e89c314a-...",
+      "total_amount": 2500.0,
+      "formatted_total": "₦2,500.00",
+      "payment_status": "Pending",
+      "payment_method": "wallet",
+      "wallet_balance": 1200.0,
+      "virtual_account": {
+        "bank_name": "Wema Bank",
+        "account_number": "9912345678",
+        "account_name": "Adeola Johnson AXPRESS",
+        "bank_code": "035"
+      },
+      "instructions": "To complete payment for Order 6158045, transfer ₦2,500.00 to Wema Bank Account: 9912345678 (Adeola Johnson AXPRESS). Your wallet will be credited and the order processed immediately."
+    },
+    "status_code": 200
+  }
+```
+
+---
+
+## DISPATCHER AFFILIATION & MERCHANT COMMISSION ENDPOINTS
+
+### 1. Get Merchant Affiliation Status
+```http
+GET /api/auth/merchant/affiliation/
+GET /api/merchant/affiliation/
+Description: Retrieves the current dispatcher affiliation details for the authenticated merchant profile.
+Authentication: Required (Merchant)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Merchant affiliation retrieved successfully",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 2. Affiliate Merchant to Dispatcher
+```http
+POST /api/auth/merchant/affiliation/
+POST /api/merchant/affiliation/
+Description: Affiliates the authenticated merchant to a dispatcher using their unique affiliation code.
+Authentication: Required (Merchant)
+Request Body:
+  {
+    "affiliation_code": "HUB001"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Successfully affiliated with dispatcher Ikeja Hub Logistics",
+    "data": {
+      "is_affiliated": true,
+      "affiliated_at": "2026-10-15T12:00:00Z",
+      "dispatcher": {
+        "id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+        "name": "Ikeja Hub Dispatcher",
+        "company_name": "Ikeja Hub Logistics",
+        "role": "hub_captain",
+        "role_display": "Hub Captain",
+        "affiliation_code": "HUB001",
+        "hub_name": "Ikeja Hub",
+        "zone_name": "Ikeja"
+      }
+    },
+    "status_code": 200
+  }
+```
+
+### 3. List Affiliated Merchants (Dispatcher View)
+```http
+GET /api/dispatch/affiliation/merchants/
+Description: Lists all merchants affiliated to the authenticated dispatcher with pagination, search, and activity counts.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - search (optional): Filter by merchant ID, business name, phone, or email
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliated merchants retrieved successfully",
+    "data": {
+      "count": 12,
+      "next": null,
+      "previous": null,
+      "results": [
+        {
+          "id": 105,
+          "merchant_id": "261603",
+          "name": "Acme Ventures",
+          "email": "acme@example.com",
+          "phone": "+2348011112222",
+          "business_name": "Acme Retail Ltd",
+          "merchant_type": "Retail",
+          "status": "active",
+          "affiliated_at": "2026-10-15T12:00:00Z",
+          "total_orders": 34,
+          "monthly_orders": 8,
+          "monthly_commission": 24000.0
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 4. Dispatcher Affiliation Summary
+```http
+GET /api/dispatch/affiliation/summary/
+Description: Retrieves aggregated performance and earnings for the dispatcher, including affiliated riders, affiliated merchants, and monthly commission totals.
+Authentication: Required (Dispatcher)
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation summary retrieved successfully",
+    "data": {
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "affiliation_code": "HUB001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "monthly_commission": 45000.0,
+      "previous_month_commission": 30000.0,
+      "total_commission_earned": 75000.0,
+      "commission_per_order": 3000.0,
+      "affiliated_riders_count": 5,
+      "total_affiliated_riders": 5,
+      "active_riders_this_month": 3,
+      "affiliated_merchants_count": 8,
+      "total_affiliated_merchants": 8,
+      "active_merchants_this_month": 4,
+      "current_month": "October 2026",
+      "currency": "NGN"
+    },
+    "status_code": 200
+  }
+```
+
+### 5. Dispatcher Commission History
+```http
+GET /api/dispatch/affiliation/commissions/
+Description: Lists ledgered commission records for the authenticated dispatcher with optional source and merchant filtering.
+Authentication: Required (Dispatcher)
+Query Parameters:
+  - page (optional): Page number (default: 1)
+  - page_size (optional): Items per page (default: 20)
+  - month (optional): Filter by month string (format: YYYY-MM)
+  - rider_id (optional): Filter by rider ID
+  - merchant_id (optional): Filter by merchant ID
+  - source (optional): Filter by affiliation source ('rider' or 'merchant')
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Commissions retrieved successfully",
+    "data": {
+      "count": 15,
+      "results": [
+        {
+          "id": "b968fc24-...",
+          "order_number": "6158045",
+          "amount": 3000.0,
+          "affiliation_source": "merchant",
+          "rider_id": null,
+          "rider_name": null,
+          "merchant_id": "261603",
+          "merchant_name": "Acme Retail Ltd",
+          "month_year": "2026-10",
+          "description": "Affiliation commission for completed order #6158045 from merchant 261603",
+          "created_at": "2026-10-15T14:30:00Z"
+        }
+      ]
+    },
+    "status_code": 200
+  }
+```
+
+### 6. Verify Affiliation Code (Public)
+```http
+GET /api/auth/affiliation/verify/?code=HUB001
+GET /api/merchant/affiliation/verify/?code=HUB001
+GET /api/riders/affiliation/verify/?code=HUB001
+GET /api/affiliation/verify/?code=HUB001
+POST /api/auth/affiliation/verify/
+POST /api/merchant/affiliation/verify/
+POST /api/riders/affiliation/verify/
+POST /api/affiliation/verify/
+Description: Validates a dispatcher affiliation code and returns the dispatcher's details (name, phone, role, hub, zone) without requiring authentication. Used during rider/merchant onboarding and profile linking.
+Authentication: None (Public - AllowAny)
+
+Query Parameters (GET):
+  - code or affiliation_code (required): The affiliation code to verify (e.g. 'HUB001'). Case-insensitive.
+
+Request Body (POST):
+  {
+    "affiliation_code": "HUB001"
+  }
+  // Or alias: {"code": "HUB001"}
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Affiliation code is valid.",
+    "data": {
+      "is_valid": true,
+      "affiliation_code": "HUB001",
+      "dispatcher_id": "d44bd075-412f-4d37-8dc0-7df81320ddcd",
+      "name": "Alice Hub Captain",
+      "phone": "+2348011110001",
+      "role": "hub_captain",
+      "role_display": "Hub Captain",
+      "hub_name": "Ikeja Central Hub",
+      "zone_name": "Ikeja Zone"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Invalid affiliation code. No active dispatcher found with this code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+---
+
+## RIDER BANK DIRECTORY, ACCOUNT ENQUIRY & WEMA WITHDRAWAL ENDPOINTS
+
+### 1. List Supported Nigerian Banks
+```http
+GET /api/riders/banks/
+Description: Retrieves the complete directory of supported Nigerian commercial banks, microfinance banks, and fintech institutions with their corresponding 3-digit and 6-digit CBN/NIBSS codes and USSD shortcodes. Cached in Redis for low latency.
+Authentication: None (Public / AllowAny)
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Banks retrieved successfully.",
+    "data": [
+      {
+        "id": "18f50682-1234-4567-89ab-cdef01234567",
+        "name": "Access Bank",
+        "bank_code": "044",
+        "cbn_code": "000014",
+        "ussd_short_code": "*901#",
+        "bank_short_name": "Access"
+      },
+      {
+        "id": "42c38501-1234-4567-89ab-cdef01234567",
+        "name": "Guaranty Trust Bank",
+        "bank_code": "058",
+        "cbn_code": "000013",
+        "ussd_short_code": "*737#",
+        "bank_short_name": "GTBank"
+      },
+      {
+        "id": "a93bc710-1234-4567-89ab-cdef01234567",
+        "name": "Wema Bank",
+        "bank_code": "035",
+        "cbn_code": "000017",
+        "ussd_short_code": "*945#",
+        "bank_short_name": "Wema"
+      }
+    ],
+    "status_code": 200
+  }
+```
+
+### 2. Bank Account Name Enquiry
+```http
+POST /api/riders/wallet/verify-account/
+Description: Validates a 10-digit NUBAN account number and resolves the account name using the LibertyPay Account Enquiry integration.
+Authentication: None (Public / AllowAny)
+
+Request Body:
+  {
+    "account_number": "0123456789",
+    "bank_code": "058"
+  }
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Account verified successfully.",
+    "data": {
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "cbn_code": "000013",
+      "currency_code": "NGN"
+    },
+    "status_code": 200
+  }
+
+Error Response (400 Bad Request):
+  {
+    "status": "error",
+    "message": "Account verification failed. Please check the account number and bank code.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 3. Withdraw Earnings to Bank Account
+```http
+POST /api/riders/wallet/withdraw/
+Description: Allows independent riders (is_independent_rider=True) to withdraw delivery earnings from their wallet to their external bank account via Wema CoreBanking payout.
+1. Validates that the platform Independent Rider Payout Wallet Pool has sufficient funds to disburse the withdrawal.
+2. Validates that the withdrawal amount does not exceed withdrawable_balance (wallet balance minus any unremitted Cash on Delivery).
+3. Atomically debits both the Independent Rider Payout Wallet Pool and the rider's personal wallet.
+4. Triggers Wema CoreBanking payout. If rejected or failed, automatically issues an immediate automated refund to both the rider's wallet and the payout pool.
+Authentication: Required (Rider Bearer Token)
+
+Request Body:
+  {
+    "amount": 25000.00,
+    "account_number": "0123456789",
+    "account_name": "ADE BABATUNDE",
+    "bank_code": "058",
+    "bank_name": "Guaranty Trust Bank",
+    "narration": "Weekly earnings payout",
+    "is_sandbox": false
+  }
+
+*Sandbox Testing: Pass "is_sandbox": true or "mode": "SANDBOX" in the request body (or ?sandbox=true query parameter) to simulate or run sandbox payouts. Generates WDR-SBX- references and auto-seeds test pool funds if empty.*
+
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Withdrawal request processed successfully.",
+    "data": {
+      "reference": "WDR-A93BC7101234",
+      "amount": 25000.0,
+      "account_number": "0123456789",
+      "account_name": "ADE BABATUNDE",
+      "bank_code": "058",
+      "status": "success",
+      "remaining_balance": 15420.50,
+      "is_sandbox": false,
+      "mode": "LIVE"
+    },
+    "status_code": 200
+  }
+
+Error Responses:
+  - 400 Bad Request (Insufficient Payout Pool Balance):
+    {
+      "status": "error",
+      "message": "Insufficient funds in payout pool. Unable to process withdrawal at this time.",
+      "data": {},
+      "status_code": 400
+    }
+
+  - 400 Bad Request (Insufficient Withdrawable Balance or Pending COD):
+    {
+      "status": "error",
+      "message": "Insufficient withdrawable balance. Withdrawable: ₦12,500.00 (Pending unremitted COD: ₦15,000.00)",
+      "data": {},
+      "status_code": 400
+    }
+
+  - 403 Forbidden (Non-Independent Rider):
+    {
+      "status": "error",
+      "message": "Only independent riders are permitted to withdraw wallet earnings.",
+      "data": {},
+      "status_code": 403
+    }
+
+  - 422 Unprocessable Entity (CoreBanking Failure - Auto-Refunded to Wallet & Pool):
+    {
+      "status": "error",
+      "message": "Destination bank unavailable. Your wallet balance has been refunded.",
+      "data": {},
+      "status_code": 422
+    }
+```
+
+---
+
+## DISPATCHER MANAGEMENT ENDPOINTS
+
+### 1. List Dispatchers
+```
+GET /api/dispatch/dispatchers/
+Description: Retrieves a list of all dispatcher profiles ordered by creation date descending.
+Authentication: Required (IsAuthenticated)
+Response (200 OK):
+  [
+    {
+      "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "name": "Jane Dispatcher",
+      "phone": "+2348011223344",
+      "email": "jane@axpress.net",
+      "role": "Admin",
+      "joined": "2026-10-16",
+      "is_active": true,
+      "affiliation_code": null,
+      "monthly_commission": "0.00",
+      "previous_month_commission": "0.00",
+      "total_commission_earned": "0.00",
+      "affiliated_riders_count": 0,
+      "affiliated_merchants_count": 0
+    }
+  ]
+```
+
+### 2. Create Dispatcher
+```
+POST /api/dispatch/dispatchers/
+Description: Creates a new user with usertype Dispatcher and assigns a DispatcherProfile atomically with role configuration.
+Authentication: Required (IsAuthenticated)
+Request Body:
+  {
+    "first_name": "Jane",
+    "last_name": "Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "password": "strongpassword123",
+    "role": "admin" | "hub_captain" | "zone_lead"
+  }
+Response (201 Created):
+  {
+    "id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+    "name": "Jane Dispatcher",
+    "phone": "+2348011223344",
+    "email": "jane@axpress.net",
+    "role": "Admin",
+    "joined": "2026-10-16",
+    "is_active": true,
+    "affiliation_code": null,
+    "monthly_commission": "0.00",
+    "previous_month_commission": "0.00",
+    "total_commission_earned": "0.00",
+    "affiliated_riders_count": 0,
+    "affiliated_merchants_count": 0
+  }
+```
+
+---
+
+## ORDER PICKUP & DELIVERY VERIFICATION (V2)
+
+Endpoints using 6-digit verification codes for rider pickup and delivery completion instead of GPS location proximity checks.
+
+### 1. Confirm Order Pickup (V2)
+```
+POST /api/orders/v2/pickup/
+Description: Rider marks an order as PickedUp by providing the 6-digit pickup code received from the merchant. Bypasses GPS proximity restrictions.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "pickup_code": "749201"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order picked up successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "PickedUp",
+      "picked_up_at": "2026-10-23T11:30:00Z"
+    },
+    "status_code": 200
+  }
+Error Response (400 Bad Request - Incorrect Code):
+  {
+    "status": "error",
+    "message": "Incorrect pickup code. 4 attempt(s) remaining.",
+    "data": {},
+    "status_code": 400
+  }
+Error Response (400 Bad Request - Verification Locked):
+  {
+    "status": "error",
+    "message": "Pickup verification is locked due to too many failed attempts (maximum 5). Please contact support.",
+    "data": {},
+    "status_code": 400
+  }
+```
+
+### 2. Complete Single-Delivery Order (V2)
+```
+POST /api/orders/v2/complete/
+Description: Rider completes a single-delivery order (Quick Send) by providing the 6-digit drop code received from the recipient. Marks the delivery as Delivered, marks the order as Done, and allocates rider earnings.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "order_number": "6158001",
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Order delivery completed successfully.",
+    "data": {
+      "order_number": "6158001",
+      "status": "Done",
+      "all_delivered": true
+    },
+    "status_code": 200
+  }
+```
+
+### 3. Deliver Multi-Drop Delivery Stop (V2)
+```
+POST /api/orders/v2/delivery/{delivery_id}/deliver/
+Description: Rider completes an individual delivery stop in a multi-drop order using that specific drop's 6-digit drop code. When all stops are completed, the order is automatically marked as Done and rider earnings are credited.
+Authentication: Required (Rider)
+Request Body:
+  {
+    "drop_code": "830194"
+  }
+Response (200 OK):
+  {
+    "status": "success",
+    "message": "Delivery completed successfully.",
+    "data": {
+      "delivery_id": "c1f7b7e5-1234-5678-90ab-cdef12345678",
+      "status": "Delivered",
+      "delivered_at": "2026-10-23T11:45:00Z",
+      "order_number": "6158001",
+      "order_status": "Fulfilling",
+      "all_delivered": false
+    },
+    "status_code": 200
+  }
+```
+
+

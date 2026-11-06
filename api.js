@@ -3,7 +3,30 @@
  * Handles all backend API communication
  */
 
-const API_BASE_URL = 'https://www.orders.axpress.net/api' || 'http://127.0.0.1:8000/api';
+const API_BASE_URL = window.VITE_API_BASE_URL || 'https://www.orders.axpress.net/api';
+
+const MASK_SECRET = "AX_SECURE_KEY_2026";
+
+/**
+ * Unmask string using XOR with MASK_SECRET
+ * @param {string} maskedKey - Base64 encoded masked key
+ */
+function unmaskPaystackKey(maskedKey) {
+  try {
+    const maskedBytes = Uint8Array.from(atob(maskedKey), c => c.charCodeAt(0));
+    const secretBytes = new TextEncoder().encode(MASK_SECRET);
+    const unmasked = new Uint8Array(maskedBytes.length);
+
+    for (let i = 0; i < maskedBytes.length; i++) {
+      unmasked[i] = maskedBytes[i] ^ secretBytes[i % secretBytes.length];
+    }
+
+    return new TextDecoder().decode(unmasked);
+  } catch (e) {
+    console.error('Failed to unmask key:', e);
+    return null;
+  }
+}
 
 // Token management
 const TokenManager = {
@@ -60,6 +83,20 @@ function extractErrorMessage(data) {
   return 'Request failed';
 }
 
+// ─── AUTO-REFRESH LOGIC ─────────────────────────────────────────
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function onRefreshed(token) {
+  refreshSubscribers.forEach((callback) => callback(token));
+  refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(callback) {
+  refreshSubscribers.push(callback);
+}
+// ────────────────────────────────────────────────────────────────
+
 // API request helper
 async function apiRequest(endpoint, options = {}) {
   const token = TokenManager.getAccessToken();
@@ -79,8 +116,66 @@ async function apiRequest(endpoint, options = {}) {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
-    const data = await response.json();
+    let response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+    let data = await response.json().catch(() => ({}));
+
+    // If unauthorized and we have a refresh token (and we're not already trying to fetch the refresh endpoint), try to refresh
+    if (!response.ok && response.status === 401 && !options.skipAuth && endpoint !== '/auth/refresh/') {
+      const refreshToken = TokenManager.getRefreshToken();
+      if (refreshToken) {
+        if (!isRefreshing) {
+          isRefreshing = true;
+          try {
+            const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh/`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh: refreshToken }),
+            });
+            const refreshData = await refreshRes.json();
+
+            if (refreshRes.ok && refreshData.access) {
+              TokenManager.setTokens(refreshData.access, refreshData.refresh || refreshToken);
+              isRefreshing = false;
+              onRefreshed(refreshData.access);
+
+              // Retry original request
+              config.headers['Authorization'] = `Bearer ${refreshData.access}`;
+              response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+              data = await response.json().catch(() => ({}));
+            } else {
+              throw new Error('Refresh failed');
+            }
+          } catch (refreshErr) {
+            isRefreshing = false;
+            TokenManager.clearTokens();
+            // Optional: trigger a custom event or reload the page to kick the user out visually
+            window.dispatchEvent(new Event('auth:unauthorized'));
+            throw new Error('Session expired. Please log in again.');
+          }
+        } else {
+          // Wait for the ongoing refresh to complete, then retry
+          return new Promise((resolve, reject) => {
+            addRefreshSubscriber(async (newToken) => {
+              config.headers['Authorization'] = `Bearer ${newToken}`;
+              try {
+                const retryRes = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                const retryData = await retryRes.json().catch(() => ({}));
+                if (!retryRes.ok) {
+                  return reject(new Error(extractErrorMessage(retryData) || 'Request failed'));
+                }
+                resolve(retryData);
+              } catch (err) {
+                reject(err);
+              }
+            });
+          });
+        }
+      } else {
+        // 401 but no refresh token
+        TokenManager.clearTokens();
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
+    }
 
     if (!response.ok) {
       const errorMessage = extractErrorMessage(data);
@@ -144,7 +239,7 @@ const AuthAPI = {
       try {
         const keys = await caches.keys();
         await Promise.all(keys.map(k => caches.delete(k)));
-      } catch (_) {}
+      } catch (_) { }
     }
   },
 
@@ -218,7 +313,7 @@ const AuthAPI = {
   resetPassword: async (token, newPassword) => {
     return await apiRequest('/auth/reset-password/', {
       method: 'POST',
-      body: JSON.stringify({ token, new_password: newPassword }),
+      body: JSON.stringify({ token, new_password: newPassword, confirm_password: newPassword }),
       skipAuth: true,
     });
   },
@@ -316,9 +411,15 @@ const WalletAPI = {
    * Get Paystack public key
    */
   getPaystackKey: async () => {
-    return await apiRequest('/wallet/paystack-key/', {
+    const response = await apiRequest('/wallet/paystack-key/', {
       method: 'GET',
     });
+
+    if (response.success && response.data && response.data.public_key) {
+      response.data.public_key = unmaskPaystackKey(response.data.public_key);
+    }
+
+    return response;
   },
 
   /**
@@ -400,6 +501,25 @@ const ActivityAPI = {
   },
 };
 
+const SubscriptionAPI = {
+  getPlans: async () => apiRequest('/subscriptions/plans/', { method: 'GET' }),
+  subscribe: async (planId) => 
+    apiRequest(`/subscriptions/plans/${planId}/subscribe/`, { 
+      method: 'POST',
+      body: JSON.stringify({})
+    }),
+  getActiveSubscription: async () => apiRequest('/subscriptions/active/', { method: 'GET' }),
+
+  // Postpaid plans
+  getPostpaidPlans: async () => apiRequest('/subscriptions/postpaid/plans/', { method: 'GET' }),
+  activatePostpaidPlan: async (planId) => 
+    apiRequest(`/subscriptions/postpaid/plans/${planId}/activate/`, { 
+      method: 'POST',
+      body: JSON.stringify({})
+    }),
+  getActivePostpaidSubscription: async () => apiRequest('/subscriptions/postpaid/active/', { method: 'GET' }),
+};
+
 // Export API modules
 window.API = {
   Auth: AuthAPI,
@@ -407,5 +527,6 @@ window.API = {
   Wallet: WalletAPI,
   Activity: ActivityAPI,
   Token: TokenManager,
+  Subscription: SubscriptionAPI,
 };
 

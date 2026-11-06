@@ -1,0 +1,64 @@
+version: "3.9"
+
+x-test-env: &test-env
+  DJANGO_SETTINGS_MODULE: ax_merchant_api.settings_test
+  SECRET_KEY: test-secret-key-not-for-production-use
+  ENVIRONMENT: test
+  DEBUG: "0"
+  ALLOWED_HOSTS: "*"
+  DB_HOST: db
+  DB_PORT: "5432"
+  DB_NAME: axpress_test
+  DB_USER: postgres
+  DB_PASSWORD: password
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+services:
+  db:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: axpress_test
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  test:
+    build: .
+    command: python -m pytest --create-db
+    environment:
+      <<: *test-env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    profiles:
+      - test
+
+volumes:
+  postgres_test_data:

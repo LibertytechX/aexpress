@@ -1,0 +1,27 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>We reached out a couple of days ago, and we're back — not to pressure you, but because we genuinely care about your business.</p>
+
+<p>We'd love to know: what's been stopping you from making deliveries?</p>
+
+<p>Is it:</p>
+<ul>
+    <li>🤔 Not sure how the platform works?</li>
+    <li>💰 Concerned about pricing?</li>
+    <li>📦 Waiting for the right order to come in?</li>
+    <li>⏱️ Just been too busy to get started?</li>
+</ul>
+
+<p>Whatever the reason, our team is ready to help you work through it. We've helped dozens of merchants in exactly your position get their first delivery out the door — and we can do the same for you.</p>
+
+<p>Reply to this email or give us a call and let's sort it out together.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">💬 Talk to Our Team</a>
+</div>
+
+<p>No pressure. Just support.</p>
+{% endblock %}

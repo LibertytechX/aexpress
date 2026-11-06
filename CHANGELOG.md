@@ -1,0 +1,691 @@
+All notable changes to the AXpress project are documented in this file.
+
+# [Unreleased]
+
+### Backend
+#### Fixed
+- **Vehicle Assets N+1 Query & Worker Timeout Resolution (`dispatcher/serializers.py`)**:
+  - Fixed Gunicorn `WORKER TIMEOUT` and `SIGKILL` 502 Bad Gateway on `GET /api/dispatch/vehicle-assets/` caused by quadratic N+1 queries and sequential table scans on `VehicleTracking` during serialization.
+  - Implemented `VehicleAssetListSerializer` to batch precompute today's orders count, yesterday's orders count, yesterday's orders distance, and yesterday's vehicle tracking odometer difference in bounded $O(1)$ queries across all vehicle assets.
+  - Optimized `get_yesterday_distance` single-asset fallback to query `VehicleTracking` by timestamp range (`created_at__gte`, `created_at__lt`), leveraging the composite B-tree index on `(vehicle_asset, created_at)` instead of unindexed `__date` function calls.
+  - Added unit test suite `backend/dispatcher/tests/unit/test_vehicle_asset_optimization.py`.
+- **Merchant List N+1 Query & Worker Timeout Resolution (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
+  - Fixed Gunicorn `WORKER TIMEOUT` on `GET /api/dispatch/merchants/` caused by quadratic N+1 queries during serialization.
+  - Optimized `MerchantViewSet.get_queryset` to preload `merchant_profile` via `select_related` and annotate `total_orders_count` and current month `month_orders_count` in a single SQL query using `Count` and `Q` filters.
+  - Updated `MerchantSerializer` (`get_totalOrders`, `get_monthOrders`) to consume annotated counts with safe fallback to unannotated queries.
+  - Reduced database queries from $O(N)$ (thousands of sequential round-trips) to exactly 1 query ($O(1)$) across all merchants.
+  - Added unit test suite `backend/dispatcher/tests/unit/test_merchant_viewset_optimization.py`.
+
+#### Added
+- **Rider Order Pickup & Delivery Verification Codes V2 (`orders/models.py`, `orders/v2_views.py`, `orders/serializers.py`, `orders/urls.py`, `orders/migrations/0017_order_pickup_code_delivery_drop_code.py`)**:
+  - Implemented 6-digit verification codes to eliminate reliance on GPS location proximity checks for rider order pickup and delivery confirmation.
+  - Automatically generates cryptographically secure 6-digit `pickup_code` on `Order` and 6-digit `drop_code` on `Delivery` (supporting single-delivery and multi-drop orders).
+  - Exposed `pickup_code` and `drop_code` to merchants in `OrderSerializer` and `DeliverySerializer`; strictly hidden from rider order representations (`AssignedOrderSerializer`).
+  - Added dedicated V2 endpoints:
+    - `POST /api/orders/v2/pickup/`: verifies assigned rider and 6-digit `pickup_code`, advancing order to `PickedUp`.
+    - `POST /api/orders/v2/complete/`: verifies assigned rider and 6-digit `drop_code` for single-delivery orders, advancing delivery and order to `Done`.
+    - `POST /api/orders/v2/delivery/<delivery_id>/deliver/`: verifies assigned rider and 6-digit `drop_code` for individual multi-drop delivery legs, advancing order to `Done` once all legs are completed.
+  - Integrated brute-force protection: locks verification after 5 consecutive failed code attempts per order/delivery.
+  - Automatically triggers rider earnings allocation, status updates, `order_event_signal` auditing, push notifications, and `order-completed` webhooks.
+  - Retained legacy V1 proximity endpoints (`/api/orders/pickup/`, `/orders/<order_number>/complete/`, `/api/orders/delivery/<id>/deliver/`) for full backward compatibility.
+  - Added migration `0017_order_pickup_code_delivery_drop_code` to backfill active orders with verification codes.
+  - Added comprehensive integration test suite `test_code_verification_v2.py`.
+- **Independent Rider Face Match Verification (`riders/views.py`, `riders/serializers.py`, `riders/tasks.py`, `riders/models.py`, `dispatcher/views.py`)**:
+  - Implemented asynchronous face match verification endpoint `POST /api/riders/facematch/` (and alias `POST /api/riders/face-match/`) for independent riders.
+  - Accepts selfie snapshot URL (`image_url`), validates that the requester is an independent rider with an existing reference profile photo (`RiderDocument` of type `profile_photo`), and returns `202 Accepted` with a dedicated Ably channel name (`facematch:<rider_id>`).
+  - Added Celery background task `process_rider_facematch_task` to download the selfie and reference profile photos into memory and invoke the 3rd-party KYC `CompareFacesView` endpoint (`/api/v1/kyc/face-match`) with multipart image payload.
+  - On match success, publishes `facematch_result` event with `status: "success"` and similarity score to the rider's Ably channel.
+  - On match failure, automatically blocks/unauthorizes the rider (`is_authorized = False`, `status = "offline"`), deactivates all active JWT `RiderSession` records, and publishes `facematch_result` with `status: "failed"` and `action: "logout"` to immediately log out the rider on the mobile app.
+  - Created `RiderFaceMatchLog` audit model and migration `0003_riderrating_riderfacematchlog` to track verification attempts, similarity scores, raw KYC responses, and error traces.
+  - Added `"facematch:*": ["subscribe"]` baseline capability to `AblyTokenView` (`GET /api/dispatch/ably-token/`) for immediate client subscription.
+  - Added unit test suite `test_rider_facematch.py` and API integration test suite `test_rider_facematch_api.py`.
+- **Rider Application Rejection Email with Document Feedback (`dispatcher/views.py`, `dispatcher/emails.py`, `dispatcher/tasks.py`)**:
+  - Implemented automated rejection email notification on `POST /api/dispatch/riders/{id}/reject/` (`RiderViewSet.reject`).
+  - Added `send_rider_rejection_email` and `get_rider_rejection_email_template` in `dispatcher/emails.py` with custom responsive HTML/text templates branded for Assured Express.
+  - The email explicitly lists the general application rejection reason, along with each rejected document's name and individual rejection reason, directing the rider on how to re-upload clear replacements in the rider mobile app (`Profile > KYC Documents`).
+  - Offloaded delivery to Celery background task `send_rider_rejection_email_task` in `dispatcher/tasks.py` with resilient direct fallback and error logging to ensure API responses remain fast and uninterrupted.
+  - Implemented comprehensive unit tests (`test_rider_rejection_email.py`) and integration tests (`test_rider_rejection_api.py`).
+- **Rider Transaction PIN for Wallet Withdrawals (`dispatcher/models.py`, `dispatcher/admin.py`, `riders/views.py`, `riders/serializers.py`, `riders/urls.py`)**:
+  - Added hashed 4-digit `transaction_pin` field to `Rider` model with `has_transaction_pin` property, `set_transaction_pin`, and `check_transaction_pin` helpers powered by Django password hashers (PBKDF2).
+  - Enforced mandatory transaction PIN authorization on `POST /api/riders/wallet/withdraw/` (`RiderWithdrawalView`), validating the PIN before any row-level locking or ledger operations.
+  - Implemented `POST /api/riders/wallet/pin/` (and alias `POST /api/riders/wallet/set-pin/`) for setting and changing rider transaction PINs with matching confirmation and current PIN or account password verification.
+  - Implemented `GET /api/riders/wallet/pin/` returning PIN configuration status (`has_transaction_pin`).
+  - Implemented `POST /api/riders/wallet/pin/verify/` for verifying PIN without initiating a withdrawal.
+  - Added `has_transaction_pin` to `RiderWalletInfoSerializer` (`GET /api/riders/wallet/info/`) and exposed `has_pin` in Django admin `RiderAdmin`.
+  - Added migration `0027_rider_transaction_pin` and automated unit/integration test coverage across all PIN management and withdrawal enforcement scenarios.
+- **Sandbox Mode for Rider Wallet Withdrawals (`riders/views.py`, `riders/serializers.py`, `wallet/integrations.py`, `wallet/models.py`)**:
+  - Enabled sandbox withdrawal execution via `is_sandbox: true` or `mode: "SANDBOX"` in request payload, `?sandbox=true` query parameter, or system settings fallback (`settings.WIHDRAWAL_MODE` / `settings.COREBANKING_MODE`).
+  - **Zero External Network Calls in Sandbox**: When `mode == "SANDBOX"` or `is_sandbox: true`, the external Wema CoreBanking API is completely bypassed across the entire pipeline (`RiderWithdrawalView`, `WemaCoreBankingPayoutSDK.transfer_funds`, `WemaCoreBankingPayoutSDK.login`, and `verify_status`), eliminating firewall IP whitelisting errors and network delays.
+  - Added `WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")` in `ax_merchant_api/settings.py`.
+  - Added `is_sandbox` and `mode` database columns and admin filters to `RiderPayoutTransaction`.
+  - Added automatic sandbox test liquidity provisioning: auto-seeds ₦1,000,000 to the payout pool if the development/test pool balance is less than the withdrawal amount, ensuring test withdrawals succeed without breaking double-entry ledger bookkeeping.
+  - Added unit and integration tests verifying that `WemaCoreBankingPayoutSDK.transfer_funds` is never called when in sandbox mode, plus serializer validation, query parameter overrides, and end-to-end sandbox withdrawal flow.
+
+# [2026-10-16] — Independent Rider Bank Directory, Account Enquiry & Wema CoreBanking Withdrawal
+
+### Backend
+#### Fixed
+- **Dispatcher Creation Integrity Error (`dispatcher/serializers.py`, `dispatcher/signals.py`)**:
+  - Resolved `IntegrityError: duplicate key value violates unique constraint "dispatcher_profiles_user_id_key"` when creating dispatchers via `POST /api/dispatch/dispatchers/`.
+  - Replaced duplicate `DispatcherProfile.objects.create` invocation in `DispatcherCreateSerializer.create` with atomic `get_or_create` and dynamic role updates, preventing duplicate profile creation when Django's `post_save` User signal triggers.
+  - Hardened `create_user_profile` signal handler to use `get_or_create` for both `DispatcherProfile` and `Rider` profile allocations.
+  - Added unit test suite `test_dispatcher_creation_serializer.py` (5 tests) and integration test suite `test_dispatcher_creation_api.py` (5 tests).
+
+#### Added
+- **Supported Banks Directory API & Admin Import/Export (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/admin.py`)**:
+  - Implemented `Bank` model in `wallet/models.py` with CBN/NIBSS codes, USSD codes, and Redis caching (`all_bank_list`).
+  - Added `BankResource` and upgraded `BankAdmin` to inherit from `ImportExportModelAdmin` in `wallet/admin.py`, enabling CSV and Excel imports/exports directly from the Django admin interface with smart lookup across `id`, `cbn_code`, `bank_code`, and `name`.
+  - Added `seed_banks` management command and automatic database migration seeding 33 standard Nigerian commercial banks, microfinance banks, and fintechs.
+  - Implemented public, unauthenticated endpoint `GET /api/riders/banks/` (`RiderBankListView`) returning the cached list of supported Nigerian banks.
+- **LibertyPay Account Name Enquiry Integration (`wallet/integrations.py`, `riders/views.py`, `riders/serializers.py`)**:
+  - Implemented `LibertyPayAccountEnquiryService` in `wallet/integrations.py` replicating the `pulse-backend` verification pattern.
+  - Implemented `POST /api/riders/wallet/verify-account/` (`RiderVerifyAccountView`) with `VerifyAccountSerializer` to validate 10-digit NUBAN numbers and resolve destination account names.
+- **Wema CoreBanking Earnings Withdrawal Flow (`riders/views.py`, `riders/serializers.py`, `wallet/models.py`, `wallet/integrations.py`)**:
+  - Implemented `WemaCoreBankingPayoutSDK` in `wallet/integrations.py` handling CoreBanking token authentication and disbursement to external bank accounts.
+  - Implemented `IndependentRiderPayoutWalletPool` and `IndependentRiderPayoutWalletPoolTransaction` models in `wallet/models.py` with double-entry ledger bookkeeping, row-level locking (`select_for_update`), and admin registration.
+  - Implemented `RiderPayoutTransaction` model in `wallet/models.py` linked to both `rider` and `pool` to record disbursement status, destination bank details, references, and audit logs.
+  - Implemented `POST /api/riders/wallet/withdraw/` (`RiderWithdrawalView`) allowing strictly independent riders (`is_independent_rider=True`) to withdraw wallet earnings.
+  - Enforced pre-flight platform liquidity check: verifies that the Independent Rider Payout Wallet Pool has sufficient balance before initiating disbursement.
+  - Enforced unremitted Cash on Delivery (COD) deductions: `withdrawable_balance = max(wallet.balance - pending_cod, 0)` to guarantee platform fund safety.
+  - Implemented atomic row-level locking (`select_for_update`) to prevent race conditions during withdrawals, debited both the payout pool and the rider wallet atomically.
+  - Implemented dual-refund synchronous failure rollback: if external transfer fails or rejects, immediately refunds **both** the rider's wallet (`wallet.credit(...)`) and the payout pool (`pool.credit(...)`), returning a `422 Unprocessable Entity` response.
+  - Automatically updates rider's saved preferred bank details (`bank_name`, `bank_account_number`, `bank_routing_code`) on successful payout.
+- **Asynchronous Payout Reconciliation Task (`riders/tasks.py`)**:
+  - Created Celery background task `check_pending_rider_payout_status` to periodically verify pending CoreBanking disbursements, mark completed transfers as success, and issue automated dual refunds (to both wallet and payout pool) if external transfers are rejected or reversed.
+- **Automated Test Coverage (`wallet/tests/unit/test_payout_wallet_pool.py`, `riders/tests/unit/test_rider_withdrawal.py`, `riders/tests/integration/test_rider_withdrawal_flow.py`)**:
+  - Added 29 automated unit and integration tests covering public bank directory access, account name enquiry, independent rider authorization, COD restrictions, payout pool liquidity validation, pool ledger debit records, dual refunds on failure, and admin registrations.
+
+---
+
+# [2026-10-15] — Dispatcher Merchant & Rider Affiliation and Commission Deduplication
+
+### Backend
+#### Added
+- **Merchant Affiliation Architecture (`dispatcher/models.py`, `dispatcher/services.py`)**:
+  - Extended Hub Captain and Zone Lead dispatcher affiliation to include merchants: added `affiliated_to`, `is_affiliated`, and `affiliated_at` to `Merchant`.
+  - Added `affiliated_merchants_count` property to `DispatcherProfile`.
+  - Added `merchant` foreign key and `affiliation_source` (`"rider"`, `"merchant"`, `"both"`) to `DispatcherCommission`.
+  - Implemented `affiliate_merchant_to_dispatcher(merchant, affiliation_code)` with validation, case-insensitivity, and duplicate checks.
+- **Order Completion Commission Deduplication (`dispatcher/services.py`, `orders/tasks.py`)**:
+  - Implemented same-dispatcher deduplication: when an order is completed where both the rider and merchant are affiliated to the same dispatcher, exactly ONE ₦3,000 commission is awarded to that dispatcher, disregarding duplicate rider payouts.
+  - When the rider and merchant are affiliated to different dispatchers, each dispatcher receives their respective ₦3,000 commission.
+  - Enforced atomic concurrency controls via `select_for_update` and month rollover tracking.
+- **Merchant Onboarding & Affiliation APIs (`authentication/views.py`, `authentication/serializers.py`)**:
+  - Added optional `affiliation_code` to `SignupSerializer` for automatic dispatcher linkage during merchant onboarding.
+  - Implemented `MerchantAffiliationView` (`GET`, `POST /api/auth/merchant/affiliation/` & `/api/merchant/affiliation/`) for viewing affiliation status and linking existing merchant accounts to a dispatcher.
+- **Dispatcher Fleet & Affiliation Management APIs (`dispatcher/views.py`, `dispatcher/serializers.py`)**:
+  - Implemented `DispatcherAffiliatedMerchantsListView` (`GET /api/dispatch/affiliation/merchants/`) with search and pagination.
+  - Updated `DispatcherAffiliationSummaryView` to include `total_affiliated_merchants`, `affiliated_merchants_count`, and `active_merchants_this_month`.
+  - Updated `DispatcherCommissionListView` to support filtering by `merchant_id` and `source` (`rider` vs `merchant`).
+- **Management Command & Scoped Code Generation (`dispatcher/management/commands/regenerate_dispatcher_codes.py`, `dispatcher/models.py`)**:
+  - Created `regenerate_dispatcher_codes` management command to regenerate unique, collision-free affiliation codes for dispatchers, supporting `--only-affiliates`, `--dispatcher-id`, and `--dry-run`.
+  - Updated `DispatcherProfile.save()` to restrict automatic affiliation code generation strictly to `zone_lead` and `hub_captain` roles, preventing unwanted codes on `admin` profiles.
+  - Added unit test suite `test_regenerate_dispatcher_codes.py` (4 tests).
+- **Public Affiliation Code Verification Endpoint (`dispatcher/services.py`, `authentication/views.py`, `authentication/serializers.py`)**:
+  - Implemented `verify_affiliation_code(code)` domain service to validate affiliation codes, enforce that the dispatcher is active and holds a `zone_lead` or `hub_captain` role, and resolve profile contact, role, hub, and zone metadata.
+  - Implemented `VerifyAffiliationCodeView` (`permissions.AllowAny`) supporting both `GET ?code=...` (or `?affiliation_code=...`) and `POST {"affiliation_code": "..."}` (or `{"code": "..."}`) with case-insensitive whitespace trimming.
+  - Exposed verification endpoints across `/api/auth/affiliation/verify/`, `/api/merchant/affiliation/verify/`, `/api/riders/affiliation/verify/`, and `/api/affiliation/verify/` for seamless onboarding validation.
+  - Added integration test suite `test_verify_affiliation_code_api.py` (11 tests).
+
+### Frontend (Dispatcher Portal)
+#### Added & Improved
+- **Dispatcher Affiliation & Merchant Fleet Hub (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Added "Affiliated Merchants" stat card to `TeamsScreen` showing live count of onboarded merchants.
+  - Updated hero banner copy and share actions to emphasize onboarding both riders and merchants.
+  - Added "Affiliated Merchants" management tab with real-time merchant table displaying Merchant ID, Business Name, Contact, Status, Merchant Type, Total Orders, and Monthly Commission.
+  - Added `AffiliationAPI.getAffiliatedMerchants()` in `src/api.js`.
+
+---
+
+# [2026-10-15] — Rider Approval Review Slideshow & Rejection Notes
+
+### Frontend (Dispatcher Portal)
+#### Added & Improved
+- **Rider Approval Review Slideshow (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Transformed document review into an interactive full-height slideshow occupying almost the entire modal, allowing reviewers to view submitted KYC documents and vehicle photos one after the other in high clarity without separate clicks.
+  - Implemented keyboard arrow navigation (`←` / `→`) and responsive floating buttons for fast document cycling.
+  - Added 1.7x zoom toggle and direct "Open Original" file link actions.
+  - Added interactive thumbnail filmstrip with active indicators and rejection flag badges.
+  - Added robust image fallback UI for broken image URLs or unsupported preview formats.
+- **Reviewer Rejection Notes & Granular Document Flagging**:
+  - Added dedicated Rejection Composer view with overall rejection note textarea and quick-fill suggestions.
+  - Added per-document rejection flagging with specific notes and quick reason chips directly in the slideshow and rejection composer.
+  - Added auto-populate helper to summarize flagged document issues into the overall rejection note.
+  - Connected rejection notes to `RidersAPI.rejectRider()` passing both the overall reason and per-document rejection breakdown.
+
+---
+
+# [2026-10-13] — Restrict Order Offers for Unverified Independent Riders
+
+### Backend
+#### Security & Fixed
+- **Order Offer Access & Zone Restrictions for Riders (`riders/views.py` & `orders/permissions.py`)**:
+  - Implemented `IsVerifiedRider` permission in `orders/permissions.py` enforcing that riders must have `is_authorized=True` and, for independent riders, `approval_status == 'approved'`.
+  - Added access controls to `OrderOfferListView` (`GET /api/riders/orders/offers/`) and `OrderOfferAcceptView` (`POST /api/riders/orders/offers/<id>/accept/`) returning `403 Forbidden` for unverified riders pending KYC approval.
+  - Aligned `OrderOfferAcceptView` with zone filtering: validated `rider.home_zone` and `rider.hub` against `offer.zone`, rejecting out-of-zone riders with `403 Forbidden` and unassigned riders with `400 Bad Request`.
+  - Hardened `RiderToggleDutyView` (`POST /api/riders/duty/`) to block unverified independent riders from switching status to `online` or `on_duty`.
+  - Scoped Ably real-time token channel capabilities in `AblyTokenView` (`dispatcher/views.py`) so unverified riders cannot subscribe to `for-you`, `for-you*`, or assigned order channels.
+  - Added unit test suite `test_unverified_rider_offer_restriction.py` and updated `test_zone_filtering.py`.
+
+---
+
+# [2026-10-13] — Celery Background Tasks for Password Reset OTP (Web & Mobile)
+
+### Backend
+#### Changed
+- **Asynchronous Password Reset OTP Dispatch (`authentication/views.py` & `authentication/tasks.py`)**:
+  - Offloaded password reset OTP delivery in `RequestPasswordResetView` to Celery task `send_password_reset_otp_task`.
+  - Offloaded mobile password reset OTP delivery in `MobileRequestPasswordResetView` to Celery task `send_mobile_password_reset_otp_task`.
+  - Updated OTP dispatch logic to always deliver to both the user's registered email (`send_password_reset_otp_to_email` / `send_mobile_password_reset_email`) and phone (`OTPService.send_sms_otp`), regardless of whether the requester supplied an email or phone number in the request body.
+  - Enhanced user lookup in `MobileRequestPasswordResetView` to prevent user enumeration on missing email addresses.
+  - Added unit test suite `test_password_reset_task.py` and integration test suite `test_password_reset_view.py`.
+
+---
+
+# [2026-09-29] — Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)
+
+### Backend
+#### Added
+- **Real-Time Rider Leaderboard (Redis Sorted Sets & PostgreSQL Sync)**:
+  - Added centralized `LeaderboardService` (`riders/leaderboard_service.py`) for real-time rider leaderboard tracking using Redis Sorted Sets (`leaderboard:trips:{period_key}` and `leaderboard:earnings:{period_key}`) with automatic PostgreSQL failover.
+  - Connected `LeaderboardService.record_order_completion` to background task `handle_order_completion_tasks` in `orders/tasks.py`.
+  - Refactored `LeaderboardView` and `RiderGamificationSummaryView` in `riders/gamification_views.py` to read real-time rankings and stats with sub-millisecond latency.
+  - Updated `rebuild_leaderboard` management command to sync both PostgreSQL snapshot tables and Redis Sorted Sets.
+  - Added unit test suite `test_leaderboard_service.py` and integration test suite `test_realtime_leaderboard.py`.
+
+---
+
+# [2026-09-29] — Vehicle Asset Total Yesterday Orders Distance (km) & Fleet Table Updates
+
+### Backend
+#### Added
+- **Vehicle Asset Total Yesterday Orders Distance (`dispatcher/serializers.py`)**:
+  - Added `total_yesterday_orders_distance_km` field and `get_total_yesterday_orders_distance_km` serializer method (with aliases `yesterday_orders_distance` and `total_yesterday_order_distance`) to `VehicleAssetSerializer`, aggregating `distance_km` from completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback and 24-hour cache.
+  - Added `total_yesterday_orders_distance_km` field to `RiderSerializer` alongside `total_yesterday_order_distance`.
+  - Added integration tests `VehicleAssetYesterdayOrdersDistanceTest` in `backend/dispatcher/tests/integration/test_dispatcher_flows.py`.
+- **Vehicle Asset Yesterday Orders (`dispatcher/serializers.py`)**:
+  - Added `yesterday_orders` field and `get_yesterday_orders` serializer method to `VehicleAssetSerializer`, calculating completed orders in the previous local date window `[yesterday_start, yesterday_end)` with 3-tier fallback (order `completed_at`, delivery `delivered_at`, and order `updated_at`).
+  - Restored `orders_today` to compute completed orders today using `>= today_start` boundary.
+
+### Frontend
+#### Changed
+- **Dispatcher Portal Vehicles Screen, Modals & Map Popup (`dispatcher-frontend/AX_Dispatch_Portal.jsx`)**:
+  - Updated Vehicles table columns to display `Yest Orders Dist` alongside `Today Orders`, `Yesterday Orders`, `Distance Today`, and `Yesterday Distance`.
+  - Updated telemetry read-only modal and map marker info window to display `Yest Orders Dist` / `Yesterday Orders Distance`.
+  - Preserved `total_yesterday_orders_distance_km`, `yesterday_orders_distance`, and `total_yesterday_order_distance` across live Ably telemetry merges.
+- **Dispatcher API Client (`dispatcher-frontend/src/api.js`)**:
+  - Mapped `total_yesterday_orders_distance_km` and `total_yesterday_order_distance` in `RidersAPI.getAll()`.
+
+---
+
+### Backend
+#### Changed
+- **Vehicle Distance Cron Script (`backend/crons/compute_distance_today.sh`)**:
+  - Added `--reset-missing` flag to `compute_distance_today` management command execution to zero out `distance_today` for vehicles with no tracking records today.
+
+#### Fixed
+- **ServiceUser Model Validation in Agent Booking (`orders/agent_views.py`)**:
+  - Ensured `customer_user` and `caller_user` validation explicitly verifies that `request.user` or `request.merchant` is an instance of Django's `User` model (`isinstance(..., User)`), preventing non-ORM dummy authentication user objects (such as `ServiceUser` or `BotServiceUser`) from being passed into ForeignKey queries or model creations expecting a UUID.
+  - Added robust phone number lookup fallback across multiple phone format variations (`+234...`, `234...`, `0...`).
+  - Added integration test `test_agent_book_order_with_service_api_key` in `orders/tests/integration/test_agent_endpoints.py`.
+
+---
+
+# [2026-09-03] — Assured Express AI Agent & MCP Logistics Endpoints
+
+### Backend & Integrations
+#### Added
+- **AI Agent & MCP Delivery Endpoints (`orders/agent_views.py` & `orders/agent_serializers.py`)**:
+  - `POST /api/orders/quote/`: Delivery quote calculation between pickup and dropoff locations, with automated geocoding, route duration, distance estimation, and default 'Bike' vehicle pricing.
+  - `POST /api/orders/agent/book/`: AI agent order creation endpoint that auto-computes route distance and travel duration if not pre-calculated, assigns order number, creates delivery record, and notifies active fleet.
+  - `GET /api/orders/track/<str:order_id>/`: Comprehensive order tracking endpoint by order number or UUID with assigned rider details and progress milestones.
+  - `GET /api/orders/customer-deliveries/`: Order history lookup by customer phone number across both sender and recipient roles.
+  - `GET /api/orders/<str:order_id>/payment-info/`: Dedicated payment information and CoreBanking virtual bank account retrieval for customer bank transfer settlement.
+- **URL Routing (`orders/urls.py`)**:
+  - Registered `quote/`, `agent/book/`, `track/<str:order_id>/`, `customer-deliveries/`, and `<str:order_id>/payment-info/`.
+- **Integration Tests (`orders/tests/integration/test_agent_endpoints.py`)**:
+  - Added comprehensive integration tests covering quote calculation, automated booking, order tracking, customer deliveries phone lookup, and payment info retrieval.
+
+---
+
+# [2026-08-27] — Standardized Testing Framework & Tests Folder Organization (Unit & Integration)
+
+### Backend & Tooling
+#### Added
+- **Standardized Tests Directory Layout (`<app>/tests/unit/` & `<app>/tests/integration/`)**:
+  - Restructured all tests across apps (`orders`, `riders`, `dispatcher`, `wallet`, `oprtn_dashboard`, `operations`, `subscriptions`, `authentication`, etc.) into dedicated `tests/unit/` and `tests/integration/` suites.
+  - Added `__init__.py` package files across all test directories.
+  - Cleaned up root loose test scripts, moving them to `scratch/`.
+- **Standardized Test Runner Script (`backend/run_tests.sh`)**:
+  - Script for automated test execution that auto-detects active virtual environments (`venv` or `.venv`) and runs `pytest` with coverage reporting (`--cov=. --cov-report=xml --cov-report=term-missing`).
+- **Coverage Configuration (`backend/.coveragerc`)**:
+  - Configured test coverage rules, omitting migrations, tests, management commands, factories, wsgi/asgi entry points, scripts, and utilities.
+- **Pytest Configuration Alignment (`backend/pytest.ini`)**:
+  - Enhanced pytest discovery for all apps (`authentication`, `ax_merchant_api`, `bot`, `chats`, `crons`, `devs`, `dispatcher`, `operations`, `oprtn_dashboard`, `orders`, `referrals`, `riders`, `subscriptions`, `wallet`, `webhooks`, `whatsapp_messaging`), updated class/function patterns, ignored dirs, warning filters, markers, and coverage defaults.
+- **Global Test Fixtures (`backend/conftest.py`)**:
+  - Added `override_static_storage` fixture (autouse) preventing missing static file/manifest errors during testing.
+  - Added `authenticated_client` fixture alongside `auth_client` with type hinting and Google-style docstrings.
+- **Unified Makefiles**:
+  - Added root `Makefile` and updated `backend/Makefile` with complete suite targets (`make test`, `make test-fast`, `make test-cov`, `make test-unit`, `make test-integration`, `make test-api`, `make test-isolate`, `make migrations`, `make migrate`).
+
+---
+
+# [2026-08-26] — Google Places Autocomplete Session Usage Tracking & Place Details DB Caching
+
+### Backend
+#### Added
+- **Google Autocomplete Session Usage Tracking**:
+  - Model `GoogleAutoCompleteSessionUsage` (`orders/models.py`) to record session usage, pricing at $0.005 per session, query hits count, place resolution, and status lifecycle (`IN_PROGRESS`, `RESOLVED`, `EXPIRED`).
+  - Recorded session token hits in `google_place_autocomplete` and session resolution in `google_place_details` (`orders/utils.py`).
+  - Registered `GoogleAutoCompleteSessionUsageAdmin` in Django Admin (`orders/admin.py`) with filters, search, and raw ID fields.
+  - Added migration `orders/migrations/0015_googleautocompletesessionusage.py`.
+- **Google Place Details Database Caching (`GooglePlace`)**:
+  - Model `GooglePlace` (`orders/models.py`) to cache seen place details by `place_id`, saving `formatted_address`, `lat`, and `lng`.
+  - Updated `google_place_details` (`orders/utils.py`) to check `GooglePlace` in the database first, avoiding external Google Places API requests for previously seen places while still maintaining session resolution.
+  - Registered `GooglePlaceAdmin` in Django Admin (`orders/admin.py`).
+  - Added migration `orders/migrations/0016_googleplace_and_more.py`.
+  - Added comprehensive unit and E2E caching tests in `orders/test_google_autocomplete_session_usage.py`.
+
+---
+
+# [2026-08-07] — Multi/Bulk Drop Fare Price Guardrail
+
+### Backend
+#### Added
+- **Fare Price Guardrail**: Added guardrail in `orders/views.py` (`BulkCalculateFareView`) for `multi`/`bulk` modes to cap individual vehicle delivery prices at 20,000 if the calculated price exceeds 20,000. Added unit test `test_multi_drop_price_guardrail_cap` in `orders/test_bulk_calculate_fare.py`.
+
+---
+
+# [2026-08-06] — Fix Webhook Model ArrayField Base Field
+
+### Backend
+#### Fixed
+- **Webhook Model ArrayField**: Added required positional argument `base_field=models.CharField(max_length=100)` and `blank=True` to `events` `ArrayField` in `webhooks/models.py`.
+
+---
+
+# [2026-08-03] — Fix Test Failures Across Dispatcher & Orders Modules
+
+### Backend
+#### Fixed
+- **Dispatcher & Order Test Fixes**:
+  - `dispatcher/tests.py`: Added `refresh_from_db()` to `test_compute_distance_today_reset_missing` so the updated database value is reflected on the model instance. Added default pickup coordinates to `_create_orders` in `OrderViewSetListTests` to prevent background tasks from invoking external geocoding HTTP requests.
+  - `orders/signals.py`: Added `"AssignmentAccepted": "F_AssignmentAccepted"` mapping in `send_merchant_email_on_status_change` to ensure progression emails fire correctly on assignment acceptance.
+  - `orders/test_rider_order_updates.py`: Updated `OrderEvent` filter assertions to match signal-generated event names (`order_status_started`, `order_status_arrived`, `order_status_done`).
+
+---
+
+# [2026-08-03] — Refactor OrderEvent Creation to Django Signals
+
+### Backend
+#### Added
+- **OrderEvent Signal Receivers**:
+  - `log_order_event_on_created`: Automatically creates an `OrderEvent` (`event="order_created"`) on `post_save` whenever a new `Order` instance is created.
+  - `log_order_event_on_status_change`: Automatically creates an `OrderEvent` (`event="order_status_<status>"`) on `post_save` when an order transitions to a new status.
+  - `order_event_signal`: Custom signal for dispatching custom order events (e.g., `price_change`, delivery status updates).
+- **Unit Tests**: Created `orders/test_order_events_signals.py` to test automatic `OrderEvent` creation on order creation, status changes, and custom signal dispatches.
+
+#### Refactored
+- **Views & Commands Event Cleanup**: Removed direct `OrderEvent.objects.create()` calls across `orders/views.py`, `riders/views.py`, `dispatcher/views.py`, and management commands, delegating all event creation to signals.
+
+---
+
+
+### Backend
+#### Added
+- **OrderEvent Admin Registration**: Registered the `OrderEvent` model in Django admin (`orders/admin.py`) as a standalone model with raw_id_fields, search, and list filters.
+- **OrderEvent Admin Inline**: Added `OrderEventInline` inside `OrderAdmin` to display all event logs directly within the parent Order view in Django admin.
+- **Admin Unit Tests**: Added verification tests in `orders/tests.py` to ensure `OrderEventAdmin` has optimized `raw_id_fields` for performance.
+
+#### Fixed
+- **Status Template Map Mappings**: Fixed missing `AssignmentAccepted` and `AssignmentRejected` status entries in `status_template_map` inside `orders/signals.py`, fixing test failures in `test_merchant_emails.py`.
+
+---
+
+# [2026-07-30] — Merchant Email Notifications on Order Progression Stages
+
+### Backend
+#### Added
+- **Order Progression Email Templates**: Designed and added 10 premium, brand-aligned email templates under `backend/templates/emails/marketing/` (extending `base.html` with Outfit typography) for order lifecycle states: Pending, Assigned, Assignment Accepted, Assignment Rejected, Picked Up, Fulfilling, Arrived, Customer Canceled, Rider Canceled, and Failed.
+- **Order Status Signal Receiver**: Registered `send_merchant_email_on_status_change` receiver for the `post_save` signal on the `Order` model in `orders/signals.py`. It tracks status transitions from the previous value (populated by `pre_save`) and triggers the corresponding transactional email.
+- **Email Signal Unit Tests**: Created `orders/test_merchant_emails.py` containing the `MerchantProgressionEmailsTest` class to verify transactional email triggers, idempotency check bypasses, and transition boundaries.
+
+#### Improved
+- **Celery Transactional Task Route**: Updated the `_send_marketing_email` helper and `send_transactional_email` task in `orders/tasks.py` to support a `skip_daily_check` flag. This allows transactional order progression emails to bypass the daily campaign rate-limiting check while preserving per-order-and-stage idempotency.
+- **Controller Cleanup**: Removed redundant manual Celery task dispatches from `_advance_order` and `DeliveryCompleteView` in `orders/views.py`, delegating all progression emails to Django model signals.
+
+---
+
+# [2026-07-23] — Dispatcher Notifications & Order Charge Task Serialization Fix
+
+### Backend
+#### Added
+- **New Order Dispatcher Email Template**: Added HTML template to render detailed information of newly created orders for dispatcher alerts.
+- **Dispatcher Email Celery Task & Signal**: Added task `send_new_order_dispatcher_email_task` and registered post_save signal `notify_dispatchers_on_new_order` to trigger notifications on order creation.
+- **MailNow Fallback Email Utility**: Implemented `send_email_with_fallback` in `authentication/emails.py` falling back to MailNow API if Mailgun fails.
+
+#### Fixed
+- **Order Charge Task Serialization**: Fixed a Celery task serialization error in `create_order_charge` task by returning a JSON-serializable string representation of the created Charge UUID instead of the Django model instance.
+- **Task Unit Tests**: Added unit tests in `orders/tests.py` to verify that `create_order_charge` task runs successfully, returns a valid UUID string, creates the Charge database entry, and raises `Order.DoesNotExist` on invalid orders.
+
+---
+
+# [2026-07-14] — SmartParcel API Error Handling
+
+### Backend
+#### Fixed
+- **SmartParcel API Error Parsing**: Updated `SmartPercelIntegration.create_parcel` in [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) to check the inner `statuscode` inside the SmartParcel JSON response. If `statuscode` is not `"00"`, the request is now treated as a failure and returns `False` along with the descriptive `statusmessage` (e.g. locker unavailable, insufficient balance).
+- **Locker Delivery Creation Service**: Simplified and fortified error handling in `process_parcel_delivery` within [services.py](file:///Users/mac/Liberty/aexpress/backend/orders/services.py) and `SmartParcelCreateParcelView` within [views.py](file:///Users/mac/Liberty/aexpress/backend/orders/views.py) to raise `ServiceException` when the underlying locker creation fails.
+- **Unit Tests**: Added integration tests to verify successful and failed parcel creation behavior.
+
+---
+
+# [2026-07-14] — Autocomplete Coordinates Bypass
+
+### Frontend
+#### Improved
+- **Autocomplete Coordinate Bypass**: Updated the shared `AddressAutocompleteInput.tsx`, inline `AddressAutocompleteInput` in `page.tsx`, and `MapPickerModal.tsx` components to check for coordinates (`lat` and `lng`) directly on the selected autocomplete suggestion. When coordinates are present, the frontend bypasses details lookup (geocoding), checks boundaries, and updates states/fires callbacks directly, reducing unnecessary API requests.
+- **Inline Component Synchronization**: Corrected the inline `AddressAutocompleteInput` component in the main dashboard `page.tsx` to properly destructure and execute the `onSelect` prop when suggestions are chosen, and added standard details lookup fallback logic.
+
+---
+
+# [2026-07-13] — Mapbox Autocomplete Integration
+
+### Backend
+#### Added
+- **Mapbox Geocoding v6 API integration**: Switched from Mapbox Search Box Suggest to the Geocoding v6 API forward search (`/search/geocode/v6/forward`) with `autocomplete=true` to fetch suggestions and geographic coordinates (`lat`/`lng`) in a single request.
+- **Mapbox Autocomplete Support**: Integrated Mapbox autocomplete into `PlacesAutocompleteView` with support for session tokens.
+- **Mapbox Place Details Support**: Updated `PlaceDetailsView` to retrieve feature details from Mapbox using prefix `mapbox:` and session tokens.
+- **Fallback Chain**: Configured autocomplete to use Geoapify first, falling back to Mapbox, and finally falling back to AWS Location Service.
+- **Autocomplete Coordinates Mapping**: Added support to map and return latitude and longitude coordinates directly in Geoapify and Mapbox autocomplete suggestions if present in the API response.
+- **Unit Tests**: Updated integration tests in `orders/test_places.py` to cover Mapbox Geocoding v6 helpers, autocomplete, details, and fallback behaviors.
+
+---
+
+# [2026-07-09] — Google Places Fallback with AWS Location Service
+
+
+### Backend
+#### Added
+- **AWS Location Service helpers**: Added AWS Location Service helper functions in `orders/utils.py` (`get_aws_location_client`, `aws_place_autocomplete`, `aws_place_details`, `aws_reverse_geocode`).
+- **AWS Place Autocomplete, Details, Reverse Geocode, and Geocode Views**: Added REST API proxy views `PlacesAutocompleteView`, `PlaceDetailsView`, `ReverseGeocodeView`, and `GeocodeView` in `orders/places_views.py` wrapping AWS Location Service.
+- **Endpoints routing**: Registered the new proxy endpoints in `orders/urls.py`.
+- **AWS Places integration tests**: Added `orders/test_places.py` to cover helpers, proxy views, and geocoding fallbacks.
+
+#### Fixed
+- **Geocoding graceful degradation fallback**: Modified `geocode_address` in `orders/utils.py` to fall back to AWS Location Service geocoding if Google Maps Geocoding API fails or throws an exception.
+
+### Frontend
+#### Added
+- **AWS Places API client calls**: Added backend proxy client endpoints (`PlacesAPI.autocomplete`, `PlacesAPI.details`, `PlacesAPI.reverseGeocode`, `PlacesAPI.geocode`) to `frontend/src/lib/api.ts`.
+- **Address Autocomplete AWS Fallback**: Integrated AWS Location Service fallback in `AddressAutocompleteInput.tsx` and the dashboard page's inline `AddressAutocompleteInput` to handle autocomplete queries and details resolution when Google Maps fails or times out.
+- **Map Picker AWS Fallback**: Integrated AWS Location Service fallback in `MapPickerModal.tsx` for place autocomplete, details resolution, and reverse geocoding on coordinates.
+- **Geocoding Coords Fallback**: Configured `geocodeAddress` utility in both the dashboard and shared `NewOrderScreen` components to fallback to `API.Places.geocode` backend proxy when client-side Google geocoder fails, preventing raw string addresses in fare calculation payloads.
+
+---
+
+# [2026-07-07] — Fix SmartParcel Locker Data Integration
+
+### Backend
+#### Fixed
+- **Sender Phone Number Lookup Typo**: Fixed typo in `QuickSendView.post()` dictionary lookup key for the sender's phone number (`"sender _phone"` -> `"sender_phone"`), which caused it to always map to an empty string.
+
+#### Added
+- **SmartParcel Locker Integration Tests**: Created `orders/test_quick_send_smart_parcel.py` unit test to verify integrated Quick Send order placement with locker details.
+
+### Frontend
+#### Fixed
+- **SmartParcel Locker Data Propagation**: Added locker delivery and pickup fields (`is_pickup_percel`, `isdelivery_percel`, `collect_code`, `box_id`, `locker_size_id`) to the `apiPayload` mapped object in `dashboard/page.tsx`'s `onPlaceOrder()`.
+- **New Order Page Payload Mapping**: Restructured payload creation on the standalone `/new-order` page (`new-order/page.tsx`) to map all camelCase keys to backend-aligned snake_case equivalent fields and include locker data.
+
+---
+
+# [2026-06-04] — Fix Admin Charge Change Page Timeout
+
+### Backend (Admin)
+#### Fixed
+- **Order representation N+1 query optimization**: Optimized the `Order` model's `__str__` method to return only the order number (`f"Order {self.order_number}"`), avoiding heavy database query loops on related user objects when rendering list choices.
+- **Admin models raw_id_fields optimization**: Added `raw_id_fields` to foreign key relationships in all `wallet` and `orders` admin modules (`ChargeAdmin`, `WalletAdmin`, `TransactionAdmin`, `VirtualAccountAdmin`, `WebhookLogAdmin`, `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, `AmortizationVirtualAccountAdmin`, `OrderAdmin`, `DeliveryAdmin`, `OrderLegAdmin`, `MerchantPricingOverrideAdmin`, `MerchantPriceListAdmin`, `MerchantPriceListItemAdmin`). This completely prevents Django admin from executing N+1 select list queries or rendering massive dropdown lists, fixing the gunicorn timeout crash when displaying admin change pages.
+
+### Backend
+#### Added
+- **Makefile Update**: Added a `test` target to run the pytest test suite via `.venv/bin/pytest` or system fallback.
+
+---
+
+# [2026-05-20] — Backend Test Suite Failure Resolution
+
+### Backend
+#### Added
+- **Rider Home Zone Filter**: Implemented home-zone filtering on rider order offers to ensure riders only view jobs that originate from or are routed to their designated zones.
+- **Relay Coordinates Validation**: Enforced strict coordinate validation in `create_dispatcher_order` when relay leg generation is requested, raising standard validation errors on missing coordinates.
+
+#### Fixed
+- **Rider Wallet Balance Aggregation**: Restored available balance retrieval in `RiderWalletInfoSerializer` to sum the current wallet balance and pending Cash On Delivery (COD) amounts. Queried the `Wallet` model directly to bypass stale in-memory cached relationships.
+- **Today's Trips Route Resolution**: Fixed dynamic pattern capturing collision in `riders/urls.py` by re-ordering the `"orders/today/"` pattern before the dynamic `"orders/<str:order_id>/"` pattern, resolving a false "Order not found" 404 response.
+- **Wallet Escrow Balance Verification**: Updated escrow tests to force refresh the wallet database state before asserting balances, avoiding stale assert failures.
+- **Merchant Subscription Creation Conflicts**: Adjusted subscription test setup to fetch pre-existing model instances automatically spawned by Django signals, preventing unique constraint violations.
+- **Proximity Checks Graceful Bypass**: Modified delivery completion views to skip proximity validation checks when geolocation coordinates are omitted from the client payload.
+- **Rider Admin Metadata**: Added `short_description` properties to custom model methods in `Rider` model to pass admin view validation checks in the test harness.
+- **Rider Duty Switch Standard choices**: Integrated `"online"` and `"offline"` choice options to the `DutyToggleSerializer` class to gracefully bridge mobile app toggle payloads.
+
+---
+
+# [2026-05-19] — Transaction Admin User Phone Search
+
+### Backend (Admin)
+#### Added
+- **Transaction User Phone Search**: Added user `phone` search field (`wallet__user__phone`) to `TransactionAdmin` to enable administrative users to search/filter wallet transactions by the associated user's phone number.
+
+---
+
+# [2026-05-18] — Amortization Admin Search Bug Fix
+
+### Backend (Admin)
+#### Fixed
+- **Amortization Admin User Search**: Resolved a Django `FieldError` (unsupported lookup 'full_name') by replacing the invalid Python `@property` lookup with actual database fields (`first_name`, `last_name`, `contact_name`) across `AmortizationWalletAdmin`, `AmortizationTransactionAdmin`, and `AmortizationVirtualAccountAdmin`.
+- **Search Robustness**: Standardized user search across amortization admin views to allow querying by first name, last name, or contact name.
+
+---
+
+# [2026-05-16] — Partner Order Count Flexibility
+
+### Frontend (Dispatcher Portal)
+#### Changed
+- **Number of Orders Flexibility**: Modified the "Number of Orders" input in the Partner Bulk creation flow to accept any integer value.
+- **Input Clearing**: Enabled the ability to clear the "Number of Orders" input field during editing for a better user experience.
+- **Robust Calculations**: Updated pricing calculations and order submission logic to handle empty or non-numeric input values gracefully.
+
+# [2026-05-15] — Transaction Admin Date Hierarchy
+
+### Backend (Admin)
+#### Added
+- **Transaction Date Hierarchy**: Added `date_hierarchy` to `TransactionAdmin` for improved date-based navigation and filtering of wallet transactions.
+- **Enhanced Search**: Added support for searching transactions by user virtual account number in `TransactionAdmin`.
+
+# [2026-05-12] — Amortization Transaction Admin Enhancements
+
+### Backend (Admin)
+#### Added
+- **Day Filter**: Added `date_hierarchy` to `AmortizationTransactionAdmin` for better date-based filtering, matching the `OrderAdmin` configuration.
+
+# [2026-05-11] — Multi-Drop Route Visualization
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Multi-Drop Map Rendering**: Updated `DeliveryRouteMap` to visualize all delivery stops for `multi` mode orders. Markers are now sequence-numbered, and the route path connects every stop in order.
+- **Enhanced Route Details**: The `OrderDetail` sidebar now lists all delivery stops sequentially, showing stop numbers, addresses, status, and receiver contact information.
+- **Dynamic Route Indicators**: Implemented a dynamic vertical path indicator in the Route section that scales based on the number of delivery stops.
+
+### API
+#### Changed
+- **Serializer Expansion**: Updated the dispatcher's `OrderSerializer` to include the nested `deliveries` field, providing full stop data to the frontend.
+
+# [2026-05-08] — Unified Coordinate-Based Routing
+
+### Frontend
+#### Added
+- **Coordinate Capture**: Enhanced `AddressAutocompleteInput` to capture and return `lat`/`lng` coordinates alongside formatted addresses.
+- **Precise Routing**: Integrated coordinate-based inputs into the `bulk-calculate-fare` API calls for Quick, Multi-drop, and Bulk order modes, improving pricing and ETA accuracy.
+- **State Management**: Updated `dashboard/page.tsx` to store and manage coordinate data for all delivery stops.
+
+---
+
+# [2026-05-07] — Routing Service Development Environment & Types
+
+### Backend (Routing Service)
+#### Added
+- **Live Reloading**: Configured `air` for hot-reloading during development.
+- **OSRM Types**: Defined `OSRMResponse` and related structs in `types/types.go` for handling map service responses.
+
+#### Fixed
+- **Development Tooling**: Resolved "no such tool 'air'" error by properly registering `air` as a Go tool in `go.mod` and adding a `.air.toml` configuration.
+- **Multiple Destinations**: Updated the directions endpoint to support multiple destinations via repeated query parameters (`?destinations=p1&destinations=p2`), bypassing semicolon parsing issues in Go 1.17+.
+
+
+---
+
+# [2026-05-06] — Amortization Wallet & Transactions
+
+### API
+#### Added
+- **Amortization Wallet**: Implemented `GET /wallet/amortization-wallet/` for riders to view bike hire-purchase progress.
+- **Amortization Transactions**: Added `GET /wallet/amortization-transactions/` to retrieve paginated transaction history for the amortization wallet.
+
+---
+
+# [2026-05-05] — Merchant Pricing Override Fix
+
+### API
+#### Fixed
+- **Merchant Pricing Overrides**: Enabled "upsert" (update or create) behavior for the pricing overrides endpoint by removing the default DRF `UniqueTogetherValidator`, allowing `POST` requests to update existing overrides as originally intended.
+
+---
+
+# [2026-05-04] — Merchant & Dispatcher Cancellation Reason Support
+
+### Frontend (Merchant Dashboard)
+#### Fixed
+- **Cancellation Reason Visibility**: Fixed an issue where the cancellation reason textarea was not appearing. Optimized modal layout and increased width to prevent clipping.
+
+### Frontend (Dispatcher Portal)
+#### Added
+- **Enhanced Cancellation Modal**: Redesigned the cancellation modal to always show the reason input field and added "Suggested Reasons" for faster processing.
+
+### API
+#### Changed
+- **Standardized Responses**: Refactored both Merchant and Dispatcher cancellation endpoints to use `service_response` and `ServiceException` for consistent API behavior.
+
+---
+
+## [2026-04-29] — Multiple Image Upload in Dispatcher Portal
+
+### Frontend
+#### Added
+- **Multiple Image Selection**: Enhanced the "Create Order" modal to support selecting and uploading multiple images simultaneously.
+- **Image Previews**: Added a grid view for uploaded images with the ability to remove individual files before submission.
+- **Improved Order Details**: Updated the Order Details view to display all uploaded documents.
+
+#### Changed
+- **API Payload**: Updated the dispatcher create order payload to send `file_uploaded_urls` as a list of strings.
+
+## [2026-04-23] — Partner Order Tracking & Management
+
+### Frontend
+#### Added
+- **Partner Details View**: Integrated a premium partner information card in the Order Detail modal.
+- **Document Preview**: Added high-fidelity preview for uploaded proof/waybill documents with full-size viewing support.
+- **Processing Metrics Editing**: Enabled inline editing for `Rider Completed` and `Returned` counts for partner bulk orders.
+- **Real-time Synchronization**: Added `useEffect` hooks to ensure partner metrics are correctly loaded and reset during order navigation.
+
+### API
+#### Added
+- **Order Stats Update**: Added `PATCH /dispatch/orders/{order_number}/update-partner-stats/` to update partner processing counts.
+- **Serializer Expansion**: Updated `OrderSerializer` to include `is_partner_order`, `partner_order_count`, `day_returned_count`, `rider_completed_count`, and `file_uploaded_url`.
+- **Merchant Access Control**: Restricted `MerchantViewSet` list action to `IsDispatcher` permission and other actions to `IsDispatcherAdmin`.
+
+---
+
+## [2026-04-22] — ClickUp Task Logging Automation
+
+### Chore
+- **ClickUp Logger**: Implemented a Python script `scripts/clickup_logger.py` to automate task logging to ClickUp.
+- **Session Tracking**: Added `.claude/session_log.json` to track and batch-log development tasks.
+- **Auto-routing**: Implemented keyword-based routing to automatically assign tasks to the correct ClickUp Lists.
+
+---
+
+## [2026-08-20] — Whisper360 Integration
+
+### Frontend
+#### Added
+- **Whisper360 Widget**: Installed the Whisper360 widget script into the root layout's `<head>` to enable the user support widget across the portal.
+
+---
+
+## [2026-04-16] — SmartParcel Toggle Fix
+
+### Frontend
+#### Fixed
+- **SmartParcel Toggle**: Resolved a `TypeError` that occurred when toggling "Deliver to SmartParcel Locker" by ensuring that data fetched from the SmartParcel API is always treated as an array before mapping.
+- **Robust Data Fetching**: Updated `useEffect` hooks to correctly extract lists (states, cities, boxes, sizes) from backend responses and added defensive array checks in the render logic.
+---
+
+## [2026-04-17] — SmartParcel Integration & Simulation
+
+### API
+#### Added
+- **SmartParcel Simulation**: Added `simulate/drop/` and `simulate/collect/` endpoints to simulate locker state transitions in sandbox mode for end-to-end testing of the locker workflow.
+- **SmartParcel Integration**: Implemented comprehensive suite of endpoints for SmartParcel locker integration:
+  - `GET smart-parcel/states/`
+  - `GET smart-parcel/states/{id}/cities/`
+  - `GET smart-parcel/boxes/city/{id}/`
+  - `GET smart-parcel/boxes/assigned/city/{id}/`
+  - `GET smart-parcel/locker-sizes/`
+  - `POST smart-parcel/parcels/`
+  - `GET smart-parcel/parcels/pending-pickups/`
+  - `GET smart-parcel/parcels/resolve-collect-code/{code}/`
+  - `GET smart-parcel/parcels/{tracking}/`
+  - `POST smart-parcel/parcels/{tracking}/cancel/`
+
+### Frontend
+#### Added
+- **SmartParcel Locker Workflow**: Integrated SmartParcel locker selection and collect code resolution directly into the Order Creation flow in the dashboard.
+- **Defensive guards**: Added defensive null guards for SmartParcel data arrays to prevent runtime crashes during API latency or failures.
+
+## [2026-04-02] — Order Mode Redesign & Grouped Pricing Fix
+
+
+### Frontend
+#### Changed
+- **Order Mode Selector**: Redesigned the "Quick vs Grouped" sub-mode selection from a standard dropdown to modern, interactive cards with icons and premium aesthetics.
+- **Grouped Pricing Fix**: Resolved a bug where "Grouped Order" failed to trigger route calculation and estimation.
+- **Payload Fix**: Ensured the `mode` field ("quick" or "grouped") is correctly included in the API payload when placing an order.
+- **Estimated Prices**: Optimized the dynamic pricing logic to correctly apply the 30% discount to both simple and tiered pricing models in "Grouped" mode.
+
+---
+
+## [2026-03-27] — Checkout Referral & Virtual Account Integration
+
+### Frontend
+#### Added
+- **Signup Referral:** Added an optional "Referral Code" field to Step 1 of the merchant signup form.
+- **Dynamic Wallet Funding:** Integrated `getVirtualAccount` API to fetch real bank details for wallet funding via bank transfer.
+- **Subscription Management:** Added a new "Subscription" sidebar item and management screen for plan selection.
+- **Subscription Enhancements:** Refactored sidebar to a nested "Subscription" menu with "Plan" and "Invoice" sub-items.
+- **Postpaid Plans:** Added support for Postpaid subscription plans with a multi-tab interface in the Subscription screen.
+- **Invoices Screen:** Implemented a dedicated screen for viewing and downloading subscription invoices.
+- **API Wrapper:** Added `Wallet.getVirtualAccount()`, `SubscriptionAPI`, and Postpaid methods to `src/lib/api.ts`.
+
+#### Changed
+- Updated signup payload to include `referral_code`.
+- Improved professional UI for referral input with a "Gift" icon.
+
+### API
+#### Added
+- `GET /wallet/virtual-account/` — Retrieves or creates a dedicated virtual account for the merchant.
+- `GET /subscriptions/plans/` — Retrieves available subscription plans.
+- `POST /subscriptions/plans/{id}/subscribe/` — Subscribes a merchant to a plan.
+- `GET /subscriptions/postpaid/plans/` — Retrieves available postpaid plans.
+- `POST /subscriptions/postpaid/plans/{id}/activate/` — Activates a postpaid plan for a merchant.
+- `GET /subscriptions/postpaid/active/` — Retrieves the current active postpaid subscription.

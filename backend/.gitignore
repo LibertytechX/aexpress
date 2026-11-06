@@ -22,7 +22,8 @@ share/python-wheels/
 MANIFEST
 migrations/
 firebase_key.json
-
+0008_vehicleasset_provider_id_sync_meta.py
+*.docx
 # Virtual Environment
 venv/
 env/
@@ -30,7 +31,7 @@ ENV/
 env.bak/
 venv.bak/
 .venv/
-
+ai_learnings/
 # Django
 *.log
 local_settings.py
@@ -39,6 +40,7 @@ db.sqlite3-journal
 media/
 staticfiles/
 static/
+libertypay_user.json
 
 # Migrations (optional - uncomment if you want to ignore migrations)
 # */migrations/*.py

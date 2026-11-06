@@ -11,9 +11,22 @@ from .views import (
     VerifyEmailView,
     ResendVerificationEmailView,
     RequestPasswordResetView,
+    VerifyPasswordResetTokenView,
     ResetPasswordView,
     VerifyOTPView,
     ResendOTPView,
+    MobileRequestPasswordResetView,
+    MobileResetPasswordView,
+    MerchantDeviceRegistrationView,
+    MerchantNotificationListView,
+    MerchantNotificationDetailView,
+    MerchantNotificationMarkReadView,
+    MerchantNotificationMarkAllReadView,
+    MerchantNotificationSettingsView,
+    MerchantNotificationDeleteView,
+    MerchantNotificationDeleteAllView,
+    MerchantAffiliationView,
+    VerifyAffiliationCodeView,
 )
 
 app_name = "authentication"
@@ -39,7 +52,22 @@ urlpatterns = [
         RequestPasswordResetView.as_view(),
         name="request_password_reset",
     ),
+    path(
+        "verify-password-reset-token/",
+        VerifyPasswordResetTokenView.as_view(),
+        name="verify_password_reset_token",
+    ),
     path("reset-password/", ResetPasswordView.as_view(), name="reset_password"),
+    path(
+        "mobile/request-password-reset/",
+        MobileRequestPasswordResetView.as_view(),
+        name="mobile_request_password_reset",
+    ),
+    path(
+        "mobile/reset-password/",
+        MobileResetPasswordView.as_view(),
+        name="mobile_reset_password",
+    ),
     # User profile endpoints
     path("me/", UserProfileView.as_view(), name="user_profile"),
     path("profile/", UserProfileView.as_view(), name="update_profile"),
@@ -54,5 +82,56 @@ urlpatterns = [
         "addresses/<uuid:address_id>/set-default/",
         SetDefaultAddressView.as_view(),
         name="set_default_address",
+    ),
+    # Merchant device & notification endpoints
+    path(
+        "device/",
+        MerchantDeviceRegistrationView.as_view(),
+        name="merchant_device_register",
+    ),
+    path(
+        "notifications/",
+        MerchantNotificationListView.as_view(),
+        name="merchant_notification_list",
+    ),
+    path(
+        "notifications/read-all/",
+        MerchantNotificationMarkAllReadView.as_view(),
+        name="merchant_notification_read_all",
+    ),
+    path(
+        "notifications/settings/",
+        MerchantNotificationSettingsView.as_view(),
+        name="merchant_notification_settings",
+    ),
+    path(
+        "notifications/<int:pk>/",
+        MerchantNotificationDetailView.as_view(),
+        name="merchant_notification_detail",
+    ),
+    path(
+        "notifications/<int:pk>/read/",
+        MerchantNotificationMarkReadView.as_view(),
+        name="merchant_notification_mark_read",
+    ),
+    path(
+        "notifications/delete-all/",
+        MerchantNotificationDeleteAllView.as_view(),
+        name="merchant_notification_delete_all",
+    ),
+    path(
+        "notifications/<int:pk>/delete/",
+        MerchantNotificationDeleteView.as_view(),
+        name="merchant_notification_delete",
+    ),
+    path(
+        "merchant/affiliation/",
+        MerchantAffiliationView.as_view(),
+        name="merchant_affiliation",
+    ),
+    path(
+        "affiliation/verify/",
+        VerifyAffiliationCodeView.as_view(),
+        name="verify_affiliation_code",
     ),
 ]

@@ -1,3 +1,4 @@
+from typing import Any
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -12,15 +13,32 @@ import hmac
 import logging
 from decimal import Decimal
 import uuid as uuid_module
+from rest_framework.views import APIView
 
-from .models import Wallet, Transaction, VirtualAccount, WebhookLog
+from .models import (
+    Wallet,
+    Transaction,
+    VirtualAccount,
+    WebhookLog,
+    AmortizationWallet,
+    AmortizationVirtualAccount,
+    AmortizationTransaction,
+)
 from .serializers import (
     WalletSerializer,
     TransactionSerializer,
     FundWalletSerializer,
     VerifyPaymentSerializer,
     VirtualAccountSerializer,
+    AmortizationWalletSerializer,
+    AmortizationTransactionSerializer,
 )
+from dispatcher.tasks import send_merchant_notification
+from orders.permissions import IsRider
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -28,22 +46,62 @@ logger = logging.getLogger(__name__)
 
 class TransactionPagination(PageNumberPagination):
     page_size = 20
-    page_size_query_param = 'page_size'
+    page_size_query_param = "page_size"
     max_page_size = 100
 
+    def get_paginated_response(self, data: Any) -> Response:
+        """Return a paginated response, supporting customized payload layout.
 
-@api_view(['GET'])
+        Args:
+            data: The paginated data list or custom payload dictionary.
+
+        Returns:
+            A custom Response object.
+        """
+        if isinstance(data, dict) and "success" in data:
+            return Response({
+                "success": data.get("success", True),
+                "count": self.page.paginator.count,
+                "next": self.get_next_link(),
+                "previous": self.get_previous_link(),
+                "data": data.get("data", [])
+            })
+        return Response({
+            "count": self.page.paginator.count,
+            "next": self.get_next_link(),
+            "previous": self.get_previous_link(),
+            "results": data
+        })
+
+
+import base64
+
+MASK_SECRET = "AX_SECURE_KEY_2026"
+
+
+def mask_paystack_key(key):
+    """Mask string using XOR with MASK_SECRET and base64 encoding"""
+    key_bytes = key.encode("utf-8")
+    secret_bytes = MASK_SECRET.encode("utf-8")
+
+    # XOR each byte of the key with the secret (cycling secret if shorter)
+    masked = bytearray()
+    for i in range(len(key_bytes)):
+        masked.append(key_bytes[i] ^ secret_bytes[i % len(secret_bytes)])
+
+    return base64.b64encode(masked).decode("utf-8")
+
+
+@api_view(["GET"])
 def get_paystack_public_key(request):
-    """Get Paystack public key for frontend integration"""
-    return Response({
-        'success': True,
-        'data': {
-            'public_key': settings.PAYSTACK_PUBLIC_KEY
-        }
-    })
+    """Get masked Paystack public key for frontend integration"""
+    public_key = settings.PAYSTACK_PUBLIC_KEY
+    masked_key = mask_paystack_key(public_key)
+
+    return Response({"success": True, "data": {"public_key": masked_key}})
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_wallet_balance(request):
     """Get user's wallet balance"""
@@ -51,18 +109,15 @@ def get_wallet_balance(request):
         wallet, created = Wallet.objects.get_or_create(user=request.user)
         serializer = WalletSerializer(wallet)
 
-        return Response({
-            'success': True,
-            'data': serializer.data
-        })
+        return Response({"success": True, "data": serializer.data})
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)}
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_transaction_history(request):
     """Get user's transaction history with pagination"""
@@ -70,8 +125,8 @@ def get_transaction_history(request):
         wallet, created = Wallet.objects.get_or_create(user=request.user)
 
         # Get query parameters
-        transaction_type = request.GET.get('type', None)
-        transaction_status = request.GET.get('status', None)
+        transaction_type = request.GET.get("type", None)
+        transaction_status = request.GET.get("status", None)
 
         # Filter transactions
         transactions = wallet.transactions.all()
@@ -88,18 +143,17 @@ def get_transaction_history(request):
 
         serializer = TransactionSerializer(paginated_transactions, many=True)
 
-        return paginator.get_paginated_response({
-            'success': True,
-            'data': serializer.data
-        })
+        return paginator.get_paginated_response(
+            {"success": True, "data": serializer.data}
+        )
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)}
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def initialize_payment(request):
     """Initialize Paystack payment for wallet funding"""
@@ -107,12 +161,12 @@ def initialize_payment(request):
         serializer = FundWalletSerializer(data=request.data)
 
         if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        amount = serializer.validated_data['amount']
+        amount = serializer.validated_data["amount"]
 
         # Get or create wallet
         wallet, created = Wallet.objects.get_or_create(user=request.user)
@@ -121,68 +175,77 @@ def initialize_payment(request):
         paystack_secret_key = settings.PAYSTACK_SECRET_KEY
 
         headers = {
-            'Authorization': f'Bearer {paystack_secret_key}',
-            'Content-Type': 'application/json'
+            "Authorization": f"Bearer {paystack_secret_key}",
+            "Content-Type": "application/json",
         }
 
         payload = {
-            'email': request.user.email,
-            'amount': int(amount * 100),  # Convert to kobo
-            'currency': 'NGN',
-            'metadata': {
-                'user_id': str(request.user.id),
-                'wallet_id': str(wallet.id),
-                'purpose': 'wallet_funding'
-            }
+            "email": request.user.email,
+            "amount": int(amount * 100),  # Convert to kobo
+            "currency": "NGN",
+            "metadata": {
+                "user_id": str(request.user.id),
+                "wallet_id": str(wallet.id),
+                "purpose": "wallet_funding",
+            },
         }
 
         response = requests.post(
-            'https://api.paystack.co/transaction/initialize',
+            "https://api.paystack.co/transaction/initialize",
             json=payload,
-            headers=headers
+            headers=headers,
         )
 
         response_data = response.json()
 
-        if response.status_code == 200 and response_data.get('status'):
+        if response.status_code == 200 and response_data.get("status"):
             # Create pending transaction
-            transaction_ref = response_data['data']['reference']
+            transaction_ref = response_data["data"]["reference"]
 
             Transaction.objects.create(
                 wallet=wallet,
-                type='credit',
+                type="credit",
                 amount=amount,
-                description='Wallet funding via Paystack',
+                description="Wallet funding via Paystack",
                 reference=transaction_ref,
                 paystack_reference=transaction_ref,
                 balance_before=wallet.balance,
                 balance_after=wallet.balance,  # Balance unchanged until payment is verified
-                status='pending',
-                metadata={'paystack_response': response_data['data']}
+                status="pending",
+                metadata={"paystack_response": response_data["data"]},
             )
 
-            return Response({
-                'success': True,
-                'data': {
-                    'authorization_url': response_data['data']['authorization_url'],
-                    'access_code': response_data['data']['access_code'],
-                    'reference': transaction_ref
+            return Response(
+                {
+                    "success": True,
+                    "data": {
+                        "authorization_url": response_data["data"]["authorization_url"],
+                        "access_code": response_data["data"]["access_code"],
+                        "reference": transaction_ref,
+                    },
                 }
-            })
+            )
         else:
-            return Response({
-                'success': False,
-                'errors': {'detail': response_data.get('message', 'Payment initialization failed')}
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {
+                    "success": False,
+                    "errors": {
+                        "detail": response_data.get(
+                            "message", "Payment initialization failed"
+                        )
+                    },
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)}
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def verify_payment(request):
     """Verify Paystack payment and credit wallet"""
@@ -190,45 +253,48 @@ def verify_payment(request):
         serializer = VerifyPaymentSerializer(data=request.data)
 
         if not serializer.is_valid():
-            return Response({
-                'success': False,
-                'errors': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": serializer.errors},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        reference = serializer.validated_data['reference']
+        reference = serializer.validated_data["reference"]
 
         # Verify payment with Paystack
         paystack_secret_key = settings.PAYSTACK_SECRET_KEY
 
         headers = {
-            'Authorization': f'Bearer {paystack_secret_key}',
+            "Authorization": f"Bearer {paystack_secret_key}",
         }
 
         response = requests.get(
-            f'https://api.paystack.co/transaction/verify/{reference}',
-            headers=headers
+            f"https://api.paystack.co/transaction/verify/{reference}", headers=headers
         )
 
         response_data = response.json()
 
-        if response.status_code == 200 and response_data.get('status'):
-            payment_data = response_data['data']
+        if response.status_code == 200 and response_data.get("status"):
+            payment_data = response_data["data"]
 
             # Check if payment was successful
-            if payment_data['status'] == 'success':
+            if payment_data["status"] == "success":
                 # Get transaction
                 try:
                     transaction = Transaction.objects.get(paystack_reference=reference)
 
                     # Check if already processed
-                    if transaction.status == 'completed':
-                        return Response({
-                            'success': True,
-                            'data': {
-                                'message': 'Payment already processed',
-                                'transaction': TransactionSerializer(transaction).data
+                    if transaction.status == "completed":
+                        return Response(
+                            {
+                                "success": True,
+                                "data": {
+                                    "message": "Payment already processed",
+                                    "transaction": TransactionSerializer(
+                                        transaction
+                                    ).data,
+                                },
                             }
-                        })
+                        )
 
                     # Credit wallet
                     with db_transaction.atomic():
@@ -237,48 +303,59 @@ def verify_payment(request):
                         wallet.save()
 
                         # Update transaction
-                        transaction.status = 'completed'
-                        transaction.paystack_status = payment_data['status']
+                        transaction.status = "completed"
+                        transaction.paystack_status = payment_data["status"]
                         transaction.balance_after = wallet.balance
                         transaction.metadata = {
                             **transaction.metadata,
-                            'paystack_verification': payment_data
+                            "paystack_verification": payment_data,
                         }
                         transaction.save()
 
-                    return Response({
-                        'success': True,
-                        'data': {
-                            'message': 'Wallet funded successfully',
-                            'transaction': TransactionSerializer(transaction).data,
-                            'wallet': WalletSerializer(wallet).data
+                        # Process pending charges if any
+                        wallet.process_pending_charges()
+
+                    return Response(
+                        {
+                            "success": True,
+                            "data": {
+                                "message": "Wallet funded successfully",
+                                "transaction": TransactionSerializer(transaction).data,
+                                "wallet": WalletSerializer(wallet).data,
+                            },
                         }
-                    })
+                    )
 
                 except Transaction.DoesNotExist:
-                    return Response({
-                        'success': False,
-                        'errors': {'detail': 'Transaction not found'}
-                    }, status=status.HTTP_404_NOT_FOUND)
+                    return Response(
+                        {
+                            "success": False,
+                            "errors": {"detail": "Transaction not found"},
+                        },
+                        status=status.HTTP_404_NOT_FOUND,
+                    )
             else:
-                return Response({
-                    'success': False,
-                    'errors': {'detail': f'Payment {payment_data["status"]}'}
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": f'Payment {payment_data["status"]}'},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         else:
-            return Response({
-                'success': False,
-                'errors': {'detail': 'Payment verification failed'}
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": {"detail": "Payment verification failed"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)}
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['GET'])
+@api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_virtual_account(request):
     """Get or create a CoreBanking virtual account for the authenticated user."""
@@ -287,22 +364,28 @@ def get_virtual_account(request):
             virtual_account = VirtualAccount.objects.get(user=request.user)
         except VirtualAccount.DoesNotExist:
             from .corebanking_service import create_virtual_account
+
             virtual_account = create_virtual_account(request.user)
 
         serializer = VirtualAccountSerializer(virtual_account)
-        return Response({
-            'success': True,
-            'data': serializer.data,
-        })
+        return Response(
+            {
+                "success": True,
+                "data": serializer.data,
+            }
+        )
 
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)},
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {
+                "success": False,
+                "errors": {"detail": str(e)},
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def confirm_transfer_payment(request):
     """
@@ -313,25 +396,29 @@ def confirm_transfer_payment(request):
     """
     try:
         from django.utils import timezone
-        amount = request.data.get('amount')
+
+        amount = request.data.get("amount")
         if not amount:
             return Response(
-                {'success': False, 'errors': {'detail': 'Amount is required'}},
-                status=status.HTTP_400_BAD_REQUEST
+                {"success": False, "errors": {"detail": "Amount is required"}},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
             amount = Decimal(str(amount))
         except Exception:
             return Response(
-                {'success': False, 'errors': {'detail': 'Invalid amount'}},
-                status=status.HTTP_400_BAD_REQUEST
+                {"success": False, "errors": {"detail": "Invalid amount"}},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         if amount <= 0:
             return Response(
-                {'success': False, 'errors': {'detail': 'Amount must be greater than zero'}},
-                status=status.HTTP_400_BAD_REQUEST
+                {
+                    "success": False,
+                    "errors": {"detail": "Amount must be greater than zero"},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         wallet, _ = Wallet.objects.get_or_create(user=request.user)
@@ -341,17 +428,17 @@ def confirm_transfer_payment(request):
 
         transaction = Transaction.objects.create(
             wallet=wallet,
-            type='credit',
+            type="credit",
             amount=amount,
-            description='Bank transfer (awaiting bank confirmation)',
+            description="Bank transfer (awaiting bank confirmation)",
             reference=reference,
             balance_before=wallet.balance,
             balance_after=wallet.balance,  # Balance unchanged until webhook confirms
-            status='pending',
+            status="pending",
             metadata={
-                'source': 'user_claim',
-                'claimed_at': timezone.now().isoformat(),
-            }
+                "source": "user_claim",
+                "claimed_at": timezone.now().isoformat(),
+            },
         )
 
         logger.info(
@@ -359,24 +446,27 @@ def confirm_transfer_payment(request):
             f"amount: ₦{amount}, ref: {reference}"
         )
 
-        return Response({
-            'success': True,
-            'data': {
-                'message': 'Transfer claim recorded. Your wallet will be credited once the bank confirms the payment.',
-                'reference': reference,
-                'transaction_id': str(transaction.id),
-            }
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "success": True,
+                "data": {
+                    "message": "Transfer claim recorded. Your wallet will be credited once the bank confirms the payment.",
+                    "reference": reference,
+                    "transaction_id": str(transaction.id),
+                },
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     except Exception as e:
         logger.error(f"confirm_transfer_payment error: {e}", exc_info=True)
         return Response(
-            {'success': False, 'errors': {'detail': str(e)}},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @permission_classes([])
 @csrf_exempt
 def corebanking_webhook(request):
@@ -394,25 +484,29 @@ def corebanking_webhook(request):
 
         # Extract headers for logging
         headers_dict = {
-            'X-Webhook-Signature': request.headers.get('X-Webhook-Signature', ''),
-            'Content-Type': request.headers.get('Content-Type', ''),
-            'User-Agent': request.headers.get('User-Agent', ''),
+            "X-Webhook-Signature": request.headers.get("X-Webhook-Signature", ""),
+            "Content-Type": request.headers.get("Content-Type", ""),
+            "User-Agent": request.headers.get("User-Agent", ""),
         }
 
         # Extract key fields for indexing
-        transaction_reference = data.get('transaction_reference', '').strip()
-        recipient_account_number = data.get('recipient_account_number', '').strip()
-        amount = data.get('amount', 0)
+        transaction_reference = data.get("transaction_reference", "").strip()
+        recipient_account_number = data.get("recipient_account_number", "").strip()
+        amount = data.get("amount", 0)
 
         # Create webhook log FIRST - before any processing
         webhook_log = WebhookLog.objects.create(
-            source='corebanking',
+            source="corebanking",
             payload=data,
             headers=headers_dict,
-            transaction_reference=transaction_reference if transaction_reference else None,
-            recipient_account_number=recipient_account_number if recipient_account_number else None,
+            transaction_reference=(
+                transaction_reference if transaction_reference else None
+            ),
+            recipient_account_number=(
+                recipient_account_number if recipient_account_number else None
+            ),
             amount=Decimal(str(amount)) if amount else None,
-            signature_received=request.headers.get('X-Webhook-Signature', ''),
+            signature_received=request.headers.get("X-Webhook-Signature", ""),
         )
 
         logger.info(f"CoreBanking webhook received - Log ID: {webhook_log.id}")
@@ -425,83 +519,296 @@ def corebanking_webhook(request):
         signature_valid = None
 
         if webhook_secret:
-            signature = request.headers.get('X-Webhook-Signature', '')
+            signature = request.headers.get("X-Webhook-Signature", "")
             expected = hmac.new(
-                webhook_secret.encode('utf-8'),
+                webhook_secret.encode("utf-8"),
                 request.body,
                 hashlib.sha256,
             ).hexdigest()
-            signature_valid = (signature == expected)
+            signature_valid = signature == expected
             webhook_log.signature_valid = signature_valid
-            webhook_log.save(update_fields=['signature_valid', 'updated_at'])
+            webhook_log.save(update_fields=["signature_valid", "updated_at"])
 
             if not signature_valid:
-                logger.warning(f"CoreBanking webhook signature mismatch - Log ID: {webhook_log.id}")
+                logger.warning(
+                    f"CoreBanking webhook signature mismatch - Log ID: {webhook_log.id}"
+                )
                 webhook_log.mark_failed("Invalid webhook signature")
-                return Response({
-                    'success': False,
-                    'errors': {'detail': 'Invalid signature'},
-                }, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Invalid signature"},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         # Only process CREDIT transactions (settlement_status is not reliable for all account types)
-        if data.get('transaction_type') != 'CREDIT':
-            logger.info(f"CoreBanking webhook skipped - not a credit transaction - Log ID: {webhook_log.id}")
+        if data.get("transaction_type") != "CREDIT":
+            logger.info(
+                f"CoreBanking webhook skipped - not a credit transaction - Log ID: {webhook_log.id}"
+            )
             webhook_log.mark_skipped("Not a credit transaction")
-            return Response({'success': True})
+            return Response({"success": True})
 
-        payer_name = data.get('payer_account_name', 'Bank Transfer')
+        payer_name = data.get("payer_account_name", "Bank Transfer")
 
         # Validate required fields
         if not recipient_account_number or not transaction_reference:
-            logger.error(f"CoreBanking webhook missing required fields - Log ID: {webhook_log.id}")
-            webhook_log.mark_failed("Missing required fields: recipient_account_number or transaction_reference")
-            return Response({
-                'success': False,
-                'errors': {'detail': 'Missing required fields'},
-            }, status=status.HTTP_400_BAD_REQUEST)
+            logger.error(
+                f"CoreBanking webhook missing required fields - Log ID: {webhook_log.id}"
+            )
+            webhook_log.mark_failed(
+                "Missing required fields: recipient_account_number or transaction_reference"
+            )
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"detail": "Missing required fields"},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Idempotency: skip if already processed
         if Transaction.objects.filter(reference=transaction_reference).exists():
-            logger.info(f"CoreBanking webhook skipped - transaction {transaction_reference} already processed - Log ID: {webhook_log.id}")
-            webhook_log.mark_skipped(f"Transaction {transaction_reference} already processed")
-            return Response({'success': True})
+            logger.info(
+                f"CoreBanking webhook skipped - transaction {transaction_reference} already processed - Log ID: {webhook_log.id}"
+            )
+            webhook_log.mark_skipped(
+                f"Transaction {transaction_reference} already processed"
+            )
+            return Response({"success": True})
+
+        req_reference = data.get("request_reference", "")
+        recipient_name = data.get("recipient_account_name", "").strip()
+        req_reference = req_reference.strip() if req_reference else ""
+        # process for amortization payment
+        if recipient_name.endswith("AXHP"):  # Amortization Account
+            # check for idempotency for AmortizationTransaction
+            if AmortizationTransaction.objects.filter(
+                reference=transaction_reference
+            ).exists():
+                logger.info(
+                    f"Amortization webhook skipped - transaction {transaction_reference} already processed - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_skipped(
+                    f"Transaction {transaction_reference} already processed"
+                )
+                return Response({"success": True})
+            # get the amort account and wallet
+            amort_account = AmortizationVirtualAccount.objects.filter(
+                account_number=recipient_account_number
+            ).first()
+            if not amort_account:
+                logger.error(
+                    f"CoreBanking webhook skipped - amort account not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed("Amortization account not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Amortization account not found"},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            wallet = amort_account.user.amortization_wallet
+            if not wallet:
+                logger.error(
+                    f"CoreBanking webhook skipped - wallet not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed("Wallet not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Wallet not found"},
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            webhook_metadata = {
+                "source": "corebanking_webhook",
+                "webhook_log_id": str(webhook_log.id),
+                "webhook_payload": data,
+                "transaction_type": data.get("transaction_type"),
+                "settlement_status": data.get("settlement_status"),
+                "payer_account_name": payer_name,
+                "payer_account_number": data.get("payer_account_number"),
+                "recipient_account_number": recipient_account_number,
+                "transaction_date": data.get("transaction_date"),
+                "settlement_date": data.get("settlement_date"),
+            }
+            # credit the amortization wallet
+            wallet.credit(
+                amount=Decimal(str(amount)),
+                ref=transaction_reference,
+                meta=webhook_metadata,
+            )
+            # mark log as processed
+            webhook_log.mark_processed()
+            return Response({"success": True})
+
+        # Check if it's a COD Remission
+        if req_reference and req_reference.startswith("COD-"):
+            from riders.models import RiderCodRecord
+            from django.utils import timezone
+
+            try:
+                cod_record = RiderCodRecord.objects.get(payment_ref=req_reference)
+
+                # If already remitted/verified, skip
+                if cod_record.status in [
+                    RiderCodRecord.Status.REMITTED,
+                    RiderCodRecord.Status.VERIFIED,
+                ]:
+                    logger.info(
+                        f"CoreBanking webhook skipped - COD transaction {transaction_reference} already remitted - Log ID: {webhook_log.id}"
+                    )
+                    webhook_log.mark_skipped(
+                        f"COD Transaction {transaction_reference} already remitted"
+                    )
+                    return Response({"success": True})
+
+                merchant_user = cod_record.order.user
+                wallet, _ = Wallet.objects.get_or_create(user=merchant_user)
+
+                webhook_metadata = {
+                    "source": "corebanking_webhook",
+                    "webhook_log_id": str(webhook_log.id),
+                    "webhook_payload": data,
+                    "transaction_type": data.get("transaction_type"),
+                    "settlement_status": data.get("settlement_status"),
+                    "payer_account_name": payer_name,
+                    "payer_account_number": data.get("payer_account_number"),
+                    "recipient_account_number": recipient_account_number,
+                    "transaction_date": data.get("transaction_date"),
+                    "settlement_date": data.get("settlement_date"),
+                    "is_cod_remission": True,
+                }
+
+                with db_transaction.atomic():
+                    wallet.credit(
+                        amount=Decimal(str(amount)),
+                        description=f"COD Remission from Rider for Order #{cod_record.order.order_number}",
+                        reference=transaction_reference,
+                        metadata=webhook_metadata,
+                    )
+
+                    cod_record.status = RiderCodRecord.Status.REMITTED
+                    cod_record.remitted_at = timezone.now()
+                    cod_record.save(update_fields=["status", "remitted_at"])
+
+                    transaction = Transaction.objects.get(
+                        reference=transaction_reference
+                    )
+                    webhook_log.mark_processed(transaction=transaction)
+
+                logger.info(
+                    f"CoreBanking webhook processed COD successfully - ₦{amount} credited to {merchant_user.business_name} - Log ID: {webhook_log.id}"
+                )
+                return Response({"success": True})
+
+            except RiderCodRecord.DoesNotExist:
+                logger.error(
+                    f"CoreBanking webhook - COD record {transaction_reference} not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed(f"COD record {transaction_reference} not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "COD record not found"},
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        # Check if it's a Subscription Invoice
+        if req_reference and req_reference.startswith("SUB-INV-"):
+            from subscriptions.models import SubscriptionInvoice
+
+            try:
+                invoice = SubscriptionInvoice.objects.get(payment_ref=req_reference)
+
+                # If already paid, skip
+                if invoice.status == "paid":
+                    logger.info(
+                        f"CoreBanking webhook skipped - Invoice {transaction_reference} already paid - Log ID: {webhook_log.id}"
+                    )
+                    webhook_log.mark_skipped(
+                        f"Invoice {transaction_reference} already paid"
+                    )
+                    return Response({"success": True})
+
+                with db_transaction.atomic():
+                    # For subscriptions, the merchant pays the platform.
+                    # We mark the invoice and subscription as paid.
+                    invoice.status = "paid"
+                    invoice.save(update_fields=["status"])
+
+                    sub = invoice.subscription
+                    sub.is_paid = True
+                    sub.save(update_fields=["is_paid"])
+
+                    # record webhook processed
+                    webhook_log.mark_processed()
+
+                logger.info(
+                    f"CoreBanking webhook processed Invoice successfully - {transaction_reference} - Log ID: {webhook_log.id}"
+                )
+                return Response({"success": True})
+
+            except SubscriptionInvoice.DoesNotExist:
+                logger.error(
+                    f"CoreBanking webhook - Invoice {transaction_reference} not found - Log ID: {webhook_log.id}"
+                )
+                webhook_log.mark_failed(f"Invoice {transaction_reference} not found")
+                return Response(
+                    {
+                        "success": False,
+                        "errors": {"detail": "Invoice not found"},
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
 
         # Find the merchant via virtual account
         try:
-            virtual_account = VirtualAccount.objects.select_related('user').get(
+            virtual_account = VirtualAccount.objects.select_related("user").get(
                 account_number=recipient_account_number
             )
         except VirtualAccount.DoesNotExist:
-            logger.error(f"CoreBanking webhook - virtual account {recipient_account_number} not found - Log ID: {webhook_log.id}")
-            webhook_log.mark_failed(f"Virtual account {recipient_account_number} not found")
-            return Response({
-                'success': False,
-                'errors': {'detail': 'Virtual account not found'},
-            }, status=status.HTTP_404_NOT_FOUND)
+            logger.error(
+                f"CoreBanking webhook - virtual account {recipient_account_number} not found - Log ID: {webhook_log.id}"
+            )
+            webhook_log.mark_failed(
+                f"Virtual account {recipient_account_number} not found"
+            )
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"detail": "Virtual account not found"},
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         wallet, _ = Wallet.objects.get_or_create(user=virtual_account.user)
 
         # Prepare metadata with full webhook payload
         webhook_metadata = {
-            'source': 'corebanking_webhook',
-            'webhook_log_id': str(webhook_log.id),
-            'webhook_payload': data,
-            'transaction_type': data.get('transaction_type'),
-            'settlement_status': data.get('settlement_status'),
-            'payer_account_name': payer_name,
-            'payer_account_number': data.get('payer_account_number'),
-            'recipient_account_number': recipient_account_number,
-            'transaction_date': data.get('transaction_date'),
-            'settlement_date': data.get('settlement_date'),
+            "source": "corebanking_webhook",
+            "webhook_log_id": str(webhook_log.id),
+            "webhook_payload": data,
+            "transaction_type": data.get("transaction_type"),
+            "settlement_status": data.get("settlement_status"),
+            "payer_account_name": payer_name,
+            "payer_account_number": data.get("payer_account_number"),
+            "recipient_account_number": recipient_account_number,
+            "transaction_date": data.get("transaction_date"),
+            "settlement_date": data.get("settlement_date"),
         }
 
         # Create transaction
         with db_transaction.atomic():
             wallet.credit(
                 amount=Decimal(str(amount)),
-                description=f'Bank transfer from {payer_name}',
+                description=f"Bank transfer from {payer_name}",
                 reference=transaction_reference,
-                metadata=webhook_metadata
+                metadata=webhook_metadata,
             )
 
             # Get the created transaction
@@ -510,58 +817,78 @@ def corebanking_webhook(request):
             # Mark webhook as processed
             webhook_log.mark_processed(transaction=transaction)
 
-        logger.info(f"CoreBanking webhook processed successfully - ₦{amount} credited to {virtual_account.user.business_name} - Log ID: {webhook_log.id}")
-        return Response({'success': True})
+        # Notify the merchant their wallet was credited
+        try:
+            merchant_profile = getattr(virtual_account.user, "merchant_profile", None)
+            if merchant_profile:
+                send_merchant_notification.delay(
+                    merchant_id=str(merchant_profile.id),
+                    title="Wallet Credited 💰",
+                    body=f"₦{amount} has been credited to your wallet.",
+                    data={"amount": str(amount), "source": "bank_transfer"},
+                    category="wallet_credit",
+                )
+        except Exception as exc:
+            logger.warning(f"Merchant wallet credit notification failed: {exc}")
+
+        logger.info(
+            f"CoreBanking webhook processed successfully - ₦{amount} credited to {virtual_account.user.business_name} - Log ID: {webhook_log.id}"
+        )
+        return Response({"success": True})
 
     except Exception as e:
         import traceback
+
         error_traceback = traceback.format_exc()
 
-        logger.exception(f"CoreBanking webhook error - Log ID: {webhook_log.id if webhook_log else 'N/A'}: {str(e)}")
+        logger.exception(
+            f"CoreBanking webhook error - Log ID: {webhook_log.id if webhook_log else 'N/A'}: {str(e)}"
+        )
 
         if webhook_log:
             webhook_log.mark_failed(str(e), error_traceback)
 
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)},
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {
+                "success": False,
+                "errors": {"detail": str(e)},
+            },
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
 
 
-@api_view(['POST'])
+@api_view(["POST"])
 @csrf_exempt
 def paystack_webhook(request):
     """Handle Paystack webhook for payment notifications"""
     try:
         # Verify webhook signature
         paystack_secret_key = settings.PAYSTACK_SECRET_KEY
-        signature = request.headers.get('X-Paystack-Signature', '')
+        signature = request.headers.get("X-Paystack-Signature", "")
 
         # Compute hash
         hash_value = hmac.new(
-            paystack_secret_key.encode('utf-8'),
-            request.body,
-            hashlib.sha512
+            paystack_secret_key.encode("utf-8"), request.body, hashlib.sha512
         ).hexdigest()
 
         if signature != hash_value:
-            return Response({
-                'success': False,
-                'errors': {'detail': 'Invalid signature'}
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "errors": {"detail": "Invalid signature"}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # Process webhook event
-        event = request.data.get('event')
-        data = request.data.get('data', {})
+        event = request.data.get("event")
+        data = request.data.get("data", {})
 
-        if event == 'charge.success':
-            reference = data.get('reference')
+        if event == "charge.success":
+            reference = data.get("reference")
 
             try:
                 transaction = Transaction.objects.get(paystack_reference=reference)
 
                 # Check if already processed
-                if transaction.status != 'completed':
+                if transaction.status != "completed":
                     # Credit wallet
                     with db_transaction.atomic():
                         wallet = transaction.wallet
@@ -569,24 +896,100 @@ def paystack_webhook(request):
                         wallet.save()
 
                         # Update transaction
-                        transaction.status = 'completed'
-                        transaction.paystack_status = data.get('status')
+                        transaction.status = "completed"
+                        transaction.paystack_status = data.get("status")
                         transaction.balance_after = wallet.balance
                         transaction.metadata = {
                             **transaction.metadata,
-                            'webhook_data': data
+                            "webhook_data": data,
                         }
                         transaction.save()
 
-                return Response({'success': True})
+                        # Process pending charges if any
+                        wallet.process_pending_charges()
+
+                return Response({"success": True})
 
             except Transaction.DoesNotExist:
-                return Response({'success': False, 'errors': {'detail': 'Transaction not found'}})
+                return Response(
+                    {"success": False, "errors": {"detail": "Transaction not found"}}
+                )
 
-        return Response({'success': True})
+        return Response({"success": True})
 
     except Exception as e:
-        return Response({
-            'success': False,
-            'errors': {'detail': str(e)}
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response(
+            {"success": False, "errors": {"detail": str(e)}},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
+
+
+class AmortizationWalletView(APIView):
+    """
+    API endpoint for getting amortization wallet info for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet info for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        serializer = AmortizationWalletSerializer(amort_wallet)
+        return service_response(
+            status="success",
+            message="Amortization wallet info retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )
+
+
+class AmortizationTransactionListView(APIView):
+    """
+    API endpoint for getting amortization wallet transaction records for the authenticated rider.
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+    pagination_class = TransactionPagination
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        """Get amortization wallet transactions for the current rider."""
+        user = request.user
+
+        try:
+            # Check if user has an amortization wallet
+            amort_wallet = user.amortization_wallet
+        except Exception:
+            raise ServiceException(
+                status_code=404, message="Rider does not have an amortization wallet"
+            )
+
+        transactions = AmortizationTransaction.objects.filter(
+            amortization_wallet=amort_wallet
+        )
+
+        # Apply pagination
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(transactions, request)
+
+        if page is not None:
+            serializer = AmortizationTransactionSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+
+        serializer = AmortizationTransactionSerializer(transactions, many=True)
+        return service_response(
+            status="success",
+            message="Amortization transactions retrieved successfully",
+            data=serializer.data,
+            status_code=200,
+        )

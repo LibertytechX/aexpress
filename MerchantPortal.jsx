@@ -1,6 +1,40 @@
 // React hooks will be available from the global React object
 const { useState, useEffect, useRef } = React;
 
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+const playChime = (notes) => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    notes.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.05);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) { console.warn('[Chime] Could not play:', e); }
+};
+const playNewOrderChime = () => playChime([
+  { freq: 784, start: 0, dur: 0.15 },    // G5
+  { freq: 988, start: 0.15, dur: 0.15 },  // B5
+  { freq: 1175, start: 0.3, dur: 0.25 },  // D6
+]);
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
+
 // ─── ICONS (inline SVG components) ──────────────────────────────
 const Icons = {
   dashboard: (
@@ -312,7 +346,15 @@ function MerchantPortal() {
 
         const ch = ably.channels.get('dispatch-feed');
         // In Ably v2, ch.subscribe() returns a Promise — must be awaited
-        await ch.subscribe('activity', () => {
+        await ch.subscribe('activity', (msg) => {
+          const d = msg.data;
+          if (d && d.event_type === 'new_order') {
+            playNewOrderChime();
+          } else if (d && d.event_type === 'in_transit') {
+            playStartedChime();
+          } else if (d && d.event_type === 'delivered') {
+            playDeliveredChime();
+          }
           loadOrders();
         });
         ablyActive = true;
@@ -402,6 +444,9 @@ function MerchantPortal() {
       id: order.order_number,
       order_number: order.order_number,
       status: order.status,
+			rider_code: order.rider_code,
+			rider_name: order.rider_name,
+			rider_phone: order.rider_phone,
       pickup: order.pickup_address,
       dropoff: order.deliveries[0]?.dropoff_address || '',
       amount: parseFloat(order.total_amount),
@@ -410,7 +455,9 @@ function MerchantPortal() {
       merchant: order.user_business_name,
       deliveries: order.deliveries,
       mode: order.mode,
-      payment_method: order.payment_method
+      payment_method: order.payment_method,
+      collect_on_delivery: order.collect_on_delivery || false,
+      cod_amount: order.cod_amount ? parseFloat(order.cod_amount) : null,
     }));
   };
 
@@ -776,7 +823,9 @@ function MerchantPortal() {
                       package_type: data.packageType || 'Box',
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
+                      cod_amount: data.codAmount || null,
                     };
                     response = await window.API.Orders.createQuickSend(apiPayload);
                   } else if (data.mode === 'multi') {
@@ -789,7 +838,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   } else if (data.mode === 'bulk') {
                     response = await window.API.Orders.createBulkImport({
@@ -801,7 +851,8 @@ function MerchantPortal() {
                       deliveries: data.deliveries || [],
                       notes: data.notes || '',
                       distance_km: data.distance_km || 0,
-                      duration_minutes: data.duration_minutes || 0
+                      duration_minutes: data.duration_minutes || 0,
+                      collect_on_delivery: data.collectOnDelivery || false,
                     });
                   }
                   if (response && response.success) {
@@ -2631,6 +2682,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [payMethod, setPayMethod] = useState("wallet");
   const [step, setStep] = useState(1); // 1=form, 2=review
 
+  // ─── Cash on Delivery ───
+  const [collectOnDelivery, setCollectOnDelivery] = useState(false);
+  const [codAmount, setCodAmount] = useState("");
+
   // ─── Vehicle pricing from backend ───
   // Defaults mirror the production tiered pricing so the UI is correct even
   // before the API response arrives (or if it fails).
@@ -2657,6 +2712,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const [earlyRouteDuration, setEarlyRouteDuration] = useState(null);
   const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [routeError, setRouteError] = useState(null);
+
+	  // Tick when Google Maps finishes loading so route effects can re-run
+	  // (otherwise they may run once, see Maps missing, and never retry).
+	  const [mapsLoadedTick, setMapsLoadedTick] = useState(0);
+	  useEffect(() => {
+	    if (typeof window === 'undefined') return;
+	    const handler = () => setMapsLoadedTick(t => t + 1);
+	    window.addEventListener('google-maps-loaded', handler);
+	    if (window.google && window.google.maps) handler();
+	    return () => window.removeEventListener('google-maps-loaded', handler);
+	  }, []);
 
   // ─── Pickup (shared across modes) ───
   const [pickupAddress, setPickupAddress] = useState("");
@@ -2704,7 +2770,7 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   }, []);
 
   // ─── Calculate route for early price estimation ───
-  useEffect(() => {
+	  useEffect(() => {
     console.log('🔍 Early route effect triggered:', { mode, pickupAddress, dropoffAddress });
 
     // Only calculate for Quick Send mode when both addresses are available
@@ -2733,9 +2799,10 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       console.log('🔄 Starting early route calculation...', { pickupAddress, dropoffAddress });
       setRouteError(null);
 
-      try {
-        // Check if Google Maps is loaded
-        if (typeof google === 'undefined' || !google.maps) {
+	      try {
+	        const g = window.google;
+	        // Check if Google Maps is loaded
+	        if (!g || !g.maps) {
           console.error('❌ Google Maps not loaded yet');
           setRouteError('Maps not loaded');
           setCalculatingRoute(false);
@@ -2743,24 +2810,24 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
         }
 
         // Use Google Maps Directions API to calculate route
-        const directionsService = new google.maps.DirectionsService();
+	        const directionsService = new g.maps.DirectionsService();
 
         const request = {
           origin: pickupAddress,
           destination: dropoffAddress,
-          travelMode: google.maps.TravelMode.DRIVING,
+	          travelMode: g.maps.TravelMode.DRIVING,
           drivingOptions: {
             departureTime: new Date(),
-            trafficModel: google.maps.TrafficModel.BEST_GUESS
+	            trafficModel: g.maps.TrafficModel.BEST_GUESS
           }
         };
 
         console.log('📡 Sending directions request...', request);
 
-        directionsService.route(request, (result, status) => {
+	        directionsService.route(request, (result, status) => {
           console.log('📥 Directions response:', { status, result });
 
-          if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
+	          if (status === g.maps.DirectionsStatus.OK && result.routes[0]) {
             const route = result.routes[0];
             let totalDistance = 0;
             let totalDuration = 0;
@@ -2795,9 +2862,203 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     // Debounce the calculation to avoid too many API calls
     const timeoutId = setTimeout(calculateEarlyRoute, 1000);
     return () => clearTimeout(timeoutId);
-  }, [mode, pickupAddress, dropoffAddress]);
+	  }, [mode, pickupAddress, dropoffAddress, mapsLoadedTick]);
 
-  // ─── Load default address on mount ───
+	  // ─── Multi-Drop state ───
+	  const [drops, setDrops] = useState([
+	    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
+	  ]);
+	  const nextDropId = useRef(2);
+
+	  const addDrop = () => {
+	    const newId = nextDropId.current++;
+	    setDrops(prev => [...prev, { id: newId, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+	  };
+	  const removeDrop = (id) => {
+	    setDrops(prev => prev.length > 1 ? prev.filter(d => d.id !== id) : prev);
+	  };
+	  const updateDrop = (id, field, value) => {
+	    setDrops(prev => prev.map(d => d.id === id ? { ...d, [field]: value } : d));
+	  };
+
+	  // ─── Calculate per-drop routes for Multi-Drop mode ───
+	  // Only depend on address changes (not name/phone/pkg edits) to avoid resetting the debounce
+	  const multiDropRouteReqId = useRef(0);
+	  const dropAddressKey = (drops || []).map(d => `${d.id}:${d.address}`).join('|');
+	  useEffect(() => {
+    if (mode !== 'multi' || !pickupAddress) return;
+
+    const dropsArr = (drops || []);
+    const dropsWithAddress = dropsArr.filter(d => d.address.trim());
+    if (dropsWithAddress.length === 0) return;
+
+    // Only recalculate drops that don't yet have a route for their current pickup+drop pair
+    const routedKeyFor = (d) => `${pickupAddress}||${d.address}`;
+    const dropsNeedingRoute = dropsWithAddress.filter(d => d._routedKey !== routedKeyFor(d));
+    if (dropsNeedingRoute.length === 0) return;
+
+	    const g = window.google;
+	    if (!g || !g.maps) return;
+
+    const reqId = ++multiDropRouteReqId.current;
+
+    const timeoutId = setTimeout(async () => {
+	      console.log('[MultiDrop] Routing needed:', {
+	        pickup: pickupAddress,
+	        drops: dropsNeedingRoute.map(d => ({ id: d.id, address: d.address }))
+	      });
+
+      // Mark these drops as pending and clear any stale route values
+      setDrops(prev => prev.map(d => {
+        if (!dropsNeedingRoute.some(x => x.id === d.id)) return d;
+        return { ...d, distance_km: null, duration_minutes: null, _route_status: 'pending', _route_error: null };
+      }));
+
+	      const routeViaDirections = async (fallbackDrops, reason) => {
+	        try {
+		          const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+	          const directionsService = new g.maps.DirectionsService();
+		          const calcOneAttempt = (drop) => new Promise((resolve) => {
+	            directionsService.route({
+	              origin: pickupAddress,
+	              destination: drop.address,
+	              travelMode: g.maps.TravelMode.DRIVING,
+	              drivingOptions: { departureTime: new Date(), trafficModel: g.maps.TrafficModel.BEST_GUESS }
+	            }, (result, status) => {
+	              if (status === g.maps.DirectionsStatus.OK && result?.routes?.[0]) {
+	                const route = result.routes[0];
+	                let totalDistance = 0, totalDuration = 0;
+	                route.legs.forEach(leg => {
+	                  totalDistance += leg.distance.value;
+	                  totalDuration += leg.duration_in_traffic?.value || leg.duration.value;
+	                });
+	                resolve({
+	                  id: drop.id,
+	                  ok: true,
+	                  distance_km: parseFloat((totalDistance / 1000).toFixed(1)),
+	                  duration_minutes: Math.ceil(totalDuration / 60),
+	                });
+	              } else {
+	                resolve({ id: drop.id, ok: false, error: status || 'UNKNOWN_ERROR' });
+	              }
+	            });
+	          });
+
+		          const calcOneWithRetry = async (drop) => {
+		            let last = null;
+		            for (let attempt = 0; attempt < 3; attempt++) {
+		              last = await calcOneAttempt(drop);
+		              if (last?.ok) return last;
+		              if (last?.error === 'OVER_QUERY_LIMIT') {
+		                await sleep(750 * (attempt + 1));
+		                continue;
+		              }
+		              return last;
+		            }
+		            return last || { id: drop.id, ok: false, error: 'UNKNOWN_ERROR' };
+		          };
+
+	          const results = [];
+	          for (const drop of fallbackDrops) {
+	            if (reqId !== multiDropRouteReqId.current) return;
+		            results.push(await calcOneWithRetry(drop));
+		            // tiny pacing to reduce rate-limit bursts
+		            await sleep(150);
+	          }
+	          if (reqId !== multiDropRouteReqId.current) return;
+
+	          setDrops(prev => prev.map(d => {
+	            const r = results.find(x => x.id === d.id);
+	            if (!r) return d;
+	            if (r.ok) {
+	              return {
+	                ...d,
+	                distance_km: r.distance_km,
+	                duration_minutes: r.duration_minutes,
+	                _routedKey: routedKeyFor(d),
+	                _route_status: 'ok',
+	                _route_error: null,
+	              };
+	            }
+	            return { ...d, distance_km: null, duration_minutes: null, _route_status: 'error', _route_error: `${reason}:${r.error}` };
+	          }));
+	        } catch (e) {
+	          console.error('[MultiDrop] Directions fallback exception:', e);
+	          setDrops(prev => prev.map(d => {
+	            if (!fallbackDrops.some(x => x.id === d.id)) return d;
+	            return { ...d, _route_status: 'error', _route_error: `${reason}:EXCEPTION` };
+	          }));
+	        }
+	      };
+
+	      // Prefer Distance Matrix: single request for N destinations from the same origin.
+	      // If the API is not enabled (REQUEST_DENIED), fall back to DirectionsService per-drop.
+	      if (!g.maps.DistanceMatrixService) {
+	        await routeViaDirections(dropsNeedingRoute, 'NO_DISTANCE_MATRIX');
+	        return;
+	      }
+	      const distanceMatrix = new g.maps.DistanceMatrixService();
+	      const destinations = dropsNeedingRoute.map(d => d.address);
+	      const request = {
+	        origins: [pickupAddress],
+	        destinations,
+	        travelMode: g.maps.TravelMode.DRIVING,
+	        drivingOptions: { departureTime: new Date(), trafficModel: g.maps.TrafficModel.BEST_GUESS },
+	        unitSystem: g.maps.UnitSystem.METRIC,
+	      };
+
+	      distanceMatrix.getDistanceMatrix(request, (response, status) => {
+	        // Ignore stale responses (user changed addresses again)
+	        if (reqId !== multiDropRouteReqId.current) return;
+
+	        if (status !== 'OK') {
+	          console.error('[MultiDrop] DistanceMatrix failed:', status);
+	          routeViaDirections(dropsNeedingRoute, status);
+	          return;
+	        }
+
+	        const elements = response?.rows?.[0]?.elements || [];
+	        const dmOk = dropsNeedingRoute.map((drop, idx) => {
+	          const el = elements[idx];
+	          if (!el || el.status !== 'OK' || !el.distance || !el.duration) {
+	            return { id: drop.id, ok: false, error: el?.status || 'UNKNOWN_ERROR' };
+	          }
+	          const distKm = parseFloat((el.distance.value / 1000).toFixed(1));
+	          const durSec = el.duration_in_traffic?.value || el.duration.value;
+	          const durMin = Math.ceil(durSec / 60);
+	          return { id: drop.id, ok: true, distance_km: distKm, duration_minutes: durMin };
+	        });
+
+	        setDrops(prev => prev.map(d => {
+	          const r = dmOk.find(x => x.id === d.id);
+	          if (!r) return d;
+	          if (r.ok) {
+	            return {
+	              ...d,
+	              distance_km: r.distance_km,
+	              duration_minutes: r.duration_minutes,
+	              _routedKey: routedKeyFor(d),
+	              _route_status: 'ok',
+	              _route_error: null,
+	            };
+	          }
+	          return { ...d, distance_km: null, duration_minutes: null, _route_status: 'error', _route_error: r.error };
+	        }));
+
+	        const failedDrops = dropsNeedingRoute.filter(dr => {
+	          const r = dmOk.find(x => x.id === dr.id);
+	          return r && !r.ok;
+	        });
+	        if (failedDrops.length > 0) {
+	          routeViaDirections(failedDrops, 'DM_ELEMENT');
+	        }
+	      });
+    }, 1500);
+
+    return () => clearTimeout(timeoutId);
+	  }, [mode, pickupAddress, dropAddressKey, mapsLoadedTick]);
+
+	  // ─── Load default address on mount ───
   useEffect(() => {
     const loadDefaultAddress = async () => {
       try {
@@ -2819,15 +3080,15 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     }
   }, [currentUser]);
 
-  // ─── Multi-Drop state ───
-  const [drops, setDrops] = useState([
-    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
-  ]);
-  const nextDropId = useRef(2);
-
-  // ─── Route information state (for pricing) ───
+	  // ─── Route information state (for pricing) ───
   const [routeDistance, setRouteDistance] = useState(null); // in kilometers
   const [routeDuration, setRouteDuration] = useState(null); // in minutes
+
+	  // When transitioning Step 1 → Step 2 (Review & Pay) for Quick Send,
+	  // we *lock* the route stats used for pricing so the displayed price does not
+	  // change later when the map finishes (re)computing directions.
+	  const [lockedQuickDistanceKm, setLockedQuickDistanceKm] = useState(null);
+	  const [lockedQuickDurationMin, setLockedQuickDurationMin] = useState(null);
 
   // When navigating back to Step 1, ensure we don't keep using stale Step 2 route data.
   // Step 1 should always reflect the *current* addresses via early-route calculation.
@@ -2835,18 +3096,20 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
     if (step === 1) {
       setRouteDistance(null);
       setRouteDuration(null);
+	      setLockedQuickDistanceKm(null);
+	      setLockedQuickDurationMin(null);
     }
   }, [step]);
 
-  const addDrop = () => {
-    setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
-  };
-  const removeDrop = (id) => {
-    if (drops.length > 1) setDrops(drops.filter(d => d.id !== id));
-  };
-  const updateDrop = (id, field, value) => {
-    setDrops(drops.map(d => d.id === id ? { ...d, [field]: value } : d));
-  };
+	  const handleProceedToReview = () => {
+	    // Freeze pricing inputs to whatever Step 1 used (early route) so the
+	    // amount doesn't change on Step 2 when OrderMap reports a route.
+	    if (mode === 'quick') {
+	      if (typeof earlyRouteDistance === 'number') setLockedQuickDistanceKm(earlyRouteDistance);
+	      if (typeof earlyRouteDuration === 'number') setLockedQuickDurationMin(earlyRouteDuration);
+	    }
+	    setStep(2);
+	  };
 
   // ─── Bulk Import state ───
   const [bulkText, setBulkText] = useState("");
@@ -2939,11 +3202,35 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   const calcTieredPrice = (km, pt) => {
     if (!pt || pt.type !== 'tiered') return null;
     if (km <= pt.floor_km) return pt.floor_fee;
-    const t = pt.tiers || [];
-    if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-    if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km || pt.floor_km) * (t[0]?.rate || 0)));
-    if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km || 0) * (t[1]?.rate || 0)));
-    return Math.round(km * (t[t.length - 1]?.rate || 0));
+	    // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+	    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+	    let prevMaxKm = Number(pt.floor_km || 0);
+	    let prevRate = null;
+	    for (let i = 0; i < tiers.length; i++) {
+	      const tier = tiers[i] || {};
+	      const rate = Number(tier.rate || 0);
+	      const maxKm = tier.max_km;
+	      const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	      if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+	        return Math.max(Math.round(km * rate), minFloor);
+	      }
+	      prevMaxKm = Number(maxKm);
+	      prevRate = rate;
+	    }
+	    // Fallback for unexpected tier config
+	    const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+	    const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+	    return Math.max(Math.round(km * lastRate), minFloor);
+  };
+
+  // ─── Compute per-drop fare for Multi-Drop ───
+  const calcDropFare = (drop, vehicleName) => {
+	    if (typeof drop?.distance_km !== 'number' || typeof drop?.duration_minutes !== 'number') return null;
+    const pricing = vehiclePricing[vehicleName || vehicle];
+    if (!pricing) return null;
+    const tiered = calcTieredPrice(drop.distance_km, pricing.pricing_tiers);
+    if (tiered !== null) return tiered;
+    return Math.round(pricing.base_fare + drop.distance_km * pricing.rate_per_km + drop.duration_minutes * pricing.rate_per_minute);
   };
 
   // ─── Price calculation ───
@@ -2972,24 +3259,34 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const totalDeliveries = getActiveDropoffs().length;
 
-  // Calculate dynamic cost based on route distance and duration
+  // Calculate dynamic cost based on route distance and duration (for Quick Send / single-route)
   const calculateCost = () => {
     const pricing = vehiclePricing[vehicle];
     if (!pricing) return 0;
 
-    // Step 2 uses the full route (map) calculation.
-    if (step === 2 && routeDistance && routeDuration) {
-      const tiered = calcTieredPrice(routeDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + routeDistance * pricing.rate_per_km + routeDuration * pricing.rate_per_minute);
-    }
+	    // Quick Send pricing: use the *locked* route stats on Step 2 so price is stable.
+	    if (mode === 'quick') {
+	      const km = (typeof lockedQuickDistanceKm === 'number')
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number')
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number')
+	            ? routeDistance
+	            : null;
+	      const mins = (typeof lockedQuickDurationMin === 'number')
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number')
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number')
+	            ? routeDuration
+	            : null;
 
-    // Step 1 (Quick Send): if we already calculated an early route, use it
-    if (mode === 'quick' && earlyRouteDistance && earlyRouteDuration) {
-      const tiered = calcTieredPrice(earlyRouteDistance, pricing.pricing_tiers);
-      if (tiered !== null) return tiered;
-      return Math.round(pricing.base_fare + earlyRouteDistance * pricing.rate_per_km + earlyRouteDuration * pricing.rate_per_minute);
-    }
+	      if (typeof km === 'number' && typeof mins === 'number') {
+	        const tiered = calcTieredPrice(km, pricing.pricing_tiers);
+	        if (tiered !== null) return tiered;
+	        return Math.round(pricing.base_fare + km * pricing.rate_per_km + mins * pricing.rate_per_minute);
+	      }
+	    }
 
     // Fallback: floor fee for tiered, or base fare for simple
     if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
@@ -2997,7 +3294,17 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
   };
 
   const unitCost = calculateCost();
-  const totalCost = totalDeliveries * unitCost;
+
+	  // For multi-drop: compute per-drop fares ONLY when all routes are ready.
+	  const activeMultiDrops = (mode === 'multi') ? drops.filter(d => d.address.trim()) : [];
+	  const multiDropPricingReady = (mode === 'multi') && activeMultiDrops.length > 0 &&
+	    activeMultiDrops.every(d => typeof d.distance_km === 'number' && typeof d.duration_minutes === 'number');
+	  const multiDropFares = (mode === 'multi' && multiDropPricingReady)
+	    ? activeMultiDrops.map(d => calcDropFare(d)).filter(f => typeof f === 'number')
+	    : [];
+	  const totalCost = (mode === 'multi' && multiDropPricingReady && multiDropFares.length === activeMultiDrops.length)
+	    ? multiDropFares.reduce((sum, f) => sum + f, 0)
+	    : totalDeliveries * unitCost;
 
   // ─── Review & Confirm ───
 	const isBlank = (v) => !v || !String(v).trim();
@@ -3016,6 +3323,18 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 		const active = getActiveDropoffs();
 		const missingReceiver = active.some(d => isBlank(d.name) || isBlank(d.phone));
 		if (missingReceiver) proceedErrors.push('Receiver name and phone are required for all deliveries.');
+
+			// Multi-drop must have route estimates ready, otherwise pricing defaults to the floor fee.
+			if (mode === 'multi') {
+				const anyRoutingError = activeMultiDrops.some(d => d._route_status === 'error');
+				const anyPending = activeMultiDrops.some(d =>
+					d.address?.trim() &&
+					(typeof d.distance_km !== 'number' || typeof d.duration_minutes !== 'number') &&
+					d._route_status !== 'error'
+				);
+				if (anyPending) proceedErrors.push('Please wait while we calculate route estimates for all deliveries.');
+				if (anyRoutingError) proceedErrors.push('One or more delivery addresses could not be estimated. Please re-select the address from suggestions.');
+			}
 	}
 
 	const canProceed = proceedErrors.length === 0;
@@ -3026,12 +3345,26 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 		(mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
 	);
 
-  const handleConfirmAll = () => {
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleConfirmAll = async () => {
+    if (submitting) return;
     const deliveries = getActiveDropoffs();
 
-    // Debug: Log route data
-    console.log('🚀 handleConfirmAll called!');
-    console.log('📏 Route data:', { routeDistance, routeDuration });
+	    const effectiveQuickDistanceKm = (mode === 'quick')
+	      ? (typeof lockedQuickDistanceKm === 'number'
+	        ? lockedQuickDistanceKm
+	        : (typeof earlyRouteDistance === 'number'
+	          ? earlyRouteDistance
+	          : (typeof routeDistance === 'number' ? routeDistance : 0)))
+	      : null;
+	    const effectiveQuickDurationMin = (mode === 'quick')
+	      ? (typeof lockedQuickDurationMin === 'number'
+	        ? lockedQuickDurationMin
+	        : (typeof earlyRouteDuration === 'number'
+	          ? earlyRouteDuration
+	          : (typeof routeDuration === 'number' ? routeDuration : 0)))
+	      : null;
 
     // Prepare order data based on mode
     const orderData = {
@@ -3042,29 +3375,27 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       vehicle: vehicle,
       payMethod: payMethod,
       notes: notes,
-      // Include route information for pricing calculation
-      distance_km: routeDistance || 0,
-      duration_minutes: routeDuration || 0,
+      // Include route information for pricing calculation.
+      // For multi-drop, send average distance so backend per-unit pricing is roughly correct.
+	      distance_km: (mode === 'multi' && drops.filter(d => d.address.trim() && d.distance_km).length > 0)
+        ? parseFloat((drops.filter(d => d.address.trim() && d.distance_km).reduce((s, d) => s + d.distance_km, 0) / drops.filter(d => d.address.trim() && d.distance_km).length).toFixed(1))
+	        : (mode === 'quick' ? (effectiveQuickDistanceKm || 0) : (routeDistance || earlyRouteDistance || 0)),
+      duration_minutes: (mode === 'multi' && drops.filter(d => d.address.trim() && d.duration_minutes).length > 0)
+        ? Math.ceil(drops.filter(d => d.address.trim() && d.duration_minutes).reduce((s, d) => s + d.duration_minutes, 0) / drops.filter(d => d.address.trim() && d.duration_minutes).length)
+	        : (mode === 'quick' ? (effectiveQuickDurationMin || 0) : (routeDuration || earlyRouteDuration || 0)),
       // Total cost — required for pay_with_transfer Paystack initialization
       totalCost: totalCost,
+      // Cash on Delivery
+      collectOnDelivery: collectOnDelivery,
+      codAmount: collectOnDelivery && codAmount ? parseFloat(codAmount) : null,
     };
 
-    // Debug: Log order data
-    console.log('📦 Order data being sent:', orderData);
-    console.log('💰 Pricing data:', {
-      distance_km: orderData.distance_km,
-      duration_minutes: orderData.duration_minutes,
-      vehicle: orderData.vehicle
-    });
-
     if (mode === 'quick') {
-      // Quick Send - single delivery
       orderData.dropoff = dropoffAddress;
       orderData.receiverName = receiverName;
       orderData.receiverPhone = receiverPhone;
       orderData.packageType = drops[0]?.pkg || 'Box';
     } else if (mode === 'multi' || mode === 'bulk') {
-      // Multi-Drop or Bulk Import - multiple deliveries
       orderData.deliveries = deliveries.map(d => ({
         dropoff_address: d.address,
         receiver_name: d.name,
@@ -3074,7 +3405,12 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
       }));
     }
 
-    onPlaceOrder(orderData);
+    setSubmitting(true);
+    try {
+      await onPlaceOrder(orderData);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // ─── Saved addresses for quick pick ───
@@ -3088,8 +3424,8 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
 
   const vehicles = [
     { id: "Bike", label: "Bike", icon: Icons.bike, desc: "Up to 10kg" },
-    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg" },
-    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg" },
+    { id: "Car", label: "Car", icon: Icons.car, desc: "Up to 70kg", comingSoon: true },
+    { id: "Van", label: "Van", icon: Icons.van, desc: "Up to 600kg", comingSoon: true },
   ];
 
   const modeConfig = [
@@ -3337,6 +3673,32 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                           {pkgTypes.map(p => <option key={p} value={p}>{p}</option>)}
                         </select>
                       </div>
+						{drop.address?.trim() && (() => {
+							if (drop._route_status === 'pending') {
+								return (
+									<div style={{ marginTop: 6, padding: "4px 8px", background: "#fef3c7", borderRadius: 6, fontSize: 10, color: S.grayLight }}>
+										Calculating route…
+									</div>
+								);
+							}
+							if (drop._route_status === 'error') {
+								return (
+									<div style={{ marginTop: 6, padding: "4px 8px", background: "#fef2f2", borderRadius: 6, fontSize: 10, color: "#991b1b" }}>
+										⚠️ Unable to estimate route{drop._route_error ? ` (${drop._route_error})` : ''}
+									</div>
+								);
+							}
+							if (typeof drop.distance_km === 'number') {
+								const fare = calcDropFare(drop);
+								return (fare != null) ? (
+									<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6, padding: "4px 8px", background: "#fef3c7", borderRadius: 6 }}>
+										<span style={{ fontSize: 10, color: S.grayLight }}>{drop.distance_km} km • {drop.duration_minutes} min</span>
+										<span style={{ fontSize: 12, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono', monospace" }}>₦{fare.toLocaleString()}</span>
+									</div>
+								) : null;
+							}
+							return null;
+						})()}
                     </div>
                   </div>
                 ))}
@@ -3500,26 +3862,45 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 const hasEarly = mode === 'quick' && earlyRouteDistance && earlyRouteDuration;
                 const isCalculating = mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute;
 
+                // For multi-drop: sum per-drop fares for this vehicle type
+							const multiDropTotal = (mode === 'multi' && multiDropPricingReady) ? (() => {
+							  const fares = activeMultiDrops.map(d => calcDropFare(d, v.id));
+							  if (fares.some(f => f == null)) return null;
+							  return fares.reduce((sum, f) => sum + f, 0);
+							})() : null;
+                const hasMultiDropPricing = mode === 'multi' && multiDropTotal !== null;
+							const isMultiCalculating = mode === 'multi' && activeMultiDrops.length > 0 && !multiDropPricingReady;
+
                 const baseFare = vehiclePricing?.[v.id]?.base_fare;
                 const earlyPrice = hasEarly ? calculateEarlyPrice(v.id) : null;
-                const displayPrice = earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null);
+							const displayPrice = hasMultiDropPricing ? multiDropTotal : (mode === 'multi' ? null : (earlyPrice ?? (baseFare != null ? Math.round(baseFare) : null)));
 
                 return (
-                  <button key={v.id} onClick={() => setVehicle(v.id)} style={{
-                    background: isSelected ? S.goldPale : "#f8fafc",
-                    border: isSelected ? `2px solid ${S.gold}` : "2px solid transparent",
-                    borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                    transition: "all 0.2s"
+                  <button key={v.id} onClick={() => !v.comingSoon && setVehicle(v.id)} disabled={v.comingSoon} style={{
+                    background: v.comingSoon ? "#f1f5f9" : isSelected ? S.goldPale : "#f8fafc",
+                    border: isSelected && !v.comingSoon ? `2px solid ${S.gold}` : "2px solid transparent",
+                    borderRadius: 12, padding: "14px 10px", cursor: v.comingSoon ? "not-allowed" : "pointer", textAlign: "center", fontFamily: "inherit",
+                    transition: "all 0.2s",
+                    opacity: v.comingSoon ? 0.55 : 1,
+                    position: "relative"
                   }}>
-                    <div style={{ color: isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>{v.label}</div>
-                    <div style={{ fontSize: 11, color: S.grayLight }}>{v.desc}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, color: S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
-                      {isCalculating ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
-                    </div>
-                    <div style={{ fontSize: 10, color: S.grayLight, marginTop: 2 }}>
-                      {isCalculating ? '' : (hasEarly ? 'Estimated' : 'Base fare')}
-                    </div>
+                    {v.comingSoon && (
+                      <div style={{
+                        position: "absolute", top: 6, right: 6,
+                        background: "#e2e8f0", color: "#64748b",
+                        fontSize: 9, fontWeight: 700, padding: "2px 6px",
+                        borderRadius: 6, textTransform: "uppercase", letterSpacing: 0.5
+                      }}>Coming Soon</div>
+                    )}
+                    <div style={{ color: v.comingSoon ? "#94a3b8" : isSelected ? S.gold : S.gray, marginBottom: 4 }}>{v.icon}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: v.comingSoon ? "#94a3b8" : S.navy }}>{v.label}</div>
+                    <div style={{ fontSize: 11, color: v.comingSoon ? "#cbd5e1" : S.grayLight }}>{v.desc}</div>
+							<div style={{ fontSize: 12, fontWeight: 800, color: v.comingSoon ? "#94a3b8" : S.gold, marginTop: 6, fontFamily: "'Space Mono', monospace" }}>
+							  {v.comingSoon ? '—' : (isCalculating || isMultiCalculating) ? 'Calculating…' : (displayPrice != null ? `₦${displayPrice.toLocaleString()}` : '—')}
+							</div>
+							<div style={{ fontSize: 10, color: v.comingSoon ? "#cbd5e1" : S.grayLight, marginTop: 2 }}>
+							  {v.comingSoon ? '' : (isCalculating || isMultiCalculating) ? '' : (hasEarly || hasMultiDropPricing ? 'Estimated' : 'Base fare')}
+							</div>
                   </button>
                 );
               })}
@@ -3544,21 +3925,30 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                 {totalDeliveries > 0 && (
                   <div>
                     <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
-                      ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
-                    </div>
+							<div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
+							  ₦{(mode === 'quick' && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance)
+								? '—'
+								: (mode === 'multi' && activeMultiDrops.length > 0 && !multiDropPricingReady)
+									? '—'
+									: totalCost.toLocaleString()}
+							</div>
                   </div>
                 )}
               </div>
-              {totalDeliveries > 1 && (
+              {totalDeliveries > 1 && mode !== 'multi' && (
                 <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
                   ₦{unitCost.toLocaleString()} × {totalDeliveries} deliveries
+                </div>
+              )}
+              {totalDeliveries > 1 && mode === 'multi' && (
+                <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
+                  {totalDeliveries} deliveries (per-drop pricing)
                 </div>
               )}
             </div>
 
             <button
-              onClick={() => setStep(2)}
+	              onClick={handleProceedToReview}
               disabled={!canProceed}
               style={{
                 padding: "14px 32px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: canProceed ? "pointer" : "default",
@@ -3616,11 +4006,13 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     {totalDeliveries} {totalDeliveries === 1 ? "Delivery" : "Deliveries"}
                   </span>
                 </div>
-                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle} • ₦{unitCost.toLocaleString()} each</span>
+                <span style={{ fontSize: 12, color: S.grayLight }}>{vehicle}{mode !== 'multi' ? ` • ₦${unitCost.toLocaleString()} each` : ''}</span>
               </div>
 
-              <div style={{ maxHeight: 300, overflowY: "auto" }}>
-                {getActiveDropoffs().map((d, idx) => (
+	              <div style={{ maxHeight: 300, overflowY: "auto" }}>
+	                {getActiveDropoffs().map((d, idx) => {
+	                  const dropFare = (mode === 'multi') ? calcDropFare(d) : unitCost;
+	                  return (
                   <div key={idx} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "10px 0",
                     borderBottom: idx < totalDeliveries - 1 ? "1px solid #f1f5f9" : "none"
@@ -3633,12 +4025,16 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.address}</div>
                       <div style={{ fontSize: 11, color: S.grayLight }}>{d.name}{d.phone ? ` • ${d.phone}` : ""}</div>
+	                      {mode === 'multi' && typeof d.distance_km === 'number' && (
+                        <div style={{ fontSize: 10, color: S.grayLight }}>{d.distance_km} km • {d.duration_minutes} min</div>
+                      )}
                     </div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono', monospace", flexShrink: 0 }}>
-                      ₦{unitCost.toLocaleString()}
+	                      {dropFare != null ? `₦${dropFare.toLocaleString()}` : '—'}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Total */}
@@ -3689,18 +4085,71 @@ function NewOrderScreen({ balance, onPlaceOrder, currentUser }) {
               ))}
             </div>
 
+            {/* Cash on Delivery */}
+            <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", padding: 20, marginBottom: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: collectOnDelivery ? 14 : 0 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: S.navy }}>Cash on Delivery (COD)</div>
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>Rider collects payment from customer on your behalf</div>
+                </div>
+                <button
+                  onClick={() => { setCollectOnDelivery(v => !v); if (collectOnDelivery) setCodAmount(""); }}
+                  style={{
+                    width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer", flexShrink: 0,
+                    background: collectOnDelivery ? S.gold : "#e2e8f0", transition: "background 0.2s", position: "relative"
+                  }}
+                >
+                  <div style={{
+                    width: 18, height: 18, borderRadius: "50%", background: "#fff",
+                    position: "absolute", top: 3, left: collectOnDelivery ? 23 : 3,
+                    transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)"
+                  }} />
+                </button>
+              </div>
+              {collectOnDelivery && (
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#64748b", marginBottom: 5 }}>
+                    Amount to collect from customer (₦)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="e.g. 15000"
+                    value={codAmount}
+                    onChange={e => setCodAmount(e.target.value)}
+                    style={{
+                      width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10,
+                      padding: "0 14px", height: 42, fontSize: 14, fontFamily: "inherit", boxSizing: "border-box"
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 6 }}>
+                    ⚠️ This is the goods payment amount — separate from the delivery fee.
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Action buttons */}
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => setStep(1)} style={{
                 flex: 1, height: 48, border: "1.5px solid #e2e8f0", borderRadius: 12, fontSize: 14, fontWeight: 600,
                 cursor: "pointer", background: "#fff", color: S.navy, fontFamily: "inherit"
               }}>← Back</button>
-              <button onClick={handleConfirmAll} style={{
-                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: "pointer",
-                background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, fontFamily: "inherit",
-                boxShadow: "0 4px 12px rgba(232,168,56,0.3)"
+              <button onClick={handleConfirmAll} disabled={submitting} style={{
+                flex: 2, height: 48, border: "none", borderRadius: 12, fontSize: 15, fontWeight: 700,
+                cursor: submitting ? "not-allowed" : "pointer",
+                background: submitting ? "#cbd5e1" : `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`,
+                color: submitting ? "#64748b" : S.navy, fontFamily: "inherit",
+                boxShadow: submitting ? "none" : "0 4px 12px rgba(232,168,56,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                transition: "all 0.2s ease"
               }}>
-                {payMethod === 'pay_with_transfer'
+                {submitting ? (
+                  <>
+                    <span style={{ width: 16, height: 16, border: "2px solid #94a3b8", borderTopColor: "#1B2A4A", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />
+                    Processing…
+                  </>
+                ) : payMethod === 'pay_with_transfer'
                   ? `Pay & Create Order — ₦${totalCost.toLocaleString()}`
                   : totalDeliveries === 1
                     ? `Create Order — ₦${totalCost.toLocaleString()}`
@@ -3761,6 +4210,8 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
     const order = orders.find(o => o.id === detailId);
     if (!order) return null;
     const st = STATUS_COLORS[order.status] || STATUS_COLORS.Pending;
+			const hasRider = Boolean(order.rider_phone || order.rider_name || order.rider_code);
+			const isLikelyAssigned = ["Assigned", "Started", "PickedUp", "Arrived", "Done"].includes(order.status);
 
     return (
       <div style={{ maxWidth: 600, margin: "0 auto", animation: "fadeIn 0.3s ease" }}>
@@ -3784,7 +4235,49 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
             <span style={{ padding: "6px 14px", borderRadius: 8, background: st.bg, color: st.text, fontSize: 13, fontWeight: 700 }}>{st.label}</span>
           </div>
 
-          <div style={{ padding: 24 }}>
+			  <div style={{ padding: 24 }}>
+					{/* Rider */}
+				<div style={{
+					marginBottom: 24,
+					padding: 14,
+					borderRadius: 12,
+					background: "#f8fafc",
+					border: "1px solid #e2e8f0",
+				}}>
+					<div style={{ fontSize: 11, color: S.grayLight, fontWeight: 700, marginBottom: 8 }}>RIDER</div>
+						{hasRider ? (
+						<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+							<div style={{ minWidth: 0 }}>
+								<div style={{ fontSize: 14, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+									{order.rider_name || "Rider"}{order.rider_code ? ` (${order.rider_code})` : ""}
+								</div>
+								<div style={{ fontSize: 12, color: S.gray }}>Assigned to your order</div>
+							</div>
+								{order.rider_phone ? (
+									<a
+										href={`tel:${order.rider_phone}`}
+										style={{
+											flexShrink: 0,
+											padding: "8px 12px",
+											borderRadius: 10,
+											border: "1px solid #dbeafe",
+											background: "#eff6ff",
+											color: "#1e40af",
+											fontSize: 13,
+											fontWeight: 700,
+											textDecoration: "none",
+										}}
+									>
+										📞 {order.rider_phone}
+									</a>
+								) : (
+									<div style={{ flexShrink: 0, fontSize: 12, color: S.grayLight, fontWeight: 700 }}>Phone not available</div>
+								)}
+						</div>
+					) : (
+							<div style={{ fontSize: 13, color: S.gray }}>{isLikelyAssigned ? "Assigned — rider details unavailable" : "Not assigned yet"}</div>
+					)}
+				</div>
             {/* Pickup Address */}
             <div style={{ marginBottom: 24 }}>
               <div style={{ display: "flex", gap: 12 }}>
@@ -3855,8 +4348,25 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
               </div>
             ))}
 
-            {/* Cancel Order Button */}
-            {!['Delivered', 'Canceled'].includes(order.status) && (
+            {/* COD detail row */}
+            {order.collect_on_delivery && (
+              <div style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "12px 14px", borderTop: "1px solid #f8fafc", marginTop: 2,
+                background: "#fefce8", borderRadius: 8
+              }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#854d0e" }}>💵 Cash on Delivery</div>
+                  <div style={{ fontSize: 11, color: "#a16207" }}>Rider collects from customer</div>
+                </div>
+                <span style={{ fontSize: 15, fontWeight: 800, color: "#854d0e", fontFamily: "'Space Mono', monospace" }}>
+                  {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : 'Amount TBD'}
+                </span>
+              </div>
+            )}
+
+            {/* Cancel Order Button — hidden once the order has been picked up or beyond */}
+            {!['Delivered', 'Canceled', 'CustomerCanceled', 'DriverCanceled', 'SupportCanceled', 'PickedUp', 'Started', 'Done'].includes(order.status) && (
               <div style={{ marginTop: 20, paddingTop: 20, borderTop: "1px solid #f1f5f9" }}>
                 <button
                   onClick={() => {
@@ -3970,6 +4480,11 @@ function OrdersScreen({ orders, detailId, onSelectOrder, onBack, onCancelOrder }
                   {order.deliveries && order.deliveries.length > 1 && (
                     <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: "#f1f5f9", color: S.navy }}>
                       {order.deliveries.length} stops
+                    </span>
+                  )}
+                  {order.collect_on_delivery && (
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: "#fef9c3", color: "#854d0e" }}>
+                      COD {order.cod_amount ? `₦${order.cod_amount.toLocaleString()}` : ''}
                     </span>
                   )}
                 </div>

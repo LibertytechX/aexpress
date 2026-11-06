@@ -1,0 +1,6 @@
+2026-03-20 17:07:00,203 [INFO] firebase - Firebase Admin SDK initialized successfully.
+Creating test database for alias 'default'...
+Got an error creating the test database: database "test_ax_db" already exists
+
+Found 4 test(s).
+Type 'yes' if you would like to try deleting the test database 'test_ax_db', or 'no' to cancel: 

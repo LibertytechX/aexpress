@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
+from sparky_utils.exceptions import ServiceException
 from .models import User, Address
 
 
@@ -34,6 +35,9 @@ class SignupSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(
         write_only=True, style={"input_type": "password"}
     )
+    affiliation_code = serializers.CharField(
+        write_only=True, required=False, allow_blank=True
+    )
 
     class Meta:
         model = User
@@ -46,6 +50,9 @@ class SignupSerializer(serializers.ModelSerializer):
             "password",
             "confirm_password",
             "usertype",
+            "registration_source",
+            "referral_code",
+            "affiliation_code",
         ]
         extra_kwargs = {
             "usertype": {
@@ -60,8 +67,8 @@ class SignupSerializer(serializers.ModelSerializer):
 
         # Check if phone already exists
         if User.objects.filter(phone=phone).exists():
-            raise serializers.ValidationError(
-                "This phone number is already registered."
+            raise ServiceException(
+                status_code=400, message="This phone number is already registered."
             )
 
         return phone
@@ -69,23 +76,24 @@ class SignupSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         """Validate email uniqueness."""
         if User.objects.filter(email=value.lower()).exists():
-            raise serializers.ValidationError("This email is already registered.")
+            raise ServiceException(
+                status_code=400, message="This email is already registered."
+            )
 
         return value.lower()
 
     def validate(self, data):
         """Validate that passwords match."""
         if data.get("password") != data.get("confirm_password"):
-            raise serializers.ValidationError(
-                {"confirm_password": "Passwords do not match."}
-            )
+            raise ServiceException(status_code=400, message="Passwords do not match.")
 
         return data
 
     def create(self, validated_data):
         """Create a new user with hashed password."""
-        # Remove confirm_password from validated data
+        # Remove confirm_password and affiliation_code from validated data
         validated_data.pop("confirm_password", None)
+        affiliation_code = validated_data.pop("affiliation_code", None)
 
         # Get usertype or default to Merchant (or whatever default behavior is desired)
         # If usertype is passed, it will be in validated_data
@@ -95,11 +103,24 @@ class SignupSerializer(serializers.ModelSerializer):
             phone=validated_data["phone"],
             email=validated_data["email"],
             password=validated_data["password"],
-            business_name=validated_data["business_name"],
-            contact_name=validated_data["contact_name"],
+            business_name=validated_data.get("business_name", ""),
+            contact_name=validated_data.get("contact_name", ""),
             address=validated_data.get("address", ""),
             usertype=validated_data.get("usertype", "Merchant"),
+            registration_source=validated_data.get("registration_source"),
+            referral_code=validated_data.get("referral_code"),
         )
+
+        if affiliation_code and affiliation_code.strip() and user.usertype == "Merchant":
+            from dispatcher.models import Merchant
+            from dispatcher.services import affiliate_merchant_to_dispatcher
+            merchant = getattr(user, "merchant_profile", None) or Merchant.objects.filter(user=user).first()
+            if merchant:
+                try:
+                    affiliate_merchant_to_dispatcher(merchant, affiliation_code)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Could not affiliate merchant on signup: {e}")
 
         return user
 
@@ -118,23 +139,50 @@ class LoginSerializer(serializers.Serializer):
         password = data.get("password")
 
         if not phone or not password:
-            raise serializers.ValidationError("Phone and password are required.")
+            raise ServiceException(
+                status_code=400, message="Phone and password are required."
+            )
 
         # Try to get the user
-        try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid phone number or password.")
+        # should try phone number combos
+        phone_2, phone_3 = "", ""
+        phone_numbers = [phone]
+        if phone.startswith("0"):
+            phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 10:
+            phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif phone.startswith("+234"):
+            phone_2 = phone[4:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        print("Let's see the phone numbers: ", phone_numbers)
+        user = User.objects.filter(phone__in=phone_numbers)
+        if user.count() == 0:
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
-        # Check if user is active
-        if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
-
-        # Authenticate user
-        user = authenticate(username=phone, password=password)
-
+        user = None
+        # try authentication for phone with the given password
+        for phone_number in phone_numbers:
+            user = authenticate(username=phone_number, password=password)
+            if user:
+                if not user.is_active:
+                    raise ServiceException(
+                        status_code=400, message="This account has been deactivated."
+                    )
+                break
         if not user:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         data["user"] = user
         return data
@@ -151,7 +199,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         """Validate email uniqueness (excluding current user)."""
         user = self.instance
         if User.objects.filter(email=value.lower()).exclude(id=user.id).exists():
-            raise serializers.ValidationError("This email is already in use.")
+            raise ServiceException(
+                status_code=400, message="This email is already in use."
+            )
 
         return value.lower()
 
@@ -172,7 +222,9 @@ class AddressSerializer(serializers.ModelSerializer):
         if not self.instance:
             existing_count = Address.objects.filter(user=user).count()
             if existing_count >= 3:
-                raise serializers.ValidationError("Maximum of 3 addresses allowed.")
+                raise ServiceException(
+                    status_code=400, message="Maximum of 3 addresses allowed."
+                )
 
         # Check unique label per user
         label = data.get("label")
@@ -181,8 +233,9 @@ class AddressSerializer(serializers.ModelSerializer):
             if self.instance:
                 query = query.exclude(id=self.instance.id)
             if query.exists():
-                raise serializers.ValidationError(
-                    {"label": "You already have an address with this label."}
+                raise ServiceException(
+                    status_code=400,
+                    message="You already have an address with this label.",
                 )
 
         return data
@@ -203,3 +256,90 @@ class AddressSerializer(serializers.ModelSerializer):
             )
 
         return super().update(instance, validated_data)
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications
+# ---------------------------------------------------------------------------
+
+from dispatcher.models import (
+    MerchantNotification,
+    MerchantNotificationSettings,
+)  # noqa: E402
+
+
+class MerchantDeviceSerializer(serializers.Serializer):
+    """Validates device registration input for merchant mobile apps."""
+
+    device_id = serializers.CharField(max_length=255)
+    fcm_token = serializers.CharField(
+        max_length=500, required=False, allow_blank=True, default=""
+    )
+    platform = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
+    model_name = serializers.CharField(
+        max_length=255, required=False, allow_blank=True, default=""
+    )
+    os_version = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
+    app_version = serializers.CharField(
+        max_length=50, required=False, allow_blank=True, default=""
+    )
+
+
+class MerchantNotificationSerializer(serializers.ModelSerializer):
+    """Read-only serializer for merchant notification list and detail responses."""
+
+    class Meta:
+        model = MerchantNotification
+        fields = ["id", "title", "body", "data", "is_read", "created_at"]
+        read_only_fields = fields
+
+
+class MerchantNotificationSettingsSerializer(serializers.ModelSerializer):
+    """Read/write serializer for per-merchant notification preference toggles."""
+
+    class Meta:
+        model = MerchantNotificationSettings
+        fields = [
+            "push_enabled",
+            "order_assigned",
+            "order_completed",
+            "order_cancelled",
+            "wallet_credit",
+            "marketing",
+            "email_notification",
+            "sms_notification",
+        ]
+
+
+class VerifyAffiliationCodeSerializer(serializers.Serializer):
+    """Serializer for verifying an affiliation code."""
+
+    affiliation_code = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=100,
+        help_text="The affiliation code to verify (e.g. HUB001)",
+    )
+    code = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=100,
+        help_text="Alias for affiliation_code",
+    )
+
+    def validate(self, attrs):
+        raw_code = attrs.get("affiliation_code") or attrs.get("code")
+        if not raw_code or not str(raw_code).strip():
+            raise ServiceException(
+                status_code=400,
+                message="Affiliation code is required.",
+            )
+        attrs["clean_code"] = str(raw_code).strip().upper()
+        return attrs
+

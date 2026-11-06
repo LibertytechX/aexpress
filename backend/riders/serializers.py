@@ -1,5 +1,10 @@
+from sparky_utils.exceptions import ServiceException
+import re
+
 from rest_framework import serializers
+from django.conf import settings
 from django.contrib.auth import authenticate
+from django.db import transaction
 from django.utils import timezone
 from django.db.models import Sum
 from dispatcher.models import Rider
@@ -9,9 +14,12 @@ from .models import (
     RiderAuth,
     RiderDevice,
     RiderCodRecord,
+    RiderDocument,
     OrderOffer,
     AreaDemand,
     RiderEarning,
+    RiderNotification,
+    RiderFaceMatchLog,
 )
 from orders.models import Order
 from orders.serializers import AssignedOrderSerializer
@@ -51,6 +59,11 @@ class RiderMeSerializer(serializers.ModelSerializer):
     acceptance_rate = serializers.SerializerMethodField()
     on_time_rate = serializers.SerializerMethodField()
     documents_status = serializers.SerializerMethodField()
+    net_earnings = serializers.SerializerMethodField()
+    is_verified = serializers.SerializerMethodField()
+    face_verification_channel = serializers.SerializerMethodField()
+    affiliated_to_code = serializers.SerializerMethodField()
+    affiliated_to_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Rider
@@ -59,9 +72,12 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "rider_id",
             "status",
             "firstName",
+            "is_independent_rider",
             "lastName",
             "phone",
             "email",
+            "emergency_contact_name",
+            "emergency_phone",
             "vehicle_model",
             "vehicle_plate_number",
             "rating",
@@ -71,7 +87,47 @@ class RiderMeSerializer(serializers.ModelSerializer):
             "acceptance_rate",
             "on_time_rate",
             "documents_status",
+            "net_earnings",
+            "is_verified",
+            "face_verification_channel",
+            "face_verification_required",
+            "last_face_verified_at",
+            "is_affiliated",
+            "affiliated_to_code",
+            "affiliated_to_name",
+            "affiliated_at",
         ]
+
+    def get_affiliated_to_code(self, obj):
+        if obj.affiliated_to:
+            return obj.affiliated_to.affiliation_code
+        return None
+
+    def get_affiliated_to_name(self, obj):
+        if obj.affiliated_to and obj.affiliated_to.user:
+            return (
+                obj.affiliated_to.user.contact_name
+                or f"{obj.affiliated_to.user.first_name} {obj.affiliated_to.user.last_name}".strip()
+                or obj.affiliated_to.user.phone
+            )
+        return None
+
+    def get_is_verified(self, obj):
+        if (
+            obj.is_independent_rider
+            and obj.is_authorized
+            and not getattr(obj, "face_verification_required", False)
+        ):
+            return True
+        elif not obj.is_independent_rider:
+            return True
+        else:
+            return False
+
+    def get_face_verification_channel(self, obj):
+        if getattr(obj, "is_independent_rider", False):
+            return f"facematch:{obj.rider_id or obj.id}"
+        return None
 
     def get_wallet_balance(self, obj):
         try:
@@ -84,6 +140,10 @@ class RiderMeSerializer(serializers.ModelSerializer):
         total = obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
             "amount__sum"
         ]
+        return total or 0.00
+
+    def get_net_earnings(self, obj):
+        total = obj.earnings.aggregate(Sum("net_earning"))["net_earning__sum"]
         return total or 0.00
 
     def get_acceptance_rate(self, obj):
@@ -141,12 +201,14 @@ class DutyToggleSerializer(serializers.Serializer):
     Serializer for toggling rider duty status.
     """
 
-    status = serializers.ChoiceField(choices=["on_duty", "off_duty"])
+    status = serializers.ChoiceField(
+        choices=["on_duty", "off_duty", "online", "offline"]
+    )
     latitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6, required=False, allow_null=True
+        max_digits=30, decimal_places=20, required=False, allow_null=True
     )
     longitude = serializers.DecimalField(
-        max_digits=9, decimal_places=6, required=False, allow_null=True
+        max_digits=30, decimal_places=20, required=False, allow_null=True
     )
 
 
@@ -173,18 +235,45 @@ class RiderLoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Phone and password are required.")
 
         # Try to get the user
-        try:
-            user = User.objects.get(phone=phone)
-        except User.DoesNotExist:
-            raise serializers.ValidationError("Invalid phone number or password.")
+        # should try phone number combos
+        phone_2, phone_3 = "", ""
+        phone_numbers = [phone]
+        if phone.startswith("0"):
+            phone_2 = "+234" + phone[1:]
+            phone_3 = phone[1:]
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif len(phone) == 10:
+            phone_3 = "0" + phone
+            phone_2 = "+234" + phone
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        elif phone.startswith("+234"):
+            phone_2 = phone[4:]
+            phone_3 = "0" + phone_2
+            phone_numbers.append(phone_2)
+            phone_numbers.append(phone_3)
+        print("Let's see the phone numbers: ", phone_numbers)
+        user = User.objects.filter(phone__in=phone_numbers)
+        if user.count() == 0:
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
-        if not user.is_active:
-            raise serializers.ValidationError("This account has been deactivated.")
-
-        # Authenticate user
-        user = authenticate(username=phone, password=password)
+        user = None
+        # try authentication for phone with the given password
+        for phone_number in phone_numbers:
+            user = authenticate(username=phone_number, password=password)
+            if user:
+                if not user.is_active:
+                    raise ServiceException(
+                        status_code=400, message="This account has been deactivated."
+                    )
+                break
         if not user:
-            raise serializers.ValidationError("Invalid phone number or password.")
+            raise ServiceException(
+                status_code=400, message="Invalid phone number or password."
+            )
 
         # Ensure user has a rider profile
         try:
@@ -199,13 +288,236 @@ class RiderLoginSerializer(serializers.Serializer):
         return data
 
 
+NIGERIA_PHONE_REGEX = re.compile(r"^\+234[789]\d{9}$")
+
+REQUIRED_DOC_TYPES = {
+    RiderDocument.DocType.NATIONAL_ID,
+    RiderDocument.DocType.RIDERS_CARD,
+    RiderDocument.DocType.DRIVERS_LICENSE,
+    RiderDocument.DocType.UTILITY_BILL,
+    RiderDocument.DocType.PROFILE_PHOTO,
+}
+
+
+class RiderDocumentInputSerializer(serializers.Serializer):
+    type = serializers.ChoiceField(choices=RiderDocument.DocType.choices)
+    url = serializers.URLField()
+
+
+class RiderSelfRegistrationSerializer(serializers.Serializer):
+    """
+    Serializer for independent/freelancer rider self-registration.
+    Creates a User + Rider (working_type="freelancer", is_independent_rider=True,
+    is_authorized=False pending ops review) plus the submitted KYC documents.
+    """
+
+    phone = serializers.CharField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        min_length=6,
+        style={"input_type": "password"},
+    )
+    confirm_password = serializers.CharField(
+        required=True, write_only=True, style={"input_type": "password"}
+    )
+    address = serializers.CharField(required=True)
+    emergency_contact_name = serializers.CharField(required=True, max_length=100)
+    emergency_phone = serializers.CharField(required=True)
+    bvn = serializers.RegexField(regex=r"^\d{11}$", required=True)
+    vehicle_model = serializers.CharField(required=True)
+    vehicle_plate_number = serializers.CharField(required=True)
+    vehicle_color = serializers.CharField(required=True)
+    vehicle_photo = serializers.URLField(required=True)
+    rider_documents = RiderDocumentInputSerializer(many=True, required=True)
+    affiliation_code = serializers.CharField(
+        required=False, allow_blank=True, max_length=100
+    )
+
+    def validate_phone(self, value):
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number, e.g. 08012345678 or +2348012345678."
+            )
+
+        if User.objects.filter(phone=phone).exists():
+            raise serializers.ValidationError(
+                "This phone number is already registered."
+            )
+        return phone
+
+    def validate_emergency_phone(self, value):
+        phone = re.sub(r"[\s\-()]", "", value)
+
+        if phone.startswith("0") and len(phone) == 11:
+            phone = "+234" + phone[1:]
+        elif phone.startswith("234"):
+            phone = "+" + phone
+
+        if not NIGERIA_PHONE_REGEX.match(phone):
+            raise serializers.ValidationError(
+                "Enter a valid Nigerian phone number for emergency contact, e.g. 08012345678 or +2348012345678."
+            )
+        return phone
+
+    def validate_email(self, value):
+        if not value:
+            return value
+        value = value.lower()
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered.")
+        return value
+
+    def validate_rider_documents(self, value):
+        submitted_types = {doc["type"] for doc in value}
+        missing = REQUIRED_DOC_TYPES - submitted_types
+        if missing:
+            raise serializers.ValidationError(
+                f"Missing required documents: {', '.join(sorted(missing))}."
+            )
+        return value
+
+    def validate(self, data):
+        if data.get("password") != data.get("confirm_password"):
+            raise serializers.ValidationError("Passwords do not match.")
+
+        affiliation_code = data.get("affiliation_code")
+        if affiliation_code and affiliation_code.strip():
+            from dispatcher.models import DispatcherProfile
+
+            dispatcher = DispatcherProfile.objects.filter(
+                affiliation_code__iexact=affiliation_code.strip()
+            ).first()
+            if not dispatcher:
+                raise serializers.ValidationError(
+                    {"affiliation_code": "Invalid affiliation code."}
+                )
+            data["_dispatcher"] = dispatcher
+
+        return data
+
+    def create(self, validated_data):
+        validated_data.pop("confirm_password")
+        rider_documents = validated_data.pop("rider_documents")
+        dispatcher = validated_data.pop("_dispatcher", None)
+        validated_data.pop("affiliation_code", None)
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                phone=validated_data["phone"],
+                email=validated_data.get("email") or None,
+                password=validated_data["password"],
+                first_name=validated_data["first_name"],
+                last_name=validated_data["last_name"],
+                contact_name=f"{validated_data['first_name']} {validated_data['last_name']}",
+                usertype="Rider",
+                address=validated_data["address"],
+                bvn=validated_data["bvn"],
+            )
+
+            rider = Rider.objects.create(
+                user=user,
+                working_type="freelancer",
+                is_independent_rider=True,
+                is_authorized=False,
+                approval_status=Rider.ApprovalStatus.PENDING,
+                address=validated_data["address"],
+                emergency_contact_name=validated_data["emergency_contact_name"],
+                emergency_phone=validated_data["emergency_phone"],
+                vehicle_model=validated_data["vehicle_model"],
+                vehicle_plate_number=validated_data["vehicle_plate_number"],
+                vehicle_color=validated_data["vehicle_color"],
+                vehicle_photo=validated_data["vehicle_photo"],
+                affiliated_to=dispatcher,
+                is_affiliated=bool(dispatcher),
+                affiliated_at=timezone.now() if dispatcher else None,
+            )
+
+            RiderDocument.objects.bulk_create(
+                [
+                    RiderDocument(
+                        rider=rider, doc_type=doc["type"], file_url=doc["url"]
+                    )
+                    for doc in rider_documents
+                ]
+            )
+
+        return {"user": user, "rider": rider}
+
+
+class RiderAffiliationSerializer(serializers.Serializer):
+    """
+    Serializer for existing riders to affiliate with a dispatcher.
+    """
+
+    affiliation_code = serializers.CharField(required=True, max_length=100)
+
+    def validate_affiliation_code(self, value):
+        from dispatcher.models import DispatcherProfile
+
+        if not value or not value.strip():
+            raise serializers.ValidationError("Affiliation code is required.")
+        dispatcher = DispatcherProfile.objects.filter(
+            affiliation_code__iexact=value.strip()
+        ).first()
+        if not dispatcher:
+            raise serializers.ValidationError(
+                "Invalid affiliation code. No dispatcher found with this code."
+            )
+        return value.strip().upper()
+
+
+class RiderAffiliationResponseSerializer(serializers.Serializer):
+    """
+    Serializer for returning rider affiliation status and details.
+    """
+
+    is_affiliated = serializers.BooleanField()
+    affiliated_at = serializers.DateTimeField(allow_null=True)
+    dispatcher = serializers.DictField(allow_null=True)
+
+
+class RiderDocumentSerializer(serializers.ModelSerializer):
+    """
+    Serializer for a rider viewing their own KYC documents and review status.
+    """
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "file_url",
+            "status",
+            "expires_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class RiderDocumentReuploadSerializer(serializers.Serializer):
+    url = serializers.URLField(required=True)
+
+
 class RiderOrderSerializer(AssignedOrderSerializer):
     """
     Serializer for rider order history and details.
     Matches the specific format requested by the user.
     """
 
-    id = serializers.CharField(source="order_number", read_only=True)
+    # id = serializers.CharField(source="order_number", read_only=True)
     status = serializers.SerializerMethodField()
     payment_method = serializers.SerializerMethodField()
 
@@ -213,6 +525,7 @@ class RiderOrderSerializer(AssignedOrderSerializer):
         model = Order
         fields = [
             "id",
+            "order_number",
             "status",
             "pickup_address",
             "pickup_latitude",
@@ -226,6 +539,7 @@ class RiderOrderSerializer(AssignedOrderSerializer):
             "dropoff_contact_name",
             "dropoff_contact_phone",
             "dropoff_notes",
+            "total_amount",
             "vehicle_type",
             "payment_method",
             "merchant_name",
@@ -296,6 +610,10 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
     pickup_contact_name = serializers.CharField(
         source="order.sender_name", read_only=True
     )
+    total_amount = serializers.DecimalField(
+        source="order.total_amount", max_digits=10, decimal_places=2, read_only=True
+    )
+    created_at = serializers.DateTimeField(source="order.created_at", read_only=True)
 
     dropoff_address = serializers.SerializerMethodField()
     dropoff_latitude = serializers.SerializerMethodField()
@@ -310,6 +628,7 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
             "order_id",
             "order_ref",
             "status",
+            "total_amount",
             "estimated_earnings",
             "estimated_distance_km",
             "estimated_eta_mins",
@@ -322,6 +641,7 @@ class OrderOfferListSerializer(serializers.ModelSerializer):
             "vehicle_type",
             "payment_method",
             "merchant_name",
+            "created_at",
             "pickup_contact_name",
             "dropoff_contact_name",
             "cod_amount",
@@ -432,6 +752,7 @@ class RiderWalletInfoSerializer(serializers.Serializer):
     available_balance = serializers.SerializerMethodField()
     pending_cod = serializers.SerializerMethodField()
     withdrawable_balance = serializers.SerializerMethodField()
+    has_transaction_pin = serializers.BooleanField(read_only=True)
 
     def get_withdrawable_balance(self, obj):
         # Withdrawable Balance = Available Balance - Pending COD
@@ -443,18 +764,15 @@ class RiderWalletInfoSerializer(serializers.Serializer):
     def get_available_balance(self, obj):
         # Available Balance = Wallet Balance + Pending COD
         try:
-            wallet_balance = obj.user.wallet.balance
-        except (AttributeError, Wallet.DoesNotExist):
+            from wallet.models import Wallet
+
+            wallet = Wallet.objects.get(user=obj.user)
+            wallet_balance = wallet.balance
+        except Wallet.DoesNotExist:
             wallet_balance = 0.00
 
-        # Sum of pending COD records
-        # pending_cod = (
-        #     obj.cod_records.filter(status="pending").aggregate(Sum("amount"))[
-        #         "amount__sum"
-        #     ]
-        #     or 0.00
-        # )
-        return float(wallet_balance)
+        pending_cod = self.get_pending_cod(obj)
+        return float(wallet_balance) + pending_cod
 
     def get_pending_cod(self, obj):
         # Sum of pending COD records
@@ -493,3 +811,468 @@ class RiderLocationSerializer(serializers.Serializer):
     accuracy = serializers.FloatField(required=False, allow_null=True)
     heading = serializers.FloatField(required=False, allow_null=True)
     speed = serializers.FloatField(required=False, allow_null=True)
+
+
+class RiderNotificationSerializer(serializers.ModelSerializer):
+    """
+    Serializer for rider notifications.
+    """
+
+    class Meta:
+        model = RiderNotification
+        fields = [
+            "id",
+            "title",
+            "body",
+            "data",
+            "is_read",
+            "created_at",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Rider Document (KYC) Serializers
+# ---------------------------------------------------------------------------
+
+RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "application/pdf",
+}
+RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 10MB
+
+
+class RiderDocumentListSerializer(serializers.ModelSerializer):
+    """
+    Output serializer for the rider's document list screen.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "created_at",
+        ]
+
+
+class RiderDocumentDetailSerializer(serializers.ModelSerializer):
+    """
+    Output serializer for a single rider document, including rejection reason.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "rejection_reason",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class RiderDocumentCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for uploading a new KYC document.
+    """
+
+    doc_type = serializers.ChoiceField(choices=RiderDocument.DocType.choices)
+    file = serializers.FileField()
+    expires_at = serializers.DateField(required=False, allow_null=True)
+
+    def validate_file(self, file_obj):
+        if file_obj.size > RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES:
+            raise serializers.ValidationError("File size must not exceed 10MB.")
+        content_type = getattr(file_obj, "content_type", "")
+        if content_type not in RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError(
+                "Unsupported file type. Only JPEG, PNG, and PDF files are allowed."
+            )
+        return file_obj
+
+    def validate_expires_at(self, value):
+        if value and value <= timezone.now().date():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
+
+
+class RiderDocumentCreateResponseSerializer(serializers.ModelSerializer):
+    """
+    Output serializer returned after a document is uploaded.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "created_at",
+        ]
+
+
+class RiderDocumentUpdateSerializer(serializers.Serializer):
+    """
+    Input serializer for updating an existing document: re-upload the file
+    and/or change the expiry date. At least one of the two must be provided.
+    """
+
+    file = serializers.FileField(required=False)
+    expires_at = serializers.DateField(required=False, allow_null=True)
+
+    def validate_file(self, file_obj):
+        if file_obj.size > RIDER_DOCUMENT_MAX_FILE_SIZE_BYTES:
+            raise serializers.ValidationError("File size must not exceed 10MB.")
+        content_type = getattr(file_obj, "content_type", "")
+        if content_type not in RIDER_DOCUMENT_ALLOWED_CONTENT_TYPES:
+            raise serializers.ValidationError(
+                "Unsupported file type. Only JPEG, PNG, and PDF files are allowed."
+            )
+        return file_obj
+
+    def validate_expires_at(self, value):
+        if value and value <= timezone.now().date():
+            raise serializers.ValidationError("Expiry date must be in the future.")
+        return value
+
+    def validate(self, data):
+        if "file" not in data and "expires_at" not in data:
+            raise serializers.ValidationError(
+                "Provide at least a file or an expiry date to update."
+            )
+        return data
+
+
+class RiderDocumentUpdateResponseSerializer(serializers.ModelSerializer):
+    """
+    Output serializer returned after a document is updated.
+    """
+
+    doc_type_display = serializers.CharField(
+        source="get_doc_type_display", read_only=True
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = RiderDocument
+        fields = [
+            "id",
+            "doc_type",
+            "doc_type_display",
+            "status",
+            "status_display",
+            "file_url",
+            "expires_at",
+            "rejection_reason",
+            "updated_at",
+        ]
+
+
+class RiderRatingSerializer(serializers.Serializer):
+    """
+    Serializer for rider rating input.
+    """
+
+    rider_id = serializers.CharField(required=True)
+    rating = serializers.IntegerField(min_value=1, max_value=5, required=True)
+    comment = serializers.CharField(required=False, allow_blank=True)
+
+
+class BankListSerializer(serializers.ModelSerializer):
+    """
+    Serializer for listing supported Nigerian banks.
+    """
+
+    class Meta:
+        from wallet.models import Bank
+
+        model = Bank
+        fields = [
+            "id",
+            "name",
+            "bank_code",
+            "cbn_code",
+            "ussd_short_code",
+            "bank_short_name",
+        ]
+
+
+class VerifyAccountSerializer(serializers.Serializer):
+    """
+    Serializer for validating account enquiry input parameters.
+    """
+
+    account_number = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        account_number = str(attrs.get("account_number", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+
+        if not account_number or not bank_code:
+            raise ServiceException(
+                status_code=400, message="account_number and bank_code are required."
+            )
+
+        if not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="Account number must be a valid 10-digit NUBAN number.",
+            )
+
+        attrs["account_number"] = account_number
+        attrs["bank_code"] = bank_code
+        return attrs
+
+
+class RiderWithdrawalSerializer(serializers.Serializer):
+    """
+    Serializer for rider wallet earnings withdrawal request.
+    Supports optional sandbox execution for testing and simulation.
+    """
+
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=True)
+    account_number = serializers.CharField(required=True)
+    account_name = serializers.CharField(required=True)
+    bank_code = serializers.CharField(required=True)
+    bank_name = serializers.CharField(required=False, allow_blank=True, default="")
+    narration = serializers.CharField(required=False, allow_blank=True, default="")
+    is_sandbox = serializers.BooleanField(required=False, default=None)
+    mode = serializers.CharField(required=False, allow_blank=True, default=None)
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN for withdrawal authorization",
+    )
+
+    def validate(self, attrs):
+        from decimal import Decimal
+
+        amount = attrs.get("amount")
+        account_number = str(attrs.get("account_number", "")).strip()
+        account_name = str(attrs.get("account_name", "")).strip()
+        bank_code = str(attrs.get("bank_code", "")).strip()
+        pin = str(attrs.get("pin", "")).strip()
+
+        if not pin:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN is required."
+            )
+
+        if not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+
+        if amount is None or amount <= Decimal("0.00"):
+            raise ServiceException(
+                status_code=400, message="Withdrawal amount must be greater than zero."
+            )
+
+        if amount < Decimal("100.00"):
+            raise ServiceException(
+                status_code=400, message="Minimum withdrawal amount is ₦100.00."
+            )
+
+        if not account_number or not account_number.isdigit() or len(account_number) != 10:
+            raise ServiceException(
+                status_code=400,
+                message="A valid 10-digit account number is required.",
+            )
+
+        if not account_name:
+            raise ServiceException(
+                status_code=400, message="Account name is required."
+            )
+
+        if not bank_code:
+            raise ServiceException(
+                status_code=400, message="Bank code is required."
+            )
+
+        attrs["pin"] = pin
+        attrs["account_number"] = account_number
+        attrs["account_name"] = account_name
+        attrs["bank_code"] = bank_code
+
+        # Determine sandbox mode: explicit is_sandbox, explicit mode, or system settings default
+        is_sandbox_arg = attrs.get("is_sandbox")
+        mode_arg = (attrs.get("mode") or "").strip().upper()
+
+        if is_sandbox_arg is True or mode_arg == "SANDBOX":
+            attrs["mode"] = "SANDBOX"
+            attrs["is_sandbox"] = True
+        elif is_sandbox_arg is False or mode_arg == "LIVE":
+            attrs["mode"] = "LIVE"
+            attrs["is_sandbox"] = False
+        else:
+            default_mode = getattr(settings, "WIHDRAWAL_MODE", getattr(settings, "COREBANKING_MODE", "SANDBOX")).upper()
+            attrs["mode"] = default_mode
+            attrs["is_sandbox"] = (default_mode == "SANDBOX")
+
+        return attrs
+
+
+class RiderSetTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for setting or changing a rider's 4-digit transaction PIN.
+    """
+
+    old_pin = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Current transaction PIN (required if PIN is already configured)",
+    )
+    password = serializers.CharField(
+        required=False,
+        write_only=True,
+        allow_blank=True,
+        default="",
+        help_text="Account login password (fallback if current PIN is forgotten)",
+    )
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="New 4-digit transaction PIN",
+    )
+    confirm_pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="Confirm new 4-digit transaction PIN",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        confirm_pin = str(attrs.get("confirm_pin", "")).strip()
+        old_pin = str(attrs.get("old_pin", "")).strip()
+
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+
+        if pin != confirm_pin:
+            raise ServiceException(
+                status_code=400, message="PIN and confirmation PIN do not match."
+            )
+
+        if old_pin and not old_pin.isdigit():
+            raise ServiceException(
+                status_code=400, message="Current transaction PIN must be numeric."
+            )
+
+        attrs["pin"] = pin
+        attrs["confirm_pin"] = confirm_pin
+        attrs["old_pin"] = old_pin
+        return attrs
+
+
+class RiderVerifyTransactionPinSerializer(serializers.Serializer):
+    """
+    Serializer for validating rider transaction PIN input.
+    """
+
+    pin = serializers.CharField(
+        required=True,
+        write_only=True,
+        help_text="4-digit transaction PIN to verify",
+    )
+
+    def validate(self, attrs):
+        pin = str(attrs.get("pin", "")).strip()
+        if not pin or not pin.isdigit() or len(pin) != 4:
+            raise ServiceException(
+                status_code=400, message="Transaction PIN must be exactly 4 digits."
+            )
+        attrs["pin"] = pin
+        return attrs
+
+
+class RiderFaceMatchRequestSerializer(serializers.Serializer):
+    """
+    Serializer for independent rider face match request.
+    Expects the S3 storage bucket URL of the selfie snapshot.
+    """
+
+    image_url = serializers.URLField(
+        required=True,
+        max_length=500,
+        help_text="URL of the uploaded selfie snapshot image in the storage bucket",
+    )
+
+    def validate_image_url(self, value):
+        url = str(value).strip()
+        if not url:
+            raise ServiceException(
+                status_code=400, message="image_url cannot be empty."
+            )
+        return url
+
+
+class RiderFaceMatchLogSerializer(serializers.ModelSerializer):
+    """
+    Serializer for independent rider face verification audit logs.
+    """
+
+    rider_id = serializers.CharField(source="rider.rider_id", read_only=True)
+    rider_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = RiderFaceMatchLog
+        fields = [
+            "id",
+            "rider_id",
+            "rider_name",
+            "trigger_type",
+            "status",
+            "similarity",
+            "is_match",
+            "selfie_url",
+            "reference_photo_url",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_rider_name(self, obj):
+        if obj.rider and obj.rider.user:
+            return (
+                obj.rider.user.contact_name
+                or f"{obj.rider.user.first_name} {obj.rider.user.last_name}".strip()
+            )
+        return ""
+
+

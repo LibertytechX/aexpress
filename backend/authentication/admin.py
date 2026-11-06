@@ -1,53 +1,130 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Address
+from .models import User, Address, MerchantEmailLog
 
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
     """Admin configuration for User model."""
 
-    list_display = ['phone', 'business_name', 'contact_name', 'email', 'is_active', 'email_verified', 'created_at']
-    list_filter = ['is_active', 'is_staff', 'email_verified', 'phone_verified', 'created_at']
-    search_fields = ['phone', 'email', 'business_name', 'contact_name']
-    ordering = ['-created_at']
+    list_display = [
+        "phone",
+        "business_name",
+        "usertype",
+        "contact_name",
+        "email",
+        "is_active",
+        "email_verified",
+        "created_at",
+    ]
+    list_filter = [
+        "is_active",
+        "is_staff",
+        "email_verified",
+        "phone_verified",
+        "usertype",
+        "created_at",
+    ]
+    search_fields = ["phone", "email", "business_name", "contact_name"]
+    ordering = ["-created_at"]
 
     fieldsets = (
-        ('Business Information', {
-            'fields': ('business_name', 'contact_name', 'phone', 'email', 'address')
-        }),
-        ('Verification Status', {
-            'fields': ('email_verified', 'phone_verified')
-        }),
-        ('Permissions', {
-            'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')
-        }),
-        ('Important Dates', {
-            'fields': ('last_login', 'created_at', 'updated_at')
-        }),
+        (
+            "Business Information",
+            {
+                "fields": (
+                    "business_name",
+                    "contact_name",
+                    "phone",
+                    "email",
+                    "address",
+                    "usertype",
+                )
+            },
+        ),
+        ("Verification Status", {"fields": ("email_verified", "phone_verified")}),
+        (
+            "Permissions",
+            {
+                "fields": (
+                    "is_active",
+                    "is_staff",
+                    "is_superuser",
+                    "groups",
+                    "user_permissions",
+                )
+            },
+        ),
+        ("Important Dates", {"fields": ("last_login", "created_at", "updated_at")}),
     )
 
     add_fieldsets = (
-        ('Business Information', {
-            'classes': ('wide',),
-            'fields': ('business_name', 'contact_name', 'phone', 'email', 'password1', 'password2')
-        }),
+        (
+            "Business Information",
+            {
+                "classes": ("wide",),
+                "fields": (
+                    "business_name",
+                    "contact_name",
+                    "phone",
+                    "email",
+                    "password1",
+                    "password2",
+                ),
+            },
+        ),
     )
 
-    readonly_fields = ['created_at', 'updated_at', 'last_login']
+    readonly_fields = ["created_at", "updated_at", "last_login"]
 
 
 @admin.register(Address)
 class AddressAdmin(admin.ModelAdmin):
     """Admin configuration for Address model."""
 
-    list_display = ['user', 'label', 'address_preview', 'is_default', 'created_at']
-    list_filter = ['is_default', 'created_at']
-    search_fields = ['user__business_name', 'user__phone', 'label', 'address']
-    ordering = ['-created_at']
-    readonly_fields = ['created_at', 'updated_at']
+    list_display = ["user", "label", "address_preview", "is_default", "created_at"]
+    list_filter = ["is_default", "created_at"]
+    search_fields = ["user__business_name", "user__phone", "label", "address"]
+    ordering = ["-created_at"]
+    readonly_fields = ["created_at", "updated_at"]
 
     def address_preview(self, obj):
         """Show preview of address."""
-        return obj.address[:50] + '...' if len(obj.address) > 50 else obj.address
-    address_preview.short_description = 'Address'
+        return obj.address[:50] + "..." if len(obj.address) > 50 else obj.address
+
+    address_preview.short_description = "Address"
+
+
+@admin.register(MerchantEmailLog)
+class MerchantEmailLogAdmin(admin.ModelAdmin):
+    """Admin configuration for MerchantEmailLog model."""
+
+    list_display = ["merchant", "template_code", "sent_at"]
+    list_filter = ["template_code", "sent_at"]
+    search_fields = [
+        "merchant__business_name",
+        "merchant__phone",
+        "merchant__email",
+        "template_code",
+    ]
+    ordering = ["-sent_at"]
+    readonly_fields = ["sent_at"]
+    actions = ["trigger_weekly_reports", "trigger_daily_drip_campaigns"]
+
+    @admin.action(description="Trigger process_weekly_monday_reports task")
+    def trigger_weekly_reports(self, request, queryset):
+        from orders.tasks import process_weekly_monday_reports
+
+        process_weekly_monday_reports.delay()
+        self.message_user(
+            request, "Triggered process_weekly_monday_reports task successfully."
+        )
+
+    @admin.action(description="Trigger process_daily_drip_campaigns task")
+    def trigger_daily_drip_campaigns(self, request, queryset):
+        from orders.tasks import process_daily_drip_campaigns
+
+        process_daily_drip_campaigns.delay()
+        self.message_user(
+            request, "Triggered process_daily_drip_campaigns task successfully."
+        )

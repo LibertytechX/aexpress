@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "clean-code": {
+      "source": "Ayobami6/skills",
+      "sourceType": "github",
+      "skillPath": "skills/clean-code/SKILL.md",
+      "computedHash": "3d761d54449fcb4e4671ed6aa5ea3a37daca69c4a3b382ede5a20bdaffe6e115"
+    },
+    "mailnow-integration": {
+      "source": "Ayobami6/skills",
+      "sourceType": "github",
+      "skillPath": "skills/mailnow-integration/SKILL.md",
+      "computedHash": "ac984420b9fb4c33df30c7df08180c6b963a5dc30800ced66ab4ed83f9ea4b53"
+    },
+    "pr-reviewer": {
+      "source": "Ayobami6/skills",
+      "sourceType": "github",
+      "skillPath": "skills/pr-reviewer/SKILL.md",
+      "computedHash": "915cf060f46241f20f7e7e488322d10d62042d91cc5286e168e53a36bcb4f7b2"
+    }
+  }
+}

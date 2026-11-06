@@ -14,6 +14,8 @@ from pathlib import Path
 import os
 from dotenv import load_dotenv
 from datetime import timedelta
+from celery.schedules import crontab
+from sparky_utils.logger import LoggerConfig
 
 # Load environment variables
 load_dotenv()
@@ -33,16 +35,18 @@ DEBUG = os.getenv("DEBUG", "True") == "True"
 
 ALLOWED_HOSTS = os.getenv(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev",
+    "localhost,127.0.0.1,.ngrok-free.app,c3c7-105-113-65-194.ngrok-free.app,https://c3c7-105-113-65-194.ngrok-free.app,https://nonrhythmical-wendie-unmarshalled.ngrok-free.dev,https://aexpress-staging.vercel.app/",
 ).split(",")
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    "django.contrib.admin",
-    "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.auth",
+    # Local apps (must come before admin since we use custom User model)
+    "authentication",
+    "django.contrib.admin",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -52,13 +56,22 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "corsheaders",
     "django_redis",
+    "import_export",
     # Local apps
-    "authentication",
     "orders",
     "wallet",
     "bot",
     "dispatcher",
+    "operations",
     "riders",
+    "webhooks",
+    "referrals",
+    "chats",
+    "whatsapp_messaging",
+    "subscriptions",
+    "oprtn_dashboard",
+    "devs",
+    "support",
 ]
 
 MIDDLEWARE = [
@@ -77,7 +90,7 @@ ROOT_URLCONF = "ax_merchant_api.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -167,6 +180,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "dispatcher.authentication.ServiceAPIKeyAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_RENDERER_CLASSES": ("rest_framework.renderers.JSONRenderer",),
@@ -176,10 +190,10 @@ REST_FRAMEWORK = {
 # Simple JWT Settings
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(
-        hours=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME", 24))
+        days=int(os.getenv("JWT_ACCESS_TOKEN_LIFETIME_DAYS", 90))
     ),
     "REFRESH_TOKEN_LIFETIME": timedelta(
-        hours=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME", 168))
+        days=int(os.getenv("JWT_REFRESH_TOKEN_LIFETIME_DAYS", 90))
     ),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -221,6 +235,9 @@ CORS_ALLOWED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://aexpress-staging.vercel.app",
+    "https://axpress-operations-command-center.vercel.app",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
 ]
 
 # Add production frontend URL if set
@@ -239,6 +256,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://move.axpress.net",
     "https://axpress.net",
     "https://axpress.net",
+    "https://liberty-axpress-admin-dashboard.vercel.app",
+    "https://aexpress-staging.vercel.app",
+    "https://axpress-operations-command-center.vercel.app",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -283,20 +303,48 @@ COREBANKING_BASE_URL = os.getenv(
     "COREBANKING_BASE_URL", "https://banking.libertypayng.com"
 )
 COREBANKING_WEBHOOK_SECRET = os.getenv("COREBANKING_WEBHOOK_SECRET", "")
+COREBANKING_SOURCE_ACCOUNT = os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+COREBANKING_WEMA_SOURCE_ACCOUNT = os.getenv(
+    "COREBANKING_WEMA_SOURCE_ACCOUNT", os.getenv("COREBANKING_SOURCE_ACCOUNT", "")
+)
+COREBANKING_MODE = os.getenv("COREBANKING_MODE", "LIVE")
+COREBANKING_SIMULATE_SANDBOX = os.getenv(
+    "COREBANKING_SIMULATE_SANDBOX", "True" if DEBUG else "False"
+).lower() in ("true", "1", "t")
+LIBERTYPAY_ACCOUNT_ENQUIRY_URL = os.getenv(
+    "LIBERTYPAY_ACCOUNT_ENQUIRY_URL",
+    "https://management.libertypayng.com/api/v1/sales/account_name_enquiry/",
+)
 
 # Mailgun Configuration
 MAILGUN_API_KEY = os.getenv("MAILGUN_API_KEY", "")
 MAILGUN_DOMAIN = os.getenv("MAILGUN_DOMAIN", "")
 MAILGUN_FROM_EMAIL = os.getenv("MAILGUN_FROM_EMAIL", f"mailgun@{MAILGUN_DOMAIN}")
 
+# MailNow Configuration
+MAILNOW_API_URL = os.getenv("MAILNOW_API_URL", "http://127.0.0.1:3200/v1/email/send")
+MAILNOW_API_KEY = os.getenv(
+    "MAILNOW_API_KEY", "mn_live_7e59df7ce4a14545b443837804ec9722"
+)
+
 # AWS S3 Configuration
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "")
 AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "")
 AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "assuredexpress")
+AWS_LOCATION_PLACE_INDEX = os.getenv("AWS_LOCATION_PLACE_INDEX", "aexpress-place-index")
+
+# Geoapify Configuration
+GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY") or "c18c5dbcc9ee4b049a2b86716bee32d9"
+MAPBOX_ACCESS_TOKEN = os.getenv("MAPBOX_ACCESS_TOKEN")
 
 # Ably Configuration
 ABLY_API_KEY = os.getenv("ABLY_API_KEY", "")
+WIHDRAWAL_MODE = os.getenv("WIHDRAWAL_MODE", "SANDBOX")
+
+# LibertyPay API Configuration
+LIBERTYPAY_API_KEY = os.getenv("LIBERTYPAY_API_KEY", "")
+LIBERTYPAY_TRANSACTION_PIN = os.getenv("LIBERTYPAY_TRANSACTION_PIN", "1234")
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
@@ -307,12 +355,69 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
 # Celery Beat Schedule
-from celery.schedules import crontab
+
 
 CELERY_BEAT_SCHEDULE = {
     "publish-random-order-offer-every-minute": {
         "task": "riders.tasks.publish_random_order_offer",
         "schedule": crontab(minute="*"),
+    },
+    "webhook-retry-every-30-seconds": {
+        "task": "webhooks.tasks.webhook_retry_cron",
+        "schedule": 30.0,
+    },
+    # OCC Snapshot Tasks
+    "aggregate-daily-rider-snapshots": {
+        "task": "dispatcher.tasks.aggregate_daily_rider_snapshots",
+        "schedule": crontab(hour=0, minute=5),
+    },
+    "aggregate-daily-merchant-snapshots": {
+        "task": "dispatcher.tasks.aggregate_daily_merchant_snapshots",
+        "schedule": crontab(hour=0, minute=10),
+    },
+    "update-merchant-activity-status": {
+        "task": "dispatcher.tasks.update_merchant_activity_status",
+        "schedule": crontab(minute=0, hour="*/6"),
+    },
+    "flag-ghost-riders": {
+        "task": "dispatcher.tasks.flag_ghost_riders",
+        "schedule": crontab(minute="*/15"),
+    },
+    "marketing-daily-drip": {
+        "task": "orders.tasks.process_daily_drip_campaigns",
+        "schedule": crontab(hour=8, minute=0),
+    },
+    "marketing-weekly-reports": {
+        "task": "orders.tasks.process_weekly_monday_reports",
+        "schedule": crontab(day_of_week=1, hour=9, minute=0),  # Monday 9 AM
+    },
+    "process-subscription-invoicing-daily": {
+        "task": "subscriptions.tasks.process_subscription_invoicing",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    "process-postpaid-billing-cycles": {
+        "task": "subscriptions.tasks.process_postpaid_billing_cycles",
+        "schedule": crontab(hour=0, minute=0),  # Daily at midnight
+    },
+    # Ops Dashboard alert engine (full rule set)
+    "generate-ops-alerts": {
+        "task": "oprtn_dashboard.tasks.generate_alerts",
+        "schedule": crontab(minute="*/30"),
+    },
+    # Pre-warm payments/COD/fuel dashboard snapshots for fast reads.
+    "refresh-ops-dashboard-cache": {
+        "task": "oprtn_dashboard.tasks.refresh_dashboard_cache",
+        "schedule": crontab(minute="*/30"),
+    },
+    # Monthly Dispatcher Affiliation Commission Rollover
+    "reset-monthly-dispatcher-commissions": {
+        "task": "dispatcher.tasks.reset_monthly_dispatcher_commissions_task",
+        "schedule": crontab(day_of_month=1, hour=0, minute=0),
+    },
+    # Monthly Independent Rider Face Verification Daily Check
+    "trigger-monthly-face-verification-daily": {
+        "task": "riders.tasks.trigger_monthly_face_verification_task",
+        "schedule": crontab(hour=1, minute=0),  # Daily at 01:00 UTC
     },
 }
 
@@ -337,5 +442,32 @@ BOT_API_KEY = os.getenv("BOT_API_KEY", "")
 RESPOND_IO_API_KEY = os.getenv("RESPOND_IO_API_KEY", "")
 RESPOND_IO_BASE_URL = os.getenv("RESPOND_IO_BASE_URL", "https://api.respond.io/v2")
 
+# 360Messenger WhatsApp API
+MESSENGER360_API_KEY = os.getenv("MESSENGER360_API_KEY", "")
+
 # Google Maps API Configuration
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
+
+# Routing Service Configuration
+ROUTING_SERVICE_URL = os.getenv(
+    "ROUTING_SERVICE_URL", "http://localhost:8071/api/v1/directions"
+)
+ROUTING_SERVICE_API_KEY = os.getenv("ROUTING_SERVICE_API_KEY", "")
+ROUTING_PROVIDER = os.getenv("ROUTING_PROVIDER", "google")  # 'google' or 'custom'
+
+
+SMARTPARCEL_BASE_URL = os.getenv("SMARTPARCEL_BASE_URL", "")
+SMARTPARCEL_API_KEY = os.getenv("SMARTPARCEL_API_KEY", "")
+SMARTPARCEL_SECRET_KEY = os.getenv("SMARTPARCEL_SECRET_KEY", "")
+SMARTPARCEL_PUBLIC_KEY = os.getenv("SMARTPARCEL_PUBLIC_KEY", "")
+
+# KYC / Biometric Service Configuration
+KYC_SERVICE_URL = os.getenv(
+    "KYC_SERVICE_URL", "http://localhost:8000/api/v1/kyc/face-match"
+)
+KYC_SERVICE_TOKEN = os.getenv("KYC_SERVICE_TOKEN", "")
+
+# Logger Configuration
+LOG_LEVEL = "INFO"
+
+logger_config = LoggerConfig(log_level=LOG_LEVEL)

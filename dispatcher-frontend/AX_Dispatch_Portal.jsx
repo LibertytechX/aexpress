@@ -1,9 +1,81 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, VehiclesAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI } from "./src/api.js";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { AuthAPI, RidersAPI, OrdersAPI, MerchantsAPI, MerchantPricingOverridesAPI, VehiclesAPI, VehicleAssetsAPI, ActivityFeedAPI, SettingsAPI, ZonesAPI, RelayNodesAPI, DispatchersAPI, ChatsAPI, RevenueAPI, AffiliationAPI } from "./src/api.js";
 import { Realtime } from "ably";
+
+// ─── NOTIFICATION CHIMES (Web Audio API) ─────────────────────────
+// Dispatcher portal event tone (wav)
+const EVENT_TONE_URL = new URL('./car_honk_3s_opt1_cluster.wav', import.meta.url).href;
+let eventToneAudio = null;
+
+const playEventTone = () => {
+  try {
+    if (!eventToneAudio) eventToneAudio = new Audio(EVENT_TONE_URL);
+    // Restart from the beginning for repeated events.
+    eventToneAudio.pause();
+    eventToneAudio.currentTime = 0;
+    eventToneAudio.volume = 0.9;
+    const p = eventToneAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch((e) => console.warn('[Tone] Playback blocked or failed:', e));
+    }
+  } catch (e) {
+    console.warn('[Tone] Could not play:', e);
+  }
+};
+
+const playChime = (notes) => {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    notes.forEach(({ freq, start, dur }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.18, now + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(now + start);
+      osc.stop(now + start + dur + 0.05);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) { console.warn('[Chime] Could not play:', e); }
+};
+// New order: use the wav tone. Other events keep the original (subtle) chimes.
+const playNewOrderChime = () => playEventTone();
+const playStartedChime = () => playChime([
+  { freq: 523, start: 0, dur: 0.12 },    // C5
+  { freq: 659, start: 0.12, dur: 0.2 },  // E5
+]);
+const playDeliveredChime = () => playChime([
+  { freq: 659, start: 0, dur: 0.1 },     // E5
+  { freq: 784, start: 0.1, dur: 0.1 },   // G5
+  { freq: 1047, start: 0.2, dur: 0.3 },  // C6
+]);
+
+// ─── GEO UTILS ──────────────────────────────────────────────────
+const haversineKm = (lat1, lng1, lat2, lng2) => {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const la1 = lat1 * Math.PI / 180;
+  const la2 = lat2 * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// ─── STALE ALERT AUDIO ──────────────────────────────────────────
+const playStaleAlertChime = () => playChime([
+  { freq: 440, start: 0, dur: 0.3 },     // A4
+  { freq: 523, start: 0.3, dur: 0.3 },   // C5
+  { freq: 440, start: 0.6, dur: 0.3 },   // A4
+  { freq: 523, start: 0.9, dur: 0.3 },   // C5
+  { freq: 659, start: 1.2, dur: 0.8 },   // E5 sustained
+]);
 
 // ─── ICONS ──────────────────────────────────────────────────────
 const I = {
+  warning: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
   dashboard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></svg>,
   orders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 16h6" /><path d="M19 13v6" /><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><path d="m7.5 4.27 9 5.15" /><polyline points="3.29 7 12 12 20.71 7" /><line x1="12" y1="22" x2="12" y2="12" /></svg>,
   riders: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18.5" cy="17.5" r="3.5" /><circle cx="5.5" cy="17.5" r="3.5" /><circle cx="15" cy="5" r="1" /><path d="M12 17.5V14l-3-3 4-3 2 3h2" /></svg>,
@@ -23,7 +95,9 @@ const I = {
   x: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>,
   check: <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>,
   teams: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>,
-  trash: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" /></svg>,
+  vehicles: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10H1v7h2" /><circle cx="7" cy="17" r="2" /><path d="M9 17h6" /><circle cx="17" cy="17" r="2" /><path d="M5 10V6a1 1 0 0 1 1-1h4l3 5" /></svg>,
+  revenue: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="20" x2="12" y2="10" /><line x1="18" y1="20" x2="18" y2="4" /><line x1="6" y1="20" x2="6" y2="16" /></svg>,
+  idCard: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><circle cx="9" cy="11" r="2" /><path d="M15 9h4" /><path d="M15 13h4" /><path d="M6 17c.5-1.5 1.8-2.5 3-2.5s2.5 1 3 2.5" /></svg>,
 };
 
 const S = {
@@ -296,7 +370,20 @@ function LagosMap({ orders, riders, highlightOrder, small, showZones, relayNodes
     </div>
   );
 }
-const STS = { Pending: { bg: S.yellowBg, text: S.yellow }, Assigned: { bg: S.blueBg, text: S.blue }, "Picked Up": { bg: S.purpleBg, text: S.purple }, "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold }, Delivered: { bg: S.greenBg, text: S.green }, Cancelled: { bg: S.redBg, text: S.red }, Failed: { bg: S.redBg, text: "#F87171" } };
+const STS = {
+  Pending: { bg: S.yellowBg, text: S.yellow },
+  Assigned: { bg: S.blueBg, text: S.blue },
+  AssignmentAccepted: { bg: "rgba(59,130,246,0.15)", text: "#60A5FA" },
+  AssignmentRejected: { bg: "rgba(239,68,68,0.15)", text: "#F87171" },
+  "Picked Up": { bg: S.purpleBg, text: S.purple },
+  "In Transit": { bg: "rgba(232,168,56,0.1)", text: S.gold },
+  "At Dropoff": { bg: "rgba(249,115,22,0.12)", text: "#F97316" },
+  Delivered: { bg: S.greenBg, text: S.green },
+  Cancelled: { bg: S.redBg, text: S.red },
+  Failed: { bg: S.redBg, text: "#F87171" },
+  "Paid Complete": { bg: S.greenBg, text: S.green },
+  "Unpaid Complete": { bg: "rgba(239,68,68,0.12)", text: S.red }
+};
 
 // ─── DELIVERY ROUTE MAP (Google Maps) ───────────────────────────
 function DeliveryRouteMap({ order, rider }) {
@@ -321,15 +408,12 @@ function DeliveryRouteMap({ order, rider }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+      directionsRendererRef.current = new window.google.maps.Polyline({
         map: map,
-        suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#E8A838',
-          strokeWeight: 4,
-          strokeOpacity: 0.7,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
-        }
+        strokeColor: '#E8A838',
+        strokeWeight: 4,
+        strokeOpacity: 0.7,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 4 }, offset: '0', repeat: '100px' }]
       });
       setMapReady(true);
     };
@@ -367,13 +451,37 @@ function DeliveryRouteMap({ order, rider }) {
       // Clear previous markers and route
       markersRef.current.forEach(m => m.setMap(null));
       markersRef.current = [];
-      if (directionsRendererRef.current) directionsRendererRef.current.setDirections({ routes: [] });
+      if (directionsRendererRef.current) directionsRendererRef.current.setPath([]);
 
-      const [pickupLoc, dropoffLoc] = await Promise.all([
-        geocodeAddr(order.pickup),
-        geocodeAddr(order.dropoff),
-      ]);
-      if (!pickupLoc || !dropoffLoc) { setMapStatus('error'); return; }
+      const bounds = new window.google.maps.LatLngBounds();
+
+      // Resolve pickup
+      const pickupLoc = (order.pickupLat && order.pickupLng) 
+        ? new window.google.maps.LatLng(parseFloat(order.pickupLat), parseFloat(order.pickupLng))
+        : await geocodeAddr(order.pickup);
+      
+      if (!pickupLoc) { setMapStatus('error'); return; }
+      bounds.extend(pickupLoc);
+
+      // Resolve all drops
+      let dropLocations = [];
+      if (order.mode === 'multi' && order.deliveries?.length > 0) {
+        const sortedDeliveries = [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0));
+        dropLocations = await Promise.all(sortedDeliveries.map(async (d) => {
+          const loc = (d.dropoff_latitude && d.dropoff_longitude)
+            ? new window.google.maps.LatLng(parseFloat(d.dropoff_latitude), parseFloat(d.dropoff_longitude))
+            : await geocodeAddr(d.dropoff_address);
+          return { loc, addr: d.dropoff_address, sequence: d.sequence };
+        }));
+      } else {
+        const dropoffLoc = (order.dropoffLat && order.dropoffLng)
+          ? new window.google.maps.LatLng(parseFloat(order.dropoffLat), parseFloat(order.dropoffLng))
+          : await geocodeAddr(order.dropoff);
+        if (dropoffLoc) dropLocations.push({ loc: dropoffLoc, addr: order.dropoff, sequence: 1 });
+      }
+
+      if (dropLocations.some(d => !d.loc)) { setMapStatus('error'); return; }
+      dropLocations.forEach(d => bounds.extend(d.loc));
 
       // Pickup marker — navy dot
       markersRef.current.push(new window.google.maps.Marker({
@@ -383,44 +491,42 @@ function DeliveryRouteMap({ order, rider }) {
         label: { text: '📦', fontSize: '16px' }
       }));
 
-      // Dropoff marker — green dot
-      markersRef.current.push(new window.google.maps.Marker({
-        position: dropoffLoc, map,
-        title: 'Dropoff: ' + order.dropoff,
-        icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
-        label: { text: '🏠', fontSize: '16px' }
-      }));
+      // Dropoff markers — green dots
+      dropLocations.forEach((d, i) => {
+        markersRef.current.push(new window.google.maps.Marker({
+          position: d.loc, map,
+          title: `Stop ${d.sequence || i + 1}: ` + d.addr,
+          icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: '#10B981', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
+          label: { 
+            text: order.mode === 'multi' ? String(d.sequence || i + 1) : '🏠', 
+            fontSize: order.mode === 'multi' ? '12px' : '16px', 
+            color: '#fff', 
+            fontWeight: 'bold' 
+          }
+        }));
+      });
 
       // Rider marker — gold dot (only if GPS available)
       if (rider && rider.lat && rider.lng) {
+        const riderLoc = { lat: rider.lat, lng: rider.lng };
         markersRef.current.push(new window.google.maps.Marker({
-          position: { lat: rider.lat, lng: rider.lng }, map,
+          position: riderLoc, map,
           title: 'Rider: ' + (rider.name || 'Rider'),
           icon: { path: window.google.maps.SymbolPath.CIRCLE, scale: 12, fillColor: '#E8A838', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 },
           label: { text: '🏍️', fontSize: '16px' }
         }));
+        bounds.extend(riderLoc);
       }
 
-      // Draw route
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc,
-        destination: dropoffLoc,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        if (status === 'OK') {
-          directionsRendererRef.current.setDirections(result);
-        } else {
-          // Route failed — just fit bounds to markers
-          const bounds = new window.google.maps.LatLngBounds();
-          bounds.extend(pickupLoc);
-          bounds.extend(dropoffLoc);
-          if (rider && rider.lat && rider.lng) bounds.extend({ lat: rider.lat, lng: rider.lng });
-          map.fitBounds(bounds, { padding: 40 });
-        }
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setPath([pickupLoc, ...dropLocations.map(d => d.loc)]);
+      }
+
+      map.fitBounds(bounds, { padding: 40 });
+      setMapStatus('ready');
     })().catch(err => { console.error('DeliveryRouteMap error:', err); setMapStatus('error'); });
-  }, [mapReady, order.id, order.pickup, order.dropoff, rider?.id, rider?.lat, rider?.lng]);
+  }, [mapReady, order.id, order.pickup, order.dropoff, order.deliveries?.length, rider?.id, rider?.lat, rider?.lng]);
 
   return (
     <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', border: `1px solid ${S.border}` }}>
@@ -462,12 +568,10 @@ function RelayRouteMap({ order, riders }) {
         styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
       });
       mapInstanceRef.current = map;
-      rendererRef.current = new window.google.maps.DirectionsRenderer({
-        map, suppressMarkers: true,
-        polylineOptions: {
-          strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
-          icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
-        }
+      rendererRef.current = new window.google.maps.Polyline({
+        map,
+        strokeColor: '#3B82F6', strokeWeight: 4, strokeOpacity: 0.75,
+        icons: [{ icon: { path: window.google.maps.SymbolPath.FORWARD_CLOSED_ARROW, scale: 3 }, offset: '50%', repeat: '80px' }]
       });
       setMapReady(true);
     };
@@ -495,7 +599,7 @@ function RelayRouteMap({ order, riders }) {
     });
     (async () => {
       markersRef.current.forEach(m => m.setMap(null)); markersRef.current = [];
-      if (rendererRef.current) rendererRef.current.setDirections({ routes: [] });
+      if (rendererRef.current) rendererRef.current.setPath([]);
 
       // Resolve pickup coordinates
       const pickupLoc = (order.pickupLat && order.pickupLng)
@@ -525,15 +629,12 @@ function RelayRouteMap({ order, riders }) {
       intermediateNodes.forEach(n => bounds.extend({ lat: n.lat, lng: n.lng }));
       map.fitBounds(bounds, { padding: 50 });
 
-      // Draw route through all waypoints
-      const waypoints = intermediateNodes.map(n => ({ location: new window.google.maps.LatLng(n.lat, n.lng), stopover: true }));
-      new window.google.maps.DirectionsService().route({
-        origin: pickupLoc, destination: dropoffLoc, waypoints,
-        travelMode: window.google.maps.TravelMode.DRIVING, optimizeWaypoints: false,
-      }, (result, status) => {
-        if (status === 'OK' && rendererRef.current) rendererRef.current.setDirections(result);
-        setMapStatus('ready');
-      });
+      // Draw straight polyline path connecting the locations directly (skips expensive Directions API)
+      const allPathNodes = [pickupLoc, ...intermediateNodes.map(n => new window.google.maps.LatLng(n.lat, n.lng)), dropoffLoc];
+      if (rendererRef.current) {
+        rendererRef.current.setPath(allPathNodes);
+      }
+      setMapStatus('ready');
 
       // Pickup marker (📦)
       markersRef.current.push(new window.google.maps.Marker({
@@ -560,7 +661,7 @@ function RelayRouteMap({ order, riders }) {
 
       // Rider marker (🏍️) — show suggested rider GPS if available
       if (order.suggestedRiderId && riders) {
-        const riderObj = riders.find(r => r.id === order.suggestedRiderId);
+        const riderObj = riders.find(r => r._uuid === order.suggestedRiderId);
         if (riderObj && riderObj.lat && riderObj.lng) {
           markersRef.current.push(new window.google.maps.Marker({
             position: { lat: riderObj.lat, lng: riderObj.lng }, map, zIndex: 11,
@@ -892,26 +993,59 @@ const CUSTOMERS_DATA = [
   { id: "C007", name: "Kola Peters", phone: "08144556677", email: "kpeters@gmail.com", totalOrders: 19, lastOrder: "Feb 14", totalSpent: 345000, favMerchant: "TechZone Gadgets" },
   { id: "C008", name: "Aisha Mohammed", phone: "07055443322", email: "aisha.m@outlook.com", totalOrders: 7, lastOrder: "Feb 11", totalSpent: 78500, favMerchant: "FreshFit Lagos" },
 ];
-const MSG_RIDER = [
-  { id: "R001", name: "Musa Kabiru", unread: 2, lastMsg: "On my way to pickup now", lastTime: "4:05 PM", messages: [{ from: "dispatch", text: "Musa, new order AX-6158260 assigned. Pickup at Sabo Yaba.", time: "3:44 PM" }, { from: "rider", text: "Received. Heading there now.", time: "3:45 PM" }, { from: "rider", text: "Traffic heavy on Third Mainland. ETA 12 mins.", time: "3:50 PM" }, { from: "dispatch", text: "Noted. Customer informed.", time: "3:51 PM" }, { from: "rider", text: "On my way to pickup now", time: "4:05 PM" }] },
-  { id: "R003", name: "Chinedu Okoro", unread: 0, lastMsg: "Package secured, heading out", lastTime: "3:35 PM", messages: [{ from: "dispatch", text: "Chinedu, AX-6158261 for you. Car required — food delivery.", time: "3:28 PM" }, { from: "rider", text: "Copy. 5 mins from Surulere pickup.", time: "3:30 PM" }, { from: "rider", text: "Package secured, heading out", time: "3:35 PM" }] },
-  { id: "R005", name: "Ibrahim Suleiman", unread: 1, lastMsg: "Free for next dispatch", lastTime: "1:15 PM", messages: [{ from: "rider", text: "AX-6158256 delivered. COD collected.", time: "1:10 PM" }, { from: "dispatch", text: "Great work! Settle COD via wallet.", time: "1:12 PM" }, { from: "rider", text: "Done. Free for next dispatch", time: "1:15 PM" }] },
-];
-const MSG_CUSTOMER = [
-  { id: "C001", name: "Adebayo Johnson", unread: 1, lastMsg: "When will my package arrive?", lastTime: "4:08 PM", messages: [{ from: "customer", text: "Hi, I placed AX-6158260. Any update?", time: "4:02 PM" }, { from: "dispatch", text: "Your rider Musa is en route. ETA ~15 min.", time: "4:04 PM" }, { from: "customer", text: "When will my package arrive?", time: "4:08 PM" }] },
-  { id: "C003", name: "Chidi Obi", unread: 0, lastMsg: "Thank you!", lastTime: "3:40 PM", messages: [{ from: "customer", text: "Is my food order on the way?", time: "3:30 PM" }, { from: "dispatch", text: "Yes! Chinedu picked it up. Heading to you now.", time: "3:36 PM" }, { from: "customer", text: "Thank you!", time: "3:40 PM" }] },
-];
+// MSG_RIDER / MSG_CUSTOMER removed — now fetched live from /api/chats/
 
 const Badge = ({ status }) => { const s = STS[status] || { bg: "#f1f5f9", text: "#94A3B8" }; return <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: s.bg, color: s.text, textTransform: "uppercase", letterSpacing: "0.5px" }}>{status}</span>; };
 const StatCard = ({ label, value, sub, color }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: "16px 18px", flex: 1 }}><div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>{label}</div><div style={{ fontSize: 24, fontWeight: 800, color: color || S.text, fontFamily: "'Space Mono', monospace", lineHeight: 1 }}>{value}</div>{sub && <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>{sub}</div>}</div>);
 const now = () => new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 
-// ─── LOGIN SCREEN ───────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+// ─── LOGIN SCREEN (Modern Redesign) ──────────────────────────────────
+function LoginScreen({ onLogin, onForgotPassword }) {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
+
+  // Resize listener for responsive breakpoints
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const isDesktop = windowWidth >= 1024; // lg breakpoint
+
+  const slides = [
+    {
+      title: "Fleet Command",
+      subtitle: "Active Deployments",
+      description: "Monitor all live active deployments, relays, and rider positions in real-time across the entire network.",
+      stats: [{ value: "89+", label: "Active Riders", color: "#FBB12F" }, { value: "12min", label: "Avg. Dispatch", color: "#00B67A" }]
+    },
+    {
+      title: "Intelligent Routing",
+      subtitle: "Instant Matching",
+      description: "Our proprietary algorithm seamlessly connects incoming orders to the most optimal relay nodes instantly.",
+      stats: [{ value: "98%", label: "Match Rate", color: "#00B67A" }, { value: "<2s", label: "Processing", color: "#FBB12F" }]
+    },
+    {
+      title: "Command Center",
+      subtitle: "Unified Control",
+      description: "Oversee merchant relations, emergency overrides, and multi-drop tracking all from one unified portal.",
+      stats: [{ value: "2K+", label: "Merchants", color: "#FBB12F" }, { value: "24/7", label: "Uptime", color: "#00B67A" }]
+    }
+  ];
+
+  // Auto-advance slides
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentSlide(prev => (prev + 1) % slides.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [slides.length]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -927,27 +1061,434 @@ function LoginScreen({ onLogin }) {
     }
   };
 
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') handleSubmit(e);
+  };
+
+  // SVGs for inputs and trust badges
+  const PhoneIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>;
+  const LockIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
+  const EyeIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>;
+  const EyeOffIcon = <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>;
+  const ShieldIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>;
+  const ZapIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
+  const PackageIcon = <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14" /><polyline points="3.27 6.96 12 12.01 20.73 6.96" /><line x1="12" y1="22.08" x2="12" y2="12" /></svg>;
+  const LoaderIcon = <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}><line x1="12" y1="2" x2="12" y2="6" /><line x1="12" y1="18" x2="12" y2="22" /><line x1="4.93" y1="4.93" x2="7.76" y2="7.76" /><line x1="16.24" y1="16.24" x2="19.07" y2="19.07" /><line x1="2" y1="12" x2="6" y2="12" /><line x1="18" y1="12" x2="22" y2="12" /><line x1="4.93" y1="19.07" x2="7.76" y2="16.24" /><line x1="16.24" y1="7.76" x2="19.07" y2="4.93" /></svg>;
+  const ArrowRightIcon = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>;
+
+  return (
+    <div style={{ minHeight: "100vh", width: "100%", display: "flex", background: "#fff", fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", overflow: "hidden" }}>
+      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+
+      {/* ─── LEFT PANEL (desktop only) ─── */}
+      {isDesktop && (
+        <div style={{ width: "55%", position: "relative", overflow: "hidden", background: "#2F3758", display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "48px", zIndex: 0 }}>
+          {/* Animated Background Elements */}
+          <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+            {/* Dot Grid */}
+            <div style={{ position: "absolute", inset: 0, opacity: 0.05, backgroundImage: "radial-gradient(#ffffff 1.5px, transparent 1.5px)", backgroundSize: "40px 40px" }} />
+            {/* Blurs */}
+            <div style={{ position: "absolute", bottom: "-10%", left: "-20%", width: 800, height: 800, background: "rgba(0,182,122,0.05)", filter: "blur(120px)", borderRadius: "50%" }} />
+            <div style={{ position: "absolute", top: "-20%", right: "-10%", width: 600, height: 600, background: "rgba(251,177,47,0.05)", filter: "blur(100px)", borderRadius: "50%" }} />
+            {/* Rings */}
+            <div style={{ position: "absolute", top: "-5%", right: "-5%", width: 400, height: 400, border: "2px dashed rgba(255,255,255,0.1)", borderRadius: "50%", animation: "spinReverse 30s linear infinite" }} />
+            <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 600, height: 600, border: "1px solid rgba(255,255,255,0.05)", borderRadius: "50%", animation: "spin 40s linear infinite" }} />
+          </div>
+
+          <div style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 12, animation: "fadeInUp 0.6s ease" }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, boxShadow: `0 4px 12px ${S.gold}40` }}>
+              <span style={{ fontWeight: 900, fontSize: 16, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
+            </div>
+            <div>
+              <p style={{ color: "#fff", fontWeight: 800, fontSize: 13, letterSpacing: "1px", margin: 0 }}>ASSURED XPRESS</p>
+              <p style={{ color: S.gold, fontSize: 9, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
+            </div>
+          </div>
+
+          <div style={{ position: "relative", zIndex: 10, flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", maxWidth: 540, paddingBottom: 80 }}>
+            {/* Slide Content */}
+            <div style={{ minHeight: 180, animation: "fadeInUp 0.5s ease" }} key={currentSlide}>
+              <h1 style={{ color: "#fff", fontSize: 44, fontWeight: 800, lineHeight: 1.1, margin: "0 0 16px 0" }}>
+                {slides[currentSlide].title} <br />
+                <span style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)` }}>
+                  {slides[currentSlide].subtitle}
+                </span>
+              </h1>
+              <p style={{ color: "#cbd5e1", fontSize: 17, lineHeight: 1.6, margin: "0 0 24px 0", maxWidth: 440, height: 80 }}>
+                {slides[currentSlide].description}
+              </p>
+              <div style={{ display: "flex", gap: 32, paddingTop: 16 }}>
+                {slides[currentSlide].stats.map((stat, i) => (
+                  <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontSize: 26, fontWeight: 800, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
+                    <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Slide Navigation Dots */}
+            <div style={{ display: "flex", gap: 8, marginTop: 40 }}>
+              {slides.map((_, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setCurrentSlide(idx)}
+                  style={{
+                    height: 6, width: currentSlide === idx ? 32 : 8,
+                    borderRadius: 3, padding: 0, border: "none",
+                    background: currentSlide === idx ? S.gold : "#475569",
+                    cursor: "pointer", transition: "all 0.3s ease"
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── RIGHT PANEL / MOBILE FULL PAGE ─── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff", position: "relative", overflow: "hidden" }}>
+
+        {/* Mobile Header Hero (Hidden on Desktop) */}
+        {!isDesktop && (
+          <div style={{ position: "relative", width: "100%", minHeight: 280, overflow: "hidden", background: "#1e2540" }}>
+            {/* Abstract Background for Mobile Hero */}
+            <div style={{ position: "absolute", inset: 0, opacity: 0.12, backgroundImage: "radial-gradient(rgba(255,255,255,0.8) 1px, transparent 1px)", backgroundSize: "24px 24px" }} />
+            <div style={{ position: "absolute", top: "-30%", right: "-20%", width: 320, height: 320, background: "radial-gradient(circle, rgba(251,177,47,0.25) 0%, transparent 70%)", borderRadius: "50%" }} />
+            <div style={{ position: "absolute", bottom: "-20%", left: "-10%", width: 280, height: 280, background: "radial-gradient(circle, rgba(0,182,122,0.2) 0%, transparent 70%)", borderRadius: "50%" }} />
+
+            <div style={{ padding: "24px 24px 40px 24px", position: "relative", zIndex: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 24 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(to bottom right, ${S.gold}, #F5C563)`, boxShadow: `0 4px 12px ${S.gold}4d` }}>
+                  <span style={{ fontWeight: 900, fontSize: 14, color: S.navy, fontFamily: "'Space Mono',monospace" }}>AX</span>
+                </div>
+                <div>
+                  <p style={{ color: "#fff", fontWeight: 800, fontSize: 12, letterSpacing: "1.5px", margin: 0 }}>ASSURED XPRESS</p>
+                  <p style={{ color: S.gold, fontSize: 8, letterSpacing: "3px", fontWeight: 700, margin: 0 }}>DISPATCH PORTAL</p>
+                </div>
+              </div>
+
+              <div key={currentSlide} style={{ animation: "fadeInUp 0.4s ease" }}>
+                <h1 style={{ color: "#fff", fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 4px 0" }}>{slides[currentSlide].title}</h1>
+                <h2 style={{ color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text", backgroundImage: `linear-gradient(to right, ${S.gold}, #ffd074)`, fontSize: 24, fontWeight: 800, lineHeight: 1.2, margin: "0 0 20px 0" }}>{slides[currentSlide].subtitle}</h2>
+
+                <div style={{ display: "flex", gap: 20 }}>
+                  {slides[currentSlide].stats.map((stat, i) => (
+                    <div key={i} style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "'Space Mono',monospace", color: stat.color }}>{stat.value}</span>
+                      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 9, fontWeight: 600, textTransform: "uppercase", letterSpacing: "1px" }}>{stat.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 6, marginTop: 24 }}>
+                {slides.map((_, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setCurrentSlide(idx)}
+                    style={{
+                      height: 4, width: currentSlide === idx ? 24 : 6,
+                      borderRadius: 2, padding: 0, border: "none",
+                      background: currentSlide === idx ? S.gold : "rgba(255,255,255,0.3)",
+                      cursor: "pointer", transition: "all 0.3s ease"
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Wave mask at bottom */}
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 32, background: "#fff", borderRadius: "40px 40px 0 0" }} />
+          </div>
+        )}
+
+        {/* Form Container */}
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: isDesktop ? "center" : "flex-start", alignItems: "center", padding: isDesktop ? 32 : "16px 24px 32px 24px", position: "relative" }}>
+
+          {/* Desktop Subtle BG accents */}
+          {isDesktop && (
+            <div style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
+              <div style={{ position: "absolute", top: "-10%", right: "-20%", width: 300, height: 300, background: "rgba(251,177,47,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+              <div style={{ position: "absolute", bottom: "-10%", left: "-10%", width: 400, height: 400, background: "rgba(0,182,122,0.05)", filter: "blur(80px)", borderRadius: "50%" }} />
+            </div>
+          )}
+
+          <div style={{ width: "100%", maxWidth: 420, position: "relative", zIndex: 10 }}>
+
+            <div style={{ marginBottom: 28 }}>
+              <h2 style={{ fontSize: isDesktop ? 28 : 24, fontWeight: 700, color: S.navy, margin: "0 0 4px 0" }}>Control Access 👋</h2>
+              <p style={{ color: S.textMuted, fontSize: 14, margin: 0 }}>Authorize entry into dispatch control.</p>
+            </div>
+
+            {error && (
+              <div style={{ padding: 14, background: "#fef2f2", border: "1px solid #fee2e2", borderRadius: 12, display: "flex", alignItems: "center", gap: 12, color: "#dc2626", fontSize: 14, marginBottom: 24, animation: "fadeInDown 0.3s ease" }}>
+                <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#ef4444", flexShrink: 0 }} />
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+              {/* Phone Field */}
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 6 }}>Phone Number</label>
+                <div style={{ position: "relative" }}>
+                  {/* Icon */}
+                  <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                    {PhoneIcon}
+                  </div>
+                  {/* Prefix */}
+                  <div style={{ position: "absolute", left: 48, top: "50%", transform: "translateY(-50%)", fontSize: 14, fontWeight: 500, color: "#64748b", borderRight: "1px solid #e2e8f0", paddingRight: 12, zIndex: 10, display: "flex", alignItems: "center", height: 20 }}>
+                    +234
+                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '');
+                      if (val.length <= 11) setPhone(val);
+                    }}
+                    onKeyPress={handleKeyPress}
+                    placeholder="8099999999"
+                    required
+                    style={{
+                      width: "100%", padding: "14px 16px 14px 96px",
+                      background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0",
+                      borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy,
+                      outline: "none", transition: "all 0.2s", fontFamily: "inherit"
+                    }}
+                    onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                    onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                  />
+                </div>
+              </div>
+
+              {/* Password Field */}
+              <div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>Password</label>
+                  <button type="button" onClick={onForgotPassword} style={{ background: "none", border: "none", fontSize: 13, fontWeight: 600, color: S.gold, cursor: "pointer", padding: 0, fontFamily: "inherit" }}>Forgot password?</button>
+                </div>
+                <div style={{ position: "relative" }}>
+                  {/* Icon */}
+                  <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 32, height: 32, borderRadius: 8, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", zIndex: 10 }}>
+                    {LockIcon}
+                  </div>
+                  <input
+                    type={showPass ? "text" : "password"}
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Enter your password"
+                    required
+                    style={{
+                      width: "100%", padding: "14px 48px 14px 52px",
+                      background: "rgba(248,250,252,0.8)", border: "1px solid #e2e8f0",
+                      borderRadius: 12, fontSize: 14, fontWeight: 500, color: S.navy,
+                      outline: "none", transition: "all 0.2s", fontFamily: "inherit"
+                    }}
+                    onFocus={e => { e.target.style.borderColor = S.gold; e.target.style.boxShadow = `0 0 0 4px rgba(251,177,47,0.1)`; }}
+                    onBlur={e => { e.target.style.borderColor = "#e2e8f0"; e.target.style.boxShadow = "none"; }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPass(!showPass)}
+                    style={{ position: "absolute", right: 16, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: "#94a3b8", cursor: "pointer", padding: 0 }}
+                  >
+                    {showPass ? EyeOffIcon : EyeIcon}
+                  </button>
+                </div>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={loading}
+                style={{
+                  marginTop: 8, width: "100%", padding: "16px", borderRadius: 12, border: "none",
+                  background: S.navy, color: "#fff", fontSize: 15, fontWeight: 700,
+                  display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                  cursor: loading ? "not-allowed" : "pointer", position: "relative", overflow: "hidden",
+                  opacity: loading ? 0.8 : 1, transition: "background 0.2s", fontFamily: "inherit",
+                  boxShadow: "0 8px 16px rgba(47,55,88,0.2)"
+                }}
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#232a45"; }}
+                onMouseLeave={e => { if (!loading) e.currentTarget.style.background = S.navy; }}
+              >
+                <span style={{ position: "relative", zIndex: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                  {loading ? <>{LoaderIcon} Accessing Control...</> : <>Enter Command Center {ArrowRightIcon}</>}
+                </span>
+                <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: S.gold }} />
+              </button>
+            </form>
+
+            {/* Mobile Trust Badges */}
+            {!isDesktop && (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 24 }}>
+                  <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+                  <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, letterSpacing: "1px", textTransform: "uppercase" }}>Secured Platform</span>
+                  <div style={{ flex: 1, height: 1, background: "#f1f5f9" }} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "center", gap: 24 }}>
+                  {[
+                    { icon: ShieldIcon, label: "Internal SSL" },
+                    { icon: ZapIcon, label: "Live Sockets" },
+                    { icon: PackageIcon, label: "Admin Rights" }
+                  ].map((badge, i) => (
+                    <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: "rgba(47,55,88,0.05)", display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(47,55,88,0.6)" }}>
+                        {badge.icon}
+                      </div>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: "#94a3b8" }}>{badge.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Footer */}
+          <div style={{ position: "absolute", bottom: 16, width: "100%", textAlign: "center", fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
+            &copy; {new Date().getFullYear()} Assured Xpress Operations.
+          </div>
+        </div>
+      </div>
+
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes spinReverse { 100% { transform: rotate(-360deg); } }
+      `}} />
+    </div>
+  );
+}
+
+// ─── FORGOT PASSWORD SCREEN ─────────────────────────────────────
+function ForgotPasswordScreen({ onBack }) {
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!email) return setError("Please enter your email");
+    try {
+      setLoading(true); setError("");
+      await AuthAPI.requestPasswordReset(email);
+      setSubmitted(true);
+    } catch (err) {
+      setError(err.errors?.non_field_errors?.[0] || err.message || "Failed to send reset link.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-      <div style={{ width: 380, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+      <div style={{ width: 440, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontWeight: 800, fontSize: 22, color: S.navy, fontFamily: "'Space Mono',monospace", marginBottom: 16 }}>AX</div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>Dispatch Portal</h1>
-          <p style={{ color: S.muted, fontSize: 14, marginTop: 4 }}>Sign in to continue</p>
+          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontSize: 24, marginBottom: 16 }}>🔒</div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>Forgot Password?</h2>
+          <p style={{ color: S.textMuted, fontSize: 14, marginTop: 8 }}>
+            {submitted ? "Check your email for reset instructions" : "Enter your email and we'll send a reset link"}
+          </p>
         </div>
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Phone Number</label>
-            <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+234..." style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+        {!submitted ? (
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Email Address</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1, marginBottom: 16 }}>
+              {loading ? "Sending..." : "Send Reset Link"}
+            </button>
+          </form>
+        ) : (
+          <div style={{ textAlign: "center", padding: "24px 0" }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>✅</div>
+            <p style={{ color: S.textMuted, fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
+              If an account exists with <strong style={{ color: S.text }}>{email}</strong>, you will receive a link shortly.
+            </p>
           </div>
-          <div style={{ marginBottom: 24 }}>
-            <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+        )}
+        <div style={{ textAlign: "center" }}>
+          <button type="button" onClick={onBack} style={{ background: "none", border: "none", color: S.gold, fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>← Back to Login</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── RESET PASSWORD SCREEN ──────────────────────────────────────
+function ResetPasswordScreen({ token, onComplete }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [status, setStatus] = useState("form"); // form, success, error
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (newPassword !== confirmPassword) return setMessage("Passwords do not match");
+    if (newPassword.length < 6) return setMessage("Password must be at least 6 characters");
+    try {
+      setLoading(true); setMessage("");
+      await AuthAPI.resetPassword(token, newPassword);
+      setStatus("success");
+      setTimeout(() => onComplete(), 3000);
+    } catch (err) {
+      setStatus("error");
+      setMessage(err.errors?.non_field_errors?.[0] || err.message || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif" }}>
+      <div style={{ width: 440, padding: 40, background: S.card, borderRadius: 16, boxShadow: "0 4px 24px rgba(0,0,0,0.08)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", background: status === "success" ? S.greenBg : status === "error" ? S.redBg : `linear-gradient(135deg,${S.gold},${S.goldLight})`, fontSize: 24, marginBottom: 16 }}>
+            {status === "success" ? "✅" : status === "error" ? "❌" : "🔑"}
           </div>
-          {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
-          <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1 }}>{loading ? "Signing in..." : "Sign In"}</button>
-        </form>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: S.text, margin: 0 }}>
+            {status === "success" ? "Password Reset!" : status === "error" ? "Reset Failed" : "Create New Password"}
+          </h2>
+          <p style={{ color: S.textMuted, fontSize: 14, marginTop: 8 }}>
+            {status === "success" ? "Redirecting to login..." : status === "error" ? "There was a problem" : "Enter your new password below"}
+          </p>
+        </div>
+        {status === "form" && (
+          <form onSubmit={handleSubmit}>
+            {message && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{message}</div>}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>New Password</label>
+              <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="At least 6 characters" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 500, color: S.text, marginBottom: 6 }}>Confirm Password</label>
+              <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Confirm new password" style={{ width: "100%", padding: "12px 14px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 14, background: S.bg }} required />
+            </div>
+            <button type="submit" disabled={loading} style={{ width: "100%", padding: "14px", background: S.gold, color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 600, cursor: loading ? "wait" : "pointer", opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Resetting..." : "Reset Password"}
+            </button>
+          </form>
+        )}
+        {status === "success" && (
+          <div style={{ textAlign: "center", padding: "24px 0", color: S.textMuted, fontSize: 14 }}>Your password has been reset!</div>
+        )}
+        {status === "error" && (
+          <div style={{ textAlign: "center" }}>
+            <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{message}</div>
+            <button type="button" onClick={onComplete} style={{ background: "none", border: "none", color: S.gold, fontWeight: 600, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>← Back to Login</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -955,18 +1496,75 @@ function LoginScreen({ onLogin }) {
 
 export default function AXDispatchPortal() {
   const [isAuthenticated, setIsAuthenticated] = useState(AuthAPI.isAuthenticated());
+  const [authScreen, setAuthScreen] = useState("login");
+  const [resetToken, setResetToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState("dashboard");
+  const [dispatchers, setDispatchers] = useState([]);
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedRiderId, setSelectedRiderId] = useState(null);
   const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [orderToCancel, setOrderToCancel] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [totalOrdersCount, setTotalOrdersCount] = useState(0);
+  const [ordersPage, setOrdersPage] = useState(1);
+  const ordersPageRef = useRef(1);
+
+  useEffect(() => { ordersPageRef.current = ordersPage; }, [ordersPage]);
+  const reloadOrders = async () => {
+    try {
+      const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+      if (res) {
+        setOrders(res.results || res);
+        if (res.count !== undefined) setTotalOrdersCount(res.count);
+      }
+    } catch (e) { /* ignore */ }
+  };
   const [riders, setRiders] = useState([]);
+  const [pendingApprovals, setPendingApprovals] = useState({ count: 0, data: [] });
   const [merchants, setMerchants] = useState([]);
-  const [dispatchers, setDispatchers] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
   const [eventLogs, setEventLogs] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
+  const [commissionPct, setCommissionPct] = useState(20);
   const ablyRef = useRef(null);
+
+  const [showStaleModal, setShowStaleModal] = useState(false);
+  const [staleOrders, setStaleOrders] = useState([]);
+  const lastStaleChimeTime = useRef(0);
+
+  // Periodic Stale Check (every 30 seconds) checks if any order has been pending > 7 mins.
+  // Plays the chime immediately if newly found, and then repeats the chime every 7 mins while they persist.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const checkStale = () => {
+      const nowMs = Date.now();
+      const STALE_THRESHOLD_MS = 7 * 60 * 1000; // 7 minutes
+
+      const stale = orders.filter(o => {
+        if (o.status !== "Pending") return false;
+        const createdMs = new Date(o.created).getTime();
+        return (nowMs - createdMs) > STALE_THRESHOLD_MS;
+      });
+
+      setStaleOrders(stale);
+
+      // Trigger audio if we have stale orders AND (it's the first time OR 7+ mins since last alert)
+      if (stale.length > 0) {
+        if (nowMs - lastStaleChimeTime.current >= STALE_THRESHOLD_MS) {
+          playStaleAlertChime();
+          lastStaleChimeTime.current = nowMs;
+        }
+      } else {
+        lastStaleChimeTime.current = 0; // reset
+      }
+    };
+
+    checkStale(); // run immediately
+    const interval = setInterval(checkStale, 30000);
+    return () => clearInterval(interval);
+  }, [orders, isAuthenticated]);
 
   // Initialize event logs when orders change
   const initEventLogs = (ordersList) => {
@@ -977,7 +1575,10 @@ export default function AXDispatchPortal() {
       if (["Picked Up", "In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "Package picked up", by: o.rider, type: "pickup" });
       if (["In Transit", "Delivered"].includes(o.status)) b.push({ time: "auto", event: "In transit to dropoff", by: "GPS", type: "transit" });
       if (o.status === "Delivered") { b.push({ time: "auto", event: "Delivered — confirmed", by: o.rider, type: "delivered" }); if (o.cod > 0) b.push({ time: "auto", event: `COD settled: ₦${(o.cod - o.codFee).toLocaleString()}`, by: "System", type: "settlement" }); }
-      if (o.status === "Cancelled") b.push({ time: "auto", event: "Order cancelled", by: "Dispatch", type: "cancel" });
+      if (o.status === "Cancelled") {
+        const cancelText = o.cancellation_reason ? `Order cancelled (${o.cancellation_reason})` : "Order cancelled";
+        b.push({ time: "auto", event: cancelText, by: "Dispatch", type: "cancel" });
+      }
       if (o.status === "Failed") b.push({ time: "auto", event: "Delivery failed", by: o.rider || "System", type: "fail" });
       logs[o.id] = b;
     });
@@ -986,6 +1587,17 @@ export default function AXDispatchPortal() {
 
   // Fetch data whenever authenticated becomes true
   useEffect(() => {
+    // Check URL for reset token
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const resetParam = urlParams.get('reset');
+
+    if (token && (resetParam === 'true' || window.location.pathname.includes('reset'))) {
+      setResetToken(token);
+      setAuthScreen("reset-password");
+      setIsAuthenticated(false); // force auth screen
+    }
+
     // In React 18 dev + StrictMode, effects can mount/unmount/mount rapidly.
     // Guard async work so we don't end up with multiple Ably subscriptions.
     let cancelled = false;
@@ -1001,18 +1613,27 @@ export default function AXDispatchPortal() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [ridersData, ordersData, merchantsData, dispatchersData] = await Promise.all([
+        const [ridersData, ordersData, merchantsData, dispatchersData, vehicleAssetsData, settingsData, pendingApprovalsData] = await Promise.all([
           RidersAPI.getAll().catch(() => []),
-          OrdersAPI.getAll().catch(() => []),
+          OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => ({ results: [], count: 0 })),
           MerchantsAPI.getAll().catch(() => []),
-          DispatchersAPI.getAll().catch(() => [])
+          DispatchersAPI.getAll().catch(() => []),
+          VehicleAssetsAPI.getAll().catch(() => []),
+          SettingsAPI.get().catch(() => null),
+          RidersAPI.getPendingApproval().catch(() => ({ count: 0, data: [] }))
         ]);
         if (cancelled) return;
         setRiders(ridersData);
-        setOrders(ordersData);
+        setOrders(ordersData.results || ordersData);
+        if (ordersData.count !== undefined) setTotalOrdersCount(ordersData.count);
         setMerchants(merchantsData);
         setDispatchers(dispatchersData);
-        setEventLogs(initEventLogs(ordersData));
+        setVehicleAssets(vehicleAssetsData);
+        setPendingApprovals(pendingApprovalsData);
+        setEventLogs(initEventLogs(ordersData.results || ordersData));
+        if (settingsData?.commission_pct != null) {
+          setCommissionPct(parseFloat(settingsData.commission_pct) || 20);
+        }
       } catch (error) {
         console.error('Failed to fetch data:', error);
         AuthAPI.logout();
@@ -1022,7 +1643,6 @@ export default function AXDispatchPortal() {
       }
     };
     fetchData();
-
     // Load initial activity feed + subscribe to live updates
     const setupAbly = async () => {
       try {
@@ -1053,12 +1673,12 @@ export default function AXDispatchPortal() {
         ablyRef.current = ably;
 
         // Log connection state changes so we can see exactly where it stalls
-        ably.connection.on('connecting',    () => console.log('[Ably] Connecting...'));
-        ably.connection.on('connected',     () => console.log('[Ably] Connected! ✅ WebSocket open'));
-        ably.connection.on('disconnected',  (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
-        ably.connection.on('suspended',     (s) => console.warn('[Ably] Suspended:', s?.reason?.message));
-        ably.connection.on('failed',        (s) => console.error('[Ably] FAILED:', s?.reason?.message));
-        ably.connection.on('closed',        () => console.log('[Ably] Closed.'));
+        ably.connection.on('connecting', () => console.log('[Ably] Connecting...'));
+        ably.connection.on('connected', () => console.log('[Ably] Connected! ✅ WebSocket open'));
+        ably.connection.on('disconnected', (s) => console.warn('[Ably] Disconnected:', s?.reason?.message));
+        ably.connection.on('suspended', (s) => console.warn('[Ably] Suspended:', s?.reason?.message));
+        ably.connection.on('failed', (s) => console.error('[Ably] FAILED:', s?.reason?.message));
+        ably.connection.on('closed', () => console.log('[Ably] Closed.'));
 
         const ch = ably.channels.get("dispatch-feed");
         // In Ably v2, ch.subscribe() returns a Promise — must be awaited
@@ -1083,18 +1703,57 @@ export default function AXDispatchPortal() {
             if (newStatus) {
               setOrders(prev => prev.map(o => o.id === d.order_id ? { ...o, status: newStatus } : o));
             }
-            // If a new_order event arrives for an order not yet in the list, refresh
+            // Play chime for key events
             if (d.event_type === "new_order") {
+              playNewOrderChime();
               setOrders(prev => {
                 if (!prev.find(o => o.id === d.order_id)) {
-                  OrdersAPI.getAll().then(data => setOrders(cur => mergeOrders(data, cur))).catch(() => { });
+                  OrdersAPI.getAll({ page: ordersPageRef.current }).then(data => {
+                    setOrders(cur => mergeOrders(data.results || data, cur));
+                    if (data.count !== undefined) setTotalOrdersCount(data.count);
+                  }).catch(() => { });
                 }
                 return prev;
               });
+            } else if (d.event_type === "in_transit") {
+              playStartedChime();
+            } else if (d.event_type === "delivered") {
+              playDeliveredChime();
             }
           }
         });
         console.log('[Ably] Subscribed to dispatch-feed ✅');
+
+        // Vehicle telemetry — live map updates from sync_bike_telemetry cron
+        const vch = ably.channels.get("vehicle-telemetry");
+        await vch.subscribe("telemetry_update", (msg) => {
+          const incoming = msg.data;
+          if (!Array.isArray(incoming) || incoming.length === 0) return;
+          console.log(`[Ably] 🏍️ Received telemetry for ${incoming.length} vehicle(s)`);
+          setVehicleAssets(prev => {
+            const map = {};
+            prev.forEach(v => { map[v.id] = v; });
+            // Merge-patch: spread existing state first so any field the Ably payload
+            // omits is preserved (e.g. orders_today from the REST API initial load).
+            incoming.forEach(v => {
+              const existing = map[v.id] || {};
+              const merged = { ...existing, ...v };
+              // Protect fields from being overwritten by null/omitted telemetry
+              if (v.yesterday_distance === null && existing.yesterday_distance != null) merged.yesterday_distance = existing.yesterday_distance;
+              if (v.yesterday_orders === null && existing.yesterday_orders != null) merged.yesterday_orders = existing.yesterday_orders;
+              if (v.total_yesterday_orders_distance_km === null && existing.total_yesterday_orders_distance_km != null) merged.total_yesterday_orders_distance_km = existing.total_yesterday_orders_distance_km;
+              if (v.yesterday_orders_distance === null && existing.yesterday_orders_distance != null) merged.yesterday_orders_distance = existing.yesterday_orders_distance;
+              if (v.total_yesterday_order_distance === null && existing.total_yesterday_order_distance != null) merged.total_yesterday_order_distance = existing.total_yesterday_order_distance;
+              if (v.orders_today === null && existing.orders_today != null) merged.orders_today = existing.orders_today;
+              if (v.total_distance === null && existing.total_distance != null) merged.total_distance = existing.total_distance;
+              if (v.distance_today === null && existing.distance_today != null) merged.distance_today = existing.distance_today;
+              map[v.id] = merged;
+            });
+            return Object.values(map);
+          });
+        });
+        console.log('[Ably] Subscribed to vehicle-telemetry ✅');
+
         ablyActive = true;
       } catch (err) {
         console.error('[Ably] Setup failed, falling back to polling:', err);
@@ -1129,8 +1788,11 @@ export default function AXDispatchPortal() {
 
     const ordersInterval = setInterval(async () => {
       try {
-        const data = await OrdersAPI.getAll().catch(() => null);
-        if (data) setOrders(prev => mergeOrders(data, prev));
+        const data = await OrdersAPI.getAll({ page: ordersPageRef.current }).catch(() => null);
+        if (data) {
+          setOrders(prev => mergeOrders(data.results || data, prev));
+          if (data.count !== undefined) setTotalOrdersCount(data.count);
+        }
       } catch (_) { /* ignore */ }
     }, 60000);
 
@@ -1143,9 +1805,44 @@ export default function AXDispatchPortal() {
     };
   }, [isAuthenticated]); // re-run when user logs in
 
-  // Show login screen if not authenticated
+  // Re-fetch orders when page changes
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (ordersPage === 1 && !ordersPageRef.current_hasChanged) {
+      ordersPageRef.current_hasChanged = true; return; // Skip initial mount to prevent double fetch
+    }
+    const fetchPage = async () => {
+      try {
+        const res = await OrdersAPI.getAll({ page: ordersPage }).catch(() => null);
+        if (res) {
+          setOrders(res.results || res);
+          if (res.count !== undefined) setTotalOrdersCount(res.count);
+        }
+      } catch (e) { /* ignore */ }
+    };
+    fetchPage();
+  }, [ordersPage, isAuthenticated]);
+
+  // Show auth screens if not authenticated
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => { setIsAuthenticated(true); setLoading(true); }} />;
+    if (authScreen === "login") {
+      return <LoginScreen
+        onLogin={() => { setIsAuthenticated(true); setLoading(true); }}
+        onForgotPassword={() => setAuthScreen("forgot-password")}
+      />;
+    }
+    if (authScreen === "forgot-password") {
+      return <ForgotPasswordScreen onBack={() => setAuthScreen("login")} />;
+    }
+    if (authScreen === "reset-password") {
+      return <ResetPasswordScreen
+        token={resetToken}
+        onComplete={() => {
+          setAuthScreen("login");
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }}
+      />;
+    }
   }
 
   // Show loading screen
@@ -1168,8 +1865,17 @@ export default function AXDispatchPortal() {
     const r = riders.find(x => x.id === rid); if (!r) return;
     try {
       await OrdersAPI.assignRider(oid, rid);
-      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned" });
-      setRiders(p => p.map(x => x.id === rid ? { ...x, currentOrder: oid, status: "on_delivery" } : x));
+      updateOrder(oid, { rider: r.name, riderId: rid, status: "Assigned", dispatcher_assigned: true });
+      // Allow assigning even if rider is already fulfilling another ride.
+      // Don't overwrite an existing currentOrder (it represents the *active* ride).
+      setRiders(p => p.map(x => {
+        if (x.id !== rid) return x;
+        const next = { ...x };
+        if (!next.currentOrder) next.currentOrder = oid;
+        // Keep status if already on_delivery; otherwise mark as on_delivery for visibility.
+        if (next.status === "online") next.status = "on_delivery";
+        return next;
+      }));
       addLog(oid, `Assigned to ${r.name}`, "Dispatch", "assign");
       addLog(oid, "Status → Assigned", "System", "status");
     } catch (error) {
@@ -1178,14 +1884,32 @@ export default function AXDispatchPortal() {
     }
   };
 
-  const changeStatus = async (oid, ns) => {
+  const changeStatus = async (oid, ns, reason = null) => {
     const o = orders.find(x => x.id === oid); if (!o) return;
     try {
-      await OrdersAPI.updateStatus(oid, ns);
-      updateOrder(oid, { status: ns });
-      addLog(oid, `Status → ${ns}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
-      if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
-      if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) setRiders(p => p.map(r => r.id === o.riderId ? { ...r, currentOrder: null, status: "online" } : r));
+      await OrdersAPI.updateStatus(oid, ns, reason);
+      // "Picked Up" is a transient confirmation step — auto-advance to In Transit immediately.
+      if (ns === "Picked Up") {
+        await OrdersAPI.updateStatus(oid, "In Transit");
+        updateOrder(oid, { status: "In Transit" });
+        addLog(oid, "Picked up → In Transit", "Dispatch", "status");
+      } else {
+        updateOrder(oid, { 
+          status: ns, 
+          ...(ns === "Assigned" ? { dispatcher_assigned: true } : {}),
+          ...(ns === "Cancelled" ? { cancellation_reason: reason } : {})
+        });
+        addLog(oid, `Status → ${ns}${reason ? ` (${reason})` : ""}`, "Dispatch", ns === "Delivered" ? "delivered" : ns === "Cancelled" ? "cancel" : "status");
+        if (ns === "Delivered" && o.cod > 0) addLog(oid, `COD settled: ₦${(o.cod - o.codFee).toLocaleString()} to merchant`, "System", "settlement");
+        // If a rider has multiple assigned orders, only clear currentOrder if it matches this order.
+        if (["Delivered", "Cancelled", "Failed"].includes(ns) && o.riderId) {
+          setRiders(p => p.map(r => {
+            if (r.id !== o.riderId) return r;
+            if (r.currentOrder && r.currentOrder !== oid) return r;
+            return { ...r, currentOrder: null, status: "online" };
+          }));
+        }
+      }
     } catch (err) {
       console.error("Failed to update status:", err);
       alert("Failed to update status. Please try again.");
@@ -1193,16 +1917,25 @@ export default function AXDispatchPortal() {
   };
 
   const navTo = (s, id) => { if (s === "orders") { setSelectedOrderId(id); setScreen("orders"); } else { setSelectedRiderId(id); setScreen("riders"); } };
+  const refreshPendingApprovals = () => RidersAPI.getPendingApproval().then(setPendingApprovals).catch(() => { });
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: I.dashboard },
     { id: "orders", label: "Orders", icon: I.orders, count: orders.filter(o => o.status === "Pending").length },
     { id: "riders", label: "Riders", icon: I.riders, count: riders.filter(r => r.status === "online").length },
+    { id: "riderApprovals", label: "Rider Approvals", icon: I.idCard, count: pendingApprovals.count || 0 },
+    { id: "vehicles", label: "Vehicles", icon: I.vehicles, count: vehicleAssets.filter(v => v.is_active).length },
+    { id: "revenue", label: "Revenue", icon: I.revenue },
     { id: "merchants", label: "Merchants", icon: I.merchants },
     { id: "customers", label: "Customers", icon: I.customers },
-    { id: "teams", label: "Teams", icon: I.teams, count: dispatchers.length },
-    { id: "messaging", label: "Messaging", icon: I.messaging, count: MSG_RIDER.reduce((s, m) => s + m.unread, 0) + MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) },
+    { id: "messaging", label: "Messaging", icon: I.messaging, count: 0 },
+    { id: "teams", label: "Teams", icon: I.teams, count: dispatchers.length || 0 },
     { id: "settings", label: "Settings", icon: I.settings },
   ];
+
+  const handleCancelRequest = (order) => {
+    setOrderToCancel(order);
+    setShowCancelModal(true);
+  };
 
   return (
     <div style={{ display: "flex", height: "100vh", background: S.bg, fontFamily: "'DM Sans','Segoe UI',system-ui,sans-serif", color: S.text, overflow: "hidden" }}>
@@ -1218,9 +1951,9 @@ export default function AXDispatchPortal() {
           </div>
         </div>
         <div style={{ padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.08)", display: "flex", gap: 8 }}>
-          {[{ v: orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
+          {[{ v: orders.filter(o => ["In Transit", "At Dropoff", "Picked Up", "Assigned", "AssignmentAccepted", "AssignmentRejected"].includes(o.status)).length, l: "ACTIVE", c: S.gold, bg: "rgba(232,168,56,0.12)" }, { v: riders.filter(r => r.status === "online").length, l: "ONLINE", c: S.green, bg: "rgba(22,163,74,0.12)" }, { v: orders.filter(o => o.status === "Pending").length, l: "PENDING", c: S.yellow, bg: "rgba(245,158,11,0.12)" }].map(s => (<div key={s.l} style={{ flex: 1, padding: 8, borderRadius: 8, background: s.bg, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: 600 }}>{s.l}</div></div>))}
         </div>
-        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+        <nav style={{ flex: 1, padding: "10px 8px", display: "flex", flexDirection: "column", gap: 2, overflowY: "auto" }}>
           {navItems.map(item => { const a = screen === item.id; return (<button key={item.id} onClick={() => { setScreen(item.id); setSelectedOrderId(null); setSelectedRiderId(null); }} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 14px", borderRadius: 10, border: "none", cursor: "pointer", fontSize: 13, fontWeight: a ? 600 : 400, fontFamily: "inherit", width: "100%", textAlign: "left", background: a ? "rgba(232,168,56,0.12)" : "transparent", color: a ? S.gold : "rgba(255,255,255,0.6)", transition: "all 0.2s" }}><span style={{ opacity: a ? 1 : 0.6 }}>{item.icon}</span><span style={{ flex: 1 }}>{item.label}</span>{item.count > 0 && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 8, minWidth: 18, textAlign: "center", background: a ? S.gold : "rgba(255,255,255,0.1)", color: a ? "#fff" : "rgba(255,255,255,0.5)" }}>{item.count}</span>}</button>); })}
         </nav>
         <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
@@ -1237,20 +1970,62 @@ export default function AXDispatchPortal() {
 
       <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <header style={{ padding: "14px 24px", borderBottom: `1px solid ${S.border}`, background: S.card, display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "teams" ? "Teams" : screen === "messaging" ? "Messaging" : "Settings"}</h1>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: S.navy, margin: 0 }}>{screen === "dashboard" ? "Dashboard" : screen === "orders" ? (selectedOrderId ? `Order ${selectedOrderId}` : "Orders") : screen === "riders" ? (selectedRiderId ? "Rider Details" : "Riders") : screen === "riderApprovals" ? "Rider Approvals" : screen === "vehicles" ? "Vehicles" : screen === "revenue" ? "Revenue" : screen === "merchants" ? "Merchants" : screen === "customers" ? "Customers" : screen === "messaging" ? "Messaging" : screen === "teams" ? "Teams" : "Settings"}</h1>
           <button onClick={() => setShowCreateOrder(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 18px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, boxShadow: "0 2px 8px rgba(232,168,56,0.25)" }}>{I.plus} New Order</button>
         </header>
-        <div style={{ flex: 1, overflow: "auto", padding: 24, animation: "fadeIn 0.3s ease" }}>
-          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
-          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} />}
-          {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={()=>RidersAPI.getAll().then(setRiders).catch(()=>{})} />}
+        <div style={{ flex: 1, minHeight: 0, overflow: screen === "messaging" ? "hidden" : "auto", padding: 24, animation: "fadeIn 0.3s ease", display: screen === "messaging" ? "flex" : "block", flexDirection: "column" }}>
+          {screen === "dashboard" && <DashboardScreen orders={orders} riders={riders} vehicleAssets={vehicleAssets} activityFeed={activityFeed} onViewOrder={id => navTo("orders", id)} onViewRider={id => navTo("riders", id)} />}
+          {screen === "orders" && <OrdersScreen orders={orders} riders={riders} selectedId={selectedOrderId} onSelect={setSelectedOrderId} onBack={() => setSelectedOrderId(null)} onViewRider={id => navTo("riders", id)} onAssign={assignRider} onChangeStatus={changeStatus} onCancelRequest={handleCancelRequest} onUpdateOrder={updateOrder} addLog={addLog} eventLogs={eventLogs} commissionPct={commissionPct} ordersPage={ordersPage} setOrdersPage={setOrdersPage} totalOrdersCount={totalOrdersCount} onReloadOrders={reloadOrders} />}
+          {screen === "riders" && <RidersScreen riders={riders} orders={orders} selectedId={selectedRiderId} onSelect={setSelectedRiderId} onBack={() => setSelectedRiderId(null)} onViewOrder={id => navTo("orders", id)} onRiderCreated={() => RidersAPI.getAll().then(setRiders).catch(() => { })} />}
+          {screen === "riderApprovals" && <PendingRiderApprovalsScreen riders={pendingApprovals.data || []} onRefresh={refreshPendingApprovals} />}
+          {screen === "vehicles" && <VehiclesScreen vehicles={vehicleAssets} onVehicleCreated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} onVehicleUpdated={() => VehicleAssetsAPI.getAll().then(setVehicleAssets).catch(() => { })} />}
+          {screen === "revenue" && <RevenueScreen />}
           {screen === "merchants" && <MerchantsScreen data={merchants.length > 0 ? merchants : MERCHANTS_DATA} />}
           {screen === "customers" && <CustomersScreen data={CUSTOMERS_DATA} />}
-          {screen === "teams" && <TeamsScreen dispatchers={dispatchers} onDispatcherAdded={d => setDispatchers(p => [d, ...p])} onDispatcherRemoved={id => setDispatchers(p => p.filter(d => d.id !== id))} />}
           {screen === "messaging" && <MessagingScreen />}
           {screen === "settings" && <SettingsScreen />}
+          {screen === "teams" && <TeamsScreen dispatchers={dispatchers} onDispatcherCreated={(d) => setDispatchers(p => [d, ...p])} />}
         </div>
       </main>
+
+      {/* ─── GLOBAL PENDING STALENESS ALERT ─── */}
+      {staleOrders.length > 0 && (
+        <button
+          onClick={() => setShowStaleModal(true)}
+          style={{
+            position: "fixed", bottom: 32, left: "50%", transform: "translateX(-50%)", zIndex: 900,
+            display: "flex", alignItems: "center", gap: 12, padding: "12px 20px",
+            background: S.gold, color: S.navy, border: "none", borderRadius: 32,
+            boxShadow: `0 8px 32px ${S.gold}60`, cursor: "pointer", animation: "stalePulseGlobal 2.5s infinite"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ animation: "spin 4s linear infinite", display: "inline-block" }}>{I.warning}</span>
+            <span style={{ fontSize: 14, fontWeight: 800, fontFamily: "inherit" }}>{staleOrders.length} Stale Orders</span>
+          </div>
+        </button>
+      )}
+
+      {showStaleModal && (
+        <StaleOrdersModal
+          staleOrders={staleOrders}
+          onClose={() => setShowStaleModal(false)}
+          onViewOrder={(id) => navTo("orders", id)}
+        />
+      )}
+
+      {showCancelModal && (
+        <CancellationModal
+          order={orderToCancel}
+          onClose={() => { setShowCancelModal(false); setOrderToCancel(null); }}
+          onConfirm={(reason) => {
+            changeStatus(orderToCancel.id, "Cancelled", reason);
+            setShowCancelModal(false);
+            setOrderToCancel(null);
+          }}
+        />
+      )}
+
       {showCreateOrder && <CreateOrderModal riders={riders} merchants={merchants} onClose={() => setShowCreateOrder(false)} onOrderCreated={(created) => {
         const newOrder = {
           id: created.id || "N/A",
@@ -1273,27 +2048,75 @@ export default function AXDispatchPortal() {
           relayLegsCount: created.relayLegsCount || 0,
           relayLegs: created.relayLegs || [],
           suggestedRiderId: created.suggestedRiderId || null,
+          source: created.source || "dispatcher_web",
         };
         setOrders(p => [newOrder, ...p]);
       }} />}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+        @keyframes stalePulseGlobal {
+          0% { box-shadow: 0 0 0 0 rgba(232,168,56,0.5); }
+          70% { box-shadow: 0 0 0 16px rgba(232,168,56,0); }
+          100% { box-shadow: 0 0 0 0 rgba(232,168,56,0); }
+        }
+      `}} />
     </div>
   );
 }
 
 // ─── DASHBOARD ──────────────────────────────────────────────────
-function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRider }) {
-  const todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
-  const today = orders.filter(o => {
-    if (!o.created) return false;
-    // Handle ISO datetime ("2026-02-22T15:42:00Z") or any string containing today's date
-    return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+function DashboardScreen({ orders, riders, vehicleAssets, activityFeed, onViewOrder, onViewRider }) {
+  const [period, setPeriod] = useState("today"); // "today" | "week" | "month"
+
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  // Start-of-week (Monday)
+  const weekStart = new Date(now);
+  weekStart.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  weekStart.setHours(0, 0, 0, 0);
+
+  // Start-of-month
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const parseCreated = (o) => {
+    if (!o.created) return null;
+    const d = new Date(o.created);
+    return isNaN(d) ? null : d;
+  };
+
+  const periodOrders = orders.filter(o => {
+    const d = parseCreated(o);
+    if (!d) return false;
+    if (period === "today") return o.created.startsWith(todayStr) || o.created.includes(todayStr);
+    if (period === "week") return d >= weekStart;
+    if (period === "month") return d >= monthStart;
+    return false;
   });
-  // Fall back to all orders if today filter returns nothing (e.g. older data)
-  const displayOrders = today.length > 0 ? today : orders;
-  const active = orders.filter(o => ["In Transit", "Picked Up", "Assigned"].includes(o.status));
+
+  // Fall back to all orders only when "today" yields nothing (legacy date formats)
+  const displayOrders = (period === "today" && periodOrders.length === 0) ? orders : periodOrders;
+
+  // Active Now = vehicles that have moved >1 km today (from GPS distance_today field)
+  const activeNowVehicles = (vehicleAssets || []).filter(v => {
+    const dist = parseFloat(v.distance_today) || 0;
+    const unit = String(v.unit_of_distance || "km").toLowerCase().trim();
+    const km = unit === "m" ? dist / 1000 : dist;
+    return km > 1;
+  });
   const delivered = displayOrders.filter(o => o.status === "Delivered");
-  const revenue = displayOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
-  const codTotal = displayOrders.reduce((s, o) => s + o.cod, 0);
+  // Exclude only Cancelled / Failed — Pending, Assigned, In Transit etc. count as earned revenue
+  const revenueOrders = displayOrders.filter(o => !["Cancelled", "Failed"].includes(o.status));
+  const revenue = revenueOrders.reduce((s, o) => s + o.amount + o.codFee, 0);
+  const codTotal = revenueOrders.reduce((s, o) => s + o.cod, 0);
+
+  const periodLabel = period === "today" ? "Today" : period === "week" ? "This Week" : "This Month";
+  const revenueLabel = revenue >= 1_000_000
+    ? `₦${(revenue / 1_000_000).toFixed(1)}M`
+    : `₦${(revenue / 1000).toFixed(0)}K`;
+  const codLabel = codTotal >= 1_000_000
+    ? `₦${(codTotal / 1_000_000).toFixed(1)}M`
+    : `₦${(codTotal / 1000).toFixed(0)}K`;
 
   // Color name → S value mapping
   const colorMap = { gold: S.gold, green: S.green, red: S.red, blue: S.blue, purple: S.purple, yellow: S.yellow };
@@ -1311,13 +2134,26 @@ function DashboardScreen({ orders, riders, activityFeed, onViewOrder, onViewRide
     dropoff: truncate(item.metadata?.dropoff || "", 30),
   }));
 
+  const PERIODS = [{ id: "today", label: "Today" }, { id: "week", label: "This Week" }, { id: "month", label: "This Month" }];
+
   return (
     <div>
+      {/* Period toggle */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+        {PERIODS.map(p => (
+          <button key={p.id} onClick={() => setPeriod(p.id)} style={{
+            padding: "6px 16px", borderRadius: 8, border: `1px solid ${period === p.id ? S.gold : S.border}`,
+            background: period === p.id ? `rgba(232,168,56,0.15)` : "transparent",
+            color: period === p.id ? S.gold : S.textMuted, fontSize: 12, fontWeight: 700,
+            cursor: "pointer", transition: "all 0.15s", fontFamily: "inherit",
+          }}>{p.label}</button>
+        ))}
+      </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-        <StatCard label="Today's Orders" value={displayOrders.length} sub={`${delivered.length} delivered`} />
-        <StatCard label="Active Now" value={active.length} sub={`${orders.filter(o => o.status === "Pending").length} pending`} color={S.gold} />
+        <StatCard label={`${periodLabel}'s Orders`} value={displayOrders.length} sub={`${delivered.length} delivered`} />
+        <StatCard label="Active Now" value={activeNowVehicles.length} sub="vehicles moved >1km today" color={S.gold} />
         <StatCard label="Online Riders" value={riders.filter(r => r.status === "online").length} sub={`${riders.filter(r => r.status === "on_delivery").length} on delivery`} color={S.green} />
-        <StatCard label="Revenue Today" value={`₦${(revenue / 1000).toFixed(0)}K`} sub={`₦${(codTotal / 1000).toFixed(0)}K COD collected`} color={S.gold} />
+        <StatCard label={`Revenue · ${periodLabel}`} value={revenueLabel} sub={`${codLabel} COD collected`} color={S.gold} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
         {/* Live feed */}
@@ -1393,70 +2229,682 @@ function formatOrderDateTime(raw) {
   return { date: parts[0] || raw, time: parts[1] || "" };
 }
 
-// ─── ORDERS SCREEN ──────────────────────────────────────────────
-function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, eventLogs }) {
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [search, setSearch] = useState("");
-
-  if (selectedId) {
-    const order = orders.find(o => o.id === selectedId);
-    if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
-    return <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} />;
-  }
-
-  const tabs = ["All", "Pending", "Assigned", "Picked Up", "In Transit", "Delivered", "Cancelled", "Failed"];
-  const filtered = orders.filter(o => {
-    if (statusFilter !== "All" && o.status !== statusFilter) return false;
-    if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
-    return true;
-  });
-
+// ─── STALE ORDERS MODAL ───────────────────────────────────────────
+function StaleOrdersModal({ staleOrders, onClose, onViewOrder }) {
   return (
-    <div>
-      <div style={{ display: "flex", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
-        {tabs.map(t => {
-          const cnt = t === "All" ? orders.length : orders.filter(o => o.status === t).length; return (
-            <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
-          );
-        })}
-      </div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
-        <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
-          <span style={{ opacity: 0.4 }}>{I.search}</span>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
-        </div>
-        <button style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{I.download} Export CSV</button>
-      </div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
 
-      <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
-        <div style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"10px 16px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
-          <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Route</span><span>Rider</span><span>Amount</span><span>COD</span><span>Status</span>
-        </div>
-        <div style={{maxHeight:"calc(100vh - 280px)",overflowY:"auto"}}>
-          {filtered.map(o=>{
-            const dt = formatOrderDateTime(o.created);
-            return (
-            <div key={o.id} onClick={()=>onSelect(o.id)} style={{display:"grid",gridTemplateColumns:"110px 105px 1fr 1fr 1.2fr 130px 80px 70px 80px",padding:"12px 16px",borderBottom:`1px solid ${S.borderLight}`,cursor:"pointer",transition:"background 0.12s",alignItems:"center"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <span style={{fontSize:12,fontWeight:700,color:S.gold,fontFamily:"'Space Mono',monospace"}}>{o.id}</span>
-              <div><div style={{fontSize:11,fontWeight:600,color:S.text}}>{dt.date}</div><div style={{fontSize:10,color:S.textMuted}}>{dt.time}</div></div>
-              <div><div style={{fontSize:12,fontWeight:600}}>{o.customer}</div><div style={{fontSize:10,color:S.textMuted}}>{o.customerPhone}</div></div>
-              <span style={{fontSize:12,color:S.textDim}}>{o.merchant}</span>
-              <div style={{fontSize:11,color:S.textMuted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</div>
-              <div>{o.rider?<div style={{display:"flex",alignItems:"center",gap:6}}><div style={{width:6,height:6,borderRadius:"50%",background:S.green}}/><span style={{fontSize:12}}>{o.rider}</span></div>:<span style={{fontSize:11,fontWeight:700,color:S.yellow}}>⚠ Unassigned</span>}</div>
-              <span style={{fontSize:12,fontWeight:600,fontFamily:"'Space Mono',monospace"}}>₦{o.amount.toLocaleString()}</span>
-              <span style={{fontSize:11,color:o.cod>0?S.green:S.textMuted,fontFamily:"'Space Mono',monospace"}}>{o.cod>0?`₦${(o.cod/1000).toFixed(0)}K`:"—"}</span>
-              <Badge status={o.status}/>
+        {/* Header */}
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: S.redBg }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(239,68,68,0.15)", color: S.red, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {I.warning}
             </div>
-          );})}
-          {filtered.length===0&&<div style={{padding:"40px 0",textAlign:"center",fontSize:13,color:S.textMuted}}>No orders match filters</div>}
+            <div>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.red }}>Stale Pending Orders</h3>
+              <p style={{ margin: "2px 0 0", fontSize: 12, color: S.textDim }}>These orders have been unassigned for more than 7 minutes.</p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.red, padding: 4 }}>{I.x}</button>
+        </div>
+
+        {/* List */}
+        <div style={{ padding: "16px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {staleOrders.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "32px 0", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>No stale orders. You're all caught up!</div>
+          ) : (
+            staleOrders.map(o => {
+              // Calculate exactly how many minutes they are stale
+              const mins = Math.floor((new Date() - new Date(o.created)) / 60000);
+              return (
+                <div key={o.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px", border: `1px solid ${S.border}`, borderRadius: 12, background: S.bg }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+                      <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>{mins} mins ago</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{o.merchant}</div>
+                    <div style={{ fontSize: 11, color: S.textDim }}>{o.pickup.split(',')[0]} → {o.dropoff.split(',')[0]}</div>
+                  </div>
+                  <button
+                    onClick={() => { onClose(); onViewOrder(o.id); }}
+                    style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: S.navy, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}
+                  >
+                    View & Assign
+                  </button>
+                </div>
+              )
+            })
+          )}
         </div>
       </div>
     </div>
   );
 }
 
+// ─── CANCELLATION REASON MODAL ──────────────────────────────────────
+function CancellationModal({ order, onClose, onConfirm }) {
+  const [reason, setReason] = useState("");
+  const [typedReason, setTypedReason] = useState("");
+  
+  const suggestedReasons = [
+    "Customer changed their mind",
+    "Duplicate order",
+    "Rider unavailable",
+    "Incorrect address",
+    "Merchant closed",
+    "Service area mismatch"
+  ];
+
+  const handleConfirm = () => {
+    const finalReason = typedReason.trim() || reason || "Order canceled by dispatcher";
+    onConfirm(finalReason);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 24, width: 480, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.5)", overflow: "hidden", animation: "scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1)" }}>
+        <div style={{ padding: "24px", borderBottom: `1px solid ${S.border}`, background: `linear-gradient(to right, ${S.card}, ${S.bg})` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: S.redBg, color: S.red, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>⚠️</div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: S.navy }}>Cancel Order</h3>
+                <div style={{ fontSize: 12, color: S.textMuted, fontFamily: "'Space Mono', monospace" }}>ID: #{order?.id}</div>
+              </div>
+            </div>
+            <button onClick={onClose} style={{ background: S.bg, border: "none", cursor: "pointer", color: S.textMuted, width: 32, height: 32, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        </div>
+
+        <div style={{ padding: "24px" }}>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</label>
+            <textarea
+              value={typedReason}
+              onChange={(e) => setTypedReason(e.target.value)}
+              placeholder="Explain why this order is being canceled..."
+              style={{
+                width: "100%", height: 120, padding: "14px", borderRadius: 16,
+                border: `1.5px solid ${S.border}`, background: S.bg, fontSize: 14,
+                color: S.text, fontFamily: "inherit", resize: "none", outline: "none",
+                transition: "all 0.2s"
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.borderColor = S.gold;
+                e.currentTarget.style.background = S.card;
+                e.currentTarget.style.boxShadow = `0 0 0 4px ${S.gold}15`;
+              }}
+              onBlur={(e) => {
+                e.currentTarget.style.borderColor = S.border;
+                e.currentTarget.style.background = S.bg;
+                e.currentTarget.style.boxShadow = "none";
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 24 }}>
+            <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10, textTransform: "uppercase" }}>Suggested Reasons</label>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {suggestedReasons.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setTypedReason(r)}
+                  style={{
+                    padding: "6px 14px", borderRadius: 20, border: `1px solid ${typedReason === r ? S.gold : S.border}`,
+                    background: typedReason === r ? S.goldPale : S.card,
+                    color: typedReason === r ? S.gold : S.textDim,
+                    fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+          </div>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
+            <button onClick={onClose} style={{ padding: "14px", borderRadius: 14, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Keep Order</button>
+            <button
+              onClick={handleConfirm}
+              style={{
+                padding: "14px",
+                borderRadius: 14,
+                border: "none",
+                background: `linear-gradient(135deg, ${S.red}, #c1121f)`,
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 800,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                boxShadow: "0 8px 20px rgba(239,68,68,0.3)",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+              }}
+            >
+              Confirm Cancellation
+            </button>
+          </div>
+        </div>
+      </div>
+      <style>{`@keyframes scaleUp { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+    </div>
+  );
+}
+
+// ─── ORDERS SCREEN ──────────────────────────────────────────────
+function OrdersScreen({ orders, riders, selectedId, onSelect, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, eventLogs, commissionPct, ordersPage, setOrdersPage, totalOrdersCount, onReloadOrders }) {
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [periodFilter, setPeriodFilter] = useState("all"); // "all" | "today" | "week" | "month"
+  const [expandedRows, setExpandedRows] = useState({});
+  const toggleExpand = (e, id) => {
+    e.stopPropagation();
+    setExpandedRows(p => ({ ...p, [id]: !p[id] }));
+  };
+  const [search, setSearch] = useState("");
+  const [paymentOrder, setPaymentOrder] = useState(null);
+  const [payLoading, setPayLoading] = useState(null);
+  const [loadingExport, setLoadingExport] = useState(false);
+  const [exportStartDate, setExportStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [exportEndDate, setExportEndDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isExporting, setIsExporting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [merging, setMerging] = useState(false);
+
+  const handlePayNow = async (order) => {
+    if (order.paymentInfo) {
+      setPaymentOrder(order);
+      return;
+    }
+    setPayLoading(order.id);
+    try {
+      const data = await OrdersAPI.payNow(order.id);
+      const updatedOrder = { ...order, paymentInfo: data.payment_info };
+      onUpdateOrder(order.id, { paymentInfo: data.payment_info });
+      setPaymentOrder(updatedOrder);
+    } catch (e) {
+      alert(e?.message || "Failed to initiate payment");
+    } finally {
+      setPayLoading(null);
+    }
+  };
+
+  if (selectedId) {
+    const order = orders.find(o => o.id === selectedId);
+    if (!order) return <div style={{ color: S.textMuted }}>Order not found</div>;
+    return (
+      <>
+        <OrderDetail order={order} riders={riders} onBack={onBack} onViewRider={onViewRider} onAssign={onAssign} onChangeStatus={onChangeStatus} onCancelRequest={onCancelRequest} onUpdateOrder={onUpdateOrder} addLog={addLog} logs={eventLogs[order.id] || []} commissionPct={commissionPct} onPayNow={handlePayNow} payLoading={payLoading} />
+        {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
+      </>
+    );
+  }
+
+  // ── Period boundaries ──────────────────────────────────────────
+  const _now = new Date();
+  const _todayStr = _now.toISOString().slice(0, 10);
+  const _weekStart = new Date(_now);
+  _weekStart.setDate(_now.getDate() - ((_now.getDay() + 6) % 7));
+  _weekStart.setHours(0, 0, 0, 0);
+  const _monthStart = new Date(_now.getFullYear(), _now.getMonth(), 1);
+
+  const inPeriod = (o) => {
+    if (periodFilter === "all") return true;
+    if (!o.created) return false;
+    if (periodFilter === "today") return o.created.startsWith(_todayStr) || o.created.includes(_todayStr);
+    const d = new Date(o.created);
+    if (isNaN(d)) return false;
+    if (periodFilter === "week") return d >= _weekStart;
+    if (periodFilter === "month") return d >= _monthStart;
+    return true;
+  };
+
+  const periodOrders = orders.filter(inPeriod);
+
+  const tabs = ["All", "Pending", "Assigned", "AssignmentAccepted", "AssignmentRejected", "Picked Up", "In Transit", "At Dropoff", "Delivered", "Paid Complete", "Unpaid Complete", "Cancelled", "Failed"];
+  const filtered = periodOrders.filter(o => {
+    if (statusFilter !== "All") {
+      if (statusFilter === "Paid Complete") {
+        if (o.status !== "Delivered" || o.payment_status !== "Paid") return false;
+      } else if (statusFilter === "Unpaid Complete") {
+        if (o.status !== "Delivered" || (o.payment_status && o.payment_status !== "Pending")) return false;
+      } else {
+        if (o.status !== statusFilter) return false;
+      }
+    }
+    if (search) { const s = search.toLowerCase(); return o.id.toLowerCase().includes(s) || o.customer.toLowerCase().includes(s) || o.merchant.toLowerCase().includes(s) || o.customerPhone.includes(s); }
+    return true;
+  });
+
+  const exportCSV = async () => {
+    setLoadingExport(true);
+    try {
+      // Fetch all orders with no filters applied (backend handles 'all=true' by disabling pagination & role-limits)
+      const res = await OrdersAPI.getAll({ all: "true" });
+
+      // Handle potential wrapped response or paginated response format
+      const dataToExport = res?.results || (Array.isArray(res) ? res : []);
+
+      if (!dataToExport || dataToExport.length === 0) {
+        alert("No orders found to export.");
+        return;
+      }
+
+      const esc = v => {
+        const s = v == null ? "" : String(v);
+        return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+
+      const headers = ["Order ID", "Date", "Time", "Customer", "Phone", "Merchant", "Vertical Lead", "Pickup", "Dropoff", "Rider", "Vehicle", "Waiting Time", "Delivery Time", "Total Time", "Amount (\u20a6)", "COD (\u20a6)", "COD Fee (\u20a6)", "PAID", "Status"];
+      const rows = dataToExport.map(o => {
+        const dt = formatOrderDateTime(o.created);
+        return [
+          o.id,
+          dt.date,
+          dt.time,
+          o.customer,
+          o.customerPhone,
+          o.merchant,
+          o.verticalLeadName || "",
+          o.pickup,
+          o.dropoff,
+          o.rider || "Unassigned",
+          o.vehicle,
+          o.waitingTime || "",
+          o.deliveryTime || "",
+          o.totalOrderTime || "",
+          o.amount,
+          o.cod,
+          o.codFee,
+          o.payment_status || "",
+          o.status
+        ];
+      });
+
+      const csv = [headers.map(esc), ...rows.map(r => r.map(esc))].map(r => r.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `all_orders_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export orders. Please try again.");
+    } finally {
+      setLoadingExport(false);
+    }
+  };
+
+  const handleExportHistoryEmail = async () => {
+    if (!exportStartDate || !exportEndDate) {
+      alert("Please select both start and end dates.");
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const res = await OrdersAPI.exportHistory({
+        start_date: exportStartDate,
+        end_date: exportEndDate,
+      });
+      alert(res.message || "Export started. You will receive an email shortly.");
+    } catch (err) {
+      console.error("Export error:", err);
+      alert(err.message || "Failed to trigger export history.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleToggleSelect = (e, id) => {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = (e) => {
+    if (selectedIds.size > 0) {
+      setSelectedIds(new Set());
+    } else {
+      const allIds = filtered.filter(o => !o.parentOrderNumber).map(o => o.id);
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const handleMergeGrouped = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length < 2) return;
+
+    // Validate all selected orders are "grouped" and "Pending"
+    const selectedOrders = filtered.filter(o => selectedIds.has(o.id));
+    const nonGrouped = selectedOrders.filter(o => o.mode !== 'grouped' || o.status !== 'Pending');
+
+    if (nonGrouped.length > 0) {
+      alert("Only 'Pending' orders in 'Grouped' mode can be merged.");
+      return;
+    }
+
+    if (!confirm(`Merge ${ids.length} orders into a single parent?`)) return;
+
+    setMerging(true);
+    try {
+      await OrdersAPI.mergeGroupedOrders(ids);
+      setSelectedIds(new Set());
+      onReloadOrders();
+      alert("Orders merged successfully!");
+    } catch (err) {
+      alert(err.message || "Failed to merge orders");
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const PERIOD_OPTS = [
+    { value: "all", label: "All Time" },
+    { value: "today", label: "Today" },
+    { value: "week", label: "This Week" },
+    { value: "month", label: "This Month" },
+  ];
+
+  const renderOrderRow = (rowOrder, isChild = false, isLastChild = false) => {
+    const dt = formatOrderDateTime(rowOrder.created);
+    const psLower = (rowOrder.payment_status || "").toLowerCase();
+    const isPaid = psLower === "paid" || psLower === "success";
+
+    return (
+      <div key={rowOrder.id} onClick={(e) => { if (e.target.tagName !== 'BUTTON' && !e.target.closest('button') && e.target.tagName !== 'INPUT') onSelect(rowOrder.id); }} style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "14px 16px", borderBottom: expandedRows[rowOrder.id] || (isChild && isLastChild) ? "none" : `1px solid ${S.borderLight}`, cursor: "pointer", transition: "all 0.2s ease", alignItems: "center", background: isChild ? "#fafafa" : "transparent" }} onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.transform = "translateY(-1px)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(0,0,0,0.02)"; }} onMouseLeave={e => { e.currentTarget.style.background = isChild ? "#fafafa" : "transparent"; e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = "none"; }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {!isChild && (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(rowOrder.id)}
+              onChange={(e) => handleToggleSelect(e, rowOrder.id)}
+              style={{ cursor: "pointer", width: 16, height: 16, accentColor: S.gold }}
+            />
+          )}
+        </div>
+        <div
+          onClick={(e) => {
+            if (!isChild && (rowOrder.isRelayOrder || rowOrder.mode === 'grouped')) toggleExpand(e, rowOrder.id);
+          }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            cursor: (!isChild && (rowOrder.isRelayOrder || rowOrder.mode === 'grouped')) ? "pointer" : "default",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {isChild && (
+              <span style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, background: S.borderLight, padding: "2px 4px", borderRadius: 4 }}>
+                LEG {rowOrder.relayLegNumber || "-"}
+              </span>
+            )}
+            {rowOrder.source === "merchant_web" ? (
+              <span title="Merchant Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.blue, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(59,130,246,0.3)" }}>M</span>
+            ) : rowOrder.source === "dispatcher_web" ? (
+              <span title="Dispatcher Web" style={{ fontSize: 9, fontWeight: 800, color: "#fff", background: S.green, padding: "2px 4px", borderRadius: 4, minWidth: 16, textAlign: "center", boxShadow: "0 2px 4px rgba(34,197,94,0.3)" }}>D</span>
+            ) : null}
+            <span style={{ fontSize: 13, fontWeight: 700, color: isChild ? S.navy : S.gold, fontFamily: "'Space Mono',monospace", letterSpacing: "-0.3px" }}>
+              {rowOrder.id}
+            </span>
+          </div>
+          {!isChild && rowOrder.isRelayOrder && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 4px",
+              borderRadius: 4,
+              background: S.purpleBg,
+              color: S.purple,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+            }}>
+              Relay
+              <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                ›
+              </span>
+            </div>
+          )}
+          {!isChild && rowOrder.mode === "grouped" && (
+            <div style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "2px 4px",
+              borderRadius: 4,
+              background: S.goldPale,
+              color: S.gold,
+              fontSize: 9,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: "0.5px",
+              alignSelf: "flex-start",
+              marginTop: 2,
+              border: `1px solid ${S.gold}33`,
+            }}>
+              Grouped
+              {rowOrder.subOrders?.length > 0 && (
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: "monospace", transition: "transform 0.3s", transform: expandedRows[rowOrder.id] ? "rotate(90deg)" : "rotate(0deg)" }}>
+                  ›
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <div><div style={{ fontSize: 11, fontWeight: 600, color: S.text }}>{dt.date}</div><div style={{ fontSize: 10, color: S.textMuted }}>{dt.time}</div></div>
+        <div><div style={{ fontSize: 12, fontWeight: 600 }}>{rowOrder.customer}</div><div style={{ fontSize: 10, color: S.textMuted }}>{rowOrder.customerPhone}</div></div>
+        <span style={{ fontSize: 12, color: S.textDim }}>{rowOrder.merchant}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: S.navy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={rowOrder.verticalLeadName}>{rowOrder.verticalLeadName || "—"}</span>
+        <div style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rowOrder.pickup.split(",")[0]} → {rowOrder.dropoff.split(",")[0]}</div>
+        <div>{rowOrder.rider ? <div style={{ display: "flex", alignItems: "center", gap: 6 }}><div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} /><span style={{ fontSize: 12 }}>{rowOrder.rider}</span></div> : <span style={{ fontSize: 11, fontWeight: 700, color: S.yellow }}>⚠ Unassigned</span>}</div>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.waitingTime || "—"}</span>
+        <span style={{ fontSize: 11, color: S.textMuted }}>{rowOrder.deliveryTime || "—"}</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{rowOrder.totalOrderTime || "—"}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.amount.toLocaleString()}</div>
+          {rowOrder.pricePerKm != null && <div style={{ fontSize: 9, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>₦{rowOrder.pricePerKm.toFixed(0)}/km</div>}
+        </div>
+        <span style={{ fontSize: 11, color: rowOrder.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{rowOrder.cod > 0 ? `₦${(rowOrder.cod / 1000).toFixed(0)}K` : "—"}</span>
+        <div>
+          <button onClick={(e) => { e.stopPropagation(); onSelect(rowOrder.id); }} style={{ padding: "6px 12px", borderRadius: 6, border: "none", background: S.blueBg, color: S.blue, fontSize: 10, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, transition: "all 0.2s ease", opacity: 1 }} onMouseEnter={e => { e.currentTarget.style.background = S.blue; e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.background = S.blueBg; e.currentTarget.style.color = S.blue; }}>
+            <span style={{ display: "flex", alignItems: "center", transform: "scale(0.85)" }}>{I.dashboard}</span> View Details
+          </button>
+        </div>
+        <div>
+          {isPaid ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.greenBg, color: S.green, padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(1.2)" }}>{I.check}</span> DONE
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 4, background: S.red, color: "#fff", padding: "4px 10px", borderRadius: 12, fontSize: 10, fontWeight: 700 }}>
+              <span style={{ transform: "scale(0.9)" }}>{I.x}</span> NONE
+            </div>
+          )}
+        </div>
+        <Badge status={rowOrder.status} />
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 14, flexWrap: "wrap" }}>
+        {tabs.map(t => {
+          let cnt = 0;
+          if (t === "All") cnt = periodOrders.length;
+          else if (t === "Paid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && o.payment_status === "Paid").length;
+          else if (t === "Unpaid Complete") cnt = periodOrders.filter(o => o.status === "Delivered" && (!o.payment_status || o.payment_status === "Pending")).length;
+          else cnt = periodOrders.filter(o => o.status === t).length;
+
+          return (
+            <button key={t} onClick={() => setStatusFilter(t)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${statusFilter === t ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: statusFilter === t ? (STS[t] ? STS[t].bg : S.goldPale) : S.card, color: statusFilter === t ? (STS[t] ? STS[t].text : S.gold) : S.textMuted }}>{t} <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>{cnt}</span></button>
+          );
+        })}
+        {/* Period dropdown — sits flush at the end of the tab row */}
+        <select
+          value={periodFilter}
+          onChange={e => setPeriodFilter(e.target.value)}
+          style={{
+            marginLeft: "auto", padding: "7px 12px", borderRadius: 8,
+            border: `1px solid ${periodFilter !== "all" ? S.gold : S.border}`,
+            background: periodFilter !== "all" ? "rgba(232,168,56,0.12)" : S.card,
+            color: periodFilter !== "all" ? S.gold : S.textMuted,
+            fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none",
+          }}
+        >
+          {PERIOD_OPTS.map(p => <option key={p.value} value={p.value} style={{ background: S.card, color: S.text }}>{p.label}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+        <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
+          <span style={{ opacity: 0.4 }}>{I.search}</span>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by Order ID, customer, merchant, phone..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
+        </div>
+        <button onClick={onReloadOrders} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>↻ Reload API</button>
+
+        {selectedIds.size > 0 && (
+          <button
+            onClick={handleMergeGrouped}
+            disabled={merging || selectedIds.size < 2}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "0 16px",
+              borderRadius: 10,
+              border: "none",
+              background: selectedIds.size < 2 ? S.borderLight : S.gold,
+              color: "#fff",
+              cursor: (merging || selectedIds.size < 2) ? "not-allowed" : "pointer",
+              fontSize: 12,
+              fontWeight: 700,
+              fontFamily: "inherit",
+              boxShadow: selectedIds.size < 2 ? "none" : "0 4px 12px rgba(232,168,56,0.25)",
+              transition: "all 0.2s ease"
+            }}
+          >
+            {merging ? "Merging..." : <>{I.plus} Merge {selectedIds.size} Grouped Orders</>}
+          </button>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: S.card, borderRadius: 10, border: `1px solid ${S.border}` }}>
+          <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Export Range:</span>
+          <input type="date" value={exportStartDate} onChange={e => setExportStartDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <span style={{ color: S.textDim }}>to</span>
+          <input type="date" value={exportEndDate} onChange={e => setExportEndDate(e.target.value)} style={{ background: "transparent", border: "none", color: S.text, fontSize: 11, fontFamily: "inherit", outline: "none" }} />
+          <button onClick={handleExportHistoryEmail} disabled={isExporting} style={{ background: isExporting ? S.border : S.gold, color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: isExporting ? "not-allowed" : "pointer", marginLeft: 4 }}>
+            {isExporting ? "Processing..." : "Email CSV Export"}
+          </button>
+        </div>
+
+        <button onClick={exportCSV} disabled={loadingExport} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: loadingExport ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "inherit", opacity: loadingExport ? 0.7 : 1 }}>
+          {loadingExport ? "Preparing..." : <>{I.download} Quick Export (UI)</>}
+        </button>
+      </div>
+
+      <div style={{ background: S.card, borderRadius: 16, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 4px 12px rgba(0,0,0,0.03)" }}>
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 1500 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "40px 100px 95px minmax(140px, 1fr) minmax(140px, 1fr) minmax(130px, 1fr) minmax(160px, 1.2fr) 110px 60px 60px 60px 80px 70px 115px 105px 80px", padding: "12px 16px", background: S.borderLight, fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size > 0 && selectedIds.size === filtered.filter(o => !o.parentOrderNumber).length}
+                  onChange={handleSelectAll}
+                  style={{ cursor: "pointer", width: 14, height: 14, accentColor: S.gold }}
+                />
+              </div>
+              <span>Order ID</span><span>Date / Time</span><span>Customer</span><span>Merchant</span><span>Vertical Lead</span><span>Route</span><span>Rider</span><span>Wait</span><span>Delivery</span><span>Total</span><span>Amount</span><span>COD</span><span>Payment</span><span>PAID</span><span>Status</span>
+            </div>
+            <div style={{ maxHeight: "calc(100vh - 280px)", overflowY: "auto" }}>
+              {filtered.map(o => {
+                // Do not render sub-orders as top-level rows
+                if (o.parentOrderNumber) return null;
+
+                // Find all sub-orders of this parent
+                const childOrders = orders.filter(child => child.parentOrderNumber === String(o.id));
+                childOrders.sort((a, b) => (a.relayLegNumber || 0) - (b.relayLegNumber || 0));
+
+                return (
+                  <React.Fragment key={o.id}>
+                    {renderOrderRow(o, false, false)}
+                    {expandedRows[o.id] && (o.isRelayOrder || o.mode === 'grouped') && (
+                      <div style={{ background: S.bgHover, padding: "16px 24px", borderBottom: `1px solid ${S.borderLight}`, boxShadow: "inset 0 4px 6px rgba(0,0,0,0.02)" }}>
+                        <div style={{ fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 8 }}>{o.mode === 'grouped' ? 'Grouped Orders' : 'Sub-Orders / Relay Legs'}</div>
+                        {childOrders.length > 0 ? (
+                          <div style={{ background: "#fff", borderRadius: 12, border: `1px solid ${S.border}`, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                            {childOrders.map((child, idx) => renderOrderRow(child, true, idx === childOrders.length - 1))}
+                          </div>
+                        ) : o.sub_orders && o.sub_orders.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", padding: "0 14px", fontSize: 10, fontWeight: 800, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 4 }}>
+                              <span>Leg No.</span>
+                              <span>Order ID</span>
+                              <span>Created Date</span>
+                              <span>Assigned Rider</span>
+                              <span>Amount</span>
+                              <span style={{ textAlign: "center" }}>Status</span>
+                            </div>
+                            {o.sub_orders.map((sub) => (
+                              <div key={sub.id} style={{ display: "grid", gridTemplateColumns: "80px 100px 180px 1fr 100px 100px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}`, padding: "10px 14px", alignItems: "center", fontSize: 11 }}>
+                                <span style={{ fontWeight: 800, color: o.mode === 'grouped' ? S.gold : S.purple }}>{o.mode === 'grouped' ? `ORD ${idx + 1}` : `LEG ${sub.relay_leg_number || "-"}`}</span>
+                                <span style={{ color: S.navy, fontFamily: "'Inter', sans-serif", fontWeight: 800 }}>#{sub.id}</span>
+                                <div style={{ color: S.textDim, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontWeight: 600 }}>{sub.created || "—"}</div>
+                                <span style={{ fontWeight: 600, color: sub.rider ? S.green : S.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                                  {sub.rider ? (
+                                    <>
+                                      <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }} />
+                                      <span>{sub.rider} <span style={{ opacity: 0.6, fontSize: 10 }}>({sub.riderId})</span></span>
+                                    </>
+                                  ) : "—"}
+                                </span>
+                                <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold, fontSize: 12 }}>₦{sub.amount ? sub.amount.toLocaleString() : "0"}</span>
+                                <span style={{ padding: "3px 8px", borderRadius: 6, background: (sub.status || "").toLowerCase() === "completed" ? S.greenBg : (sub.status || "").toLowerCase() === "assigned" ? S.blueBg : S.borderLight, color: (sub.status || "").toLowerCase() === "completed" ? S.green : (sub.status || "").toLowerCase() === "assigned" ? S.blue : S.textMuted, fontWeight: 800, fontSize: 9, textAlign: "center", letterSpacing: "0.5px" }}>{sub.status ? sub.status.toUpperCase() : "PENDING"}</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>No relay legs designated yet or routing is pending.</div>
+                        )}
+                      </div>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+              {filtered.length === 0 && <div style={{ padding: "40px 0", textAlign: "center", fontSize: 13, color: S.textMuted }}>No orders match filters</div>}
+            </div>
+
+            <div style={{ padding: "16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${S.borderLight}` }}>
+              <button disabled={ordersPage <= 1} onClick={() => setOrdersPage(p => p - 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage <= 1 ? "not-allowed" : "pointer", color: ordersPage <= 1 ? S.textMuted : S.navy, fontWeight: 600 }}>Previous Page</button>
+              <div style={{ fontSize: 13, color: S.textMuted, fontWeight: 500 }}>
+                Page <strong style={{ color: S.navy }}>{ordersPage}</strong> of {Math.max(1, Math.ceil(totalOrdersCount / 100))} <span style={{ opacity: 0.5, margin: "0 8px" }}>|</span> Total: {totalOrdersCount}
+              </div>
+              <button disabled={ordersPage * 100 >= totalOrdersCount} onClick={() => setOrdersPage(p => p + 1)} style={{ padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: ordersPage * 100 >= totalOrdersCount ? "not-allowed" : "pointer", color: ordersPage * 100 >= totalOrdersCount ? S.textMuted : S.navy, fontWeight: 600 }}>Next Page</button>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      {paymentOrder && <PaymentDetailsModal order={paymentOrder} onClose={() => setPaymentOrder(null)} />}
+    </div>
+  );
+}
+
 // ─── ORDER DETAIL (all fixes) ───────────────────────────────────
-function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onUpdateOrder, addLog, logs }) {
+function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeStatus, onCancelRequest, onUpdateOrder, addLog, logs, commissionPct = 20, onPayNow, payLoading }) {
   const [showAssign, setShowAssign] = useState(false);
   const [editPickup, setEditPickup] = useState(false);
   const [editDropoff, setEditDropoff] = useState(false);
@@ -1467,13 +2915,35 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [relayLoading, setRelayLoading] = useState(false);
   const [relayError, setRelayError] = useState("");
+  const [acceptRelayLoading, setAcceptRelayLoading] = useState(false);
+  const [acceptRelayError, setAcceptRelayError] = useState("");
+  const [assigningLeg, setAssigningLeg] = useState(null);
+  const [assigningLegLoading, setAssigningLegLoading] = useState(false);
+  const [priceSaving, setPriceSaving] = useState(false);
+  const [priceError, setPriceError] = useState("");
+
+  const [showCODModal, setShowCODModal] = useState(false);
+  const [codLoading, setCodLoading] = useState(false);
+  const [codData, setCodData] = useState(null);
+  const [codError, setCodError] = useState("");
+
+  const [editPartnerStats, setEditPartnerStats] = useState(false);
+  const [riderCompletedVal, setRiderCompletedVal] = useState(order.riderCompletedCount || 0);
+  const [dayReturnedVal, setDayReturnedVal] = useState(order.dayReturnedCount || 0);
+  const [partnerStatsSaving, setPartnerStatsSaving] = useState(false);
+
+  useEffect(() => {
+    setRiderCompletedVal(order.riderCompletedCount || 0);
+    setDayReturnedVal(order.dayReturnedCount || 0);
+    setEditPartnerStats(false);
+  }, [order.id]);
 
   const rider = order.riderId ? riders.find(r => r.id === order.riderId) : null;
   const isTerminal = ["Delivered", "Cancelled", "Failed"].includes(order.status);
 
   // Status flow for progression
   const nextStatuses = () => {
-    const flow = ["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"];
+    const flow = ["Pending", "Assigned", "AssignmentAccepted", "Picked Up", "In Transit", "At Dropoff", "Delivered"];
     const idx = flow.indexOf(order.status);
     const opts = [];
     if (idx >= 0 && idx < flow.length - 1) opts.push(flow[idx + 1]);
@@ -1483,7 +2953,37 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
 
   const savePickup = () => { onUpdateOrder(order.id, { pickup: pickupVal }); addLog(order.id, `Pickup address changed to: ${pickupVal}`, "Dispatch", "edit"); setEditPickup(false); };
   const saveDropoff = () => { onUpdateOrder(order.id, { dropoff: dropoffVal }); addLog(order.id, `Dropoff address changed to: ${dropoffVal}`, "Dispatch", "edit"); setEditDropoff(false); };
-  const savePrice = () => { const n = parseInt(priceVal) || order.amount; onUpdateOrder(order.id, { amount: n }); addLog(order.id, `Price changed to ₦${n.toLocaleString()}`, "Dispatch", "edit"); setEditPrice(false); };
+  const savePrice = async () => {
+    const n = Number(priceVal);
+    const next = Number.isFinite(n) && n >= 0 ? n : order.amount;
+    setPriceSaving(true);
+    setPriceError("");
+    try {
+      const updated = await OrdersAPI.updatePrice(order.id, next);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Price changed to ₦${updated.amount.toLocaleString()}`, "Dispatch", "edit");
+      setEditPrice(false);
+    } catch (e) {
+      setPriceError(e?.error || e?.detail || e?.message || "Failed to update price");
+    } finally {
+      setPriceSaving(false);
+    }
+  };
+
+  const handleGenerateCOD = async () => {
+    setCodLoading(true);
+    setCodError("");
+    try {
+      const res = await OrdersAPI.generateCODAccount(order.id);
+      setCodData(res.data?.account_details || null);
+      setShowCODModal(true);
+    } catch (e) {
+      setCodError(e?.message || e?.error || "Failed to generate COD account");
+      setShowCODModal(true);
+    } finally {
+      setCodLoading(false);
+    }
+  };
 
   const handleGenerateRelayRoute = async (force = false) => {
     setRelayLoading(true);
@@ -1505,6 +3005,51 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
     }
   };
 
+  const handleAcceptRelayRoute = async () => {
+    setAcceptRelayLoading(true);
+    setAcceptRelayError("");
+    try {
+      const updated = await OrdersAPI.acceptRelayRoute(order.id);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Relay route accepted and sub-orders created`, "Dispatch", "create");
+    } catch (e) {
+      setAcceptRelayError(e?.error || e?.message || "Failed to create assignment");
+    } finally {
+      setAcceptRelayLoading(false);
+    }
+  };
+
+  const handleAssignLegRider = async (legNumber, riderId) => {
+    setAssigningLegLoading(true);
+    try {
+      const updated = await OrdersAPI.assignRelayLeg(order.id, legNumber, riderId);
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Rider ${riderId ? 'assigned' : 'unassigned'} for Leg ${legNumber}`, "Dispatch", "assign");
+      setAssigningLeg(null);
+    } catch (e) {
+      alert(e?.error || e?.message || "Failed to assign leg rider");
+    } finally {
+      setAssigningLegLoading(false);
+    }
+  };
+
+  const savePartnerStats = async () => {
+    setPartnerStatsSaving(true);
+    try {
+      const updated = await OrdersAPI.updatePartnerStats(order.id, {
+        rider_completed_count: riderCompletedVal,
+        day_returned_count: dayReturnedVal
+      });
+      onUpdateOrder(order.id, updated);
+      addLog(order.id, `Partner stats updated: Completed=${riderCompletedVal}, Returned=${dayReturnedVal}`, "Dispatch", "edit");
+      setEditPartnerStats(false);
+    } catch (e) {
+      alert(e?.message || e?.error || "Failed to update partner stats");
+    } finally {
+      setPartnerStatsSaving(false);
+    }
+  };
+
   const logColors = { create: S.gold, payment: S.blue, assign: S.green, status: S.textDim, pickup: S.purple, transit: S.gold, cod: S.green, delivered: S.green, settlement: S.gold, cancel: S.red, fail: S.red, edit: S.blue };
 
   const iStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 13, fontFamily: "inherit", color: S.navy, background: "#fff" };
@@ -1519,15 +3064,48 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           <span style={{ fontSize: 18, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{order.id}</span>
           <Badge status={order.status} />
           <span style={{ fontSize: 12, color: S.textMuted }}>{order.created}</span>
+          <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
           <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.vehicle === "Bike" ? S.goldPale : order.vehicle === "Car" ? S.blueBg : S.purpleBg, color: order.vehicle === "Bike" ? S.gold : order.vehicle === "Car" ? S.blue : S.purple, fontWeight: 700 }}>{order.vehicle}</span>
+          {order.rider && (
+            order.dispatcher_assigned === true ? (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {I.check} DISPATCHER ASSIGNED
+              </span>
+            ) : (
+              <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.borderLight, color: S.textMuted, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                RIDER CLAIMED
+              </span>
+            )
+          )}
           {order.cod > 0 && <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: S.greenBg, color: S.green, fontWeight: 700 }}>💵 COD ₦{order.cod.toLocaleString()}</span>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {order.cod > 0 && (
+            <button
+              onClick={handleGenerateCOD}
+              disabled={codLoading}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 14px", borderRadius: 8, border: "none", background: S.gold, color: "#fff", cursor: codLoading ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 800, fontFamily: "inherit", opacity: codLoading ? 0.7 : 1, transition: "all 0.2s ease", boxShadow: "0 2px 8px rgba(245,158,11,0.25)" }}
+              onMouseEnter={e => !codLoading && (e.currentTarget.style.background = "#D97706")}
+              onMouseLeave={e => !codLoading && (e.currentTarget.style.background = S.gold)}
+            >
+              <span style={{ fontSize: 14 }}>💵</span> {codLoading ? "Generating..." : "Generate COD Account"}
+            </button>
+          )}
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.print} Label</button>
           <button style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontWeight: 600, fontFamily: "inherit" }}>{I.download} Receipt</button>
-          {!isTerminal && <button onClick={() => onChangeStatus(order.id, "Cancelled")} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
+          {!isTerminal && <button onClick={() => onCancelRequest(order)} style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: S.redBg, color: S.red, cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Cancel</button>}
         </div>
       </div>
+
+      {order.status === "Cancelled" && order.cancellation_reason && (
+        <div style={{ background: "rgba(239,68,68,0.08)", border: `1.5px solid ${S.red}44`, borderRadius: 12, padding: "12px 18px", marginBottom: 16, display: "flex", alignItems: "center", gap: 12, animation: "fadeIn 0.3s ease" }}>
+          <div style={{ width: 28, height: 28, borderRadius: "50%", background: S.red, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 14 }}>!</div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: S.red, textTransform: "uppercase", letterSpacing: "0.5px" }}>Cancellation Reason</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.navy }}>{order.cancellation_reason}</div>
+          </div>
+        </div>
+      )}
 
       {/* STATUS PROGRESSION BAR */}
       {!isTerminal && (
@@ -1539,7 +3117,7 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               {showStatusMenu && (
                 <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: S.card, border: `1px solid ${S.border}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 10, minWidth: 180, overflow: "hidden" }}>
                   {nextStatuses().map(ns => (
-                    <button key={ns} onClick={() => { onChangeStatus(order.id, ns); setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <button key={ns} onClick={() => { if (ns === "Cancelled") { onCancelRequest(order); } else { onChangeStatus(order.id, ns); } setShowStatusMenu(false); }} style={{ display: "block", width: "100%", padding: "10px 16px", border: "none", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit", textAlign: "left", color: STS[ns] ? STS[ns].text : S.text, transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       → {ns}
                     </button>
                   ))}
@@ -1548,8 +3126,10 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 0 }}>
-            {["Pending", "Assigned", "Picked Up", "In Transit", "Delivered"].map((st, i, arr) => {
-              const idx = arr.indexOf(order.status);
+            {["Pending", "Assigned", "AssignmentAccepted", "In Transit", "At Dropoff", "Delivered"].map((st, i, arr) => {
+              // "Picked Up" is a transient state — treat it as "In Transit" on the bar
+              const barStatus = order.status === "Picked Up" ? "In Transit" : order.status;
+              const idx = arr.indexOf(barStatus);
               const done = i <= idx;
               const current = i === idx;
               return (
@@ -1564,6 +3144,19 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* COD Instruction Banner — visible to dispatchers/riders */}
+      {order.cod > 0 && (
+        <div style={{ background: "rgba(245,158,11,0.08)", border: "1.5px solid rgba(245,158,11,0.35)", borderRadius: 14, padding: "14px 20px", marginBottom: 16, display: "flex", alignItems: "center", gap: 14 }}>
+          <span style={{ fontSize: 28, flexShrink: 0 }}>💵</span>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#B45309", marginBottom: 2 }}>Cash on Delivery (COD)</div>
+            <div style={{ fontSize: 13, color: "#92400E" }}>
+              Collect <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>₦{(order.cod || 0).toLocaleString()}</span> on behalf of the merchant.
+            </div>
           </div>
         </div>
       )}
@@ -1590,12 +3183,87 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             </div>
           </div>
 
+          {/* PARTNER DETAILS SECTION */}
+          {order.isPartnerOrder && (
+            <div style={{ background: S.goldPale, borderRadius: 14, border: `1px solid ${S.gold}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "#B8860B", textTransform: "uppercase", letterSpacing: "0.5px" }}>🤝 Partner Details</span>
+                {!isTerminal && !editPartnerStats && <button onClick={() => setEditPartnerStats(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit Stats</button>}
+              </div>
+              
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>TOTAL EXPECTED</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{order.partnerOrderCount || 0}</div>
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RIDER COMPLETED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={riderCompletedVal} onChange={e => setRiderCompletedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.green }}>{order.riderCompletedCount || 0}</div>
+                  )}
+                </div>
+                <div style={{ background: "rgba(255,255,255,0.5)", padding: 10, borderRadius: 10, border: "1px solid rgba(184,134,11,0.1)" }}>
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600, marginBottom: 2 }}>RETURNED</div>
+                  {editPartnerStats ? (
+                    <input type="number" value={dayReturnedVal} onChange={e => setDayReturnedVal(e.target.value)} style={{ ...iStyle, padding: "4px 8px", fontSize: 13 }} />
+                  ) : (
+                    <div style={{ fontSize: 16, fontWeight: 800, color: S.red }}>{order.dayReturnedCount || 0}</div>
+                  )}
+                </div>
+              </div>
+
+              {editPartnerStats && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <button onClick={savePartnerStats} disabled={partnerStatsSaving} style={{ flex: 1, padding: "10px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: partnerStatsSaving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                    {partnerStatsSaving ? "Saving..." : "Save Stats"}
+                  </button>
+                  <button onClick={() => { setEditPartnerStats(false); setRiderCompletedVal(order.riderCompletedCount); setDayReturnedVal(order.dayReturnedCount); }} style={{ padding: "10px 16px", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                </div>
+              )}
+
+              {((order.fileUploadedUrls && order.fileUploadedUrls.length > 0) || order.fileUploadedUrl) && (
+                <div style={{ borderTop: "1px solid rgba(184,134,11,0.1)", paddingTop: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", marginBottom: 8 }}>Uploaded Documents</div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {order.fileUploadedUrls && order.fileUploadedUrls.length > 0 ? (
+                      order.fileUploadedUrls.map((url, index) => (
+                        <a key={index} href={url} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "calc(50% - 4px)" }}>
+                          <img src={url} alt={`Order document ${index}`} style={{ width: "100%", maxHeight: 120, objectFit: "contain" }} />
+                          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 6px", fontSize: 8, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                            Click to view
+                          </div>
+                        </a>
+                      ))
+                    ) : (
+                      <a href={order.fileUploadedUrl} target="_blank" rel="noreferrer" style={{ display: "block", position: "relative", borderRadius: 12, overflow: "hidden", border: `1px solid ${S.border}`, background: "#fff", width: "100%" }}>
+                        <img src={order.fileUploadedUrl} alt="Order document" style={{ width: "100%", maxHeight: 240, objectFit: "contain" }} />
+                        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.5)", color: "#fff", padding: "6px 10px", fontSize: 10, fontWeight: 600, textAlign: "center", backdropFilter: "blur(4px)" }}>
+                          Click to view full size
+                        </div>
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ADDRESSES — EDITABLE */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Route</div>
             <div style={{ display: "flex", gap: 12, alignItems: "stretch" }}>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 4 }}>
-                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} /><div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} /><div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.green }} />
+                <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                {order.mode === 'multi' && order.deliveries?.length > 1 && order.deliveries.slice(0, -1).map((_, i) => (
+                   <React.Fragment key={i}>
+                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.border }} />
+                     <div style={{ width: 2, flex: 1, background: S.border, margin: "4px 0" }} />
+                   </React.Fragment>
+                ))}
+                <div style={{ width: 10, height: 10, borderRadius: "50%", background: S.red }} />
               </div>
               <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* Pickup */}
@@ -1614,22 +3282,35 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{order.pickup}</div>
                   )}
                 </div>
-                {/* Dropoff */}
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
-                    {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
-                  </div>
-                  {editDropoff ? (
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
-                      <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
-                      <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                {/* Dropoff(s) */}
+                {order.mode === 'multi' && order.deliveries?.length > 0 ? (
+                  [...order.deliveries].sort((a, b) => (a.sequence || 0) - (b.sequence || 0)).map((d, idx) => (
+                    <div key={d.id || idx} style={{ borderTop: idx > 0 ? `1px solid ${S.border}` : 'none', paddingTop: idx > 0 ? 10 : 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>STOP {d.sequence || idx + 1}</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: d.status === 'Delivered' ? S.greenBg : S.yellowBg, color: d.status === 'Delivered' ? S.green : S.yellow, fontWeight: 700 }}>{d.status || 'Pending'}</span>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{d.dropoff_address}</div>
+                      <div style={{ fontSize: 11, color: S.textMuted, marginTop: 2 }}>{d.receiver_name} • {d.receiver_phone}</div>
                     </div>
-                  ) : (
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
-                  )}
-                </div>
+                  ))
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: S.red }}>DROPOFF</span>
+                      {!isTerminal && !editDropoff && <button onClick={() => setEditDropoff(true)} style={{ display: "flex", alignItems: "center", gap: 3, background: "none", border: "none", color: S.gold, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>{I.edit} Edit</button>}
+                    </div>
+                    {editDropoff ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <input value={dropoffVal} onChange={e => setDropoffVal(e.target.value)} style={{ ...iStyle, flex: 1 }} autoFocus />
+                        <button onClick={saveDropoff} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: S.green, color: "#fff", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>Save</button>
+                        <button onClick={() => { setEditDropoff(false); setDropoffVal(order.dropoff); }} style={{ padding: "8px 10px", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, color: S.textDim, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{order.dropoff}</div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1651,20 +3332,101 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {editPrice ? (
                   <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                     <span>₦</span><input value={priceVal} onChange={e => setPriceVal(e.target.value)} style={{ width: 80, border: `1px solid ${S.border}`, borderRadius: 6, padding: "3px 8px", fontSize: 12, fontFamily: "'Space Mono',monospace", textAlign: "right" }} />
-                    <button onClick={savePrice} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>✓</button>
-                    <button onClick={() => setEditPrice(false)} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: "pointer" }}>✕</button>
+                    <button onClick={savePrice} disabled={priceSaving} style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: S.green, color: "#fff", fontSize: 10, fontWeight: 700, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>{priceSaving ? "…" : "✓"}</button>
+                    <button onClick={() => { setEditPrice(false); setPriceError(""); }} disabled={priceSaving} style={{ padding: "3px 6px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.card, color: S.textMuted, fontSize: 10, cursor: priceSaving ? "not-allowed" : "pointer", opacity: priceSaving ? 0.7 : 1 }}>✕</button>
                   </div>
                 ) : (
                   <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.amount.toLocaleString()}</span>
                 )}
               </div>
+              {!editPrice && order.pricePerKm != null && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: S.textMuted, marginBottom: 4 }}>
+                  <span>Effective rate</span>
+                  <span style={{ fontFamily: "'Space Mono',monospace" }}>₦{order.pricePerKm.toFixed(0)}/km</span>
+                </div>
+              )}
+              {editPrice && priceError && <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: S.red }}>{priceError}</div>}
               {order.cod > 0 && <>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD collection</span><span style={{ fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{order.cod.toLocaleString()}</span></div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: S.textDim, marginBottom: 4 }}><span>COD fee</span><span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{order.codFee.toLocaleString()}</span></div>
               </>}
               {!editPrice && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, borderTop: `1px solid ${S.border}`, paddingTop: 6, marginTop: 4 }}><span>Wallet charged</span><span style={{ fontFamily: "'Space Mono',monospace" }}>₦{(order.amount + order.codFee).toLocaleString()}</span></div>}
             </div>
+
+            {/* PAYMENT INFORMATION */}
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Payment Information</span>
+                <span style={{ fontSize: 10, padding: "3px 8px", borderRadius: 6, background: order.payment_status === "Paid" ? S.greenBg : S.red, color: order.payment_status === "Paid" ? S.green : "#fff", fontWeight: 700 }}>{order.payment_status === "Paid" ? "PAID" : "AWAITING PAYMENT"}</span>
+              </div>
+
+              {order.paymentInfo ? (
+                <div>
+                  <div style={{ background: S.borderLight, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                    <div style={{ fontSize: 11, color: S.textDim, marginBottom: 2 }}>{order.paymentInfo.bank_name || "Wema Bank"}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{order.paymentInfo.account_number}</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: S.text, marginTop: 2 }}>{order.paymentInfo.account_name}</div>
+                  </div>
+                  {order.charge && (
+                    <div style={{ background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, padding: 12, marginBottom: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: S.textDim, textTransform: "uppercase" }}>Charge Trx</span>
+                        <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: order.charge.status === "completed" ? S.greenBg : (order.charge.status === "failed" ? S.redBg : S.yellowBg), color: order.charge.status === "completed" ? S.green : (order.charge.status === "failed" ? S.red : S.yellow), fontWeight: 700 }}>{order.charge.status.toUpperCase()}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontSize: 11, color: S.textMuted }}>Amount</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{order.charge.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      </div>
+                      {order.charge.created_at && (
+                        <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>
+                          {new Date(order.charge.created_at).toLocaleString("en-NG", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <button onClick={() => onPayNow(order)} style={{ width: "100%", padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: "#fff", color: S.navy, fontSize: 11, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                    {I.dashboard} View Account Details
+                  </button>
+                </div>
+              ) : (
+                <div style={{ textAlign: "center", padding: "10px 0" }}>
+                  <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 12 }}>Virtual account not yet generated for this order.</div>
+                  <button onClick={() => onPayNow(order)} disabled={payLoading === order.id} style={{ width: "100%", padding: "10px 0", borderRadius: 10, border: "none", cursor: payLoading === order.id ? "not-allowed" : "pointer", background: payLoading === order.id ? S.border : `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>
+                    {payLoading === order.id ? "Generating..." : "Pay Now (Generate Account)"}
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* EVENT LOG */}
+          {order.events && order.events.length > 0 && (
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", display: "block", marginBottom: 10 }}>Event Log</span>
+              {order.events.map((ev, i) => {
+                const fmtAmt = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? `₦${n.toLocaleString()}` : v; };
+                const fmtDate = (iso) => { try { return new Date(iso).toLocaleString("en-NG", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch (_) { return iso; } };
+                return (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingTop: i === 0 ? 0 : 8, marginTop: i === 0 ? 0 : 8, borderTop: i === 0 ? "none" : `1px solid ${S.border}` }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: S.text, marginBottom: 2 }}>
+                        {ev.eventType === "price_change" ? "Price changed" : ev.eventType}
+                      </div>
+                      {ev.eventType === "price_change" && ev.oldValue && ev.newValue && (
+                        <div style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>
+                          {fmtAmt(ev.oldValue)}<span style={{ color: S.textMuted, margin: "0 6px" }}>→</span>{fmtAmt(ev.newValue)}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>
+                        {ev.createdBy ? `by ${ev.createdBy}` : "by System"}
+                        {ev.createdAt ? ` · ${fmtDate(ev.createdAt)}` : ""}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* RIDER ASSIGNMENT — shows availability clearly, persists */}
           <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
@@ -1695,26 +3457,38 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
               <div style={{ marginTop: 12, borderTop: `1px solid ${S.border}`, paddingTop: 12 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>SELECT RIDER</div>
                 {riders.filter(r => r.status !== "offline").map(r => {
-                  const busy = !!r.currentOrder && r.currentOrder !== order.id;
-                  const available = !r.currentOrder || r.currentOrder === order.id;
+                  // A rider can be assigned even if they are currently fulfilling another order.
+                  // We still *indicate* busyness, but we do not block assignment.
+                  const busy = (r.status === "on_delivery" && (!r.currentOrder || r.currentOrder !== order.id)) || (!!r.currentOrder && r.currentOrder !== order.id);
+                  const available = !busy;
                   return (
-                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.5 : 1 }}>
+                    <div key={r.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, marginBottom: 4, background: available ? S.borderLight : "transparent", border: `1px solid ${available ? S.border : "transparent"}`, opacity: busy ? 0.75 : 1 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <div style={{ width: 8, height: 8, borderRadius: "50%", background: r.status === "on_delivery" ? S.purple : S.green }} />
                         <div>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{r.name} <span style={{ fontSize: 10, color: S.textMuted }}>({r.vehicle})</span></div>
                           <div style={{ fontSize: 10, color: S.textMuted }}>
                             ⭐ {r.rating} • {r.todayOrders} today
-                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 Fulfilling {r.currentOrder}</span>}
+                            {busy && <span style={{ color: S.purple, fontWeight: 700, marginLeft: 6 }}>📦 {r.currentOrder ? `Fulfilling ${r.currentOrder}` : "On delivery"}</span>}
                             {available && r.status === "online" && <span style={{ color: S.green, fontWeight: 700, marginLeft: 6 }}>✓ Available</span>}
                           </div>
                         </div>
                       </div>
-                      {available ? (
-                        <button onClick={() => { onAssign(order.id, r.id); setShowAssign(false); }} style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}>Assign</button>
-                      ) : (
-                        <span style={{ fontSize: 10, color: S.textMuted, fontStyle: "italic" }}>Busy</span>
-                      )}
+                      <button
+                        onClick={() => {
+                          if (busy) {
+                            const msg = r.currentOrder
+                              ? `${r.name} is currently fulfilling order ${r.currentOrder}. Assign this order anyway?`
+                              : `${r.name} is currently on delivery. Assign this order anyway?`;
+                            if (!confirm(msg)) return;
+                          }
+                          onAssign(order.id, r.id);
+                          setShowAssign(false);
+                        }}
+                        style={{ padding: "5px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, fontSize: 10, fontWeight: 800, fontFamily: "inherit" }}
+                      >
+                        {busy ? "Assign anyway" : "Assign"}
+                      </button>
                     </div>
                   );
                 })}
@@ -1737,18 +3511,32 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 {order.isRelayOrder && order.routingStatus === "processing" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.blueBg, color: S.blue, fontWeight: 700 }}>PROCESSING</span>}
                 {order.isRelayOrder && order.routingStatus === "failed" && <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, fontWeight: 700 }}>FAILED</span>}
               </div>
-              {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && !relayLoading && (
-                <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                  {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
-                </button>
+              {!relayLoading && (
+                <>
+                  {(!order.isRelayOrder || order.routingStatus === "pending" || order.routingStatus === "failed") && (
+                    <button onClick={() => handleGenerateRelayRoute(order.routingStatus === "failed")} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.blue},#3b82f6)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                      {order.routingStatus === "failed" ? "🔄 Retry" : "⚡ Generate Route"}
+                    </button>
+                  )}
+                  {order.isRelayOrder && order.routingStatus === "ready" && (
+                    <>
+                      <button onClick={() => handleGenerateRelayRoute(true)} style={{ padding: "6px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", background: "transparent", color: S.textMuted, fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                        🔄 Re-generate
+                      </button>
+                      <button disabled={acceptRelayLoading} onClick={handleAcceptRelayRoute} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: acceptRelayLoading ? "not-allowed" : "pointer", background: `linear-gradient(135deg,${S.green},#22c55e)`, color: "#fff", fontSize: 11, fontWeight: 700, fontFamily: "inherit", marginLeft: 8, opacity: acceptRelayLoading ? 0.7 : 1 }}>
+                        {acceptRelayLoading ? "Creating..." : "✅ Create Assignment"}
+                      </button>
+                    </>
+                  )}
+                </>
               )}
               {relayLoading && <span style={{ fontSize: 11, color: S.blue, fontWeight: 600 }}>⏳ Generating...</span>}
             </div>
 
             {/* Error message */}
-            {(relayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
+            {(relayError || acceptRelayError || (order.isRelayOrder && order.routingStatus === "failed" && order.routingError)) && (
               <div style={{ marginBottom: 12, padding: "8px 12px", borderRadius: 8, background: S.redBg, border: `1px solid ${S.red}30`, fontSize: 11, color: S.red, fontWeight: 500 }}>
-                ⚠ {relayError || order.routingError}
+                ⚠ {relayError || acceptRelayError || order.routingError}
               </div>
             )}
 
@@ -1776,37 +3564,107 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
             {/* Legs list */}
             {order.routingStatus === "ready" && order.relayLegs && order.relayLegs.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {order.relayLegs.map((leg, idx) => (
-                  <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
-                        {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
-                      </div>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{(parseFloat(leg.rider_payout) || 0).toLocaleString()}</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
-                      <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || "Pickup"} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || "Dropoff"}
-                    </div>
-                    <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
-                      <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
-                      <span>⏱ {leg.duration_minutes || 0} min</span>
-                      {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
-                    </div>
-                  </div>
-                ))}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600, padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
-                  <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
-                  <span style={{ color: S.green }}>Total payout: ₦{order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0).toLocaleString()}</span>
-                </div>
-              </div>
-            )}
+                {order.relayLegs.map((leg, idx) => {
+                  // Compute suggested rider distance from this leg's start point
+                  const legSuggestedRider = leg.suggestedRiderId
+                    ? riders.find(r => r.id === leg.suggestedRiderId)
+                    : null;
+                  const startLat = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.latitude)
+                    : (order.pickupLat ? parseFloat(order.pickupLat) : null);
+                  const startLng = leg.start_relay_node
+                    ? parseFloat(leg.start_relay_node.longitude)
+                    : (order.pickupLng ? parseFloat(order.pickupLng) : null);
+                  const rLat = legSuggestedRider?.lat ? parseFloat(legSuggestedRider.lat) : null;
+                  const rLng = legSuggestedRider?.lng ? parseFloat(legSuggestedRider.lng) : null;
+                  const legDistKm = (rLat && rLng && startLat && startLng)
+                    ? haversineKm(rLat, rLng, startLat, startLng)
+                    : null;
+                  const suggestedName = leg.suggestedRiderName || (legSuggestedRider?.name) || null;
 
-            {/* Suggested rider for leg 1 */}
-            {order.routingStatus === "ready" && order.suggestedRiderId && (
-              <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}30`, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span style={{ color: S.blue, fontWeight: 600 }}>💡 Suggested for leg 1: {riders.find(r => r.id === order.suggestedRiderId)?.name || `Rider #${order.suggestedRiderId}`}</span>
-                <button onClick={() => onAssign(order.id, order.suggestedRiderId)} style={{ padding: "4px 12px", borderRadius: 6, border: "none", cursor: "pointer", background: S.blue, color: "#fff", fontSize: 10, fontWeight: 700, fontFamily: "inherit" }}>Assign</button>
+                  const legPayout = parseFloat(leg.rider_payout) || 0;
+                  const legNetPay = legPayout * (1 - commissionPct / 100);
+
+                  return (
+                    <div key={leg.id || idx} style={{ borderRadius: 10, border: `1px solid ${S.border}`, padding: "10px 12px", background: S.borderLight }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 5, background: S.blue, color: "#fff" }}>LEG {leg.leg_number || idx + 1}</span>
+                          {leg.status && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 5, background: leg.status === "completed" ? S.greenBg : S.goldPale, color: leg.status === "completed" ? S.green : S.gold, fontWeight: 700 }}>{leg.status.toUpperCase()}</span>}
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: S.green, fontFamily: "'Space Mono',monospace" }}>₦{legPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                          <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 500 }}>Rider gets: <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{legNetPay.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span> <span style={{ color: S.textMuted }}>({100 - commissionPct}%)</span></div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: S.textDim, marginBottom: 4 }}>
+                        <span style={{ color: S.green, fontWeight: 600 }}>From:</span> {leg.start_relay_node?.name || order.pickup} → <span style={{ color: S.red, fontWeight: 600 }}>To:</span> {leg.end_relay_node?.name || order.dropoff}
+                      </div>
+                      <div style={{ display: "flex", gap: 16, fontSize: 10, color: S.textMuted }}>
+                        <span>📍 {(parseFloat(leg.distance_km) || 0).toFixed(1)} km</span>
+                        <span>⏱ {leg.duration_minutes || 0} min</span>
+                        {leg.hub_pin && <span>🔑 PIN: <span style={{ fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>{leg.hub_pin}</span></span>}
+                      </div>
+                      {/* Assignment / Suggested Rider Inline Block */}
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: `1px dashed ${S.border}`, fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {leg.riderName ? (
+                              <span style={{ color: S.green }}>✅ <span style={{ fontWeight: 700 }}>{leg.riderName}</span></span>
+                            ) : suggestedName ? (
+                              <span style={{ color: S.blue }}>💡 <span style={{ fontWeight: 700 }}>{suggestedName}</span> (Suggested)</span>
+                            ) : (
+                              <span style={{ color: S.textMuted }}>No rider selected</span>
+                            )}
+                            {legDistKm !== null && <span style={{ color: S.textMuted }}>· 🏍️ {legDistKm.toFixed(1)} km away</span>}
+                          </div>
+                          <button
+                            onClick={() => setAssigningLeg(assigningLeg === leg.leg_number ? null : leg.leg_number)}
+                            style={{ padding: "3px 8px", fontSize: 9, borderRadius: 5, border: `1px solid ${S.border}`, background: assigningLeg === leg.leg_number ? S.borderLight : "#fff", color: S.navy, cursor: "pointer", fontWeight: 600 }}
+                          >
+                            {assigningLeg === leg.leg_number ? "Cancel" : leg.riderName || suggestedName ? "Change" : "Assign"}
+                          </button>
+                        </div>
+
+                        {assigningLeg === leg.leg_number && (
+                          <div style={{ marginTop: 4, padding: 8, borderRadius: 6, background: "#fff", border: `1px solid ${S.border}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <span style={{ fontWeight: 600, color: S.navy }}>Select Rider for Leg {leg.leg_number}</span>
+                            <div style={{ maxHeight: 120, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 6, background: S.bgHover }}>
+                              {riders.map(r => (
+                                <div
+                                  key={r.id}
+                                  onClick={() => !assigningLegLoading && handleAssignLegRider(leg.leg_number, r.id)}
+                                  style={{ padding: "6px 8px", borderBottom: `1px solid ${S.border}`, fontSize: 10, display: "flex", justifyContent: "space-between", cursor: assigningLegLoading ? "not-allowed" : "pointer", opacity: assigningLegLoading ? 0.6 : 1, background: "#fff" }}
+                                >
+                                  <span style={{ fontWeight: 600, color: S.navy }}>{r.name}</span>
+                                  <span style={{ color: S.textMuted }}>{r.capacityLoad || 'Bike'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {(() => {
+                  const totalPayout = order.relayLegs.reduce((s, l) => s + (parseFloat(l.rider_payout) || 0), 0);
+                  const totalNet = totalPayout * (1 - commissionPct / 100);
+                  return (
+                    <div style={{ padding: "8px 4px", borderTop: `1px solid ${S.border}`, marginTop: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 600 }}>
+                        <span style={{ color: S.textMuted }}>{order.relayLegs.length} legs total</span>
+                        <span style={{ color: S.green }}>
+                          Total: ₦{totalPayout.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          {" "}<span style={{ color: S.textMuted, fontWeight: 400 }}>(of ₦{order.amount.toLocaleString()})</span>
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", fontSize: 10, marginTop: 3 }}>
+                        <span style={{ color: S.textMuted }}>Riders' take-home ({100 - commissionPct}%): <span style={{ color: S.navy, fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>₦{totalNet.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -1844,7 +3702,15 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>📦 PICKUP</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.pickup.split(",")[0]}</div>
               </div>
-              <div style={{ fontSize: 16, color: S.textMuted, alignSelf: "center" }}>→</div>
+              <div style={{ textAlign: "center", alignSelf: "center" }}>
+                {order.distance && (
+                  <div style={{ fontSize: 10, fontWeight: 700, color: S.blue, fontFamily: "'Space Mono',monospace" }}>📍 {order.distance}</div>
+                )}
+                {order.time && (
+                  <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>⏱ {order.time}</div>
+                )}
+                {!order.distance && <div style={{ fontSize: 16, color: S.textMuted }}>→</div>}
+              </div>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 9, color: S.textMuted, fontWeight: 600 }}>🏠 DROPOFF</div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: S.navy }}>{order.dropoff.split(",")[0]}</div>
@@ -1875,6 +3741,13 @@ function OrderDetail({ order, riders, onBack, onViewRider, onAssign, onChangeSta
           </div>
         </div>
       </div>
+      {showCODModal && (
+        <CODAccountModal
+          codData={codData}
+          error={codError}
+          onClose={() => setShowCODModal(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1990,15 +3863,217 @@ function RidersLocationMap({ riders }) {
   );
 }
 
+// ─── RESET RIDER PASSWORD MODAL ─────────────────────────────────
+function ResetRiderPasswordModal({ rider, onClose }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+    setLoading(true);
+    try {
+      await RidersAPI.resetPassword(rider._uuid || rider.id, newPassword);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 420, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reset Password</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Password Updated</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's password has been changed successfully.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>New Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showNew ? "text" : "password"} value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" style={{ ...iSt, paddingRight: 48 }} required minLength={6} />
+                <button type="button" onClick={() => setShowNew(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showNew ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 22 }}>
+              <label style={lSt}>Confirm Password *</label>
+              <div style={{ position: "relative" }}>
+                <input type={showConfirm ? "text" : "password"} value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" style={{ ...iSt, paddingRight: 48 }} required />
+                <button type="button" onClick={() => setShowConfirm(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 12, fontFamily: "inherit" }}>{showConfirm ? "Hide" : "Show"}</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Set New Password"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── REASSIGN VEHICLE MODAL ──────────────────────────────────────
+function ReassignVehicleModal({ rider, onClose }) {
+  const [vehicles, setVehicles] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selectedVehicleId, setSelectedVehicleId] = useState(rider.vehicle_asset?.id || "");
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(false);
+
+  useEffect(() => {
+    VehicleAssetsAPI.getAll()
+      .then(data => setVehicles(data))
+      .catch(() => setError("Failed to load vehicles."))
+      .finally(() => setFetching(false));
+  }, []);
+
+  const filtered = vehicles.filter(v => {
+    if (!v.is_active) return false;
+    const q = search.toLowerCase();
+    if (!q) return true;
+    return (
+      (v.asset_id || "").toLowerCase().includes(q) ||
+      (v.plate_number || "").toLowerCase().includes(q) ||
+      (v.make || "").toLowerCase().includes(q) ||
+      (v.model || "").toLowerCase().includes(q)
+    );
+  });
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      await RidersAPI.assignVehicle(rider._uuid || rider.id, selectedVehicleId || null);
+      setSuccess(true);
+    } catch (err) {
+      setError(err?.error || err?.detail || "Failed to assign vehicle.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const iSt = { width: "100%", padding: "8px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>Reassign Vehicle</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>{rider.name} · {rider.phone}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
+        </div>
+
+        {rider.vehicle_asset && (
+          <div style={{ padding: "10px 14px", background: S.borderLight, borderRadius: 8, marginBottom: 16, fontSize: 12 }}>
+            <span style={{ color: S.textMuted }}>Current: </span>
+            <span style={{ fontWeight: 700, fontFamily: "'Space Mono',monospace" }}>{rider.vehicle_asset.asset_id}</span>
+            <span style={{ color: S.textMuted }}> · {rider.vehicle_asset.plate_number} — {rider.vehicle_asset.make} {rider.vehicle_asset.model} ({(rider.vehicle_asset.vehicle_type || "").toUpperCase()})</span>
+          </div>
+        )}
+
+        {success ? (
+          <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>✅</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: S.green, marginBottom: 6 }}>Vehicle Assigned</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginBottom: 20 }}>The rider's vehicle has been updated. Refresh to see changes.</div>
+            <button onClick={onClose} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Done</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
+            {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 12 }}>{error}</div>}
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by asset ID, plate, make, model…" style={{ ...iSt, marginBottom: 10 }} />
+            {fetching ? (
+              <div style={{ textAlign: "center", padding: 24, color: S.textMuted, fontSize: 13 }}>Loading vehicles…</div>
+            ) : (
+              <div style={{ flex: 1, overflowY: "auto", border: `1px solid ${S.border}`, borderRadius: 8, marginBottom: 14 }}>
+                <div
+                  onClick={() => setSelectedVehicleId("")}
+                  style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: selectedVehicleId === "" ? S.goldPale : "transparent", display: "flex", alignItems: "center", gap: 8 }}
+                >
+                  <span style={{ fontSize: 18 }}>🚫</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Unassign (remove vehicle)</span>
+                </div>
+                {filtered.map(v => {
+                  const isSelected = selectedVehicleId === v.id;
+                  return (
+                    <div
+                      key={v.id}
+                      onClick={() => setSelectedVehicleId(v.id)}
+                      style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${S.borderLight}`, background: isSelected ? S.goldPale : "transparent", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = S.borderLight; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <div>
+                        <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: S.gold }}>{v.asset_id}</span>
+                        <span style={{ fontSize: 12, color: S.textMuted }}> · {v.plate_number}</span>
+                        <div style={{ fontSize: 11, color: S.textDim, marginTop: 2 }}>{v.make} {v.model} · <span style={{ textTransform: "uppercase", fontSize: 10, fontWeight: 700 }}>{v.vehicle_type}</span></div>
+                      </div>
+                      {isSelected && <span style={{ color: S.gold, fontSize: 16 }}>✓</span>}
+                    </div>
+                  );
+                })}
+                {filtered.length === 0 && !fetching && <div style={{ padding: 20, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles match your search.</div>}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+              <button type="submit" disabled={loading || fetching} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Confirm Assignment"}</button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── CREATE RIDER MODAL ─────────────────────────────────────────
 function CreateRiderModal({ onClose, onRiderCreated }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "",
     password: "", vehicle_type: "", city: "", is_verified: false,
+    home_zone: "", vehicle_asset: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [relayNodes, setRelayNodes] = useState([]);
+  const [vehicleAssets, setVehicleAssets] = useState([]);
+
+  useEffect(() => {
+    RelayNodesAPI.getAll().then(nodes => setRelayNodes(nodes || [])).catch(() => { });
+    VehicleAssetsAPI.getAll().then(assets => setVehicleAssets(assets || [])).catch(() => { });
+  }, []);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -2010,6 +4085,8 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
       const payload = { ...form };
       if (!payload.vehicle_type) delete payload.vehicle_type;
       if (!payload.city) delete payload.city;
+      if (!payload.home_zone) delete payload.home_zone;
+      if (!payload.vehicle_asset) delete payload.vehicle_asset;
       await RidersAPI.createRider(payload);
       onRiderCreated();
       onClose();
@@ -2021,34 +4098,34 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
     }
   };
 
-  const iSt = { width:"100%", padding:"10px 12px", border:`1px solid ${S.border}`, borderRadius:8, fontSize:13, background:S.bg, color:S.text, fontFamily:"inherit", boxSizing:"border-box" };
-  const lSt = { display:"block", fontSize:12, fontWeight:600, color:S.textDim, marginBottom:5 };
-  const row = { display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 };
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+  const row = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 };
 
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:S.card,borderRadius:16,padding:28,width:480,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
         {/* Header */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22}}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
           <div>
-            <div style={{fontSize:17,fontWeight:800,color:S.navy}}>Add New Rider</div>
-            <div style={{fontSize:12,color:S.textMuted,marginTop:2}}>Create a rider account on the platform</div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Add New Rider</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Create a rider account on the platform</div>
           </div>
-          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:S.textMuted,lineHeight:1}}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: S.textMuted, lineHeight: 1 }}>✕</button>
         </div>
 
-        {error && <div style={{padding:"10px 14px",background:S.redBg,color:S.red,borderRadius:8,fontSize:13,marginBottom:16}}>{error}</div>}
+        {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
         <form onSubmit={handleSubmit}>
           {/* Name row */}
           <div style={row}>
             <div>
               <label style={lSt}>First Name *</label>
-              <input value={form.first_name} onChange={e=>set("first_name",e.target.value)} placeholder="e.g. Musa" style={iSt} required/>
+              <input value={form.first_name} onChange={e => set("first_name", e.target.value)} placeholder="e.g. Musa" style={iSt} required />
             </div>
             <div>
               <label style={lSt}>Last Name *</label>
-              <input value={form.last_name} onChange={e=>set("last_name",e.target.value)} placeholder="e.g. Kabiru" style={iSt} required/>
+              <input value={form.last_name} onChange={e => set("last_name", e.target.value)} placeholder="e.g. Kabiru" style={iSt} required />
             </div>
           </div>
 
@@ -2056,21 +4133,21 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
           <div style={row}>
             <div>
               <label style={lSt}>Phone *</label>
-              <input value={form.phone} onChange={e=>set("phone",e.target.value)} placeholder="+234..." style={iSt} required/>
+              <input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="+234..." style={iSt} required />
             </div>
             <div>
               <label style={lSt}>Email *</label>
-              <input type="email" value={form.email} onChange={e=>set("email",e.target.value)} placeholder="rider@email.com" style={iSt} required/>
+              <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="rider@email.com" style={iSt} required />
             </div>
           </div>
 
           {/* Password */}
-          <div style={{marginBottom:14}}>
+          <div style={{ marginBottom: 14 }}>
             <label style={lSt}>Password *</label>
-            <div style={{position:"relative"}}>
-              <input type={showPassword?"text":"password"} value={form.password} onChange={e=>set("password",e.target.value)} placeholder="Min. 6 characters" style={{...iSt,paddingRight:44}} required minLength={6}/>
-              <button type="button" onClick={()=>setShowPassword(p=>!p)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:S.textMuted,fontSize:13,fontFamily:"inherit"}}>
-                {showPassword?"Hide":"Show"}
+            <div style={{ position: "relative" }}>
+              <input type={showPassword ? "text" : "password"} value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters" style={{ ...iSt, paddingRight: 44 }} required minLength={6} />
+              <button type="button" onClick={() => setShowPassword(p => !p)} style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: S.textMuted, fontSize: 13, fontFamily: "inherit" }}>
+                {showPassword ? "Hide" : "Show"}
               </button>
             </div>
           </div>
@@ -2079,7 +4156,7 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
           <div style={row}>
             <div>
               <label style={lSt}>Vehicle Type</label>
-              <select value={form.vehicle_type} onChange={e=>set("vehicle_type",e.target.value)} style={iSt}>
+              <select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}>
                 <option value="">— Select —</option>
                 <option value="1">Bike</option>
                 <option value="2">Car</option>
@@ -2088,25 +4165,53 @@ function CreateRiderModal({ onClose, onRiderCreated }) {
             </div>
             <div>
               <label style={lSt}>City</label>
-              <input value={form.city} onChange={e=>set("city",e.target.value)} placeholder="e.g. Lagos" style={iSt}/>
+              <input value={form.city} onChange={e => set("city", e.target.value)} placeholder="e.g. Lagos" style={iSt} />
             </div>
           </div>
 
+          {/* Vehicle Asset */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Assign Vehicle Asset</label>
+            <select value={form.vehicle_asset} onChange={e => set("vehicle_asset", e.target.value)} style={iSt}>
+              <option value="">— No Vehicle —</option>
+              {vehicleAssets.filter(v => v.is_active).map(v => (
+                <option key={v.id} value={v.id}>
+                  {v.asset_id} · {v.plate_number}{v.make ? ` — ${v.make}${v.model ? ' ' + v.model : ''}` : ''} ({(v.vehicle_type || 'vehicle').toUpperCase()})
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Only active vehicle assets are shown. Optional — can be assigned later.</div>
+          </div>
+
+          {/* Relay Node */}
+          {relayNodes.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={lSt}>Relay Network Node</label>
+              <select value={form.home_zone} onChange={e => set("home_zone", e.target.value)} style={iSt}>
+                <option value="">— None (no relay assignment) —</option>
+                {relayNodes.map(n => (
+                  <option key={n.id} value={n.zone}>{n.name}{n.zone_name ? ` (${n.zone_name})` : ''}</option>
+                ))}
+              </select>
+              <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Assigns the rider to the relay node's zone for relay dispatch.</div>
+            </div>
+          )}
+
           {/* Verified checkbox */}
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:22,padding:"12px 14px",background:S.borderLight,borderRadius:10,border:`1px solid ${S.border}`}}>
-            <input id="verified-cb" type="checkbox" checked={form.is_verified} onChange={e=>set("is_verified",e.target.checked)} style={{width:16,height:16,accentColor:S.gold,cursor:"pointer"}}/>
-            <label htmlFor="verified-cb" style={{cursor:"pointer",flex:1}}>
-              <div style={{fontSize:13,fontWeight:600,color:S.text}}>Mark as Verified</div>
-              <div style={{fontSize:11,color:S.textMuted}}>Skips OTP — phone and email will be marked verified immediately</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 22, padding: "12px 14px", background: S.borderLight, borderRadius: 10, border: `1px solid ${S.border}` }}>
+            <input id="verified-cb" type="checkbox" checked={form.is_verified} onChange={e => set("is_verified", e.target.checked)} style={{ width: 16, height: 16, accentColor: S.gold, cursor: "pointer" }} />
+            <label htmlFor="verified-cb" style={{ cursor: "pointer", flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>Mark as Verified</div>
+              <div style={{ fontSize: 11, color: S.textMuted }}>Skips OTP — phone and email will be marked verified immediately</div>
             </label>
-            {form.is_verified && <span style={{fontSize:10,fontWeight:700,color:S.green,padding:"2px 8px",background:S.greenBg,borderRadius:6}}>✓ Verified</span>}
+            {form.is_verified && <span style={{ fontSize: 10, fontWeight: 700, color: S.green, padding: "2px 8px", background: S.greenBg, borderRadius: 6 }}>✓ Verified</span>}
           </div>
 
           {/* Actions */}
-          <div style={{display:"flex",gap:10}}>
-            <button type="button" onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,border:`1px solid ${S.border}`,background:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,color:S.textDim}}>Cancel</button>
-            <button type="submit" disabled={loading} style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,opacity:loading?0.7:1}}>
-              {loading?"Creating Rider…":"Create Rider"}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button type="button" onClick={onClose} style={{ flex: 1, padding: "11px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: S.textDim }}>Cancel</button>
+            <button type="submit" disabled={loading} style={{ flex: 2, padding: "11px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>
+              {loading ? "Creating Rider…" : "Create Rider"}
             </button>
           </div>
         </form>
@@ -2120,66 +4225,146 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
   const [filter, setFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [showCreateRider, setShowCreateRider] = useState(false);
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showReassignVehicle, setShowReassignVehicle] = useState(false);
+  const [isTogglingDuty, setIsTogglingDuty] = useState(false);
+  const [showMapModal, setShowMapModal] = useState(false);
 
   if (selectedId) {
     const rider = riders.find(r => r.id === selectedId);
     if (!rider) return <div style={{ color: S.textMuted }}>Rider not found</div>;
     const rOrders = orders.filter(o => o.riderId === rider.id);
+
+    const handleToggleDuty = async () => {
+      const targetStatus = rider.status === "offline" ? "online" : "offline";
+      setIsTogglingDuty(true);
+      try {
+        await RidersAPI.toggleDuty(rider._uuid || rider.id, targetStatus);
+        // Fire callback if exist to refresh list or just mutate locally (hacky but faster)
+        rider.status = targetStatus;
+      } catch (err) {
+        alert(err.error || "Failed to toggle duty. Please try again.");
+      } finally {
+        setIsTogglingDuty(false);
+      }
+    };
+
     return (
-      <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
-              <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: S.gold }}>{rider.name.split(" ").map(n => n[0]).join("")}</div>
-              <div style={{ fontSize: 18, fontWeight: 800 }}>{rider.name}</div>
-              <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
-              <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
-              {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
-              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
-                <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
-              </div>
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
-                {[{ l: "Vehicle", v: rider.vehicle }, { l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
-                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
-                ))}
-              </div>
-            </div>
-            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                {[{ l: "Total Deliveries", v: rider.totalDeliveries.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
-                  <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-            <div style={{ padding: "14px 18px", borderBottom: `1px solid ${S.border}` }}><span style={{ fontSize: 13, fontWeight: 700 }}>Order History ({rOrders.length})</span></div>
-            <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "8px 16px", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
-              <span>ID</span><span>Merchant</span><span>Route</span><span>Amount</span><span>COD</span><span>Status</span>
-            </div>
-            <div style={{ maxHeight: 400, overflowY: "auto" }}>
-              {rOrders.map(o => (
-                <div key={o.id} onClick={() => onViewOrder(o.id)} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "10px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", alignItems: "center", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
-                  <span style={{ fontSize: 11, color: S.textDim }}>{o.merchant}</span>
-                  <span style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
-                  <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
-                  <Badge status={o.status} />
+      <>
+        <div>
+          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 6, padding: 0, background: "none", border: "none", cursor: "pointer", color: S.textDim, fontSize: 13, fontWeight: 600, fontFamily: "inherit", marginBottom: 16 }}>{I.back} Back to Riders</button>
+          <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 20, textAlign: "center" }}>
+                <div style={{ width: 64, height: 64, borderRadius: 16, margin: "0 auto 10px", background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: S.gold }}>{rider.name.split(" ").map(n => n[0]).join("")}</div>
+                <div style={{ fontSize: 18, fontWeight: 800 }}>{rider.name}</div>
+                <div style={{ fontSize: 12, color: S.textDim, fontFamily: "'Space Mono',monospace", marginTop: 2 }}>{rider.phone}</div>
+                <span style={{ display: "inline-block", marginTop: 8, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: rider.status === "online" ? S.greenBg : rider.status === "on_delivery" ? S.purpleBg : S.redBg, color: rider.status === "online" ? S.green : rider.status === "on_delivery" ? S.purple : S.red }}>{rider.status === "online" ? "ONLINE" : rider.status === "on_delivery" ? "ON DELIVERY" : "OFFLINE"}</span>
+                {rider.currentOrder && <div style={{ fontSize: 11, color: S.purple, fontWeight: 700, fontFamily: "'Space Mono',monospace", marginTop: 6 }}>📦 {rider.currentOrder}</div>}
+
+                <div style={{ marginTop: 14 }}>
+                  <button
+                    onClick={handleToggleDuty}
+                    disabled={isTogglingDuty || rider.status === "on_delivery"}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 8, border: "none", cursor: (isTogglingDuty || rider.status === "on_delivery") ? "not-allowed" : "pointer",
+                      fontFamily: "inherit", fontSize: 12, fontWeight: 800,
+                      background: rider.status === "offline" ? `linear-gradient(135deg,${S.green},#2d936c)` : `linear-gradient(135deg,${S.red},#c1121f)`,
+                      color: "#fff",
+                      opacity: (isTogglingDuty || rider.status === "on_delivery") ? 0.6 : 1,
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                      boxShadow: "0 4px 10px rgba(0,0,0,0.15)"
+                    }}
+                  >
+                    {isTogglingDuty ? "⏳ Toggling..." : rider.status === "offline" ? "🟢 Go Online" : "🔴 Go Offline"}
+                  </button>
+                  {rider.status === "on_delivery" && <div style={{ fontSize: 10, color: S.textMuted, marginTop: 6, textAlign: "center" }}>Cannot change status while on a delivery.</div>}
                 </div>
-              ))}
+
+                <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+                  <a href={`tel:${rider.phone}`} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.goldPale, color: S.gold, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>{I.phone} Call</a>
+                  <a href={`https://wa.me/234${rider.phone.slice(1)}`} target="_blank" rel="noreferrer" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "8px 0", borderRadius: 8, background: S.greenBg, color: S.green, fontSize: 11, fontWeight: 600, textDecoration: "none" }}>💬 WhatsApp</a>
+                </div>
+                <button onClick={() => setShowResetPassword(true)} style={{ width: "100%", marginTop: 8, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🔑 Reset Password</button>
+                <button onClick={() => setShowReassignVehicle(true)} style={{ width: "100%", marginTop: 6, padding: "8px 0", borderRadius: 8, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, color: S.textDim, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>🚗 Reassign Vehicle</button>
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${S.border}`, textAlign: "left" }}>
+                  {[{ l: "ID", v: rider.id }, { l: "Joined", v: rider.joined }].map(f => (
+                    <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0" }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                  ))}
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${S.borderLight}` }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 6 }}>Assigned Vehicle</div>
+                    {rider.vehicle_asset ? (
+                      <>
+                        {[
+                          { l: "Asset ID", v: rider.vehicle_asset.asset_id },
+                          { l: "Plate", v: rider.vehicle_asset.plate_number },
+                          { l: "Make/Model", v: `${rider.vehicle_asset.make} ${rider.vehicle_asset.model}` },
+                          { l: "Type", v: (rider.vehicle_asset.vehicle_type || "").toUpperCase() },
+                        ].map(f => (
+                          <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0" }}><span style={{ fontSize: 11, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>{f.v}</span></div>
+                        ))}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 12, color: S.textMuted, fontStyle: "italic" }}>No vehicle assigned</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: 16 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  {[{ l: "Total Deliveries", v: rider.totalDeliveries.toLocaleString(), c: S.text }, { l: "Completion", v: `${rider.completionRate}%`, c: rider.completionRate >= 95 ? S.green : S.yellow }, { l: "Avg Time", v: rider.avgTime, c: S.text }, { l: "Rating", v: `⭐ ${rider.rating}`, c: S.gold }, { l: "Today Orders", v: rider.todayOrders, c: S.gold }, { l: "Today Earnings", v: `₦${rider.todayEarnings.toLocaleString()}`, c: S.green }].map(s => (
+                    <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 16, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", borderBottom: `1px solid ${S.border}` }}><span style={{ fontSize: 13, fontWeight: 700 }}>Order History ({rOrders.length})</span></div>
+              <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "8px 16px", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+                <span>ID</span><span>Merchant</span><span>Route</span><span>Amount</span><span>COD</span><span>Status</span>
+              </div>
+              <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                {rOrders.map(o => (
+                  <div key={o.id} onClick={() => onViewOrder(o.id)} style={{ display: "grid", gridTemplateColumns: "100px 1fr 1fr 80px 70px 70px", padding: "10px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", alignItems: "center", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{o.id}</span>
+                    <span style={{ fontSize: 11, color: S.textDim }}>{o.merchant}</span>
+                    <span style={{ fontSize: 11, color: S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.pickup.split(",")[0]} → {o.dropoff.split(",")[0]}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, fontFamily: "'Space Mono',monospace" }}>₦{o.amount.toLocaleString()}</span>
+                    <span style={{ fontSize: 11, color: o.cod > 0 ? S.green : S.textMuted, fontFamily: "'Space Mono',monospace" }}>{o.cod > 0 ? `₦${(o.cod / 1000).toFixed(0)}K` : "—"}</span>
+                    <Badge status={o.status} />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+        {showResetPassword && (
+          <ResetRiderPasswordModal
+            rider={rider}
+            onClose={() => setShowResetPassword(false)}
+          />
+        )}
+        {showReassignVehicle && (
+          <ReassignVehicleModal
+            rider={rider}
+            onClose={() => setShowReassignVehicle(false)}
+          />
+        )}
+      </>
     );
   }
 
   const sMap = { "Online": "online", "On Delivery": "on_delivery", "Offline": "offline" };
-  const filtered = riders.filter(r => { if (filter !== "All" && r.status !== sMap[filter]) return false; if (search) { const s = search.toLowerCase(); return r.name.toLowerCase().includes(s) || r.phone.includes(s); } return true; });
+  const filtered = riders.filter(r => {
+    if (filter !== "All" && r.status !== sMap[filter]) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      const plate = (r.vehicle_asset?.plate_number || "").toLowerCase();
+      return r.name.toLowerCase().includes(s) || r.phone.includes(s) || plate.includes(s);
+    }
+    return true;
+  });
   const sc = (s) => s === "online" ? S.green : s === "on_delivery" ? S.purple : S.textMuted;
 
   return (
@@ -2192,10 +4377,10 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
         <StatCard label="Deliveries Today" value={riders.reduce((s, r) => s + r.todayOrders, 0)} color={S.gold} />
       </div>
 
-      {/* 50/50 split: table (left) + map (right) */}
-      <div style={{ display: "flex", gap: 16, alignItems: "flex-start", height: "calc(100vh - 240px)" }}>
+      {/* Full width table with floating Map button */}
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
 
-        {/* Left – filters + table (50%) */}
+        {/* Top – filters + table */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
           <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
             <div style={{ display: "flex", gap: 4 }}>
@@ -2205,17 +4390,17 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
               <span style={{ opacity: 0.4 }}>{I.search}</span>
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search riders..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
             </div>
-            <button onClick={()=>setShowCreateRider(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"0 16px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,whiteSpace:"nowrap",flexShrink:0}}>
+            <button onClick={() => setShowCreateRider(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, whiteSpace: "nowrap", flexShrink: 0 }}>
               {I.plus} Add Rider
             </button>
           </div>
-          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
-              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Status</span><span>Current Order</span><span>Today</span><span>Rating</span>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Vehicle Plate</span><span>Status</span><span>Current Order</span><span>Today</span><span>Yest. Dist</span><span>Rating</span>
             </div>
             <div style={{ overflowY: "auto", flex: 1 }}>
               {filtered.map(r => (
-                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 90px 110px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <div key={r.id} onClick={() => onSelect(r.id)} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 80px 95px 90px 110px 100px 100px 70px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.id}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, background: `${sc(r.status)}12`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800, color: sc(r.status) }}>{r.name.split(" ").map(n => n[0]).join("")}</div>
@@ -2223,9 +4408,11 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
                   </div>
                   <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
                   <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle}</span>
+                  <span style={{ fontSize: 11, color: r.vehicle_asset?.plate_number ? S.textDim : S.textMuted, fontFamily: "'Space Mono',monospace", fontWeight: r.vehicle_asset?.plate_number ? 700 : 400 }}>{r.vehicle_asset?.plate_number || "—"}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: `${sc(r.status)}12`, color: sc(r.status) }}>{r.status === "online" ? "Online" : r.status === "on_delivery" ? "On Delivery" : "Offline"}</span>
                   <span style={{ fontSize: 11, color: r.currentOrder ? S.purple : S.textMuted, fontWeight: r.currentOrder ? 700 : 400, fontFamily: "'Space Mono',monospace" }}>{r.currentOrder || "— Available"}</span>
                   <div><span style={{ fontSize: 12, fontWeight: 700 }}>{r.todayOrders} orders</span><div style={{ fontSize: 10, color: S.textMuted }}>₦{r.todayEarnings.toLocaleString()}</div></div>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{r.total_yesterday_order_distance ? `${r.total_yesterday_order_distance} km` : "—"}</span>
                   <span style={{ fontSize: 12, color: S.gold }}>⭐ {r.rating}</span>
                 </div>
               ))}
@@ -2233,19 +4420,2110 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
           </div>
         </div>
 
-        {/* Right – riders location map (50%) */}
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <RidersLocationMap riders={riders} />
-        </div>
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
 
       </div>
 
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Rider Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <RidersLocationMap riders={riders} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCreateRider && (
         <CreateRiderModal
-          onClose={()=>setShowCreateRider(false)}
-          onRiderCreated={()=>{ if(onRiderCreated) onRiderCreated(); }}
+          onClose={() => setShowCreateRider(false)}
+          onRiderCreated={() => { if (onRiderCreated) onRiderCreated(); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── PENDING RIDER APPROVALS ──────────────────────────────────────
+const APPROVAL_PILL = {
+  pending: { bg: S.yellowBg, text: S.yellow },
+  approved: { bg: S.greenBg, text: S.green },
+  rejected: { bg: S.redBg, text: S.red },
+  expired: { bg: S.borderLight, text: S.textMuted },
+};
+const StatusPill = ({ status }) => {
+  const s = APPROVAL_PILL[status] || { bg: S.borderLight, text: S.textMuted };
+  return <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 6, background: s.bg, color: s.text, textTransform: "uppercase", letterSpacing: "0.5px" }}>{status}</span>;
+};
+
+const DOC_TYPE_LABELS = {
+  national_id: "National ID",
+  riders_card: "Rider's Card",
+  drivers_license: "Driver's License",
+  utility_bill: "Utility Bill",
+  profile_photo: "Profile Photo",
+  vehicle_insurance: "Vehicle Insurance",
+  vehicle_registration: "Vehicle Registration",
+};
+
+const InfoRow = ({ label, value }) => (
+  <div style={{ marginBottom: 6 }}>
+    <span style={{ fontSize: 10, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.3px" }}>{label}: </span>
+    <span style={{ fontSize: 12, color: S.text, fontWeight: 600 }}>{value || "—"}</span>
+  </div>
+);
+
+function PendingRiderApprovalsScreen({ riders, onRefresh }) {
+  const [reviewingRider, setReviewingRider] = useState(null);
+  const [toast, setToast] = useState("");
+
+  const handleDone = (message) => {
+    setReviewingRider(null);
+    onRefresh();
+    setToast(message);
+    setTimeout(() => setToast(""), 3500);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Pending Applications" value={riders.length} color={S.gold} />
+      </div>
+
+      {riders.length === 0 ? (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, padding: "60px 20px", textAlign: "center" }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🪪</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: S.navy, marginBottom: 6 }}>No pending applications</div>
+          <div style={{ fontSize: 12, color: S.textMuted }}>Self-registered riders awaiting document review will show up here.</div>
+        </div>
+      ) : (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 120px 160px 90px 110px 90px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+            <span>ID</span><span>Rider</span><span>Phone</span><span>Vehicle</span><span>Docs</span><span>Submitted</span><span></span>
+          </div>
+          {riders.map(r => {
+            const docsCount = (r.documents || []).length;
+            return (
+              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "80px 1fr 120px 160px 90px 110px 90px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.rider_id}</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600 }}>{r.first_name} {r.last_name}</div>
+                  <div style={{ fontSize: 11, color: S.textMuted }}>{r.email}</div>
+                </div>
+                <span style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{r.phone}</span>
+                <span style={{ fontSize: 11, color: S.textDim }}>{r.vehicle_model} · {r.vehicle_plate_number}</span>
+                <span style={{ fontSize: 11, color: S.textDim }}>{docsCount} docs</span>
+                <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}</span>
+                <button onClick={() => setReviewingRider(r)} style={{ padding: "6px 14px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 11, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy }}>Review</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {reviewingRider && (
+        <RiderApprovalReviewModal
+          rider={reviewingRider}
+          onClose={() => setReviewingRider(null)}
+          onDone={handleDone}
+        />
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", background: S.navy, color: "#fff", padding: "12px 24px", borderRadius: 30, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 2000, display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: S.green }}>{I.check}</span> {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RiderApprovalReviewModal({ rider, onClose, onDone }) {
+  const [mode, setMode] = useState("view"); // "view" | "reject"
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [reason, setReason] = useState("");
+  const [flagged, setFlagged] = useState({}); // { [docId]: reasonString }
+  const [imgErrors, setImgErrors] = useState({}); // { [slideId]: boolean }
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null); // "approved" | "rejected"
+
+  const documents = rider.documents || [];
+
+  const slides = useMemo(() => {
+    const list = documents.map(doc => ({
+      id: doc.id,
+      docId: doc.id,
+      docType: doc.doc_type,
+      title: DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type,
+      url: doc.file_url,
+      status: doc.status,
+      rejectionReason: doc.rejection_reason,
+      isDoc: true,
+    }));
+    if (rider.vehicle_photo) {
+      list.push({
+        id: "vehicle_photo",
+        docId: null,
+        docType: "vehicle_photo",
+        title: "Vehicle Photo",
+        url: rider.vehicle_photo,
+        status: "submitted",
+        rejectionReason: "",
+        isDoc: false,
+      });
+    }
+    return list;
+  }, [documents, rider.vehicle_photo]);
+
+  // Ensure currentSlide is within bounds if slides change
+  useEffect(() => {
+    if (currentSlide >= slides.length && slides.length > 0) {
+      setCurrentSlide(slides.length - 1);
+    }
+  }, [slides.length, currentSlide]);
+
+  // Reset zoom when switching slides
+  useEffect(() => {
+    setIsZoomed(false);
+  }, [currentSlide]);
+
+  // Keyboard navigation for slideshow
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      if (mode !== "view") return;
+      if (e.key === "ArrowLeft") {
+        setCurrentSlide(prev => (prev > 0 ? prev - 1 : Math.max(0, slides.length - 1)));
+      } else if (e.key === "ArrowRight") {
+        setCurrentSlide(prev => (prev < slides.length - 1 ? prev + 1 : 0));
+      } else if (e.key === "Escape" && !loading) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [slides.length, mode, loading, onClose]);
+
+  const toggleFlag = (docId) => {
+    setFlagged(prev => {
+      const next = { ...prev };
+      if (docId in next) delete next[docId];
+      else next[docId] = "";
+      return next;
+    });
+  };
+
+  const setFlagReason = (docId, val) => setFlagged(prev => ({ ...prev, [docId]: val }));
+
+  const resolveDocUrl = (url) => {
+    if (!url) return "";
+    if (url.startsWith("http://") || url.startsWith("https://") || url.startsWith("data:") || url.startsWith("blob:")) {
+      return url;
+    }
+    const base = (import.meta.env.VITE_API_BASE_URL || "https://www.orders.axpress.net/api").replace(/\/api\/?$/, "");
+    return `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+  };
+
+  const handleImgError = (slideId) => {
+    setImgErrors(prev => ({ ...prev, [slideId]: true }));
+  };
+
+  const handleApprove = async () => {
+    const flaggedCount = Object.keys(flagged).length;
+    if (flaggedCount > 0) {
+      if (!window.confirm(`You have flagged ${flaggedCount} document(s) for rejection. Are you sure you want to approve this application?`)) {
+        return;
+      }
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      await RidersAPI.approveRider(rider.id);
+      setSuccess("approved");
+    } catch (err) {
+      setError(err?.message || err?.error || err?.detail || "Failed to approve rider.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleReject = async () => {
+    setError(null);
+    const overallReason = reason.trim();
+    const flaggedEntries = Object.entries(flagged).filter(([docId]) => docId && docId !== "vehicle_photo");
+
+    if (!overallReason && flaggedEntries.length === 0) {
+      setError("Please provide a rejection note or select at least one document to reject with a reason.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const rejectedDocuments = flaggedEntries.map(([docId, docReason]) => ({
+        document_id: docId,
+        reason: docReason.trim() || overallReason || "Document rejected during application review.",
+      }));
+
+      // If overall reason was empty but documents had notes, generate concise overall note
+      const finalOverallReason = overallReason || Object.entries(flagged).map(([docId, r]) => {
+        const found = slides.find(s => s.docId === docId);
+        return `${found ? found.title : "Document"}: ${r.trim() || "Rejected"}`;
+      }).join("; ") || "Your application was rejected. Please review flagged documents and re-upload.";
+
+      await RidersAPI.rejectRider(rider.id, finalOverallReason, rejectedDocuments);
+      setSuccess("rejected");
+    } catch (err) {
+      setError(err?.message || err?.error || err?.detail || "Failed to reject application.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const flaggedCount = Object.keys(flagged).length;
+  const currentDoc = slides[currentSlide] || null;
+
+  const quickDocumentReasons = [
+    "Blurry / Unreadable",
+    "Expired Document",
+    "Name Mismatch with BVN",
+    "Wrong Document Type",
+    "Cut Off / Incomplete",
+  ];
+
+  const quickOverallReasons = [
+    "Blurry or unreadable document scans submitted.",
+    "Driver's license has expired. Please re-upload a valid license.",
+    "Name on uploaded documents does not match BVN records.",
+    "Vehicle registration or insurance details are incomplete or invalid.",
+    "Incomplete documentation. Please review flagged items and re-upload.",
+  ];
+
+  const autoFillFromFlagged = () => {
+    const parts = Object.entries(flagged).map(([docId, note]) => {
+      const found = slides.find(s => s.docId === docId);
+      return `${found ? found.title : "Document"}: ${note.trim() || "Needs re-upload"}`;
+    });
+    if (parts.length > 0) {
+      const compiled = `Application rejected due to document issues: ${parts.join("; ")}. Please re-upload valid documents.`;
+      setReason(compiled);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(11, 19, 43, 0.78)",
+        backdropFilter: "blur(6px)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1100,
+        padding: "16px",
+      }}
+      onClick={e => {
+        if (e.target === e.currentTarget && !loading) onClose();
+      }}
+    >
+      <div
+        style={{
+          background: S.card,
+          borderRadius: 20,
+          width: "min(1120px, 96vw)",
+          height: "min(90vh, 880px)",
+          maxHeight: "92vh",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 25px 60px -15px rgba(0,0,0,0.5)",
+          border: `1px solid ${S.border}`,
+        }}
+      >
+        {/* MODAL HEADER */}
+        <div
+          style={{
+            padding: "14px 20px",
+            borderBottom: `1px solid ${S.border}`,
+            background: "#fff",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ width: 40, height: 40, borderRadius: 12, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, display: "flex", alignItems: "center", justifyContent: "center", color: S.navy, fontWeight: 900, fontSize: 16 }}>
+                {(rider.first_name?.[0] || "") + (rider.last_name?.[0] || "")}
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>
+                    {rider.first_name} {rider.last_name}
+                  </span>
+                  <StatusPill status={rider.approval_status} />
+                  {flaggedCount > 0 && (
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 6, background: S.redBg, color: S.red, display: "flex", alignItems: "center", gap: 4 }}>
+                      🚩 {flaggedCount} flagged for rejection
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2, fontFamily: "'Space Mono',monospace", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span>#{rider.rider_id}</span>
+                  <span>·</span>
+                  <span>{rider.phone}</span>
+                  {rider.email && (
+                    <>
+                      <span>·</span>
+                      <span style={{ fontFamily: "inherit" }}>{rider.email}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setShowInfo(v => !v)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: 8,
+                  border: `1px solid ${showInfo ? S.gold : S.border}`,
+                  background: showInfo ? S.goldPale : "#fff",
+                  color: showInfo ? S.gold : S.textDim,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 5,
+                }}
+              >
+                <span>ℹ</span>
+                <span>{showInfo ? "Hide Rider Details" : "View Rider Details"}</span>
+              </button>
+
+              {!loading && (
+                <button
+                  onClick={onClose}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "none",
+                    border: `1px solid ${S.border}`,
+                    cursor: "pointer",
+                    fontSize: 14,
+                    color: S.textMuted,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = S.borderLight; e.currentTarget.style.color = S.navy; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "none"; e.currentTarget.style.color = S.textMuted; }}
+                  title="Close (Esc)"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* EXPANDABLE / COMPACT METADATA STRIP */}
+          {showInfo && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${S.border}`, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, background: S.bg, padding: "10px 14px", borderRadius: 10 }}>
+              <InfoRow label="Address" value={rider.address} />
+              <InfoRow label="BVN" value={rider.bvn} />
+              <InfoRow label="Plate Number" value={rider.vehicle_plate_number} />
+              <InfoRow label="Vehicle Model" value={rider.vehicle_model} />
+              <InfoRow label="Vehicle Color" value={rider.vehicle_color} />
+              <InfoRow label="Working Type" value={rider.working_type} />
+              {rider.rejection_reason && (
+                <div style={{ gridColumn: "1 / -1", fontSize: 11, color: S.red, background: S.redBg, padding: "6px 10px", borderRadius: 6 }}>
+                  <strong>Previous Rejection:</strong> {rider.rejection_reason}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* MAIN BODY AREA */}
+        {success ? (
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
+            <div style={{ fontSize: 56, marginBottom: 16 }}>{success === "approved" ? "✅" : "🚫"}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: success === "approved" ? S.green : S.red, marginBottom: 8 }}>
+              {success === "approved" ? "Rider Approved Successfully" : "Rider Application Rejected"}
+            </div>
+            <div style={{ fontSize: 13, color: S.textMuted, maxWidth: 440, lineHeight: 1.6, marginBottom: 24 }}>
+              {success === "approved"
+                ? "The rider has been authorized to accept orders and start operating on the platform."
+                : "The rider has been notified with your rejection notes so they can correct and re-upload the required documents."}
+            </div>
+            <button
+              onClick={() => onDone(success === "approved" ? "Rider approved successfully" : "Application rejected")}
+              style={{
+                padding: "12px 36px",
+                borderRadius: 12,
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 14,
+                fontWeight: 700,
+                background: `linear-gradient(135deg,${S.gold},${S.goldLight})`,
+                color: S.navy,
+                boxShadow: "0 4px 14px rgba(232,168,56,0.3)",
+              }}
+            >
+              Done
+            </button>
+          </div>
+        ) : mode === "reject" ? (
+          /* REJECTION COMPOSER VIEW */
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "#f8fafc" }}>
+            <div style={{ padding: "16px 24px", background: "#fff", borderBottom: `1px solid ${S.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: S.navy }}>
+                    Reject Submission — Rejection Notes
+                  </h3>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: S.textDim }}>
+                    Provide clear feedback explaining why this submission is rejected. The rider will be notified immediately to fix these items.
+                  </p>
+                </div>
+                {flaggedCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={autoFillFromFlagged}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: `1px solid ${S.gold}`,
+                      background: S.goldPale,
+                      color: S.navy,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ⚡ Auto-fill note from flagged documents
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+              {error && (
+                <div style={{ padding: "12px 16px", background: S.redBg, color: S.red, borderRadius: 10, fontSize: 13, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>⚠️</span> {error}
+                </div>
+              )}
+
+              {/* OVERALL NOTE INPUT */}
+              <div style={{ background: "#fff", padding: "18px 20px", borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 20 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 800, color: S.navy, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Overall Rejection Note / Summary *
+                </label>
+                <textarea
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  placeholder="Explain clearly to the rider why their application was rejected and what steps they need to take..."
+                  rows={4}
+                  style={{
+                    width: "100%",
+                    padding: 14,
+                    borderRadius: 10,
+                    border: `1.5px solid ${S.border}`,
+                    background: S.bg,
+                    fontSize: 13,
+                    color: S.text,
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    outline: "none",
+                    boxSizing: "border-box",
+                    lineHeight: 1.5,
+                  }}
+                  onFocus={e => { e.target.style.borderColor = S.red; }}
+                  onBlur={e => { e.target.style.borderColor = S.border; }}
+                />
+
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 6 }}>
+                    Quick Suggestions (click to add):
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {quickOverallReasons.map((chip, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setReason(prev => (prev ? `${prev.trim()} ${chip}` : chip))}
+                        style={{
+                          padding: "5px 10px",
+                          borderRadius: 20,
+                          border: `1px solid ${S.border}`,
+                          background: "#fff",
+                          color: S.textDim,
+                          fontSize: 11,
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.borderColor = S.red; e.currentTarget.style.color = S.red; }}
+                        onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.color = S.textDim; }}
+                      >
+                        + {chip}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* SPECIFIC FLAGGED DOCUMENTS REVIEW */}
+              <div style={{ background: "#fff", padding: "18px 20px", borderRadius: 14, border: `1px solid ${S.border}` }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 800, color: S.navy, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Documents To Flag / Reject ({slides.filter(s => s.isDoc).length})
+                  </div>
+                  <span style={{ fontSize: 11, color: S.textMuted }}>
+                    Flagged documents allow the rider to re-upload only the rejected items
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {slides.map(doc => {
+                    const isFlagged = doc.id in flagged;
+                    return (
+                      <div
+                        key={doc.id}
+                        style={{
+                          padding: "12px 14px",
+                          borderRadius: 12,
+                          border: `1.5px solid ${isFlagged ? S.red : S.border}`,
+                          background: isFlagged ? "#fff5f5" : "#fff",
+                          transition: "all 0.2s",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 13, color: S.navy }}>
+                            <input
+                              type="checkbox"
+                              checked={isFlagged}
+                              onChange={() => toggleFlag(doc.id)}
+                              style={{ width: 16, height: 16, accentColor: S.red, cursor: "pointer" }}
+                            />
+                            <span>{doc.title}</span>
+                            <StatusPill status={doc.status} />
+                          </label>
+
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            {doc.url && (
+                              <a
+                                href={resolveDocUrl(doc.url)}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ fontSize: 11, color: S.blue, fontWeight: 600, textDecoration: "none" }}
+                              >
+                                View file ↗
+                              </a>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const idx = slides.findIndex(s => s.id === doc.id);
+                                if (idx >= 0) setCurrentSlide(idx);
+                                setMode("view");
+                              }}
+                              style={{
+                                padding: "4px 8px",
+                                borderRadius: 6,
+                                border: `1px solid ${S.border}`,
+                                background: "#fff",
+                                color: S.textDim,
+                                fontSize: 11,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Show in Slideshow
+                            </button>
+                          </div>
+                        </div>
+
+                        {isFlagged && (
+                          <div style={{ marginTop: 10, paddingLeft: 24 }}>
+                            <input
+                              value={flagged[doc.id] || ""}
+                              onChange={e => setFlagReason(doc.id, e.target.value)}
+                              placeholder={`Specific reason for rejecting ${doc.title} (e.g. Expired on Jan 2024, Unreadable, Wrong type)...`}
+                              style={{
+                                width: "100%",
+                                padding: "8px 12px",
+                                borderRadius: 8,
+                                border: `1px solid ${S.border}`,
+                                background: "#fff",
+                                fontSize: 12,
+                                fontFamily: "inherit",
+                                boxSizing: "border-box",
+                              }}
+                            />
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+                              {quickDocumentReasons.map((chip, cIdx) => (
+                                <button
+                                  key={cIdx}
+                                  type="button"
+                                  onClick={() => setFlagReason(doc.id, chip)}
+                                  style={{
+                                    padding: "2px 8px",
+                                    borderRadius: 12,
+                                    border: `1px solid ${S.border}`,
+                                    background: "#fff",
+                                    color: S.textDim,
+                                    fontSize: 10,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {chip}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* REJECTION VIEW FOOTER */}
+            <div
+              style={{
+                padding: "16px 24px",
+                borderTop: `1px solid ${S.border}`,
+                background: "#fff",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setMode("view")}
+                disabled={loading}
+                style={{
+                  padding: "11px 20px",
+                  borderRadius: 10,
+                  border: `1px solid ${S.border}`,
+                  background: "#fff",
+                  color: S.navy,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                ← Back to Slideshow
+              </button>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>
+                  {flaggedCount > 0 ? `${flaggedCount} document(s) flagged` : "Rejecting entire submission"}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleReject}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 28px",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: `linear-gradient(135deg, ${S.red}, #b91c1c)`,
+                    color: "#fff",
+                    boxShadow: "0 4px 14px rgba(220,38,38,0.3)",
+                    opacity: loading ? 0.7 : 1,
+                  }}
+                >
+                  {loading ? "Rejecting Application…" : "Confirm Rejection & Send Note"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* SLIDESHOW VIEW (Almost the entire modal!) */
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+            {error && (
+              <div style={{ margin: "10px 16px 0", padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 13 }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            {slides.length === 0 ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 40, color: S.textMuted }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📁</div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>No Documents Found</div>
+                <div style={{ fontSize: 12 }}>This rider has not uploaded any documents yet.</div>
+              </div>
+            ) : (
+              <>
+                {/* SLIDESHOW STAGE */}
+                <div
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    background: "#080d1a",
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: isZoomed ? "auto" : "hidden",
+                    userSelect: "none",
+                  }}
+                >
+                  {/* FLOATING PREVIOUS BUTTON */}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentSlide(prev => (prev > 0 ? prev - 1 : slides.length - 1))}
+                    style={{
+                      position: "absolute",
+                      left: 16,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 46,
+                      height: 46,
+                      borderRadius: "50%",
+                      background: "rgba(255, 255, 255, 0.15)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 20,
+                      boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"; e.currentTarget.style.transform = "translateY(-50%) scale(1.08)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)"; e.currentTarget.style.transform = "translateY(-50%) scale(1)"; }}
+                    title="Previous Document (← Left Arrow)"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="15 18 9 12 15 6" />
+                    </svg>
+                  </button>
+
+                  {/* FLOATING NEXT BUTTON */}
+                  <button
+                    type="button"
+                    onClick={() => setCurrentSlide(prev => (prev < slides.length - 1 ? prev + 1 : 0))}
+                    style={{
+                      position: "absolute",
+                      right: 16,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      width: 46,
+                      height: 46,
+                      borderRadius: "50%",
+                      background: "rgba(255, 255, 255, 0.15)",
+                      backdropFilter: "blur(8px)",
+                      border: "1px solid rgba(255, 255, 255, 0.25)",
+                      color: "#fff",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      zIndex: 20,
+                      boxShadow: "0 6px 18px rgba(0,0,0,0.4)",
+                      transition: "all 0.2s ease",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.3)"; e.currentTarget.style.transform = "translateY(-50%) scale(1.08)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = "rgba(255, 255, 255, 0.15)"; e.currentTarget.style.transform = "translateY(-50%) scale(1)"; }}
+                    title="Next Document (→ Right Arrow)"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6" />
+                    </svg>
+                  </button>
+
+                  {/* STAGE TOP OVERLAY BAR */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: 14,
+                      left: 16,
+                      right: 16,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      zIndex: 15,
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, pointerEvents: "auto", background: "rgba(11, 19, 43, 0.8)", backdropFilter: "blur(8px)", padding: "6px 14px", borderRadius: 30, border: "1px solid rgba(255,255,255,0.15)" }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: S.goldLight, fontFamily: "'Space Mono',monospace" }}>
+                        {currentSlide + 1} / {slides.length}
+                      </span>
+                      <span style={{ color: "rgba(255,255,255,0.4)" }}>|</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+                        {currentDoc.title}
+                      </span>
+                      <StatusPill status={currentDoc.status} />
+                      {currentDoc.docId && currentDoc.docId in flagged && (
+                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 10, background: S.red, color: "#fff" }}>
+                          FLAGGED
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, pointerEvents: "auto" }}>
+                      <button
+                        type="button"
+                        onClick={() => setIsZoomed(z => !z)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 20,
+                          background: isZoomed ? S.gold : "rgba(11, 19, 43, 0.8)",
+                          backdropFilter: "blur(8px)",
+                          border: "1px solid rgba(255,255,255,0.18)",
+                          color: isZoomed ? S.navy : "#fff",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                        }}
+                      >
+                        <span>🔍</span>
+                        <span>{isZoomed ? "Reset Zoom" : "Zoom 1.7x"}</span>
+                      </button>
+
+                      {currentDoc.url && (
+                        <a
+                          href={resolveDocUrl(currentDoc.url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            padding: "6px 12px",
+                            borderRadius: 20,
+                            background: "rgba(11, 19, 43, 0.8)",
+                            backdropFilter: "blur(8px)",
+                            border: "1px solid rgba(255,255,255,0.18)",
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            textDecoration: "none",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+                          }}
+                        >
+                          <span>Open Original</span>
+                          <span>↗</span>
+                        </a>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ACTIVE IMAGE DISPLAY */}
+                  {imgErrors[currentDoc.id] || !currentDoc.url ? (
+                    <div style={{ textAlign: "center", padding: "40px 24px", color: "rgba(255,255,255,0.7)" }}>
+                      <div style={{ fontSize: 44, marginBottom: 12, opacity: 0.8 }}>🖼️</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 6 }}>
+                        {currentDoc.title} Preview Unavailable
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 16, maxWidth: 360, margin: "0 auto 16px" }}>
+                        The image link could not be loaded in the browser. You can still inspect the direct link or flag this document.
+                      </div>
+                      {currentDoc.url && (
+                        <a
+                          href={resolveDocUrl(currentDoc.url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            display: "inline-block",
+                            padding: "8px 18px",
+                            borderRadius: 8,
+                            background: "rgba(255,255,255,0.15)",
+                            color: "#fff",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            textDecoration: "none",
+                          }}
+                        >
+                          Try opening direct file URL ↗
+                        </a>
+                      )}
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: "48px 72px 16px",
+                        boxSizing: "border-box",
+                      }}
+                    >
+                      <img
+                        key={currentDoc.id}
+                        src={resolveDocUrl(currentDoc.url)}
+                        alt={currentDoc.title}
+                        onError={() => handleImgError(currentDoc.id)}
+                        style={{
+                          maxWidth: "100%",
+                          maxHeight: "100%",
+                          objectFit: "contain",
+                          borderRadius: 8,
+                          boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+                          transform: isZoomed ? "scale(1.7)" : "scale(1)",
+                          transformOrigin: "center center",
+                          transition: "transform 0.25s ease",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* CURRENT DOCUMENT REJECTION NOTE TOOLBAR */}
+                <div
+                  style={{
+                    padding: "8px 16px",
+                    background: currentDoc.docId && currentDoc.docId in flagged ? "#fff1f2" : "#f8fafc",
+                    borderTop: `1px solid ${S.border}`,
+                    borderBottom: `1px solid ${S.border}`,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                    minHeight: 46,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: S.navy }}>
+                      {currentDoc.title}:
+                    </span>
+                    {currentDoc.docId ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleFlag(currentDoc.docId)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: 6,
+                          border: `1px solid ${currentDoc.docId in flagged ? S.red : S.border}`,
+                          background: currentDoc.docId in flagged ? S.red : "#fff",
+                          color: currentDoc.docId in flagged ? "#fff" : S.textDim,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                        }}
+                      >
+                        <span>🚩</span>
+                        <span>{currentDoc.docId in flagged ? "Flagged for Rejection" : "Flag for Rejection"}</span>
+                      </button>
+                    ) : (
+                      <span style={{ fontSize: 11, color: S.textMuted }}>Vehicle Asset Photo</span>
+                    )}
+                  </div>
+
+                  {currentDoc.docId && currentDoc.docId in flagged && (
+                    <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, minWidth: 260 }}>
+                      <input
+                        value={flagged[currentDoc.docId] || ""}
+                        onChange={e => setFlagReason(currentDoc.docId, e.target.value)}
+                        placeholder="Rejection note for this document (e.g. Expired, Blurry, Invalid)..."
+                        style={{
+                          flex: 1,
+                          padding: "5px 10px",
+                          borderRadius: 6,
+                          border: `1.5px solid ${S.red}`,
+                          background: "#fff",
+                          fontSize: 12,
+                          fontFamily: "inherit",
+                          outline: "none",
+                        }}
+                      />
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        {quickDocumentReasons.slice(0, 3).map((chip, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setFlagReason(currentDoc.docId, chip)}
+                            style={{
+                              padding: "2px 7px",
+                              borderRadius: 4,
+                              border: `1px solid ${S.border}`,
+                              background: "#fff",
+                              color: S.textDim,
+                              fontSize: 10,
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {chip}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {currentDoc.rejectionReason && (
+                    <div style={{ fontSize: 11, color: S.red, marginLeft: "auto" }}>
+                      <strong>Previously:</strong> {currentDoc.rejectionReason}
+                    </div>
+                  )}
+                </div>
+
+                {/* THUMBNAIL FILMSTRIP */}
+                <div
+                  style={{
+                    background: "#080d1a",
+                    padding: "8px 16px",
+                    display: "flex",
+                    gap: 10,
+                    overflowX: "auto",
+                    flexShrink: 0,
+                    alignItems: "center",
+                  }}
+                >
+                  {slides.map((s, idx) => {
+                    const isActive = idx === currentSlide;
+                    const isFlagged = s.docId && s.docId in flagged;
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => setCurrentSlide(idx)}
+                        style={{
+                          width: 86,
+                          height: 64,
+                          borderRadius: 8,
+                          background: "#1e293b",
+                          border: `2px solid ${isActive ? S.gold : isFlagged ? S.red : "rgba(255,255,255,0.15)"}`,
+                          cursor: "pointer",
+                          position: "relative",
+                          overflow: "hidden",
+                          flexShrink: 0,
+                          display: "flex",
+                          flexDirection: "column",
+                          transition: "all 0.15s ease",
+                          boxShadow: isActive ? `0 0 12px ${S.gold}80` : "none",
+                        }}
+                      >
+                        {imgErrors[s.id] || !s.url ? (
+                          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
+                            📄
+                          </div>
+                        ) : (
+                          <img
+                            src={resolveDocUrl(s.url)}
+                            alt={s.title}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            onError={() => handleImgError(s.id)}
+                          />
+                        )}
+
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            background: "rgba(11, 19, 43, 0.85)",
+                            color: "#fff",
+                            fontSize: 9,
+                            fontWeight: 700,
+                            textAlign: "center",
+                            padding: "2px 4px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {s.title}
+                        </div>
+
+                        {isFlagged && (
+                          <div
+                            style={{
+                              position: "absolute",
+                              top: 3,
+                              right: 3,
+                              width: 14,
+                              height: 14,
+                              borderRadius: "50%",
+                              background: S.red,
+                              color: "#fff",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontSize: 8,
+                              fontWeight: 900,
+                            }}
+                          >
+                            !
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* MODAL BOTTOM ACTION BAR */}
+            <div
+              style={{
+                padding: "14px 20px",
+                borderTop: `1px solid ${S.border}`,
+                background: "#fff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>
+                  Use <strong>← / → keys</strong> to cycle documents
+                </span>
+                {flaggedCount > 0 && (
+                  <span style={{ fontSize: 12, fontWeight: 700, color: S.red }}>
+                    • {flaggedCount} document(s) flagged for rejection
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => setMode("reject")}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 22px",
+                    borderRadius: 10,
+                    border: `1.5px solid ${S.red}`,
+                    background: "#fff",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: S.red,
+                    transition: "all 0.15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = S.redBg; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#fff"; }}
+                >
+                  Reject Application & Add Note
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleApprove}
+                  disabled={loading}
+                  style={{
+                    padding: "11px 28px",
+                    borderRadius: 10,
+                    border: "none",
+                    cursor: loading ? "not-allowed" : "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    background: `linear-gradient(135deg,${S.gold},${S.goldLight})`,
+                    color: S.navy,
+                    opacity: loading ? 0.7 : 1,
+                    boxShadow: "0 4px 14px rgba(232,168,56,0.35)",
+                  }}
+                >
+                  {loading ? "Approving…" : "Approve Rider"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── VEHICLES LOCATION MAP ──────────────────────────────────────
+function VehiclesLocationMap({ vehicles }) {
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markersByIdRef = useRef({});
+  const overlaysByIdRef = useRef({});
+  const latestVehiclesByIdRef = useRef({});
+  const vehiclesRef = useRef([]);
+  const infoWindowRef = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+
+  // Camera control
+  const didInitialFitRef = useRef(false);
+  const userInteractedRef = useRef(false);
+  const programmaticMoveRef = useRef(false);
+
+  const safeVehicleKey = (v) => {
+    // Prefer stable backend id; fall back to other identifiers.
+    return (v && (v.id ?? v.asset_id ?? v.plate_number)) ?? null;
+  };
+
+  const parseVehicleLatLng = (v) => {
+    if (!v || v.latitude == null || v.longitude == null) return null;
+    const lat = parseFloat(v.latitude);
+    const lng = parseFloat(v.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    // Treat (0,0) as bad telemetry for this app (prevents world-zoom).
+    if (Math.abs(lat) < 1e-9 && Math.abs(lng) < 1e-9) return null;
+    return { lat, lng };
+  };
+
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+
+  const median = (arr) => {
+    if (!arr || arr.length === 0) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const mid = Math.floor(s.length / 2);
+    return (s.length % 2 === 1) ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+  };
+
+  // Haversine distance in km
+  const haversineKm = (a, b) => {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const sin1 = Math.sin(dLat / 2);
+    const sin2 = Math.sin(dLng / 2);
+    const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  };
+
+  const computeClusterInliers = (points, { keepPercentile = 0.9, madFactor = 6 } = {}) => {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+
+    const medLat = median(points.map(p => p.lat));
+    const medLng = median(points.map(p => p.lng));
+    if (medLat == null || medLng == null) return points;
+    const center = { lat: medLat, lng: medLng };
+
+    const withD = points.map(p => ({ p, d: haversineKm(center, p) }));
+    const dists = withD.map(x => x.d);
+    const medD = median(dists);
+    if (medD == null) return points;
+    const absDev = dists.map(d => Math.abs(d - medD));
+    const mad = median(absDev) ?? 0;
+
+    const sorted = [...withD].sort((a, b) => a.d - b.d);
+    const pctIdx = Math.max(0, Math.min(sorted.length - 1, Math.floor(keepPercentile * (sorted.length - 1))));
+    const pctCutoff = sorted[pctIdx]?.d ?? sorted[sorted.length - 1]?.d ?? 0;
+
+    // Combine a percentile cutoff with a MAD cutoff; choose the more "zoomed-in" (smaller) cutoff,
+    // but never so strict that we drop to <3 points when we have more.
+    const madCutoff = (mad > 0) ? (medD + madFactor * mad) : pctCutoff;
+    let cutoff = Math.min(pctCutoff, madCutoff);
+    if (!Number.isFinite(cutoff) || cutoff <= 0) cutoff = pctCutoff;
+
+    let inliers = withD.filter(x => x.d <= cutoff).map(x => x.p);
+    if (inliers.length < Math.min(3, points.length)) inliers = points;
+    return inliers;
+  };
+
+  const fitMapToVehicles = (vehiclesList) => {
+    const map = mapInstanceRef.current;
+    if (!map || !window.google || !window.google.maps) return false;
+
+    const pts = (vehiclesList || [])
+      .map(v => parseVehicleLatLng(v))
+      .filter(Boolean);
+
+    if (pts.length === 0) return false;
+
+    const inliers = computeClusterInliers(pts, { keepPercentile: 0.9, madFactor: 6 });
+
+    programmaticMoveRef.current = true;
+
+    if (inliers.length === 1) {
+      map.setCenter(inliers[0]);
+      map.setZoom(15);
+    } else {
+      const bounds = new window.google.maps.LatLngBounds();
+      inliers.forEach(p => bounds.extend(p));
+      map.fitBounds(bounds, { padding: 60 });
+      const z = map.getZoom?.();
+      if (typeof z === 'number' && z > 16) map.setZoom(16);
+    }
+
+    didInitialFitRef.current = true;
+    return true;
+  };
+
+  useEffect(() => {
+    const init = () => {
+      if (!mapRef.current || mapInstanceRef.current) return;
+      if (!window.google || !window.google.maps) return;
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: 6.5244, lng: 3.3792 }, zoom: 11,
+        mapTypeControl: false, streetViewControl: false, fullscreenControl: true, zoomControl: true,
+        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }]
+      });
+      mapInstanceRef.current = map;
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+
+      // Track user interaction so we don't unexpectedly override their camera.
+      map.addListener('dragstart', () => { userInteractedRef.current = true; });
+      map.addListener('zoom_changed', () => {
+        if (!programmaticMoveRef.current) userInteractedRef.current = true;
+      });
+      map.addListener('idle', () => {
+        // Clear programmatic guard after a fit/center/zoom.
+        if (programmaticMoveRef.current) programmaticMoveRef.current = false;
+      });
+
+      setMapReady(true);
+    };
+    let unsub = null;
+    if (window.google && window.google.maps) { init(); }
+    else { window.addEventListener('google-maps-loaded', init); unsub = () => window.removeEventListener('google-maps-loaded', init); }
+    return () => {
+      if (unsub) unsub();
+      Object.values(markersByIdRef.current).forEach(m => {
+        try {
+          if (m?._labelOverlay) m._labelOverlay.setMap(null);
+          m?.setMap?.(null);
+        } catch { }
+      });
+      markersByIdRef.current = {};
+      overlaysByIdRef.current = {};
+      if (infoWindowRef.current) { infoWindowRef.current.close(); infoWindowRef.current = null; }
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapReady || !mapInstanceRef.current || !window.google) return;
+    const map = mapInstanceRef.current;
+    vehiclesRef.current = vehicles || [];
+
+    // Helper: build a rotated emoji icon as a canvas-based marker image
+    const buildVehicleIcon = (emoji, rotation, borderColor) => {
+      const size = 40;
+      const canvas = document.createElement('canvas');
+      canvas.width = size; canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      // Rotate around center
+      ctx.translate(size / 2, size / 2);
+      ctx.rotate((Math.PI / 180) * (rotation || 0));
+      // Status-colored ring
+      ctx.beginPath();
+      ctx.arc(0, 0, size / 2 - 2, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = borderColor;
+      ctx.stroke();
+      // Emoji
+      ctx.font = '20px serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#000';
+      ctx.fillText(emoji, 0, 1);
+      return { url: canvas.toDataURL(), scaledSize: new window.google.maps.Size(size, size), anchor: new window.google.maps.Point(size / 2, size / 2) };
+    };
+
+    const LabelOverlayCtor = class extends window.google.maps.OverlayView {
+      constructor(latLng, div) {
+        super();
+        this.latLng = latLng;
+        this.div = div;
+      }
+      onAdd() {
+        (this.getPanes().floatPane || this.getPanes().overlayLayer).appendChild(this.div);
+      }
+      draw() {
+        const proj = this.getProjection();
+        if (!proj || !this.latLng) return;
+        const pos = proj.fromLatLngToDivPixel(this.latLng);
+        if (!pos) return;
+        this.div.style.left = (pos.x - this.div.offsetWidth / 2) + 'px';
+        this.div.style.top = (pos.y - 32) + 'px';
+      }
+      onRemove() {
+        if (this.div?.parentNode) this.div.parentNode.removeChild(this.div);
+      }
+      setPosition(latLng) {
+        this.latLng = latLng;
+        this.draw();
+      }
+    };
+
+    const nextKeys = new Set();
+
+    (vehicles || []).forEach(v => {
+      const key = safeVehicleKey(v);
+      if (!key) return;
+      const ll = parseVehicleLatLng(v);
+      if (!ll) return;
+      nextKeys.add(String(key));
+      latestVehiclesByIdRef.current[String(key)] = v;
+
+      const color = v.engine_status === 'on' ? '#22c55e' : v.engine_status === 'idle' ? '#F59E0B' : v.engine_status === 'off' ? '#EF4444' : '#6b7280';
+      const statusLabel = v.engine_status === 'on' ? 'Engine On' : v.engine_status === 'idle' ? 'Idle' : v.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+      const typeIcon = v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐';
+      const rotation = parseFloat(v.course) || 0;
+
+      // Floating label: plate | rider | speed
+      const riderName = v.assigned_rider ? v.assigned_rider.name : '';
+      const speedStr = v.speed > 0 ? `${v.speed} km/h` : '';
+      const labelParts = [v.plate_number, riderName, speedStr].filter(Boolean);
+
+      // Create or update marker
+      let marker = markersByIdRef.current[String(key)];
+      if (!marker) {
+        marker = new window.google.maps.Marker({
+          position: ll,
+          map,
+          title: v.plate_number,
+          icon: buildVehicleIcon(typeIcon, rotation, color),
+          zIndex: v.engine_status === 'on' ? 10 : 5,
+        });
+        markersByIdRef.current[String(key)] = marker;
+
+        marker.addListener('click', () => {
+          const latest = latestVehiclesByIdRef.current[String(key)] || v;
+          const latestColor = latest.engine_status === 'on' ? '#22c55e' : latest.engine_status === 'idle' ? '#F59E0B' : latest.engine_status === 'off' ? '#EF4444' : '#6b7280';
+          const latestStatus = latest.engine_status === 'on' ? 'Engine On' : latest.engine_status === 'idle' ? 'Idle' : latest.engine_status === 'off' ? 'Engine Off' : 'Unknown';
+          const latestIcon = latest.vehicle_type === 'bike' ? '🏍️' : latest.vehicle_type === 'car' ? '🚗' : '🚐';
+          const totalDistanceStr = fmtDistance(latest.total_distance, latest.unit_of_distance);
+          const distanceTodayStr = fmtDistance(latest.distance_today, latest.unit_of_distance);
+          const yesterdayDistanceStr = fmtDistance(latest.yesterday_distance, latest.unit_of_distance);
+          const yesterdayOrdersDistStr = fmtDistance(latest.total_yesterday_orders_distance_km ?? latest.yesterday_orders_distance ?? latest.total_yesterday_order_distance, latest.unit_of_distance || 'km');
+          infoWindowRef.current.setContent(
+            `<div style="font-family:sans-serif;padding:6px 2px;min-width:180px;">` +
+            `<div style="font-weight:700;font-size:13px;margin-bottom:4px;">${latestIcon} ${latest.plate_number}</div>` +
+            `<div style="color:${latestColor};font-weight:600;font-size:11px;">${latestStatus}</div>` +
+            `<div style="color:#555;font-size:11px;margin-top:4px;">${latest.asset_id} • ${(latest.vehicle_type || '').toUpperCase()}</div>` +
+            (latest.make || latest.model ? `<div style="color:#888;font-size:10px;">${latest.make || ''} ${latest.model || ''}</div>` : '') +
+            (latest.speed > 0 ? `<div style="color:#555;font-size:10px;margin-top:3px;">🏎️ ${latest.speed} km/h</div>` : '') +
+            `<div style="color:#555;font-size:10px;margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">` +
+            `<span><span style="color:#888;font-weight:700;">Total:</span> ${totalDistanceStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Today Dist:</span> ${distanceTodayStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yesterday Dist:</span> ${yesterdayDistanceStr}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Today Orders:</span> ${latest.orders_today != null ? latest.orders_today : '—'}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yesterday Orders:</span> ${latest.yesterday_orders != null ? latest.yesterday_orders : '—'}</span>` +
+            `<span><span style="color:#888;font-weight:700;">Yest Orders Dist:</span> ${yesterdayOrdersDistStr}</span>` +
+            `</div>` +
+            (latest.assigned_rider ? `<div style="color:#a855f7;font-size:10px;margin-top:3px;">👤 ${latest.assigned_rider.name}</div>` : '<div style="color:#aaa;font-size:10px;margin-top:3px;">Unassigned</div>') +
+            `</div>`
+          );
+          infoWindowRef.current.open(map, marker);
+        });
+
+        // Label overlay
+        const labelDiv = document.createElement('div');
+        labelDiv.style.cssText = 'position:absolute;pointer-events:none;user-select:none;white-space:nowrap;' +
+          'background:rgba(255,255,255,0.92);border:1px solid rgba(15,23,42,0.12);border-radius:999px;' +
+          'padding:3px 8px;box-shadow:0 2px 6px rgba(0,0,0,0.16);backdrop-filter:blur(2px);' +
+          'font-family:sans-serif;font-size:10px;font-weight:700;color:#1B2A4A;line-height:1.2;letter-spacing:0.1px;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+        labelDiv.textContent = labelParts.join(' · ');
+        const overlay = new LabelOverlayCtor(new window.google.maps.LatLng(ll.lat, ll.lng), labelDiv);
+        overlay.setMap(map);
+        overlaysByIdRef.current[String(key)] = overlay;
+        marker._labelOverlay = overlay;
+      } else {
+        marker.setPosition(ll);
+        marker.setIcon(buildVehicleIcon(typeIcon, rotation, color));
+        marker.setZIndex(v.engine_status === 'on' ? 10 : 5);
+
+        const overlay = overlaysByIdRef.current[String(key)];
+        if (overlay) overlay.setPosition(new window.google.maps.LatLng(ll.lat, ll.lng));
+        // Update label text if overlay div exists
+        const div = overlay?.div;
+        if (div) {
+          const nextText = labelParts.join(' · ');
+          if (div.textContent !== nextText) div.textContent = nextText;
+          overlay?.draw?.();
+        }
+      }
+    });
+
+    // Remove markers for vehicles no longer present / no longer valid
+    Object.keys(markersByIdRef.current).forEach(k => {
+      if (nextKeys.has(k)) return;
+      const m = markersByIdRef.current[k];
+      try {
+        if (m?._labelOverlay) m._labelOverlay.setMap(null);
+        m?.setMap?.(null);
+      } catch { }
+      delete markersByIdRef.current[k];
+      delete overlaysByIdRef.current[k];
+      delete latestVehiclesByIdRef.current[k];
+    });
+
+    // Initial fit ONCE: only if user hasn't already taken control.
+    if (!didInitialFitRef.current && !userInteractedRef.current) {
+      fitMapToVehicles(vehicles);
+    }
+
+  }, [mapReady, vehicles]);
+
+  const withLocation = (vehicles || []).map(v => parseVehicleLatLng(v)).filter(Boolean).length;
+
+  return (
+    <div style={{ position: 'relative', height: '100%', borderRadius: 14, overflow: 'hidden', border: `1px solid ${S.border}`, background: S.card, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '10px 14px', borderBottom: `1px solid ${S.border}`, fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span>🗺️ Vehicle Locations</span>
+          <button
+            type="button"
+            onClick={() => fitMapToVehicles(vehiclesRef.current)}
+            disabled={!mapReady || withLocation === 0}
+            title="Recenter to the main cluster (ignores outliers like 0,0)"
+            style={{
+              padding: '5px 9px',
+              borderRadius: 10,
+              border: `1px solid ${S.border}`,
+              background: S.borderLight,
+              color: S.navy,
+              fontSize: 10,
+              fontWeight: 800,
+              cursor: (!mapReady || withLocation === 0) ? 'not-allowed' : 'pointer',
+              opacity: (!mapReady || withLocation === 0) ? 0.6 : 1,
+            }}
+          >
+            Recenter / Fit
+          </button>
+        </div>
+        <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 400 }}>{withLocation} of {(vehicles || []).length} vehicles with GPS</span>
+      </div>
+      <div style={{ flex: 1, position: 'relative' }}>
+        <div ref={mapRef} style={{ height: '100%', width: '100%' }} />
+        {withLocation === 0 && mapReady && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.03)' }}>
+            <div style={{ textAlign: 'center', color: S.textMuted }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>No GPS data available</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Vehicles will appear here when telemetry is received</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ padding: '6px 12px', borderTop: `1px solid ${S.border}`, fontSize: 10, color: S.textMuted, display: 'flex', gap: 12, flexShrink: 0 }}>
+        <span>🏍️ Bike  🚗 Car  🚐 Van</span>
+        <span style={{ marginLeft: 4 }}>|</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#22c55e', marginRight: 3, verticalAlign: 'middle' }} /> Engine On</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#F59E0B', marginRight: 3, verticalAlign: 'middle' }} /> Idle</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#EF4444', marginRight: 3, verticalAlign: 'middle' }} /> Engine Off</span>
+        <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#6b7280', marginRight: 3, verticalAlign: 'middle' }} /> Unknown</span>
+        <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>Click a marker for details</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── VEHICLES SCREEN ────────────────────────────────────────────
+function VehiclesScreen({ vehicles, onVehicleCreated, onVehicleUpdated }) {
+  const [filter, setFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [showCreateVehicle, setShowCreateVehicle] = useState(false);
+  const [detailVehicleId, setDetailVehicleId] = useState(null);
+  const [showMapModal, setShowMapModal] = useState(false);
+
+  const detailVehicle = detailVehicleId ? vehicles.find(v => v.id === detailVehicleId) : null;
+
+  const typeMap = { "Bike": "bike", "Car": "car", "Van": "van" };
+  const filtered = vehicles.filter(v => { if (filter === "Active" && !v.is_active) return false; if (filter === "Inactive" && v.is_active) return false; if (filter !== "All" && filter !== "Active" && filter !== "Inactive" && v.vehicle_type !== typeMap[filter]) return false; if (search) { const s = search.toLowerCase(); return (v.plate_number || '').toLowerCase().includes(s) || (v.asset_id || '').toLowerCase().includes(s) || (v.make || '').toLowerCase().includes(s) || (v.model || '').toLowerCase().includes(s); } return true; });
+  const ec = (s) => s === "on" ? S.green : s === "idle" ? S.yellow : s === "off" ? S.red : S.textMuted;
+  const gridCols = "70px 1.2fr 50px 0.9fr 0.9fr 75px 105px 105px 115px 90px 105px 115px 1.3fr 75px";
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Vehicles" value={vehicles.length} />
+        <StatCard label="Active" value={vehicles.filter(v => v.is_active).length} color={S.green} />
+        <StatCard label="Engine On" value={vehicles.filter(v => v.engine_status === "on").length} color={S.green} />
+        <StatCard label="With GPS" value={vehicles.filter(v => v.latitude && v.longitude).length} color={S.gold} />
+      </div>
+
+      <div style={{ position: "relative", display: "flex", flexDirection: "column", gap: 16, height: "calc(100vh - 240px)" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", height: "100%" }}>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexShrink: 0 }}>
+            <div style={{ display: "flex", gap: 4 }}>
+              {["All", "Active", "Inactive", "Bike", "Car", "Van"].map(f => (<button key={f} onClick={() => setFilter(f)} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${filter === f ? "transparent" : S.border}`, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, background: filter === f ? S.goldPale : S.card, color: filter === f ? S.gold : S.textMuted }}>{f}</button>))}
+            </div>
+            <div style={{ flex: 1, background: S.card, borderRadius: 10, border: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 8, padding: "0 12px" }}>
+              <span style={{ opacity: 0.4 }}>{I.search}</span>
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vehicles..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
+            </div>
+            <button onClick={() => setShowCreateVehicle(true)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 16px", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, whiteSpace: "nowrap", flexShrink: 0 }}>
+              {I.plus} Add Vehicle
+            </button>
+          </div>
+          <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflowX: "auto", overflowY: "hidden", flex: 1, display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}`, flexShrink: 0 }}>
+              <span>Asset ID</span><span>Plate</span><span>Type</span><span>Make</span><span>Model</span><span>Speed</span><span>Total Distance</span><span>Distance Today</span><span>Yesterday Distance</span><span>Today Orders</span><span>Yesterday Orders</span><span>Yest Orders Dist</span><span>Rider</span><span>Status</span>
+            </div>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {filtered.map(v => (
+                <div key={v.id} onClick={() => setDetailVehicleId(v.id)} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", transition: "background 0.12s", alignItems: "center" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: S.gold, fontFamily: "'Space Mono',monospace" }}>{v.asset_id}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600 }}>{v.plate_number}</span>
+                  <span style={{ fontSize: 11, color: S.textDim }}>{v.vehicle_type === 'bike' ? '🏍️' : v.vehicle_type === 'car' ? '🚗' : '🚐'}</span>
+                  <span title={v.make || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.make || '—'}</span>
+                  <span title={v.model || '—'} style={{ fontSize: 11, color: S.textDim, maxWidth: 60, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{v.model || '—'}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{v.speed || 0} km/h</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_distance, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.distance_today, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.yesterday_distance, v.unit_of_distance)}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.orders_today === null || v.orders_today === undefined) ? "—" : v.orders_today}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{(v.yesterday_orders === null || v.yesterday_orders === undefined) ? "—" : v.yesterday_orders}</span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{fmtDistance(v.total_yesterday_orders_distance_km ?? v.yesterday_orders_distance ?? v.total_yesterday_order_distance, v.unit_of_distance || 'km')}</span>
+                  <span style={{ fontSize: 11, color: v.assigned_rider ? S.purple : S.textMuted, fontWeight: v.assigned_rider ? 600 : 400 }}>{v.assigned_rider ? v.assigned_rider.name : '— None'}</span>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: v.is_active ? S.greenBg : S.redBg, color: v.is_active ? S.green : S.red }}>{v.is_active ? "Active" : "Inactive"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <button
+          onClick={() => setShowMapModal(true)}
+          style={{
+            position: "absolute",
+            bottom: 24,
+            right: 24,
+            padding: "14px 24px",
+            borderRadius: 30,
+            border: "none",
+            background: `linear-gradient(135deg, ${S.navy}, ${S.navyLight})`,
+            color: "#fff",
+            fontSize: 14,
+            fontWeight: 800,
+            cursor: "pointer",
+            boxShadow: "0 8px 20px rgba(27,42,74,0.3)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            zIndex: 100,
+          }}
+        >
+          <span style={{ fontSize: 18 }}>🗺️</span> View Map
+        </button>
+      </div>
+
+      {showMapModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1200, display: "flex", alignItems: "center", justifyContent: "center", padding: 40 }} onClick={e => { if (e.target === e.currentTarget) setShowMapModal(false); }}>
+          <div style={{ background: S.card, borderRadius: 16, width: "100%", height: "100%", maxWidth: 1200, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 40px rgba(0,0,0,0.4)", position: "relative", margin: "0 auto" }}>
+            <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>🗺️ Vehicle Locations</div>
+              <button onClick={() => setShowMapModal(false)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: S.textMuted, lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <VehiclesLocationMap vehicles={vehicles} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCreateVehicle && (
+        <CreateVehicleModal
+          onClose={() => setShowCreateVehicle(false)}
+          onVehicleCreated={() => { if (onVehicleCreated) onVehicleCreated(); setShowCreateVehicle(false); }}
+        />
+      )}
+      {detailVehicle && (
+        <VehicleDetailModal
+          vehicle={detailVehicle}
+          onClose={() => setDetailVehicleId(null)}
+          onVehicleUpdated={() => { if (onVehicleUpdated) onVehicleUpdated(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── REVENUE SCREEN ─────────────────────────────────────────────
+const REVENUE_PERIOD_OPTS = [
+  { value: "today", label: "Today" },
+  { value: "this_week", label: "This Week" },
+  { value: "this_month", label: "This Month" },
+  { value: "this_year", label: "This Year" },
+];
+
+function RevenueScreen() {
+  const [period, setPeriod] = useState("today");
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    RevenueAPI.getAll({ period })
+      .then(res => { if (!cancelled) setData(res); })
+      .catch(() => { if (!cancelled) setError("Failed to load revenue report."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [period]);
+
+  const rows = data?.results || [];
+  const summary = data?.summary || {};
+  const gridCols = "1.4fr 1fr 1.2fr 0.9fr 0.9fr 0.9fr";
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <StatCard label="Total Revenue" value={`₦${Number(summary.total_amount_earned || 0).toLocaleString()}`} />
+        <StatCard label="Total Distance" value={`${Number(summary.total_distance_km || 0).toLocaleString()} km`} />
+        <StatCard label="Overall Ratio" value={summary.overall_ratio != null ? summary.overall_ratio.toLocaleString() : "—"} color={S.gold} />
+        <StatCard label="Meeting Target" value={`${summary.vehicles_meeting_target || 0}/${summary.total_vehicles || 0}`} color={S.green} />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <select
+          value={period}
+          onChange={e => setPeriod(e.target.value)}
+          style={{ padding: "7px 12px", borderRadius: 8, border: `1px solid ${S.gold}`, background: "rgba(232,168,56,0.12)", color: S.gold, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: "pointer", outline: "none" }}
+        >
+          {REVENUE_PERIOD_OPTS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+      </div>
+
+      <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
+          <span>Vehicle</span><span>Distance</span><span>Amount Earned</span><span>Ratio</span><span>Target Ratio</span><span>Orders</span>
+        </div>
+        <div style={{ maxHeight: "calc(100vh - 360px)", overflowY: "auto" }}>
+          {loading && <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>Loading…</div>}
+          {error && <div style={{ padding: 24, textAlign: "center", color: S.red, fontSize: 12 }}>{error}</div>}
+          {!loading && !error && rows.length === 0 && (
+            <div style={{ padding: 24, textAlign: "center", color: S.textMuted, fontSize: 12 }}>No active vehicles found.</div>
+          )}
+          {!loading && !error && rows.map(r => {
+            const hasTarget = Number(r.target_ratio) > 0;
+            const ratioColor = r.ratio == null ? S.textMuted : (!hasTarget ? S.text : (r.meets_target ? S.green : S.red));
+            return (
+              <div key={r.vehicle_asset_id} style={{ display: "grid", gridTemplateColumns: gridCols, padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{r.plate_number}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{Number(r.distance_km).toFixed(2)} km</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>₦{Number(r.amount_earned).toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: "'Space Mono',monospace", color: ratioColor }}>{r.ratio == null ? "—" : r.ratio.toLocaleString()}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace", color: S.textDim }}>{hasTarget ? Number(r.target_ratio).toLocaleString() : "—"}</span>
+                <span style={{ fontSize: 12, fontFamily: "'Space Mono',monospace" }}>{r.orders_count}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── VEHICLE DETAIL MODAL ───────────────────────────────────────
+function VehicleDetailModal({ vehicle, onClose, onVehicleUpdated }) {
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    plate_number: vehicle.plate_number || "",
+    vehicle_type: vehicle.vehicle_type || "bike",
+    make: vehicle.make || "",
+    model: vehicle.model || "",
+    year: vehicle.year ? String(vehicle.year) : "",
+    color: vehicle.color || "",
+    vin: vehicle.vin || "",
+    insurance_expiry: vehicle.insurance_expiry || "",
+    registration_expiry: vehicle.registration_expiry || "",
+    road_worthiness_expiry: vehicle.road_worthiness_expiry || "",
+    is_active: vehicle.is_active,
+    target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0",
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const cancelEdit = () => {
+    setEditing(false); setError(null);
+    setForm({ plate_number: vehicle.plate_number || "", vehicle_type: vehicle.vehicle_type || "bike", make: vehicle.make || "", model: vehicle.model || "", year: vehicle.year ? String(vehicle.year) : "", color: vehicle.color || "", vin: vehicle.vin || "", insurance_expiry: vehicle.insurance_expiry || "", registration_expiry: vehicle.registration_expiry || "", road_worthiness_expiry: vehicle.road_worthiness_expiry || "", is_active: vehicle.is_active, target_ratio: vehicle.target_ratio != null ? String(vehicle.target_ratio) : "0" });
+  };
+
+  const handleSave = async () => {
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10); else delete payload.year;
+      payload.target_ratio = payload.target_ratio === "" ? "0" : parseFloat(payload.target_ratio);
+      Object.keys(payload).forEach(k => { if (payload[k] === "" && k !== "plate_number" && k !== "vehicle_type" && k !== "is_active") delete payload[k]; });
+      await VehicleAssetsAPI.update(vehicle.id, payload);
+      if (onVehicleUpdated) onVehicleUpdated();
+      setEditing(false);
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to save changes.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const typeIcon = vehicle.vehicle_type === 'bike' ? '🏍️' : vehicle.vehicle_type === 'car' ? '🚗' : '🚐';
+  const ec = vehicle.engine_status === 'on' ? S.green : vehicle.engine_status === 'idle' ? S.yellow : vehicle.engine_status === 'off' ? S.red : S.textMuted;
+  const iSt = { width: "100%", padding: "8px 10px", border: `1px solid ${S.border}`, borderRadius: 6, fontSize: 12, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4 };
+
+  const fmtDistance = (raw, unit) => {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    const n = (typeof raw === "number") ? raw : parseFloat(raw);
+    if (!Number.isFinite(n)) return "—";
+    const u = String(unit || "").trim();
+    return u ? `${n.toFixed(2)} ${u}` : n.toFixed(2);
+  };
+  const totalDistanceStr = fmtDistance(vehicle.total_distance, vehicle.unit_of_distance);
+  const distanceTodayStr = fmtDistance(vehicle.distance_today, vehicle.unit_of_distance);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 660, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", display: "flex", flexDirection: "column" }}>
+
+        {/* ── Header ── */}
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
+          <div style={{ width: 46, height: 46, borderRadius: 12, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24 }}>{typeIcon}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>{vehicle.plate_number}</div>
+            <div style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{vehicle.asset_id}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <>
+                <button onClick={cancelEdit} style={{ padding: "7px 14px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.textDim }}>Cancel</button>
+                <button onClick={handleSave} disabled={loading} style={{ padding: "7px 18px", borderRadius: 8, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 12, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Saving…" : "Save Changes"}</button>
+              </>
+            ) : (
+              <button onClick={() => setEditing(true)} style={{ padding: "7px 16px", borderRadius: 8, border: `1px solid ${S.border}`, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: 12, background: S.card, color: S.text, display: "flex", alignItems: "center", gap: 6 }}>✏️ Edit</button>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 4 }}>{I.x}</button>
+          </div>
+        </div>
+
+        {error && <div style={{ margin: "12px 24px 0", padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600 }}>{error}</div>}
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 22 }}>
+
+          {/* ── Status badges / is_active toggle ── */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {editing ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <label style={{ fontSize: 12, fontWeight: 600, color: S.textDim }}>Status:</label>
+                <select value={form.is_active ? "active" : "inactive"} onChange={e => set("is_active", e.target.value === "active")} style={{ ...iSt, width: "auto", padding: "6px 10px" }}>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            ) : (
+              <>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: vehicle.is_active ? S.greenBg : S.redBg, color: vehicle.is_active ? S.green : S.red }}>{vehicle.is_active ? "ACTIVE" : "INACTIVE"}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 8, background: `${ec}18`, color: ec }}>{(vehicle.engine_status || 'unknown').toUpperCase()}</span>
+              </>
+            )}
+          </div>
+
+          {/* ── Vehicle Info ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Vehicle Info</div>
+            {editing ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div><label style={lSt}>Plate Number *</label><input value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Type</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+                <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+                <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+                <div><label style={lSt}>Year</label><input type="number" value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" /></div>
+                <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+                <div style={{ gridColumn: "1/-1" }}><label style={lSt}>VIN</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 24px" }}>
+                {[{ l: "Asset ID", v: vehicle.asset_id }, { l: "Plate Number", v: vehicle.plate_number }, { l: "Type", v: (vehicle.vehicle_type || '').toUpperCase() }, { l: "Make", v: vehicle.make || '—' }, { l: "Model", v: vehicle.model || '—' }, { l: "Year", v: vehicle.year || '—' }, { l: "Color", v: vehicle.color || '—' }, { l: "VIN", v: vehicle.vin || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Telemetry (always read-only) ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Telemetry <span style={{ fontWeight: 400, fontSize: 9 }}>(read-only)</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+              {[{ l: "Speed", v: `${vehicle.speed || 0} km/h`, c: S.text }, { l: "Heading", v: `${vehicle.course || 0}°`, c: S.text }, { l: "Engine", v: (vehicle.engine_status || 'unknown').toUpperCase(), c: ec }, { l: "GPS", v: vehicle.latitude ? '📍 Active' : 'No Data', c: vehicle.latitude ? S.green : S.textMuted }].map(s => (
+                <div key={s.l} style={{ padding: 10, background: S.borderLight, borderRadius: 8, textAlign: "center" }}><div style={{ fontSize: 13, fontWeight: 800, color: s.c, fontFamily: "'Space Mono',monospace" }}>{s.v}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 2 }}>{s.l}</div></div>
+              ))}
+            </div>
+            <div style={{ marginTop: 8, display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Total:</span> {totalDistanceStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today Distance:</span> {distanceTodayStr}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Distance:</span> {fmtDistance(vehicle.yesterday_distance, vehicle.unit_of_distance)}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Today Orders:</span> {vehicle.orders_today != null ? vehicle.orders_today : "—"}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders:</span> {vehicle.yesterday_orders != null ? vehicle.yesterday_orders : "—"}</span>
+              <span><span style={{ fontWeight: 700, color: S.textDim }}>Yesterday Orders Distance:</span> {fmtDistance(vehicle.total_yesterday_orders_distance_km ?? vehicle.yesterday_orders_distance ?? vehicle.total_yesterday_order_distance, vehicle.unit_of_distance || 'km')}</span>
+            </div>
+            {vehicle.latitude && vehicle.longitude && (
+              <div style={{ marginTop: 8, fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>
+                📍 {parseFloat(vehicle.latitude).toFixed(6)}, {parseFloat(vehicle.longitude).toFixed(6)}
+              </div>
+            )}
+          </div>
+
+          {/* ── Performance Target ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Performance Target</div>
+            {editing ? (
+              <div><label style={lSt}>Target Ratio (₦ per km)</label><input type="number" step="0.01" value={form.target_ratio} onChange={e => set("target_ratio", e.target.value)} style={iSt} placeholder="0.00" /></div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}>
+                <span style={{ fontSize: 12, color: S.textMuted }}>Target Ratio</span>
+                <span style={{ fontSize: 12, fontWeight: 600 }}>{vehicle.target_ratio && Number(vehicle.target_ratio) > 0 ? `₦${Number(vehicle.target_ratio).toLocaleString()}/km` : "Not set"}</span>
+              </div>
+            )}
+          </div>
+
+          {/* ── Documents ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Documents</div>
+            {editing ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div><label style={lSt}>Insurance Expiry</label><input type="date" value={form.insurance_expiry} onChange={e => set("insurance_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Registration Expiry</label><input type="date" value={form.registration_expiry} onChange={e => set("registration_expiry", e.target.value)} style={iSt} /></div>
+                <div><label style={lSt}>Road Worthiness Expiry</label><input type="date" value={form.road_worthiness_expiry} onChange={e => set("road_worthiness_expiry", e.target.value)} style={iSt} /></div>
+              </div>
+            ) : (
+              <div>
+                {[{ l: "Insurance Expiry", v: vehicle.insurance_expiry || '—' }, { l: "Registration Expiry", v: vehicle.registration_expiry || '—' }, { l: "Road Worthiness Expiry", v: vehicle.road_worthiness_expiry || '—' }].map(f => (
+                  <div key={f.l} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderBottom: `1px solid ${S.borderLight}` }}><span style={{ fontSize: 12, color: S.textMuted }}>{f.l}</span><span style={{ fontSize: 12, fontWeight: 600 }}>{f.v}</span></div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Assigned Rider ── */}
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>Assigned Rider</div>
+            {vehicle.assigned_rider ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: S.borderLight, borderRadius: 10 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 800, color: S.gold }}>{vehicle.assigned_rider.name.split(" ").map(n => n[0]).join("")}</div>
+                <div><div style={{ fontSize: 14, fontWeight: 700 }}>{vehicle.assigned_rider.name}</div><div style={{ fontSize: 11, color: S.textDim, fontFamily: "'Space Mono',monospace" }}>{vehicle.assigned_rider.rider_id} • {vehicle.assigned_rider.phone}</div></div>
+              </div>
+            ) : (
+              <div style={{ color: S.textMuted, fontSize: 12, padding: "6px 0" }}>No rider assigned to this vehicle</div>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CREATE VEHICLE MODAL ───────────────────────────────────────
+function CreateVehicleModal({ onClose, onVehicleCreated }) {
+  const [form, setForm] = useState({ plate_number: "", vehicle_type: "bike", make: "", model: "", year: "", color: "", vin: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError(null);
+    try {
+      const payload = { ...form };
+      if (payload.year) payload.year = parseInt(payload.year, 10);
+      else delete payload.year;
+      Object.keys(payload).forEach(k => { if (!payload[k]) delete payload[k]; });
+      payload.plate_number = form.plate_number; // always required
+      payload.vehicle_type = form.vehicle_type;
+      await VehicleAssetsAPI.create(payload);
+      onVehicleCreated();
+      onClose();
+    } catch (err) {
+      const msg = err?.plate_number?.[0] || err?.non_field_errors?.[0] || err?.detail || "Failed to create vehicle.";
+      setError(msg);
+    } finally { setLoading(false); }
+  };
+
+  const iSt = { width: "100%", padding: "10px 12px", border: `1px solid ${S.border}`, borderRadius: 8, fontSize: 13, background: S.bg, color: S.text, fontFamily: "inherit", boxSizing: "border-box" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
+  const row = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, padding: 28, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22 }}>
+          <div><div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Add New Vehicle</div><div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Register a new vehicle asset</div></div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
+        </div>
+        {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 8, fontSize: 12, fontWeight: 600, marginBottom: 14 }}>{error}</div>}
+        <form onSubmit={handleSubmit}>
+          <div style={row}>
+            <div><label style={lSt}>Plate Number *</label><input required value={form.plate_number} onChange={e => set("plate_number", e.target.value)} style={iSt} placeholder="LAG-123-AB" /></div>
+            <div><label style={lSt}>Type *</label><select value={form.vehicle_type} onChange={e => set("vehicle_type", e.target.value)} style={iSt}><option value="bike">Bike</option><option value="car">Car</option><option value="van">Van</option></select></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Make</label><input value={form.make} onChange={e => set("make", e.target.value)} style={iSt} placeholder="Honda" /></div>
+            <div><label style={lSt}>Model</label><input value={form.model} onChange={e => set("model", e.target.value)} style={iSt} placeholder="ACE 125" /></div>
+          </div>
+          <div style={row}>
+            <div><label style={lSt}>Year</label><input value={form.year} onChange={e => set("year", e.target.value)} style={iSt} placeholder="2024" type="number" /></div>
+            <div><label style={lSt}>Color</label><input value={form.color} onChange={e => set("color", e.target.value)} style={iSt} placeholder="Red" /></div>
+          </div>
+          <div style={{ marginBottom: 14 }}><label style={lSt}>VIN (Optional)</label><input value={form.vin} onChange={e => set("vin", e.target.value)} style={iSt} placeholder="Vehicle Identification Number" /></div>
+          <button type="submit" disabled={loading} style={{ width: "100%", padding: "12px 0", borderRadius: 10, border: "none", cursor: loading ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: 14, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: loading ? 0.7 : 1 }}>{loading ? "Creating…" : "Create Vehicle"}</button>
+        </form>
+      </div>
     </div>
   );
 }
@@ -2253,6 +6531,8 @@ function RidersScreen({ riders, orders, selectedId, onSelect, onBack, onViewOrde
 // ─── MERCHANTS ──────────────────────────────────────────────────
 function MerchantsScreen({ data }) {
   const [search, setSearch] = useState("");
+  const [pricingMerchant, setPricingMerchant] = useState(null);
+  const [pricingError, setPricingError] = useState(null);
   const f = data.filter(m => !search || m.name.toLowerCase().includes(search.toLowerCase()) || m.contact.toLowerCase().includes(search.toLowerCase()));
   return (
     <div>
@@ -2266,11 +6546,19 @@ function MerchantsScreen({ data }) {
         <span style={{ opacity: 0.4 }}>{I.search}</span>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search merchants..." style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, fontFamily: "inherit", height: 38, outline: "none" }} />
       </div>
+      {pricingError && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 10, color: S.red, fontSize: 12, fontWeight: 700, marginBottom: 12 }}>⚠️ {pricingError}</div>}
       <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "10px 16px", background: S.borderLight, fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px", borderBottom: `1px solid ${S.border}` }}>
           <span>ID</span><span>Business</span><span>Contact</span><span>Category</span><span>Total</span><span>Month</span><span>Wallet</span><span>Status</span><span>Joined</span>
         </div>
-        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        {f.map(m => (<div key={m.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr 90px 70px 70px 100px 70px 80px", padding: "12px 16px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center", cursor: "pointer", transition: "background 0.12s" }} onMouseEnter={e => e.currentTarget.style.background = S.borderLight} onMouseLeave={e => e.currentTarget.style.background = "transparent"} onClick={() => {
+          setPricingError(null);
+          if (!m.userId) {
+            setPricingError("Pricing overrides require real merchant records (missing merchant userId in this row).");
+            return;
+          }
+          setPricingMerchant(m);
+        }}>
           <span style={{ fontSize: 11, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.id}</span>
           <span style={{ fontSize: 12, fontWeight: 700 }}>{m.name}</span>
           <div><div style={{ fontSize: 12 }}>{m.contact}</div><div style={{ fontSize: 10, color: S.textMuted, fontFamily: "'Space Mono',monospace" }}>{m.phone}</div></div>
@@ -2282,6 +6570,8 @@ function MerchantsScreen({ data }) {
           <span style={{ fontSize: 11, color: S.textMuted }}>{m.joined}</span>
         </div>))}
       </div>
+
+      {pricingMerchant && <MerchantPricingOverridesModal merchant={pricingMerchant} onClose={() => setPricingMerchant(null)} />}
     </div>
   );
 }
@@ -2327,52 +6617,574 @@ function CustomersScreen({ data }) {
   );
 }
 
-// ─── MESSAGING ──────────────────────────────────────────────────
+// ─── MESSAGING (Live) ───────────────────────────────────────────
 function MessagingScreen() {
-  const [tab, setTab] = useState("riders");
+  const [tab, setTab] = useState("customers");
+  const [conversations, setConversations] = useState([]);
   const [activeId, setActiveId] = useState(null);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const chats = tab === "riders" ? MSG_RIDER : MSG_CUSTOMER;
-  const active = activeId ? chats.find(c => c.id === activeId) : null;
-  const templates = ["Your order has been picked up. Rider is on the way.", "Rider is ~10 minutes away.", "Slight delay, we apologize.", "Delivered successfully. Thank you!", "Please confirm delivery address."];
+  const [searchTerm, setSearchTerm] = useState("");
+  const [loadingConvos, setLoadingConvos] = useState(true);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [ablyClient, setAblyClient] = useState(null);
+  const ablyRef = useRef(null);
+  const channelRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  const TEMPLATES = [
+    "Your order has been picked up. Rider is on the way.",
+    "Rider is ~10 minutes away.",
+    "Slight delay, we apologize.",
+    "Delivered successfully. Thank you!",
+    "Please confirm your delivery address.",
+  ];
+
+  // ── Load Ably token + init client ───────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    ActivityFeedAPI.getAblyToken().then(({ token }) => {
+      if (cancelled) return;
+      const client = new Realtime({ token });
+      ablyRef.current = client;
+      setAblyClient(client);
+    }).catch(err => console.warn('[Chat] Ably token error:', err));
+    return () => {
+      cancelled = true;
+      channelRef.current?.unsubscribe();
+      ablyRef.current?.close();
+    };
+  }, []);
+
+  // ── Fetch conversation list whenever tab changes ─────────────────
+  const loadConversations = useCallback(async () => {
+    setLoadingConvos(true);
+    // Keep activeId if it still exists in the new tab's list (optional optimization)
+    // For now, simpler to clear it on tab change as before.
+    setActiveId(null);
+    setMessages([]);
+    try {
+      const data = await ChatsAPI.list({ type: tab });
+      setConversations(data);
+    } catch (e) {
+      console.error('[Chat] loadConversations:', e);
+    } finally {
+      setLoadingConvos(false);
+    }
+  }, [tab]);
+
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  // ── When a conversation is selected, load history + subscribe ───
+  useEffect(() => {
+    if (!activeId) return;
+    let cancelled = false;
+
+    // Unsubscribe from previous channel
+    channelRef.current?.unsubscribe();
+    channelRef.current = null;
+
+    // Load message history
+    setLoadingMsgs(true);
+    ChatsAPI.getMessages(activeId).then(data => {
+      if (!cancelled) setMessages(data);
+    }).finally(() => { if (!cancelled) setLoadingMsgs(false); });
+
+    // Mark as read
+    ChatsAPI.markRead(activeId).then(() => {
+      setConversations(prev => prev.map(c =>
+        c.id === activeId ? { ...c, unread_count: 0 } : c
+      ));
+    }).catch(() => { });
+
+    // Subscribe to Ably channel for real-time messages
+    const convo = conversations.find(c => c.id === activeId);
+    if (convo && ablyClient) {
+      const channelName = `chat:${convo.type}:${convo.participant?.id}`;
+      const ch = ablyClient.channels.get(channelName);
+      channelRef.current = ch;
+      ch.subscribe('new_message', (msg) => {
+        if (cancelled) return;
+        const d = msg.data;
+        setMessages(prev => [
+          ...prev,
+          { id: d.id, sender_type: d.sender_type, content: d.content, timestamp: d.timestamp, is_read: false },
+        ]);
+        // Update sidebar preview
+        setConversations(prev => prev.map(c =>
+          c.id === d.conversation_id
+            ? { ...c, last_message: d.content, unread_count: d.sender_type !== 'agent' ? c.unread_count + 1 : c.unread_count }
+            : c
+        ));
+      });
+    }
+
+    return () => { cancelled = true; channelRef.current?.unsubscribe(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, ablyClient]);
+
+  // ── Auto-scroll to bottom when messages change ──────────────────
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ── Send ────────────────────────────────────────────────────────
+  const sendMessage = async () => {
+    const content = input.trim();
+    if (!content || !activeId || sending) return;
+    setSending(true);
+    setInput('');
+    try {
+      const msg = await ChatsAPI.sendMessage(activeId, content);
+      setMessages(prev => {
+        if (prev.find(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      setConversations(prev => prev.map(c =>
+        c.id === activeId ? { ...c, last_message: content } : c
+      ));
+    } catch (e) {
+      console.error('[Chat] sendMessage:', e);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const fmt = (ts) => ts ? new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) : '';
+
+  const ridersCount = conversations.filter(c => c.type === 'riders').reduce((s, c) => s + (c.unread_count || 0), 0);
+  const customersCount = conversations.filter(c => c.type === 'customers').reduce((s, c) => s + (c.unread_count || 0), 0);
+
+  const filteredList = conversations.filter(c =>
+    c.type === tab &&
+    (c.participant?.name || c.participant?.phone || "").toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const activeChat = conversations.find(c => c.id === activeId) || null;
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 0, height: "calc(100vh - 130px)", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
-      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${S.border}` }}>
-          {[{ id: "riders", l: "Riders", c: MSG_RIDER.reduce((s, m) => s + m.unread, 0) }, { id: "customers", l: "Customers", c: MSG_CUSTOMER.reduce((s, m) => s + m.unread, 0) }].map(t => (<button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); }} style={{ flex: 1, padding: "12px 0", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600, borderBottom: tab === t.id ? `2px solid ${S.gold}` : "2px solid transparent", color: tab === t.id ? S.gold : S.textMuted, background: "transparent" }}>{t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff", fontWeight: 700 }}>{t.c}</span>}</button>))}
+    <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gridTemplateRows: "100%", gap: 0, height: "100%", background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden", boxShadow: "0 10px 30px rgba(0,0,0,0.04)" }}>
+      {/* Sidebar - Enhanced list with search */}
+      <div style={{ borderRight: `1px solid ${S.border}`, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#f8fafc" }}>
+        <div style={{ padding: "20px 16px 15px", borderBottom: `1px solid ${S.border}`, background: "#fff" }}>
+          <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 12, padding: "3px", marginBottom: 16 }}>
+            {[
+              { id: "customers", l: "Customers", c: customersCount },
+              { id: "riders", l: "Riders", c: ridersCount },
+            ].map(t => (
+              <button key={t.id} onClick={() => { setTab(t.id); setActiveId(null); setSearchTerm(""); }}
+                style={{ flex: 1, padding: "8px 0", border: "none", borderRadius: 9, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, background: tab === t.id ? "#fff" : "transparent", color: tab === t.id ? S.gold : S.textMuted, boxShadow: tab === t.id ? "0 2px 6px rgba(0,0,0,0.08)" : "none", transition: "all 0.2s" }}>
+                {t.l}{t.c > 0 && <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", borderRadius: 6, background: S.gold, color: "#fff" }}>{t.c}</span>}
+              </button>
+            ))}
+          </div>
+          <div style={{ position: "relative" }}>
+            <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: S.textMuted, lineHeight: 0 }}>{I.search}</span>
+            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search conversations..."
+              style={{ width: "100%", padding: "10px 12px 10px 36px", borderRadius: 12, border: `1.5px solid ${S.border}`, fontSize: 13, outline: "none", background: "#f8fafc", fontFamily: "inherit", transition: "border-color 0.2s" }}
+              onFocus={e => e.target.style.borderColor = S.gold}
+              onBlur={e => e.target.style.borderColor = S.border}
+            />
+          </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto" }}>
-          {chats.map(ch => (<div key={ch.id} onClick={() => setActiveId(ch.id)} style={{ padding: "12px 14px", borderBottom: `1px solid ${S.borderLight}`, cursor: "pointer", background: activeId === ch.id ? S.goldPale : "transparent", transition: "background 0.12s" }} onMouseEnter={e => { if (activeId !== ch.id) e.currentTarget.style.background = S.borderLight; }} onMouseLeave={e => { if (activeId !== ch.id) e.currentTarget.style.background = "transparent"; }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ fontSize: 13, fontWeight: ch.unread ? 700 : 500 }}>{ch.name}</span><span style={{ fontSize: 10, color: S.textMuted }}>{ch.lastTime}</span></div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}><span style={{ fontSize: 11, color: ch.unread ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{ch.lastMsg}</span>{ch.unread > 0 && <span style={{ fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 8, background: S.gold, color: "#fff", minWidth: 16, textAlign: "center" }}>{ch.unread}</span>}</div>
-          </div>))}
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "10px 8px" }}>
+          {loadingConvos ? (
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+              <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+              Loading…
+            </div>
+          ) : filteredList.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13, fontWeight: 500 }}>
+              <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.5 }}>📭</div>
+              {searchTerm ? "No results found" : "No conversations yet"}
+            </div>
+          ) : filteredList.map(ch => {
+            const isSelected = activeId === ch.id;
+            const hasUnread = ch.unread_count > 0;
+            return (
+              <div key={ch.id} onClick={() => setActiveId(ch.id)}
+                style={{ padding: "14px 14px", borderRadius: 12, marginBottom: 4, cursor: "pointer", background: isSelected ? "#fff" : "transparent", boxShadow: isSelected ? "0 4px 12px rgba(0,0,0,0.04)" : "none", border: isSelected ? `1px solid ${S.border}` : "1px solid transparent", transition: "all 0.2s" }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = "#fff"; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 14, fontWeight: isSelected || hasUnread ? 700 : 500, color: S.navy }}>
+                    {ch.participant?.name || ch.participant?.phone || 'Unknown'}
+                  </span>
+                  <span style={{ fontSize: 10, color: S.textMuted, fontWeight: 500 }}>{fmt(ch.updated_at)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: hasUnread ? S.text : S.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 200, fontWeight: hasUnread ? 600 : 400 }}>
+                    {ch.last_message || 'No messages yet'}
+                  </span>
+                  {hasUnread && (
+                    <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 10, background: S.gold, color: "#fff", boxShadow: `0 2px 6px ${S.gold}40` }}>
+                      {ch.unread_count}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
-      {active ? (<div style={{ display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "12px 18px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color: S.gold }}>{active.name.split(" ").map(n => n[0]).join("")}</div>
-          <div><div style={{ fontSize: 14, fontWeight: 700 }}>{active.name}</div><div style={{ fontSize: 10, color: S.textMuted }}>{tab === "riders" ? "Rider" : "Customer"} • {active.id}</div></div>
+
+      {/* Chat area */}
+      {activeChat ? (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", minHeight: 0, background: "#fff" }}>
+          {/* Enhanced Chat Header */}
+          <div style={{ padding: "16px 24px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fff", zIndex: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 14, background: `linear-gradient(135deg, ${S.goldPale}, #fff)`, border: `1px solid ${S.gold}20`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 900, color: S.gold }}>
+                {(activeChat.participant?.name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: S.navy }}>{activeChat.participant?.name || activeChat.participant?.phone}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
+                  <div style={{ width: 6, height: 6, borderRadius: "50%", background: S.green }}></div>
+                  <div style={{ fontSize: 11, color: S.textMuted, fontWeight: 600 }}>{activeChat.type === 'riders' ? 'Rider' : 'Customer'} • {activeChat.participant?.phone}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Modern Messages with dynamic bubbles */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: 14, background: "#fcfdfe" }}>
+            {loadingMsgs ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                <div style={{ width: 24, height: 24, border: `2px solid ${S.border}`, borderTopColor: S.gold, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 12px" }}></div>
+                Loading history…
+              </div>
+            ) : messages.map(m => {
+              const isAgent = m.sender_type === 'agent';
+              return (
+                <div key={m.id} style={{ display: "flex", justifyContent: isAgent ? "flex-end" : "flex-start", animation: "fadeIn 0.2s ease-out" }}>
+                  <div style={{
+                    maxWidth: "75%",
+                    padding: "12px 18px",
+                    borderRadius: 18,
+                    borderBottomRightRadius: isAgent ? 4 : 18,
+                    borderBottomLeftRadius: isAgent ? 18 : 4,
+                    background: isAgent ? `linear-gradient(135deg, ${S.gold}, ${S.goldLight})` : "#fff",
+                    color: isAgent ? S.navy : S.text,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    boxShadow: isAgent ? "0 4px 12px rgba(232,168,56,0.2)" : "0 2px 8px rgba(0,0,0,0.05)",
+                    border: isAgent ? "none" : `1px solid ${S.borderLight}`
+                  }}>
+                    <div>{m.content}</div>
+                    <div style={{ fontSize: 10, color: isAgent ? "rgba(27,42,74,0.6)" : S.textMuted, marginTop: 6, fontWeight: 600, textAlign: isAgent ? "right" : "left" }}>{fmt(m.timestamp)}</div>
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Smart Input Controls */}
+          <div style={{ padding: "16px 24px", borderTop: `1px solid ${S.border}`, background: "#fff" }}>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", marginBottom: 12, paddingBottom: 4 }}>
+              {TEMPLATES.map((t, i) => (
+                <button key={i} onClick={() => setInput(t)}
+                  style={{ padding: "6px 14px", borderRadius: 30, border: `1px solid ${S.border}`, background: "#f8fafc", color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", transition: "all 0.2s" }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = S.gold; e.currentTarget.style.color = S.gold; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = S.border; e.currentTarget.style.color = S.textDim; }}>
+                  {t}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
+              <div style={{ flex: 1, position: "relative" }}>
+                <textarea
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                  placeholder="Your message..."
+                  rows={Math.min(4, input.split('\n').length)}
+                  style={{ width: "100%", background: "#f1f5f9", border: `1.5px solid ${S.border}`, borderRadius: 16, padding: "12px 48px 12px 16px", color: S.text, fontSize: 14, fontFamily: "inherit", outline: "none", resize: "none", transition: "border-color 0.2s" }}
+                  onFocus={e => e.target.style.borderColor = S.gold}
+                  onBlur={e => e.target.style.borderColor = S.border}
+                />
+              </div>
+              <button onClick={sendMessage} disabled={sending || !input.trim()}
+                style={{ width: 48, height: 48, borderRadius: 16, border: "none", cursor: sending ? "not-allowed" : "pointer", opacity: sending ? 0.6 : 1, background: `linear-gradient(135deg, ${S.gold}, ${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, boxShadow: "0 4px 12px rgba(232,168,56,0.3)", transform: "translateY(-2px)" }}>
+                {I.send}
+              </button>
+            </div>
+          </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
-          {active.messages.map((m, i) => { const d = m.from === "dispatch"; return (<div key={i} style={{ display: "flex", justifyContent: d ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "65%", padding: "10px 14px", borderRadius: 12, borderBottomRightRadius: d ? 4 : 12, borderBottomLeftRadius: d ? 12 : 4, background: d ? S.goldPale : S.borderLight, fontSize: 12, lineHeight: 1.5 }}><div>{m.text}</div><div style={{ fontSize: 9, color: S.textMuted, marginTop: 4, textAlign: d ? "right" : "left" }}>{m.time}</div></div></div>); })}
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, flexDirection: "column", gap: 16, background: "#fcfdfe" }}>
+          <div style={{ width: 80, height: 80, borderRadius: 24, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 40, opacity: 0.8 }}>💬</div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: S.navy }}>Messaging Portal</div>
+            <div style={{ fontSize: 14, color: S.textMuted, marginTop: 4 }}>Select a conversation to start chatting</div>
+          </div>
         </div>
-        <div style={{ padding: "8px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 6, overflowX: "auto" }}>
-          {templates.slice(0, 3).map((t, i) => (<button key={i} onClick={() => setInput(t)} style={{ padding: "5px 10px", borderRadius: 6, border: `1px solid ${S.border}`, background: S.borderLight, color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 10, whiteSpace: "nowrap" }}>{t.substring(0, 30)}...</button>))}
-        </div>
-        <div style={{ padding: "10px 18px", borderTop: `1px solid ${S.border}`, display: "flex", gap: 8 }}>
-          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Type a message..." style={{ flex: 1, background: S.borderLight, border: `1px solid ${S.border}`, borderRadius: 8, padding: "0 14px", height: 40, color: S.text, fontSize: 12, fontFamily: "inherit", outline: "none" }} />
-          <button style={{ width: 40, height: 40, borderRadius: 8, border: "none", cursor: "pointer", background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, display: "flex", alignItems: "center", justifyContent: "center" }}>{I.send}</button>
-        </div>
-      </div>) : (<div style={{ display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}><div style={{ fontSize: 40, opacity: 0.2 }}>💬</div><div style={{ fontSize: 14, color: S.textMuted }}>Select a conversation</div></div>)}
+      )}
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
+
+
 
 // ─── SETTINGS SHARED CONSTANTS (module-level = stable references, no focus loss) ───
 const inputStyle = { width: "100%", border: `1.5px solid ${S.border}`, borderRadius: 10, padding: "0 12px", height: 40, fontSize: 14, fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy, outline: "none" };
 const labelStyle = { display: "block", fontSize: 11, fontWeight: 600, color: S.textMuted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.3px" };
 const Toggle = ({ on, setOn, size }) => { const w = size === "sm" ? 36 : 44; const d = size === "sm" ? 16 : 20; return (<div onClick={() => setOn(!on)} style={{ width: w, height: Math.round(w / 1.83), borderRadius: w / 2, cursor: "pointer", background: on ? S.green : S.border, position: "relative", transition: "background 0.2s", flexShrink: 0 }}><div style={{ width: d, height: d, borderRadius: "50%", background: "#fff", position: "absolute", top: Math.round((w / 1.83 - d) / 2), left: on ? w - d - Math.round((w / 1.83 - d) / 2) : Math.round((w / 1.83 - d) / 2), transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} /></div>) };
 const SC = ({ children, title, icon, desc, right }) => (<div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}><div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}><div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 20 }}>{icon}</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{title}</div>{desc && <div style={{ fontSize: 11, color: S.textMuted }}>{desc}</div>}</div></div>{right}</div><div style={{ padding: 20 }}>{children}</div></div>);
+
+//     MERCHANT PRICING OVERRIDES MODAL    
+function MerchantPricingOverridesModal({ merchant, onClose }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [vehicles, setVehicles] = useState([]);
+  const [forms, setForms] = useState({});
+
+  const DEFAULTS = {
+    bike: { floorKm: 6, floorFee: 1700, t1MaxKm: 10, t1Rate: 275, t2Rate: 235, t3Rate: 200, t4Rate: 200 },
+    car: { floorKm: 3, floorFee: 2500, t1MaxKm: 8, t1Rate: 350, t2Rate: 300, t3Rate: 250, t4Rate: 250 },
+    van: { floorKm: 3, floorFee: 5000, t1MaxKm: 8, t1Rate: 500, t2Rate: 450, t3Rate: 400, t4Rate: 400 },
+  };
+
+  const parseTierFields = (pt, vehicleKey) => {
+    const d = DEFAULTS[vehicleKey] || DEFAULTS.bike;
+    if (!pt || pt.type !== 'tiered') return { ...d };
+    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+    const floorKm = pt.floor_km ?? d.floorKm;
+    const floorFee = pt.floor_fee ?? d.floorFee;
+    const t1MaxKm = tiers?.[0]?.max_km ?? d.t1MaxKm;
+    const t1Rate = tiers?.[0]?.rate ?? d.t1Rate;
+    const t2Rate = tiers?.[1]?.rate ?? d.t2Rate;
+    // 4-tier config: tiers[2] = <=25, tiers[3] = 25+
+    // Legacy 3-tier config: tiers[2] is treated as both <=25 and 25+
+    const legacyLast = tiers?.[2]?.rate ?? d.t3Rate;
+    const t3Rate = (tiers.length >= 4 ? (tiers?.[2]?.rate ?? d.t3Rate) : legacyLast);
+    const t4Rate = (tiers.length >= 4 ? (tiers?.[3]?.rate ?? t3Rate) : legacyLast);
+    return { floorKm, floorFee, t1MaxKm, t1Rate, t2Rate, t3Rate, t4Rate };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        if (!merchant?.userId) throw new Error('Missing merchant userId (UUID).');
+        const [vs, ovs] = await Promise.all([
+          VehiclesAPI.getAll(),
+          MerchantPricingOverridesAPI.list({ merchant: merchant.userId }).catch(() => [])
+        ]);
+        if (cancelled) return;
+        setVehicles(vs);
+
+        const next = {};
+        (vs || []).forEach(v => {
+          const key = String(v.name || '').toLowerCase();
+          const vehicleKey = key === 'bike' ? 'bike' : key === 'car' ? 'car' : 'van';
+          const existing = (ovs || []).find(o => String(o.vehicle) === String(v.id));
+          const srcPt = existing?.pricing_tiers ?? v.pricing_tiers ?? null;
+          const tf = parseTierFields(srcPt, vehicleKey);
+          next[v.id] = {
+            overrideId: existing?.id || null,
+            vehicleId: v.id,
+            vehicleName: v.name,
+            vehicleKey,
+            is_active: existing?.is_active ?? false,
+            flatFeeText: (existing?.flat_fee === 0 || existing?.flat_fee) ? String(existing.flat_fee) : '',
+            ...tf,
+          };
+        });
+        setForms(next);
+      } catch (e) {
+        if (!cancelled) setError(e?.detail || e?.message || 'Failed to load merchant pricing overrides.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [merchant?.userId]);
+
+  const setForm = (vehicleId, patch) => {
+    setForms(prev => ({
+      ...prev,
+      [vehicleId]: { ...prev[vehicleId], ...patch }
+    }));
+  };
+
+  const buildPricingTiers = (f) => ({
+    type: 'tiered',
+    floor_km: Number(f.floorKm) || 0,
+    floor_fee: Number(f.floorFee) || 0,
+    tiers: [
+      { max_km: Number(f.t1MaxKm) || 0, rate: Number(f.t1Rate) || 0 },
+      { max_km: 15, rate: Number(f.t2Rate) || 0 },
+      { max_km: 25, rate: Number(f.t3Rate) || 0 },
+      { rate: Number(f.t4Rate) || 0 },
+    ]
+  });
+
+  const parseFlatFee = (txt) => {
+    if (txt === null || txt === undefined) return null;
+    const t = String(txt).trim();
+    if (t === '') return null;
+    const n = parseFloat(t);
+    return isNaN(n) ? null : n;
+  };
+
+  const saveAll = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const vehicleIds = Object.keys(forms);
+      await Promise.all(vehicleIds.map(async (vid) => {
+        const f = forms[vid];
+        if (!f) return;
+        // Only create a new record when enabling; otherwise we update existing records.
+        if (!f.overrideId && !f.is_active) return;
+        const payload = {
+          merchant: merchant.userId,
+          vehicle: f.vehicleId,
+          is_active: !!f.is_active,
+          flat_fee: parseFlatFee(f.flatFeeText),
+          pricing_tiers: buildPricingTiers(f),
+        };
+        const saved = await MerchantPricingOverridesAPI.upsert(payload);
+        // Capture returned id so subsequent disables/enables update instead of creating.
+        if (saved?.id && !f.overrideId) {
+          setForms(prev => ({ ...prev, [vid]: { ...prev[vid], overrideId: saved.id } }));
+        }
+      }));
+      onClose();
+    } catch (e) {
+      const msg = e?.detail || e?.non_field_errors?.[0] || e?.merchant?.[0] || e?.vehicle?.[0] || e?.message || 'Failed to save overrides.';
+      setError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const vehicleOrder = ['bike', 'car', 'van'];
+  const sortedVehicles = [...(vehicles || [])].sort((a, b) => vehicleOrder.indexOf(String(a.name || '').toLowerCase()) - vehicleOrder.indexOf(String(b.name || '').toLowerCase()));
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: S.card, borderRadius: 16, width: 760, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)", border: `1px solid ${S.border}` }}>
+        <div style={{ padding: "18px 22px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: S.navy }}>Merchant Pricing Overrides</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 3 }}><span style={{ fontWeight: 700, color: S.text }}>{merchant?.name || 'Merchant'}</span>  —  <span style={{ fontFamily: "'Space Mono',monospace" }}>{merchant?.id || ''}</span></div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted, padding: 6 }}>{I.x}</button>
+        </div>
+
+        <div style={{ padding: 22 }}>
+          {error && <div style={{ padding: "10px 14px", background: S.redBg, color: S.red, borderRadius: 10, fontSize: 12, fontWeight: 700, marginBottom: 14 }}>⚠️ {error}</div>}
+
+          {loading ? (
+            <div style={{ padding: 26, textAlign: "center", color: S.textMuted, fontSize: 13 }}>Loading pricing overrides…</div>
+          ) : (
+            <>
+              <div style={{ padding: "12px 14px", background: "rgba(232,168,56,0.08)", border: "1px solid rgba(232,168,56,0.22)", borderRadius: 12, marginBottom: 14, fontSize: 12, color: S.navy, fontWeight: 700 }}>
+                Flat fee (if set) fully overrides distance/tier pricing for that vehicle.
+              </div>
+
+              {sortedVehicles.map(v => {
+                const f = forms?.[v.id];
+                if (!f) return null;
+                const icon = f.vehicleKey === 'bike' ? '🏍️' : f.vehicleKey === 'car' ? '🚗' : '🚐';
+                return (
+                  <div key={v.id} style={{ border: `1px solid ${S.border}`, borderRadius: 14, overflow: "hidden", marginBottom: 14 }}>
+                    <div style={{ padding: "14px 16px", background: S.borderLight, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 10, background: S.goldPale, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{icon}</div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 900, color: S.navy }}>{v.name}</div>
+                          <div style={{ fontSize: 11, color: S.textMuted }}>Enable override + set flat fee or tiers</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 11, color: S.textMuted, fontWeight: 700 }}>Override Active</span>
+                        <Toggle on={!!f.is_active} setOn={(on) => setForm(v.id, { is_active: on })} size="sm" />
+                      </div>
+                    </div>
+
+                    <div style={{ padding: 16 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+                        <div>
+                          <label style={labelStyle}>Flat fee (₦)</label>
+                          <input value={f.flatFeeText} onChange={e => setForm(v.id, { flatFeeText: e.target.value })} placeholder="Leave blank to use tiers" style={inputStyle} inputMode="numeric" />
+                          <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>If set, distance is ignored.</div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "flex-end", gap: 10 }}>
+                          <button onClick={() => {
+                            const tf = parseTierFields(v.pricing_tiers || null, f.vehicleKey);
+                            setForm(v.id, { ...tf });
+                          }} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim, display: "flex", alignItems: "center", gap: 6 }}>{I.copy} Copy Global Tiers</button>
+                          <button onClick={() => setForm(v.id, { flatFeeText: '' })} style={{ padding: "9px 14px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, color: S.textDim }}>Clear Flat</button>
+                        </div>
+                      </div>
+
+                      <div style={{ background: "#f8fafc", borderRadius: 12, padding: 14, border: `1px solid ${S.border}` }}>
+                        <div style={{ fontSize: 11, fontWeight: 900, color: S.navy, marginBottom: 12 }}>Tiered Pricing</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Floor km</label>
+                            <input value={f.floorKm} onChange={e => setForm(v.id, { floorKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Floor fee (₦)</label>
+                            <input value={f.floorFee} onChange={e => setForm(v.id, { floorFee: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 max km</label>
+                            <input value={f.t1MaxKm} onChange={e => setForm(v.id, { t1MaxKm: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier1 rate</label>
+                            <input value={f.t1Rate} onChange={e => setForm(v.id, { t1Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+                          <div>
+                            <label style={labelStyle}>Tier2 rate (≤ 15km)</label>
+                            <input value={f.t2Rate} onChange={e => setForm(v.id, { t2Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier3 rate (≤ 25km)</label>
+                            <input value={f.t3Rate} onChange={e => setForm(v.id, { t3Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                          <div>
+                            <label style={labelStyle}>Tier4 rate (25+)</label>
+                            <input value={f.t4Rate} onChange={e => setForm(v.id, { t4Rate: Number(e.target.value) || 0 })} type="number" style={inputStyle} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 6 }}>
+                <button onClick={onClose} disabled={saving} style={{ padding: "10px 22px", borderRadius: 10, border: `1px solid ${S.border}`, background: S.card, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: S.textDim }}>Cancel</button>
+                <button onClick={saveAll} disabled={saving} style={{ padding: "10px 28px", borderRadius: 10, border: "none", cursor: saving ? "not-allowed" : "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 800, background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy, opacity: saving ? 0.75 : 1 }}>{saving ? "Saving…" : "Save Overrides"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── SETTINGS ───────────────────────────────────────────────────
 function SettingsScreen() {
@@ -2384,7 +7196,9 @@ function SettingsScreen() {
   const [bikeT1Rate, setBikeT1Rate] = useState(275);
   const [bikeT2MaxKm, setBikeT2MaxKm] = useState(15);
   const [bikeT2Rate, setBikeT2Rate] = useState(235);
+  const [bikeT3MaxKm, setBikeT3MaxKm] = useState(25);
   const [bikeT3Rate, setBikeT3Rate] = useState(200);
+  const [bikeT4Rate, setBikeT4Rate] = useState(200);
   // Legacy bike state kept for getVC compatibility
   const bikeBase = 0, bikePerKm = 0, bikeMinKm = bikeFloorKm, bikeMin = bikeFloorFee;
   // Car uses tiered rate-switch pricing
@@ -2394,7 +7208,9 @@ function SettingsScreen() {
   const [carT1Rate, setCarT1Rate] = useState(350);
   const [carT2MaxKm, setCarT2MaxKm] = useState(15);
   const [carT2Rate, setCarT2Rate] = useState(300);
+  const [carT3MaxKm, setCarT3MaxKm] = useState(25);
   const [carT3Rate, setCarT3Rate] = useState(250);
+  const [carT4Rate, setCarT4Rate] = useState(250);
   const carBase = 0, carPerKm = 0, carMinKm = carFloorKm, carMin = carFloorFee;
   // Van uses tiered rate-switch pricing
   const [vanFloorKm, setVanFloorKm] = useState(3);
@@ -2403,7 +7219,9 @@ function SettingsScreen() {
   const [vanT1Rate, setVanT1Rate] = useState(500);
   const [vanT2MaxKm, setVanT2MaxKm] = useState(15);
   const [vanT2Rate, setVanT2Rate] = useState(450);
+  const [vanT3MaxKm, setVanT3MaxKm] = useState(25);
   const [vanT3Rate, setVanT3Rate] = useState(400);
+  const [vanT4Rate, setVanT4Rate] = useState(400);
   const vanBase = 0, vanPerKm = 0, vanMinKm = vanFloorKm, vanMin = vanFloorFee;
   const [codFee, setCodFee] = useState(500);
   const [codPct, setCodPct] = useState(1.5);
@@ -2467,15 +7285,16 @@ function SettingsScreen() {
   const [nodeSaving, setNodeSaving] = useState(false);
 
   // Tiered price: rate-switch with boundary floors
-  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3Rate) => {
+  const calcTieredPrice = (km, floorKm, floorFee, t1MaxKm, t1Rate, t2MaxKm, t2Rate, t3MaxKm, t3Rate, t4Rate) => {
     if (km <= floorKm) return floorFee;
     if (km <= t1MaxKm) return Math.max(km * t1Rate, floorFee);
     if (km <= t2MaxKm) return Math.max(km * t2Rate, t1MaxKm * t1Rate);
-    return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+    if (km <= t3MaxKm) return Math.max(km * t3Rate, t2MaxKm * t2Rate);
+    return Math.max(km * t4Rate, t3MaxKm * t3Rate);
   };
-  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3Rate);
-  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3Rate);
-  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3Rate);
+  const calcBikePrice = (km) => calcTieredPrice(km, bikeFloorKm, bikeFloorFee, bikeT1MaxKm, bikeT1Rate, bikeT2MaxKm, bikeT2Rate, bikeT3MaxKm, bikeT3Rate, bikeT4Rate);
+  const calcCarPrice = (km) => calcTieredPrice(km, carFloorKm, carFloorFee, carT1MaxKm, carT1Rate, carT2MaxKm, carT2Rate, carT3MaxKm, carT3Rate, carT4Rate);
+  const calcVanPrice = (km) => calcTieredPrice(km, vanFloorKm, vanFloorFee, vanT1MaxKm, vanT1Rate, vanT2MaxKm, vanT2Rate, vanT3MaxKm, vanT3Rate, vanT4Rate);
   const calcPrice = (base, perKm, minKm, minFee, km, zone, weight, vehicleType) => {
     let price;
     if (vehicleType === "bike") { price = calcBikePrice(km); }
@@ -2493,9 +7312,9 @@ function SettingsScreen() {
     return Math.round(price);
   };
   const getVC = () => ({
-    bike: { base:bikeBase, perKm:bikePerKm, minKm:bikeMinKm, min:bikeMin, type:"bike" },
-    car: { base:carBase, perKm:carPerKm, minKm:carMinKm, min:carMin, type:"car" },
-    van: { base:vanBase, perKm:vanPerKm, minKm:vanMinKm, min:vanMin, type:"van" },
+    bike: { base: bikeBase, perKm: bikePerKm, minKm: bikeMinKm, min: bikeMin, type: "bike" },
+    car: { base: carBase, perKm: carPerKm, minKm: carMinKm, min: carMin, type: "car" },
+    van: { base: vanBase, perKm: vanPerKm, minKm: vanMinKm, min: vanMin, type: "van" },
   });
   const simC = getVC()[simVehicle];
   const simPrice = calcPrice(simC.base, simC.perKm, simC.minKm, simC.min, simKm, simZone, simWeight, simVehicle);
@@ -2526,9 +7345,18 @@ function SettingsScreen() {
               setBikeFloorFee(pt.floor_fee ?? 1700);
               setBikeT1MaxKm(pt.tiers?.[0]?.max_km ?? 10);
               setBikeT1Rate(pt.tiers?.[0]?.rate ?? 275);
-              setBikeT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setBikeT2MaxKm(15);
               setBikeT2Rate(pt.tiers?.[1]?.rate ?? 235);
-              setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+              setBikeT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setBikeT3Rate(pt.tiers?.[2]?.rate ?? 200);
+                setBikeT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 200);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 200;
+                setBikeT3Rate(legacyLast);
+                setBikeT4Rate(legacyLast);
+              }
             } else {
               setBikeFloorKm(pf(v.min_distance_km, 6));
               setBikeFloorFee(pf(v.min_fee, 1700));
@@ -2540,9 +7368,18 @@ function SettingsScreen() {
               setCarFloorFee(pt.floor_fee ?? 2500);
               setCarT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setCarT1Rate(pt.tiers?.[0]?.rate ?? 350);
-              setCarT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setCarT2MaxKm(15);
               setCarT2Rate(pt.tiers?.[1]?.rate ?? 300);
-              setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+              setCarT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setCarT3Rate(pt.tiers?.[2]?.rate ?? 250);
+                setCarT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 250);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 250;
+                setCarT3Rate(legacyLast);
+                setCarT4Rate(legacyLast);
+              }
             } else {
               setCarFloorKm(pf(v.min_distance_km, 3));
               setCarFloorFee(pf(v.min_fee, 2500));
@@ -2554,9 +7391,18 @@ function SettingsScreen() {
               setVanFloorFee(pt.floor_fee ?? 5000);
               setVanT1MaxKm(pt.tiers?.[0]?.max_km ?? 8);
               setVanT1Rate(pt.tiers?.[0]?.rate ?? 500);
-              setVanT2MaxKm(pt.tiers?.[1]?.max_km ?? 15);
+              // Pricing breakpoints are fixed at 15km and 25km
+              setVanT2MaxKm(15);
               setVanT2Rate(pt.tiers?.[1]?.rate ?? 450);
-              setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+              setVanT3MaxKm(25);
+              if ((pt.tiers?.length ?? 0) >= 4) {
+                setVanT3Rate(pt.tiers?.[2]?.rate ?? 400);
+                setVanT4Rate(pt.tiers?.[3]?.rate ?? pt.tiers?.[2]?.rate ?? 400);
+              } else {
+                const legacyLast = pt.tiers?.[2]?.rate ?? 400;
+                setVanT3Rate(legacyLast);
+                setVanT4Rate(legacyLast);
+              }
             } else {
               setVanFloorKm(pf(v.min_distance_km, 3));
               setVanFloorFee(pf(v.min_fee, 5000));
@@ -2636,9 +7482,9 @@ function SettingsScreen() {
       // PATCH each vehicle's pricing
       await Promise.all(
         [
-          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: bikeT2MaxKm, rate: bikeT2Rate }, { rate: bikeT3Rate }] } } },
-          { key: 'car',  data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: carT2MaxKm, rate: carT2Rate }, { rate: carT3Rate }] } } },
-          { key: 'van',  data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: vanT2MaxKm, rate: vanT2Rate }, { rate: vanT3Rate }] } } },
+          { key: 'bike', data: { base_fare: 0, rate_per_km: 0, min_distance_km: bikeFloorKm, min_fee: bikeFloorFee, pricing_tiers: { type: 'tiered', floor_km: bikeFloorKm, floor_fee: bikeFloorFee, tiers: [{ max_km: bikeT1MaxKm, rate: bikeT1Rate }, { max_km: 15, rate: bikeT2Rate }, { max_km: 25, rate: bikeT3Rate }, { rate: bikeT4Rate }] } } },
+          { key: 'car', data: { base_fare: 0, rate_per_km: 0, min_distance_km: carFloorKm, min_fee: carFloorFee, pricing_tiers: { type: 'tiered', floor_km: carFloorKm, floor_fee: carFloorFee, tiers: [{ max_km: carT1MaxKm, rate: carT1Rate }, { max_km: 15, rate: carT2Rate }, { max_km: 25, rate: carT3Rate }, { rate: carT4Rate }] } } },
+          { key: 'van', data: { base_fare: 0, rate_per_km: 0, min_distance_km: vanFloorKm, min_fee: vanFloorFee, pricing_tiers: { type: 'tiered', floor_km: vanFloorKm, floor_fee: vanFloorFee, tiers: [{ max_km: vanT1MaxKm, rate: vanT1Rate }, { max_km: 15, rate: vanT2Rate }, { max_km: 25, rate: vanT3Rate }, { rate: vanT4Rate }] } } },
         ]
           .filter(({ key }) => vehicleIds[key])
           .map(({ key, data }) => VehiclesAPI.update(vehicleIds[key], data))
@@ -2666,7 +7512,7 @@ function SettingsScreen() {
       setSaving(false);
     }
   };
-  const handleReset = () => { setBikeFloorKm(6);setBikeFloorFee(1700);setBikeT1MaxKm(10);setBikeT1Rate(275);setBikeT2MaxKm(15);setBikeT2Rate(235);setBikeT3Rate(200);setCarFloorKm(3);setCarFloorFee(2500);setCarT1MaxKm(8);setCarT1Rate(350);setCarT2MaxKm(15);setCarT2Rate(300);setCarT3Rate(250);setVanFloorKm(3);setVanFloorFee(5000);setVanT1MaxKm(8);setVanT1Rate(500);setVanT2MaxKm(15);setVanT2Rate(450);setVanT3Rate(400);setCodFee(500);setCodPct(1.5);setBridgeSurcharge(500);setOuterZoneSurcharge(800);setIslandPremium(300);setSaveError(null); };
+  const handleReset = () => { setBikeFloorKm(6); setBikeFloorFee(1700); setBikeT1MaxKm(10); setBikeT1Rate(275); setBikeT2MaxKm(15); setBikeT2Rate(235); setBikeT3MaxKm(25); setBikeT3Rate(200); setBikeT4Rate(200); setCarFloorKm(3); setCarFloorFee(2500); setCarT1MaxKm(8); setCarT1Rate(350); setCarT2MaxKm(15); setCarT2Rate(300); setCarT3MaxKm(25); setCarT3Rate(250); setCarT4Rate(250); setVanFloorKm(3); setVanFloorFee(5000); setVanT1MaxKm(8); setVanT1Rate(500); setVanT2MaxKm(15); setVanT2Rate(450); setVanT3MaxKm(25); setVanT3Rate(400); setVanT4Rate(400); setCodFee(500); setCodPct(1.5); setBridgeSurcharge(500); setOuterZoneSurcharge(800); setIslandPremium(300); setSaveError(null); };
 
   const tabs = [{ id: "pricing", label: "Pricing & Fees", icon: "💰" }, { id: "zones", label: "Zones & Surcharges", icon: "🗺️" }, { id: "simulator", label: "Price Calculator", icon: "🧮" }, { id: "dispatch", label: "Dispatch Rules", icon: "⚙️" }, { id: "relay", label: "Relay Network", icon: "🔗" }, { id: "notifications", label: "Notifications", icon: "🔔" }, { id: "integrations", label: "API & Integrations", icon: "🔌" }];
 
@@ -2694,97 +7540,113 @@ function SettingsScreen() {
         </div>
 
         {/* ── BIKE CARD (Tiered Pricing) ── */}
-        <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
-          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>🏍️</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>Bike Delivery</div><div style={{fontSize:11,color:S.textMuted}}>Small packages, documents, food. Max 25kg.</div></div></div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{background:"#f8fafc",padding:"4px 10px",borderRadius:6,fontSize:10,color:S.textMuted}}>Tiered Pricing</div><div style={{background:"#10B98112",padding:"6px 14px",borderRadius:8}}><span style={{fontSize:11,fontWeight:700,color:"#10B981"}}>MIN ₦{bikeFloorFee.toLocaleString()}</span></div></div>
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>🏍️</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>Bike Delivery</div><div style={{ fontSize: 11, color: S.textMuted }}>Small packages, documents, food. Max 25kg.</div></div></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ background: "#f8fafc", padding: "4px 10px", borderRadius: 6, fontSize: 10, color: S.textMuted }}>Tiered Pricing</div><div style={{ background: "#10B98112", padding: "6px 14px", borderRadius: 8 }}><span style={{ fontSize: 11, fontWeight: 700, color: "#10B981" }}>MIN ₦{bikeFloorFee.toLocaleString()}</span></div></div>
           </div>
-          <div style={{padding:20}}>
-            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📐 Floor Price</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
-              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={bikeFloorKm} onChange={e=>setBikeFloorKm(Number(e.target.value)||0)} style={inputStyle}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Orders up to this distance = flat fee</div></div>
-              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={bikeFloorFee} onChange={e=>setBikeFloorFee(Number(e.target.value)||0)} style={{...inputStyle,color:"#10B981",borderColor:"#10B98140"}}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Fixed charge for ≤{bikeFloorKm}km</div></div>
+          <div style={{ padding: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.navy, marginBottom: 10 }}>📐 Floor Price</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={bikeFloorKm} onChange={e => setBikeFloorKm(Number(e.target.value) || 0)} style={inputStyle} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Orders up to this distance = flat fee</div></div>
+              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={bikeFloorFee} onChange={e => setBikeFloorFee(Number(e.target.value) || 0)} style={{ ...inputStyle, color: "#10B981", borderColor: "#10B98140" }} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Fixed charge for ≤{bikeFloorKm}km</div></div>
             </div>
-            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📊 Distance Tier Rates</div>
-            <div style={{border:`1px solid ${S.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",background:"#f8fafc",padding:"8px 14px",borderBottom:`1px solid ${S.border}`,fontSize:10,fontWeight:700,color:S.textMuted}}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.navy, marginBottom: 10 }}>📊 Distance Tier Rates</div>
+            <div style={{ border: `1px solid ${S.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", background: "#f8fafc", padding: "8px 14px", borderBottom: `1px solid ${S.border}`, fontSize: 10, fontWeight: 700, color: S.textMuted }}>
                 <div>TIER</div><div>UP TO (KM)</div><div>RATE (₦/KM)</div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 1 <span style={{fontSize:10,color:S.textMuted}}>({bikeFloorKm}–{bikeT1MaxKm}km)</span></div>
-                <input value={bikeT1MaxKm} onChange={e=>setBikeT1MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
-                <input value={bikeT1Rate} onChange={e=>setBikeT1Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 1 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeFloorKm}–{bikeT1MaxKm}km)</span></div>
+                <input value={bikeT1MaxKm} onChange={e => setBikeT1MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+                <input value={bikeT1Rate} onChange={e => setBikeT1Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 2 <span style={{fontSize:10,color:S.textMuted}}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
-                <input value={bikeT2MaxKm} onChange={e=>setBikeT2MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
-                <input value={bikeT2Rate} onChange={e=>setBikeT2Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT1MaxKm}–{bikeT2MaxKm}km)</span></div>
+                <input value={bikeT2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={bikeT2Rate} onChange={e => setBikeT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 3 <span style={{fontSize:10,color:S.textMuted}}>({bikeT2MaxKm}km+)</span></div>
-                <div style={{fontSize:11,color:S.textMuted,fontStyle:"italic"}}>∞</div>
-                <input value={bikeT3Rate} onChange={e=>setBikeT3Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT2MaxKm}–{bikeT3MaxKm}km)</span></div>
+                <input value={bikeT3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={bikeT3Rate} onChange={e => setBikeT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({bikeT3MaxKm}km+)</span></div>
+                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+                <input value={bikeT4Rate} onChange={e => setBikeT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
             </div>
-            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:8}}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {[1,3,5,8,12,20,30].map(km=>{const price=calcBikePrice(km);return (<div key={km} style={{padding:"8px 10px",background:"#fff",borderRadius:8,border:`1px solid ${km<=bikeFloorKm?"#10B98130":S.border}`,textAlign:"center",minWidth:68,flex:1}}><div style={{fontSize:10,color:S.textMuted,fontWeight:600}}>{km} KM</div><div style={{fontSize:14,fontWeight:800,color:"#10B981",fontFamily:"'Space Mono',monospace"}}>₦{price.toLocaleString()}</div>{km<=bikeFloorKm&&<div style={{fontSize:8,color:"#10B981",fontWeight:700}}>FLOOR</div>}</div>);})}
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = calcBikePrice(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= bikeFloorKm ? "#10B98130" : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: "#10B981", fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= bikeFloorKm && <div style={{ fontSize: 8, color: "#10B981", fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{marginTop:8,fontSize:10,color:S.textMuted,lineHeight:1.5}}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm*bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}km+ → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm*bikeT2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{bikeFloorKm}km → ₦{bikeFloorFee.toLocaleString()}. {bikeFloorKm}–{bikeT1MaxKm}km → km × ₦{bikeT1Rate}. {bikeT1MaxKm}–{bikeT2MaxKm}km → km × ₦{bikeT2Rate} (min ₦{(bikeT1MaxKm * bikeT1Rate).toLocaleString()}). {bikeT2MaxKm}–{bikeT3MaxKm}km → km × ₦{bikeT3Rate} (min ₦{(bikeT2MaxKm * bikeT2Rate).toLocaleString()}). {bikeT3MaxKm}km+ → km × ₦{bikeT4Rate} (min ₦{(bikeT3MaxKm * bikeT3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>
 
         {/* ── CAR & VAN CARDS (Tiered Pricing) ── */}
-        {[{label:"Car",emoji:"🚗",color:"#3B82F6",desc:"Medium packages, electronics, fragile. Max 100kg.",
-           floorKm:carFloorKm,setFloorKm:setCarFloorKm,floorFee:carFloorFee,setFloorFee:setCarFloorFee,
-           t1MaxKm:carT1MaxKm,setT1MaxKm:setCarT1MaxKm,t1Rate:carT1Rate,setT1Rate:setCarT1Rate,
-           t2MaxKm:carT2MaxKm,setT2MaxKm:setCarT2MaxKm,t2Rate:carT2Rate,setT2Rate:setCarT2Rate,
-           t3Rate:carT3Rate,setT3Rate:setCarT3Rate,calcFn:calcCarPrice},
-          {label:"Van",emoji:"🚐",color:"#8B5CF6",desc:"Bulk orders, furniture, large cargo. Max 500kg.",
-           floorKm:vanFloorKm,setFloorKm:setVanFloorKm,floorFee:vanFloorFee,setFloorFee:setVanFloorFee,
-           t1MaxKm:vanT1MaxKm,setT1MaxKm:setVanT1MaxKm,t1Rate:vanT1Rate,setT1Rate:setVanT1Rate,
-           t2MaxKm:vanT2MaxKm,setT2MaxKm:setVanT2MaxKm,t2Rate:vanT2Rate,setT2Rate:setVanT2Rate,
-           t3Rate:vanT3Rate,setT3Rate:setVanT3Rate,calcFn:calcVanPrice}
-        ].map(v=>(<div key={v.label} style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginBottom:14,overflow:"hidden"}}>
-          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:22}}>{v.emoji}</span><div><div style={{fontSize:15,fontWeight:700,color:S.navy}}>{v.label} Delivery</div><div style={{fontSize:11,color:S.textMuted}}>{v.desc}</div></div></div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{background:"#f8fafc",padding:"4px 10px",borderRadius:6,fontSize:10,color:S.textMuted}}>Tiered Pricing</div><div style={{background:`${v.color}12`,padding:"6px 14px",borderRadius:8}}><span style={{fontSize:11,fontWeight:700,color:v.color}}>MIN ₦{v.floorFee.toLocaleString()}</span></div></div>
+        {[{
+          label: "Car", emoji: "🚗", color: "#3B82F6", desc: "Medium packages, electronics, fragile. Max 100kg.",
+          floorKm: carFloorKm, setFloorKm: setCarFloorKm, floorFee: carFloorFee, setFloorFee: setCarFloorFee,
+          t1MaxKm: carT1MaxKm, setT1MaxKm: setCarT1MaxKm, t1Rate: carT1Rate, setT1Rate: setCarT1Rate,
+          t2MaxKm: carT2MaxKm, setT2MaxKm: setCarT2MaxKm, t2Rate: carT2Rate, setT2Rate: setCarT2Rate,
+          t3MaxKm: carT3MaxKm, setT3MaxKm: setCarT3MaxKm, t3Rate: carT3Rate, setT3Rate: setCarT3Rate,
+          t4Rate: carT4Rate, setT4Rate: setCarT4Rate, calcFn: calcCarPrice
+        },
+        {
+          label: "Van", emoji: "🚐", color: "#8B5CF6", desc: "Bulk orders, furniture, large cargo. Max 500kg.",
+          floorKm: vanFloorKm, setFloorKm: setVanFloorKm, floorFee: vanFloorFee, setFloorFee: setVanFloorFee,
+          t1MaxKm: vanT1MaxKm, setT1MaxKm: setVanT1MaxKm, t1Rate: vanT1Rate, setT1Rate: setVanT1Rate,
+          t2MaxKm: vanT2MaxKm, setT2MaxKm: setVanT2MaxKm, t2Rate: vanT2Rate, setT2Rate: setVanT2Rate,
+          t3MaxKm: vanT3MaxKm, setT3MaxKm: setVanT3MaxKm, t3Rate: vanT3Rate, setT3Rate: setVanT3Rate,
+          t4Rate: vanT4Rate, setT4Rate: setVanT4Rate, calcFn: calcVanPrice
+        }
+        ].map(v => (<div key={v.label} style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginBottom: 14, overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}><span style={{ fontSize: 22 }}>{v.emoji}</span><div><div style={{ fontSize: 15, fontWeight: 700, color: S.navy }}>{v.label} Delivery</div><div style={{ fontSize: 11, color: S.textMuted }}>{v.desc}</div></div></div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ background: "#f8fafc", padding: "4px 10px", borderRadius: 6, fontSize: 10, color: S.textMuted }}>Tiered Pricing</div><div style={{ background: `${v.color}12`, padding: "6px 14px", borderRadius: 8 }}><span style={{ fontSize: 11, fontWeight: 700, color: v.color }}>MIN ₦{v.floorFee.toLocaleString()}</span></div></div>
           </div>
-          <div style={{padding:20}}>
-            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📐 Floor Price</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:16}}>
-              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={v.floorKm} onChange={e=>v.setFloorKm(Number(e.target.value)||0)} style={inputStyle}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Orders up to this distance = flat fee</div></div>
-              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={v.floorFee} onChange={e=>v.setFloorFee(Number(e.target.value)||0)} style={{...inputStyle,color:v.color,borderColor:`${v.color}40`}}/><div style={{fontSize:10,color:S.textMuted,marginTop:3}}>Fixed charge for ≤{v.floorKm}km</div></div>
+          <div style={{ padding: 20 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.navy, marginBottom: 10 }}>📐 Floor Price</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 16 }}>
+              <div><label style={labelStyle}>Floor Distance (KM)</label><input value={v.floorKm} onChange={e => v.setFloorKm(Number(e.target.value) || 0)} style={inputStyle} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Orders up to this distance = flat fee</div></div>
+              <div><label style={labelStyle}>Floor Fee (₦)</label><input value={v.floorFee} onChange={e => v.setFloorFee(Number(e.target.value) || 0)} style={{ ...inputStyle, color: v.color, borderColor: `${v.color}40` }} /><div style={{ fontSize: 10, color: S.textMuted, marginTop: 3 }}>Fixed charge for ≤{v.floorKm}km</div></div>
             </div>
-            <div style={{fontSize:12,fontWeight:700,color:S.navy,marginBottom:10}}>📊 Distance Tier Rates</div>
-            <div style={{border:`1px solid ${S.border}`,borderRadius:10,overflow:"hidden",marginBottom:16}}>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",background:"#f8fafc",padding:"8px 14px",borderBottom:`1px solid ${S.border}`,fontSize:10,fontWeight:700,color:S.textMuted}}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: S.navy, marginBottom: 10 }}>📊 Distance Tier Rates</div>
+            <div style={{ border: `1px solid ${S.border}`, borderRadius: 10, overflow: "hidden", marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", background: "#f8fafc", padding: "8px 14px", borderBottom: `1px solid ${S.border}`, fontSize: 10, fontWeight: 700, color: S.textMuted }}>
                 <div>TIER</div><div>UP TO (KM)</div><div>RATE (₦/KM)</div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 1 <span style={{fontSize:10,color:S.textMuted}}>({v.floorKm}–{v.t1MaxKm}km)</span></div>
-                <input value={v.t1MaxKm} onChange={e=>v.setT1MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
-                <input value={v.t1Rate} onChange={e=>v.setT1Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 1 <span style={{ fontSize: 10, color: S.textMuted }}>({v.floorKm}–{v.t1MaxKm}km)</span></div>
+                <input value={v.t1MaxKm} onChange={e => v.setT1MaxKm(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+                <input value={v.t1Rate} onChange={e => v.setT1Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 2 <span style={{fontSize:10,color:S.textMuted}}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
-                <input value={v.t2MaxKm} onChange={e=>v.setT2MaxKm(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
-                <input value={v.t2Rate} onChange={e=>v.setT2Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 2 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t1MaxKm}–{v.t2MaxKm}km)</span></div>
+                <input value={v.t2MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={v.t2Rate} onChange={e => v.setT2Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",padding:"10px 14px",alignItems:"center"}}>
-                <div style={{fontSize:12,fontWeight:600,color:S.navy}}>Tier 3 <span style={{fontSize:10,color:S.textMuted}}>({v.t2MaxKm}km+)</span></div>
-                <div style={{fontSize:11,color:S.textMuted,fontStyle:"italic"}}>∞</div>
-                <input value={v.t3Rate} onChange={e=>v.setT3Rate(Number(e.target.value)||0)} style={{...inputStyle,margin:0}}/>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", borderBottom: `1px solid ${S.borderLight}`, alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 3 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t2MaxKm}–{v.t3MaxKm}km)</span></div>
+                <input value={v.t3MaxKm} disabled style={{ ...inputStyle, margin: 0, background: "#f1f5f9", color: S.textMuted, cursor: "not-allowed" }} />
+                <input value={v.t3Rate} onChange={e => v.setT3Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", padding: "10px 14px", alignItems: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: S.navy }}>Tier 4 <span style={{ fontSize: 10, color: S.textMuted }}>({v.t3MaxKm}km+)</span></div>
+                <div style={{ fontSize: 11, color: S.textMuted, fontStyle: "italic" }}>∞</div>
+                <input value={v.t4Rate} onChange={e => v.setT4Rate(Number(e.target.value) || 0)} style={{ ...inputStyle, margin: 0 }} />
               </div>
             </div>
-            <div style={{background:"#f8fafc",borderRadius:10,padding:"12px 16px"}}>
-              <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:8}}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
-              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {[1,3,5,8,12,20,30].map(km=>{const price=v.calcFn(km);return (<div key={km} style={{padding:"8px 10px",background:"#fff",borderRadius:8,border:`1px solid ${km<=v.floorKm?`${v.color}30`:S.border}`,textAlign:"center",minWidth:68,flex:1}}><div style={{fontSize:10,color:S.textMuted,fontWeight:600}}>{km} KM</div><div style={{fontSize:14,fontWeight:800,color:v.color,fontFamily:"'Space Mono',monospace"}}>₦{price.toLocaleString()}</div>{km<=v.floorKm&&<div style={{fontSize:8,color:v.color,fontWeight:700}}>FLOOR</div>}</div>);})}
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 8 }}>PRICE PREVIEW (base — no zone/weight surcharges)</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {[1, 3, 5, 8, 12, 20, 30].map(km => { const price = v.calcFn(km); return (<div key={km} style={{ padding: "8px 10px", background: "#fff", borderRadius: 8, border: `1px solid ${km <= v.floorKm ? `${v.color}30` : S.border}`, textAlign: "center", minWidth: 68, flex: 1 }}><div style={{ fontSize: 10, color: S.textMuted, fontWeight: 600 }}>{km} KM</div><div style={{ fontSize: 14, fontWeight: 800, color: v.color, fontFamily: "'Space Mono',monospace" }}>₦{price.toLocaleString()}</div>{km <= v.floorKm && <div style={{ fontSize: 8, color: v.color, fontWeight: 700 }}>FLOOR</div>}</div>); })}
               </div>
-              <div style={{marginTop:8,fontSize:10,color:S.textMuted,lineHeight:1.5}}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm*v.t1Rate).toLocaleString()}). {v.t2MaxKm}km+ → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm*v.t2Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
+              <div style={{ marginTop: 8, fontSize: 10, color: S.textMuted, lineHeight: 1.5 }}>≤{v.floorKm}km → ₦{v.floorFee.toLocaleString()}. {v.floorKm}–{v.t1MaxKm}km → km × ₦{v.t1Rate}. {v.t1MaxKm}–{v.t2MaxKm}km → km × ₦{v.t2Rate} (min ₦{(v.t1MaxKm * v.t1Rate).toLocaleString()}). {v.t2MaxKm}–{v.t3MaxKm}km → km × ₦{v.t3Rate} (min ₦{(v.t2MaxKm * v.t2Rate).toLocaleString()}). {v.t3MaxKm}km+ → km × ₦{v.t4Rate} (min ₦{(v.t3MaxKm * v.t3Rate).toLocaleString()}). Plus zone + weight surcharges.</div>
             </div>
           </div>
         </div>))}
@@ -2842,10 +7704,10 @@ function SettingsScreen() {
               <div style={{ fontSize: 10, color: S.textMuted, marginTop: 4 }}>Ikorodu, Ojo, Badagry, Epe, Agbara</div>
             </div>
           </div>
-          <div style={{background:"#f8fafc",borderRadius:10,padding:"14px 16px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:S.textMuted,marginBottom:10}}>ZONE EXAMPLES (BIKE, 10KM)</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
-              {[{l:"Same Zone",z:"same",d:"Ikeja→Ikeja",i:"🏠"},{l:"Bridge",z:"bridge",d:"Yaba→V.I.",i:"🌉"},{l:"Island",z:"island",d:"V.I.→Lekki",i:"🏝️"},{l:"Outer",z:"outer",d:"Ikeja→Ikorodu",i:"🛤️"}].map(z=>{const p=calcPrice(bikeBase,bikePerKm,bikeMinKm,bikeMin,10,z.z,3,"bike");return (<div key={z.z} style={{textAlign:"center",padding:"10px 8px",background:"#fff",borderRadius:8,border:`1px solid ${S.border}`}}><div style={{fontSize:16}}>{z.i}</div><div style={{fontSize:10,fontWeight:700,color:S.navy,marginTop:2}}>{z.l}</div><div style={{fontSize:16,fontWeight:800,color:S.gold,fontFamily:"'Space Mono',monospace",margin:"4px 0"}}>₦{p.toLocaleString()}</div><div style={{fontSize:9,color:S.textMuted}}>{z.d}</div></div>);})}
+          <div style={{ background: "#f8fafc", borderRadius: 10, padding: "14px 16px" }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: S.textMuted, marginBottom: 10 }}>ZONE EXAMPLES (BIKE, 10KM)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+              {[{ l: "Same Zone", z: "same", d: "Ikeja→Ikeja", i: "🏠" }, { l: "Bridge", z: "bridge", d: "Yaba→V.I.", i: "🌉" }, { l: "Island", z: "island", d: "V.I.→Lekki", i: "🏝️" }, { l: "Outer", z: "outer", d: "Ikeja→Ikorodu", i: "🛤️" }].map(z => { const p = calcPrice(bikeBase, bikePerKm, bikeMinKm, bikeMin, 10, z.z, 3, "bike"); return (<div key={z.z} style={{ textAlign: "center", padding: "10px 8px", background: "#fff", borderRadius: 8, border: `1px solid ${S.border}` }}><div style={{ fontSize: 16 }}>{z.i}</div><div style={{ fontSize: 10, fontWeight: 700, color: S.navy, marginTop: 2 }}>{z.l}</div><div style={{ fontSize: 16, fontWeight: 800, color: S.gold, fontFamily: "'Space Mono',monospace", margin: "4px 0" }}>₦{p.toLocaleString()}</div><div style={{ fontSize: 9, color: S.textMuted }}>{z.d}</div></div>); })}
             </div>
           </div>
         </SC>
@@ -2914,20 +7776,20 @@ function SettingsScreen() {
                 <div style={{ fontSize: 32, fontWeight: 900, color: S.gold, fontFamily: "'Space Mono',monospace" }}>₦{simFinal.toLocaleString()}</div>
                 <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>{simVehicle.toUpperCase()} • {simKm}km • {simZone === "bridge" ? "Bridge" : simZone === "island" ? "Island" : simZone === "outer" ? "Outer" : "Local"} • {simWeight}kg{simSurge ? " • SURGE" : ""}</div>
               </div>
-              <div style={{marginTop:12,background:"#f8fafc",borderRadius:8,padding:"10px 14px"}}>
-                <div style={{fontSize:10,fontWeight:700,color:S.textMuted,marginBottom:6}}>COMPARE ALL VEHICLES</div>
-                <div style={{display:"flex",gap:8}}>{[{id:"bike",i:"🏍️"},{id:"car",i:"🚗"},{id:"van",i:"🚐"}].map(v=>{const c=getVC()[v.id];const p=calcPrice(c.base,c.perKm,c.minKm,c.min,simKm,simZone,simWeight,v.id);const f=simSurge?Math.round(p*surgeMultiplier):p;return (<div key={v.id} style={{flex:1,textAlign:"center",padding:6,borderRadius:6,background:simVehicle===v.id?"rgba(232,168,56,0.1)":"transparent",border:simVehicle===v.id?`1px solid ${S.gold}`:"1px solid transparent"}}><div style={{fontSize:14}}>{v.i}</div><div style={{fontSize:14,fontWeight:800,color:S.navy,fontFamily:"'Space Mono',monospace"}}>₦{f.toLocaleString()}</div></div>);})}</div>
+              <div style={{ marginTop: 12, background: "#f8fafc", borderRadius: 8, padding: "10px 14px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: S.textMuted, marginBottom: 6 }}>COMPARE ALL VEHICLES</div>
+                <div style={{ display: "flex", gap: 8 }}>{[{ id: "bike", i: "🏍️" }, { id: "car", i: "🚗" }, { id: "van", i: "🚐" }].map(v => { const c = getVC()[v.id]; const p = calcPrice(c.base, c.perKm, c.minKm, c.min, simKm, simZone, simWeight, v.id); const f = simSurge ? Math.round(p * surgeMultiplier) : p; return (<div key={v.id} style={{ flex: 1, textAlign: "center", padding: 6, borderRadius: 6, background: simVehicle === v.id ? "rgba(232,168,56,0.1)" : "transparent", border: simVehicle === v.id ? `1px solid ${S.gold}` : "1px solid transparent" }}><div style={{ fontSize: 14 }}>{v.i}</div><div style={{ fontSize: 14, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{f.toLocaleString()}</div></div>); })}</div>
               </div>
             </div>
           </div>
         </div>
 
-        <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,marginTop:14,overflow:"hidden"}}>
-          <div style={{padding:"14px 20px",borderBottom:`1px solid ${S.border}`}}><div style={{fontSize:14,fontWeight:700,color:S.navy}}>🚀 Common Lagos Routes — Quick Reference</div></div>
-          <div style={{padding:16,overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-              <thead><tr style={{borderBottom:`2px solid ${S.border}`}}>{["Route","KM","Zone","🏍️ Bike","🚗 Car","🚐 Van"].map(h=>(<th key={h} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase"}}>{h}</th>))}</tr></thead>
-              <tbody>{[{r:"Ikeja → Allen Ave",km:3,z:"same",d:"Local"},{r:"Yaba → V.I.",km:12,z:"bridge",d:"Bridge"},{r:"Surulere → Lekki Ph1",km:18,z:"bridge",d:"Bridge"},{r:"V.I. → Lekki",km:8,z:"island",d:"Island"},{r:"Ikeja → Ikorodu",km:28,z:"outer",d:"Outer"},{r:"Maryland → Ajah",km:32,z:"bridge",d:"Bridge"},{r:"Apapa → Ojo",km:15,z:"outer",d:"Outer"},{r:"V.I. → Ajah",km:22,z:"island",d:"Island"}].map((r,i)=>(<tr key={i} style={{borderBottom:`1px solid ${S.borderLight}`}}><td style={{padding:"8px 10px",fontWeight:600}}>{r.r}</td><td style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700}}>{r.km}</td><td style={{padding:"8px 10px"}}><span style={{fontSize:10,padding:"2px 8px",borderRadius:4,background:r.z==="bridge"?"rgba(232,168,56,0.1)":r.z==="island"?"rgba(139,92,246,0.08)":r.z==="outer"?"rgba(16,185,129,0.08)":"#f1f5f9",color:r.z==="bridge"?S.gold:r.z==="island"?"#8B5CF6":r.z==="outer"?S.green:S.textMuted,fontWeight:700}}>{r.d}</span></td>{["bike","car","van"].map(v=>{const c=getVC()[v];return<td key={v} style={{padding:"8px 10px",fontFamily:"'Space Mono',monospace",fontWeight:700,color:S.navy}}>₦{calcPrice(c.base,c.perKm,c.minKm,c.min,r.km,r.z,3,v).toLocaleString()}</td>;})}</tr>))}</tbody>
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, marginTop: 14, overflow: "hidden" }}>
+          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${S.border}` }}><div style={{ fontSize: 14, fontWeight: 700, color: S.navy }}>🚀 Common Lagos Routes — Quick Reference</div></div>
+          <div style={{ padding: 16, overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead><tr style={{ borderBottom: `2px solid ${S.border}` }}>{["Route", "KM", "Zone", "🏍️ Bike", "🚗 Car", "🚐 Van"].map(h => (<th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 10, fontWeight: 700, color: S.textMuted, textTransform: "uppercase" }}>{h}</th>))}</tr></thead>
+              <tbody>{[{ r: "Ikeja → Allen Ave", km: 3, z: "same", d: "Local" }, { r: "Yaba → V.I.", km: 12, z: "bridge", d: "Bridge" }, { r: "Surulere → Lekki Ph1", km: 18, z: "bridge", d: "Bridge" }, { r: "V.I. → Lekki", km: 8, z: "island", d: "Island" }, { r: "Ikeja → Ikorodu", km: 28, z: "outer", d: "Outer" }, { r: "Maryland → Ajah", km: 32, z: "bridge", d: "Bridge" }, { r: "Apapa → Ojo", km: 15, z: "outer", d: "Outer" }, { r: "V.I. → Ajah", km: 22, z: "island", d: "Island" }].map((r, i) => (<tr key={i} style={{ borderBottom: `1px solid ${S.borderLight}` }}><td style={{ padding: "8px 10px", fontWeight: 600 }}>{r.r}</td><td style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700 }}>{r.km}</td><td style={{ padding: "8px 10px" }}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 4, background: r.z === "bridge" ? "rgba(232,168,56,0.1)" : r.z === "island" ? "rgba(139,92,246,0.08)" : r.z === "outer" ? "rgba(16,185,129,0.08)" : "#f1f5f9", color: r.z === "bridge" ? S.gold : r.z === "island" ? "#8B5CF6" : r.z === "outer" ? S.green : S.textMuted, fontWeight: 700 }}>{r.d}</span></td>{["bike", "car", "van"].map(v => { const c = getVC()[v]; return <td key={v} style={{ padding: "8px 10px", fontFamily: "'Space Mono',monospace", fontWeight: 700, color: S.navy }}>₦{calcPrice(c.base, c.perKm, c.minKm, c.min, r.km, r.z, 3, v).toLocaleString()}</td>; })}</tr>))}</tbody>
             </table>
           </div>
         </div>
@@ -3129,7 +7991,7 @@ function SettingsScreen() {
 }
 // ─── ADDRESS AUTOCOMPLETE INPUT ─────────────────────────────────
 // onPlaceSelected(place) is called with { address, lat, lng } when a suggestion is picked
-function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style }) {
+function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholder, style, onBlur }) {
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -3179,18 +8041,10 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
       autocompleteService.current.getPlacePredictions(req, (predictions, status) => {
         setLoading(false);
         if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions?.length > 0) {
-          // Keep only predictions that reference Lagos — no fallback to non-Lagos results
-          const lagosOnly = predictions.filter(p =>
-            p.terms?.some(t => /lagos/i.test(t.value)) ||
-            /lagos/i.test(p.description)
-          );
-          if (lagosOnly.length > 0) {
-            setSuggestions(lagosOnly.slice(0, 8));
-            setShowDropdown(true);
-          } else {
-            setSuggestions([]);
-            setShowDropdown(false);
-          }
+          // Do not hard-filter by the word "Lagos" (valid Lagos addresses often resolve to e.g. Ikeja/Eti-Osa).
+          // We validate service area AFTER geocoding the selected place.
+          setSuggestions(predictions.slice(0, 8));
+          setShowDropdown(true);
         } else {
           setSuggestions([]);
           setShowDropdown(false);
@@ -3201,7 +8055,7 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
 
   return (
     <div style={{ position: 'relative', width: '100%' }}>
-      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }}
+      <input ref={inputRef} value={value} onChange={e => { onChange(e.target.value); fetchSuggestions(e.target.value); }} onBlur={onBlur}
         placeholder={placeholder} style={style} />
       {loading && <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#94a3b8' }}>⏳</div>}
       {showDropdown && suggestions.length > 0 && (
@@ -3224,6 +8078,8 @@ function AddressAutocompleteInput({ value, onChange, onPlaceSelected, placeholde
                     } else {
                       onPlaceSelected({ address: s.description, lat, lng });
                     }
+                  } else {
+                    onPlaceSelected({ error: status || 'GEOCODE_FAILED', address: s.description });
                   }
                 });
               }
@@ -3272,14 +8128,71 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
   const [dropoffLng, setDropoffLng] = useState(null);
 
   // Pricing & route state
-  const [vehiclePricing, setVehiclePricing] = useState({
-    Bike: { base_fare: 1200, rate_per_km: 80, rate_per_minute: 5 },
-    Car: { base_fare: 4500, rate_per_km: 150, rate_per_minute: 8 },
-    Van: { base_fare: 12000, rate_per_km: 250, rate_per_minute: 12 }
-  });
+  const [vehiclePricing, setVehiclePricing] = useState({});
   const [routeDistance, setRouteDistance] = useState(null);
   const [routeDuration, setRouteDuration] = useState(null);
   const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [isPartnerOrder, setIsPartnerOrder] = useState(false);
+  const [partnerOrderCount, setPartnerOrderCount] = useState(1);
+  const [fileUploadedUrls, setFileUploadedUrls] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [backendFares, setBackendFares] = useState({});
+
+  const selectedMerchant = merchants.find(m => String(m.id) === String(merchantId));
+  const isSelectedMerchantPartner = selectedMerchant?.isPartner || false;
+
+  const handleFileUpload = async (e) => {
+    const inputElement = e.target;
+    const files = Array.from(inputElement.files);
+    if (files.length === 0) return;
+    setIsUploading(true);
+    
+    try {
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('https://dev.getlinked.live/services/upload/file/', {
+          method: 'POST',
+          headers: { 'X-API-KEY': '9745-26ed188f48f0-4b98b89f-626bb781' },
+          body: formData
+        });
+        const data = await res.json();
+        console.log("Upload Response:", data);
+        const fileUrl = data.url || data.data?.url || data.file_url || data.data?.file_url;
+        
+        if (res.ok && fileUrl) {
+          return fileUrl;
+        } else {
+          throw new Error(data.message || "Invalid response structure");
+        }
+      });
+
+      const results = await Promise.allSettled(uploadPromises);
+      const successfulUrls = [];
+      let hasError = false;
+
+      results.forEach(result => {
+        if (result.status === 'fulfilled') {
+          successfulUrls.push(result.value);
+        } else {
+          hasError = true;
+          console.error("File upload failed:", result.reason);
+        }
+      });
+
+      if (hasError) {
+        setError("Some files failed to upload.");
+      }
+
+      setFileUploadedUrls(prev => [...prev, ...successfulUrls]);
+    } catch (err) {
+      setError("File upload error");
+    } finally {
+      setIsUploading(false);
+      // Clear the input value so the same files can be selected again if needed
+      if (inputElement) inputElement.value = '';
+    }
+  };
 
   // UI state
   const [submitting, setSubmitting] = useState(false);
@@ -3287,39 +8200,72 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 
   // Load vehicle pricing from backend
   useEffect(() => {
-    VehiclesAPI.getAll().then(res => {
-      if (res.success && res.vehicles) {
-        const p = {};
-        res.vehicles.forEach(v => { p[v.name] = { base_fare: parseFloat(v.base_fare), rate_per_km: parseFloat(v.rate_per_km), rate_per_minute: parseFloat(v.rate_per_minute), pricing_tiers: v.pricing_tiers || null }; });
-        setVehiclePricing(p);
-      }
+    VehiclesAPI.getAll().then(vehicles => {
+      if (!Array.isArray(vehicles) || vehicles.length === 0) return;
+      const p = {};
+      vehicles.forEach(v => {
+        p[v.name] = {
+          base_fare: parseFloat(v.base_fare),
+          rate_per_km: parseFloat(v.rate_per_km),
+          rate_per_minute: parseFloat(v.rate_per_minute),
+          pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
+        };
+      });
+      setVehiclePricing(p);
     }).catch(() => { });
   }, []);
 
   // Calculate route when both addresses change
   useEffect(() => {
-    if (!pickup || !dropoff) { setRouteDistance(null); setRouteDuration(null); return; }
+    // Only calculate when both addresses are sufficiently ready
+    const isPickupReady = pickupLat || (pickup && pickup.trim().length >= 8);
+    const isDropoffReady = dropoffLat || (dropoff && dropoff.trim().length >= 4);
+
+    if (!isPickupReady || !isDropoffReady) { 
+      setRouteDistance(null); 
+      setRouteDuration(null); 
+      setBackendFares({});
+      return; 
+    }
+
     setCalculatingRoute(true);
-    const tid = setTimeout(() => {
-      if (typeof google === 'undefined' || !google.maps) { setCalculatingRoute(false); return; }
-      new google.maps.DirectionsService().route({
-        origin: pickup, destination: dropoff,
-        travelMode: google.maps.TravelMode.DRIVING,
-      }, (result, status) => {
-        setCalculatingRoute(false);
-        if (status === google.maps.DirectionsStatus.OK && result.routes[0]) {
-          let dist = 0, dur = 0;
-          result.routes[0].legs.forEach(l => { dist += l.distance.value; dur += l.duration.value; });
-          setRouteDistance(parseFloat((dist / 1000).toFixed(1)));
-          setRouteDuration(Math.ceil(dur / 60));
+    const tid = setTimeout(async () => {
+      try {
+        const pickupPoint = (pickupLat && pickupLng) ? { lat: pickupLat, lng: pickupLng } : pickup;
+        const dropoffPoint = (dropoffLat && dropoffLng) ? { lat: dropoffLat, lng: dropoffLng } : dropoff;
+
+        const payload = {
+          mode: 'quick',
+          pickup: pickupPoint,
+          deliveries: [dropoffPoint]
+        };
+
+        const res = await OrdersAPI.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // Identify first vehicle to extract common route stats
+          const firstV = Object.values(res.vehicles)[0];
+          if (firstV) {
+            setRouteDistance(firstV.distance_km);
+            setRouteDuration(firstV.duration_minutes);
+          }
+          setBackendFares(res.vehicles);
         }
-      });
-    }, 800);
+      } catch (err) {
+        console.error("Dispatcher route calculation error:", err);
+      } finally {
+        setCalculatingRoute(false);
+      }
+    }, 1000);
     return () => clearTimeout(tid);
-  }, [pickup, dropoff]);
+  }, [pickup, dropoff, pickupLat, pickupLng, dropoffLat, dropoffLng]);
 
   // Calculate price for a given vehicle
   const calcPrice = (vName) => {
+    // If backend already calculated the precise fare, use it.
+    if (backendFares && backendFares[vName]) {
+      return backendFares[vName].price;
+    }
+
     const p = vehiclePricing[vName];
     if (!p) return null;
     // Tiered pricing (Bike, Car, Van)
@@ -3327,11 +8273,25 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     if (pt && pt.type === 'tiered' && routeDistance) {
       const km = routeDistance;
       if (km <= pt.floor_km) return pt.floor_fee;
-      const t = pt.tiers || [];
-      if (t[0] && km <= t[0].max_km) return Math.max(Math.round(km * t[0].rate), pt.floor_fee);
-      if (t[1] && km <= t[1].max_km) return Math.max(Math.round(km * t[1].rate), Math.round((t[0]?.max_km||pt.floor_km) * (t[0]?.rate||0)));
-      if (t[2]) return Math.max(Math.round(km * t[2].rate), Math.round((t[1]?.max_km||0) * (t[1]?.rate||0)));
-      return Math.round(km * (t[t.length-1]?.rate || 0));
+      // Generic tiered pricing (supports 3-tier legacy + 4-tier 25km breakpoint + future tiers)
+      const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+      let prevMaxKm = Number(pt.floor_km || 0);
+      let prevRate = null;
+      for (let i = 0; i < tiers.length; i++) {
+        const tier = tiers[i] || {};
+        const rate = Number(tier.rate || 0);
+        const maxKm = tier.max_km;
+        const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+        if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+          return Math.max(Math.round(km * rate), minFloor);
+        }
+        prevMaxKm = Number(maxKm);
+        prevRate = rate;
+      }
+      // Fallback for unexpected tier config
+      const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+      const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+      return Math.max(Math.round(km * lastRate), minFloor);
     }
     if (pt && pt.type === 'tiered') return pt.floor_fee;
     // Simple pricing fallback
@@ -3341,16 +8301,89 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
     return Math.round(p.base_fare);
   };
 
-  const displayPrice = priceOverride ? parseInt(priceOverride) : (calcPrice(vehicle) || 0);
+  const displayPrice = isPartnerOrder
+    ? (selectedMerchant?.partnerBasePrice || 0) * (Number(partnerOrderCount) || 0)
+    : (priceOverride ? parseInt(priceOverride) : calcPrice(vehicle));
+
+  // Local helpers for reliable coordinate capture
+  const inLagosBounds = (lat, lng) => (lat >= 6.25 && lat <= 6.75 && lng >= 2.70 && lng <= 3.95);
+  const geocodeFreeText = (address) => {
+    return new Promise((resolve) => {
+      try {
+        if (!address || address.length < 3) return resolve(null);
+        if (!window.google || !window.google.maps) return resolve(null);
+        const gc = new window.google.maps.Geocoder();
+        gc.geocode({ address }, (results, status) => {
+          if (status === 'OK' && results && results[0] && results[0].geometry) {
+            const loc = results[0].geometry.location;
+            const lat = loc.lat(), lng = loc.lng();
+            return resolve({ lat, lng });
+          }
+          return resolve(null);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  };
+
+  const handlePickupChange = (v) => {
+    setPickup(v);
+    // If user edits text after selecting a suggestion, coords are no longer trustworthy.
+    setPickupLat(null);
+    setPickupLng(null);
+  };
+  const handleDropoffChange = (v) => {
+    setDropoff(v);
+    setDropoffLat(null);
+    setDropoffLng(null);
+  };
 
   const handleSubmit = async () => {
     setError(null);
-    if (!pickup) { setError("Pickup address is required"); return; }
-    if (!dropoff) { setError("Dropoff address is required"); return; }
-    if (!senderName) { setError("Sender name is required"); return; }
-    if (!receiverName) { setError("Receiver name is required"); return; }
+    if (!isPartnerOrder) {
+      if (!pickup) { setError("Pickup address is required"); return; }
+      if (!dropoff) { setError("Dropoff address is required"); return; }
+      if (!senderName) { setError("Sender name is required"); return; }
+      if (!receiverName) { setError("Receiver name is required"); return; }
+    } else {
+      if (!merchantId) { setError("Merchant is required for partner orders"); return; }
+      if (fileUploadedUrls.length === 0) { setError("Proof/File upload is required for partner orders"); return; }
+    }
     setSubmitting(true);
     try {
+      // Ensure relay orders always have coordinates (either from Places selection or fallback geocode)
+      let finalPickupLat = pickupLat, finalPickupLng = pickupLng;
+      let finalDropoffLat = dropoffLat, finalDropoffLng = dropoffLng;
+
+      const pickupMissing = (finalPickupLat == null || finalPickupLng == null);
+      const dropoffMissing = (finalDropoffLat == null || finalDropoffLng == null);
+
+      if (pickupMissing) {
+        const g = await geocodeFreeText(pickup);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalPickupLat = g.lat; finalPickupLng = g.lng;
+          setPickupLat(g.lat); setPickupLng(g.lng);
+        }
+      }
+      if (dropoffMissing) {
+        const g = await geocodeFreeText(dropoff);
+        if (g && inLagosBounds(g.lat, g.lng)) {
+          finalDropoffLat = g.lat; finalDropoffLng = g.lng;
+          setDropoffLat(g.lat); setDropoffLng(g.lng);
+        }
+      }
+
+      if (isRelayOrder) {
+        const pOk = (finalPickupLat != null && finalPickupLng != null);
+        const dOk = (finalDropoffLat != null && finalDropoffLng != null);
+        if (!pOk || !dOk) {
+          setError("Relay Delivery requires geocoded pickup & dropoff. Please select both addresses from suggestions (or use a more specific address).");
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const payload = {
         pickup, dropoff,
         senderName, senderPhone: senderPhone || "N/A",
@@ -3363,10 +8396,13 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
         distance_km: routeDistance || 0,
         duration_minutes: routeDuration || 0,
         is_relay_order: isRelayOrder,
-        pickup_lat: pickupLat,
-        pickup_lng: pickupLng,
-        dropoff_lat: dropoffLat,
-        dropoff_lng: dropoffLng,
+        pickup_lat: finalPickupLat,
+        pickup_lng: finalPickupLng,
+        dropoff_lat: finalDropoffLat,
+        dropoff_lng: finalDropoffLng,
+        is_partner_order: isPartnerOrder,
+        partner_order_count: Number(partnerOrderCount) || 0,
+        file_uploaded_urls: fileUploadedUrls,
       };
       const created = await OrdersAPI.create(payload);
       if (onOrderCreated) onOrderCreated(created);
@@ -3391,50 +8427,126 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: S.textMuted }}>{I.x}</button>
         </div>
         <div style={{ padding: "20px 24px" }}>
+          {/* Mode Selector */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(false)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: !isPartnerOrder ? `2px solid ${S.primary}` : `1px solid ${S.border}`,
+                background: !isPartnerOrder ? `${S.primary}10` : "transparent",
+                color: !isPartnerOrder ? S.primary : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🚀 Standard Order
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsPartnerOrder(true)}
+              style={{
+                flex: 1, padding: "12px", borderRadius: 10, cursor: "pointer",
+                border: isPartnerOrder ? `2px solid ${S.gold}` : `1px solid ${S.border}`,
+                background: isPartnerOrder ? S.goldPale : "transparent",
+                color: isPartnerOrder ? "#B8860B" : S.textMuted,
+                fontWeight: 700, fontSize: 13, transition: "all 0.2s"
+              }}
+            >
+              🤝 Partner Bulk
+            </button>
+          </div>
+
           {/* Merchant */}
           <div style={{ marginBottom: 16 }}>
             <label style={lSt}>Merchant</label>
             <select value={merchantId} onChange={e => setMerchantId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Select merchant...</option>
-              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} — {m.contact}</option>)}
+              {merchants.map(m => <option key={m.id} value={m.id}>{m.name} {m.isPartner ? "⭐" : ""} — {m.contact}</option>)}
             </select>
+            {isPartnerOrder && !isSelectedMerchantPartner && merchantId && (
+              <div style={{ fontSize: 10, color: S.red, marginTop: 4 }}>⚠️ This merchant is not configured as a Partner.</div>
+            )}
           </div>
 
-          {/* Sender */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Sender</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
-              <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+          {isPartnerOrder ? (
+            <div style={{ padding: "20px", background: S.goldPale, borderRadius: 12, border: `1px solid ${S.gold}`, marginBottom: 20 }}>
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Number of Orders</label>
+                <input
+                  type="number"
+                  value={partnerOrderCount}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setPartnerOrderCount(val === '' ? '' : parseInt(val));
+                  }}
+                  style={{ ...iSt, fontSize: 16, fontWeight: 700 }}
+                />
+              </div>
+              <div>
+                <label style={lSt}>Upload Partner Proof / File {isUploading && "(Uploading...)"}</label>
+                <div style={{ position: "relative" }}>
+                  <input type="file" multiple accept="image/*" onChange={handleFileUpload} style={{ ...iSt, padding: "8px 10px", opacity: isUploading ? 0.5 : 1 }} disabled={isUploading} />
+                  {fileUploadedUrls.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {fileUploadedUrls.map((url, index) => (
+                        <div key={index} style={{ position: "relative", width: 60, height: 60, borderRadius: 8, overflow: "hidden", border: `1px solid ${S.border}` }}>
+                          <img src={url} alt={`Upload ${index}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <button
+                            type="button"
+                            onClick={() => setFileUploadedUrls(fileUploadedUrls.filter((_, i) => i !== index))}
+                            style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: 16, height: 16, fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Sender */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Sender</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender name" style={iSt} />
+                  <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender phone" style={iSt} />
+                </div>
+              </div>
 
-          {/* Pickup */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Pickup Address</label>
-            <AddressAutocompleteInput value={pickup} onChange={setPickup} onPlaceSelected={p=>{
-              if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              setPickupLat(p.lat); setPickupLng(p.lng);
-            }} placeholder="Enter pickup address..." style={iSt}/>
-          </div>
+              {/* Pickup */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Pickup Address</label>
+                <AddressAutocompleteInput value={pickup} onChange={handlePickupChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setPickup(''); setPickupLat(null); setPickupLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setPickupLat(null); setPickupLng(null); setError('Could not geocode pickup address. Please select a suggestion or enter a more specific address.'); return; }
+                  setPickupLat(p.lat); setPickupLng(p.lng);
+                }} placeholder="Enter pickup address..." style={iSt} />
+              </div>
 
-          {/* Dropoff */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Dropoff Address</label>
-            <AddressAutocompleteInput value={dropoff} onChange={setDropoff} onPlaceSelected={p=>{
-              if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
-              setDropoffLat(p.lat); setDropoffLng(p.lng);
-            }} placeholder="Enter delivery address..." style={iSt}/>
-          </div>
+              {/* Dropoff */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Dropoff Address</label>
+                <AddressAutocompleteInput value={dropoff} onChange={handleDropoffChange} onPlaceSelected={p => {
+                  if (p.outOfScope) { setDropoff(''); setDropoffLat(null); setDropoffLng(null); alert('⚠️ Out of service area — we only deliver within Lagos State.'); return; }
+                  if (p.error) { setDropoffLat(null); setDropoffLng(null); setError('Could not geocode dropoff address. Please select a suggestion or enter a more specific address.'); return; }
+                  setDropoffLat(p.lat); setDropoffLng(p.lng);
+                }} placeholder="Enter delivery address..." style={iSt} />
+              </div>
 
-          {/* Receiver */}
-          <div style={{ marginBottom: 16 }}>
-            <label style={lSt}>Receiver</label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
-              <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
-            </div>
-          </div>
+              {/* Receiver */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={lSt}>Receiver</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver name" style={iSt} />
+                  <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver phone" style={iSt} />
+                </div>
+              </div>
+            </>
+          )}
 
           {/* Route info */}
           {(calculatingRoute || routeDistance) && (
@@ -3503,8 +8615,16 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
             <label style={lSt}>Assign Rider (Optional)</label>
             <select value={riderId} onChange={e => setRiderId(e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
               <option value="">Auto-assign nearest rider</option>
-              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (<option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>))}
-              {riders.filter(r => r.status === "on_delivery").map(r => (<option key={r.id} value={r.id} disabled>{r.name} — 📦 Busy</option>))}
+              {riders.filter(r => r.status === "online" && !r.currentOrder).map(r => (
+                <option key={r.id} value={r.id}>{r.name} — {r.vehicle} • ⭐ {r.rating}</option>
+              ))}
+              {riders
+                .filter(r => r.status !== "offline" && (r.status === "on_delivery" || !!r.currentOrder))
+                .map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} — 📦 Busy{r.currentOrder ? ` (${r.currentOrder})` : ""}
+                  </option>
+                ))}
             </select>
           </div>
 
@@ -3512,7 +8632,7 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
           <div style={{ marginBottom: 16, padding: "14px 16px", borderRadius: 10, background: S.goldPale, border: `1px solid ${S.gold}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px" }}>Estimated Price</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{displayPrice.toLocaleString()}</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>{displayPrice != null ? `₦${displayPrice.toLocaleString()}` : "—"}</div>
               {routeDistance && <div style={{ fontSize: 11, color: S.textMuted, marginTop: 2 }}>{routeDistance}km • {routeDuration}min</div>}
             </div>
             <div style={{ textAlign: "right" }}>
@@ -3538,109 +8658,618 @@ function CreateOrderModal({ riders, merchants, onClose, onOrderCreated }) {
 }
 
 // ─── TEAMS SCREEN ────────────────────────────────────────────────
-function TeamsScreen({ dispatchers, onDispatcherAdded, onDispatcherRemoved }) {
-  const [teamsTab, setTeamsTab] = useState("dispatchers");
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [removing, setRemoving] = useState(null);
+function TeamsScreen({ dispatchers, onDispatcherCreated }) {
+  const [activeTab, setActiveTab] = useState("members"); // "members" | "riders" | "merchants" | "earnings"
   const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [toast, setToast] = useState("");
+  const [copiedCode, setCopiedCode] = useState(null);
+  const [affiliationSummary, setAffiliationSummary] = useState(null);
+  const [affiliatedRiders, setAffiliatedRiders] = useState([]);
+  const [affiliatedMerchants, setAffiliatedMerchants] = useState([]);
+  const [monthlyEarnings, setMonthlyEarnings] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
 
-  const filtered = dispatchers.filter(d => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return d.name.toLowerCase().includes(s) || d.phone.includes(s) || d.email.toLowerCase().includes(s);
-  });
-
-  const handleRemove = async (dispatcher) => {
-    if (!window.confirm(`Deactivate ${dispatcher.name}? They will no longer be able to log in.`)) return;
-    setRemoving(dispatcher.id);
+  const loadAffiliationData = useCallback(async () => {
+    setLoading(true);
     try {
-      await DispatchersAPI.remove(dispatcher.id);
-      onDispatcherRemoved(dispatcher.id);
+      const [sum, riders, merchants, earnings] = await Promise.all([
+        AffiliationAPI.getSummary().catch(() => null),
+        AffiliationAPI.getAffiliatedRiders().catch(() => []),
+        AffiliationAPI.getAffiliatedMerchants().catch(() => []),
+        AffiliationAPI.getMonthlyEarnings().catch(() => []),
+      ]);
+      setAffiliationSummary(sum);
+      setAffiliatedRiders(riders);
+      setAffiliatedMerchants(merchants);
+      setMonthlyEarnings(earnings);
     } catch (e) {
-      alert("Failed to deactivate dispatcher. Please try again.");
+      console.error("Failed to load affiliation data:", e);
     } finally {
-      setRemoving(null);
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAffiliationData();
+  }, [loadAffiliationData]);
+
+  const copyToClipboard = (code) => {
+    if (!code) return;
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setToast(`Affiliation Code "${code}" copied to clipboard!`);
+    setTimeout(() => {
+      setCopiedCode(null);
+      setToast("");
+    }, 3000);
+  };
+
+  const handleReconcile = async () => {
+    setReconciling(true);
+    try {
+      const res = await AffiliationAPI.reconcile();
+      setToast(`Reconciliation complete! Verified ${res.total_orders || 0} orders (₦${parseFloat(res.total_commission || 0).toLocaleString()})`);
+      await loadAffiliationData();
+    } catch (err) {
+      setToast(err.message || "Reconciliation failed.");
+    } finally {
+      setReconciling(false);
+      setTimeout(() => setToast(""), 4000);
     }
   };
 
+  const roleBadgeStyle = (role) => {
+    const r = (role || "").toLowerCase();
+    if (r.includes("hub") || r.includes("captain")) {
+      return { background: S.purpleBg, color: S.purple, border: `1px solid ${S.purple}30` };
+    }
+    if (r.includes("zone") || r.includes("lead")) {
+      return { background: S.blueBg, color: S.blue, border: `1px solid ${S.blue}30` };
+    }
+    return { background: S.goldPale, color: S.gold, border: `1px solid ${S.gold}30` };
+  };
+
+  const filteredDispatchers = (dispatchers || []).filter(d => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const name = (d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`).toLowerCase();
+    const phone = (d.phone || "").toLowerCase();
+    const code = (d.affiliation_code || "").toLowerCase();
+    const role = (d.role || "").toLowerCase();
+    return name.includes(q) || phone.includes(q) || code.includes(q) || role.includes(q);
+  });
+
+  const filteredRiders = (affiliatedRiders || []).filter(r => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const name = (r.name || "").toLowerCase();
+    const id = (r.rider_id || "").toLowerCase();
+    const phone = (r.phone || "").toLowerCase();
+    return name.includes(q) || id.includes(q) || phone.includes(q);
+  });
+
+  const filteredMerchants = (affiliatedMerchants || []).filter(m => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    const bName = (m.business_name || "").toLowerCase();
+    const cName = (m.contact_name || "").toLowerCase();
+    const id = (m.merchant_id || "").toLowerCase();
+    const phone = (m.phone || "").toLowerCase();
+    return bName.includes(q) || cName.includes(q) || id.includes(q) || phone.includes(q);
+  });
+
   return (
-    <div style={{animation:"fadeIn 0.3s ease"}}>
-      {/* Tabs */}
-      <div style={{display:"flex",gap:4,marginBottom:20,borderBottom:`1px solid ${S.border}`,paddingBottom:0}}>
-        {[{id:"dispatchers",label:"Dispatchers",count:dispatchers.length}].map(t=>(
-          <button key={t.id} onClick={()=>setTeamsTab(t.id)} style={{padding:"10px 18px",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13,borderBottom:teamsTab===t.id?`2px solid ${S.gold}`:"2px solid transparent",color:teamsTab===t.id?S.gold:S.textMuted,background:"transparent",marginBottom:-1,display:"flex",alignItems:"center",gap:6}}>
-            {t.label}
-            <span style={{fontSize:11,padding:"1px 8px",borderRadius:12,background:teamsTab===t.id?S.goldPale:"#f1f5f9",color:teamsTab===t.id?S.gold:S.textMuted,fontWeight:700}}>{t.count}</span>
-          </button>
-        ))}
+    <div style={{ animation: "fadeIn 0.3s ease", position: "relative", minHeight: "100%", display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* ─── STAT CARDS ─── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+        <StatCard
+          label="Total Dispatchers"
+          value={dispatchers.length}
+          subtext="Hub Captains & Leads"
+        />
+        <StatCard
+          label="Affiliated Fleet"
+          value={affiliationSummary?.total_affiliated_riders || affiliatedRiders.length || 0}
+          subtext="Active fleet linked to hubs"
+          color={S.blue}
+        />
+        <StatCard
+          label="Affiliated Merchants"
+          value={affiliationSummary?.total_affiliated_merchants || affiliatedMerchants.length || 0}
+          subtext="Businesses linked to hubs"
+          color={S.purple}
+        />
+        <StatCard
+          label="Monthly Commission"
+          value={`₦${parseFloat(affiliationSummary?.monthly_commission || 0).toLocaleString()}`}
+          subtext={`Current month (${affiliationSummary?.current_month || "Active"})`}
+          color={S.green}
+        />
+        <StatCard
+          label="Lifetime Commission"
+          value={`₦${parseFloat(affiliationSummary?.total_commission_earned || 0).toLocaleString()}`}
+          subtext={`Rate: ₦${parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} / completed order`}
+          color={S.gold}
+        />
       </div>
 
-      {teamsTab === "dispatchers" && (
-        <div>
-          {/* Toolbar */}
-          <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
-            <div style={{flex:1,background:S.card,borderRadius:10,border:`1px solid ${S.border}`,display:"flex",alignItems:"center",gap:8,padding:"0 12px"}}>
-              <span style={{opacity:0.4}}>{I.search}</span>
-              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search dispatchers by name, phone or email…" style={{flex:1,background:"transparent",border:"none",color:S.text,fontSize:12,fontFamily:"inherit",height:38,outline:"none"}}/>
+      {/* ─── AFFILIATION CODE PROMO BANNER ─── */}
+      {affiliationSummary?.affiliation_code && (
+        <div style={{
+          background: `linear-gradient(135deg, ${S.navy} 0%, #17233c 100%)`,
+          borderRadius: 16, padding: "20px 24px", color: "#fff",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexWrap: "wrap", gap: 16, boxShadow: "0 4px 20px rgba(0,0,0,0.08)"
+        }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <span style={{ color: S.gold }}>{I.idCard}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px" }}>
+                Hub Captain Affiliation Program
+              </span>
             </div>
-            <button onClick={()=>setShowAddModal(true)} style={{display:"flex",alignItems:"center",gap:6,padding:"9px 18px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:13,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy,whiteSpace:"nowrap",boxShadow:"0 2px 8px rgba(232,168,56,0.25)"}}>
-              {I.plus} Add Dispatcher
-            </button>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
+              Share your affiliation code with riders and merchants to onboard or link them to your hub.
+            </div>
+            <div style={{ fontSize: 12, color: S.textMuted }}>
+              Earn ₦{parseFloat(affiliationSummary?.commission_per_order || 3000).toLocaleString()} commission for each completed order by your affiliated riders or merchants.
+            </div>
           </div>
 
-          {/* Table */}
-          <div style={{background:S.card,borderRadius:14,border:`1px solid ${S.border}`,overflow:"hidden"}}>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 2fr 1.2fr 100px 60px",padding:"10px 18px",background:S.borderLight,fontSize:10,fontWeight:700,color:S.textMuted,textTransform:"uppercase",letterSpacing:"0.5px",borderBottom:`1px solid ${S.border}`}}>
-              <span>Name</span><span>Phone</span><span>Email</span><span>Joined</span><span>Status</span><span></span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, background: "rgba(255,255,255,0.06)", padding: "10px 16px", borderRadius: 12, border: "1px solid rgba(255,255,255,0.12)" }}>
+            <div>
+              <div style={{ fontSize: 10, color: S.textMuted, textTransform: "uppercase", fontWeight: 700 }}>Your Affiliation Code</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: S.gold, fontFamily: "'Space Mono', monospace", letterSpacing: "2px" }}>
+                {affiliationSummary.affiliation_code}
+              </div>
             </div>
-            <div style={{maxHeight:"calc(100vh - 300px)",overflowY:"auto"}}>
-              {filtered.map(d=>(
-                <div key={d.id} style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 2fr 1.2fr 100px 60px",padding:"13px 18px",borderBottom:`1px solid ${S.borderLight}`,alignItems:"center",transition:"background 0.12s"}} onMouseEnter={e=>e.currentTarget.style.background=S.borderLight} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                  {/* Avatar + name */}
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:34,height:34,borderRadius:"50%",background:`linear-gradient(135deg,${S.navy},${S.navyLight})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:S.gold,flexShrink:0}}>
-                      {(d.name||"?").split(" ").slice(0,2).map(w=>w[0]).join("").toUpperCase()}
-                    </div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:700,color:S.text}}>{d.name||"—"}</div>
-                      <div style={{fontSize:10,color:S.textMuted}}>Dispatcher</div>
-                    </div>
-                  </div>
-                  <div style={{fontSize:12,color:S.textDim,fontFamily:"'Space Mono',monospace"}}>{d.phone||"—"}</div>
-                  <div style={{fontSize:12,color:S.textDim,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.email||"—"}</div>
-                  <div style={{fontSize:12,color:S.textMuted}}>{d.joined}</div>
-                  <div>
-                    <span style={{fontSize:10,fontWeight:700,padding:"3px 10px",borderRadius:6,background:d.isActive?"#dcfce7":"#fee2e2",color:d.isActive?"#16a34a":"#ef4444",textTransform:"uppercase",letterSpacing:"0.5px"}}>
-                      {d.isActive?"Active":"Inactive"}
-                    </span>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"center"}}>
-                    <button onClick={()=>handleRemove(d)} disabled={removing===d.id} title="Deactivate dispatcher" style={{background:"none",border:"none",cursor:removing===d.id?"not-allowed":"pointer",color:S.textMuted,padding:4,borderRadius:6,display:"flex",alignItems:"center",opacity:removing===d.id?0.4:1,transition:"color 0.15s"}} onMouseEnter={e=>e.currentTarget.style.color="#ef4444"} onMouseLeave={e=>e.currentTarget.style.color=S.textMuted}>
-                      {I.trash}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {filtered.length===0 && (
-                <div style={{padding:"60px 0",textAlign:"center"}}>
-                  <div style={{fontSize:32,marginBottom:12}}>👥</div>
-                  <div style={{fontSize:14,fontWeight:700,color:S.text,marginBottom:6}}>No dispatchers yet</div>
-                  <div style={{fontSize:12,color:S.textMuted,marginBottom:20}}>Add your first dispatcher to give them access to this portal.</div>
-                  <button onClick={()=>setShowAddModal(true)} style={{padding:"10px 24px",borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:13,background:`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:S.navy}}>
-                    {I.plus} Add Dispatcher
-                  </button>
-                </div>
+            <button
+              onClick={() => copyToClipboard(affiliationSummary.affiliation_code)}
+              style={{
+                background: copiedCode === affiliationSummary.affiliation_code ? S.green : S.gold,
+                color: S.navy, border: "none", padding: "8px 14px", borderRadius: 8,
+                fontSize: 12, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+                transition: "all 0.2s"
+              }}
+            >
+              {copiedCode === affiliationSummary.affiliation_code ? (
+                <>{I.check} Copied</>
+              ) : (
+                <>{I.copy} Copy Code</>
               )}
-            </div>
+            </button>
           </div>
         </div>
       )}
 
-      {showAddModal && (
+      {/* ─── TABS & CONTROLS ─── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", gap: 6, background: S.borderLight, padding: 4, borderRadius: 10 }}>
+          <button
+            onClick={() => setActiveTab("members")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "members" ? S.card : "transparent",
+              color: activeTab === "members" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "members" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.teams} Team Dispatchers ({dispatchers.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("riders")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "riders" ? S.card : "transparent",
+              color: activeTab === "riders" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "riders" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.riders} Affiliated Fleet ({affiliatedRiders.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("merchants")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "merchants" ? S.card : "transparent",
+              color: activeTab === "merchants" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "merchants" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🏪 Affiliated Merchants ({affiliatedMerchants.length})
+          </button>
+          <button
+            onClick={() => setActiveTab("earnings")}
+            style={{
+              padding: "8px 16px", borderRadius: 8, border: "none",
+              background: activeTab === "earnings" ? S.card : "transparent",
+              color: activeTab === "earnings" ? S.navy : S.textDim,
+              fontWeight: 700, fontSize: 13, cursor: "pointer",
+              boxShadow: activeTab === "earnings" ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            {I.revenue} Monthly Ledgers ({monthlyEarnings.length})
+          </button>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            background: S.card, borderRadius: 10, border: `1px solid ${S.border}`,
+            display: "flex", alignItems: "center", gap: 8, padding: "0 12px", width: 240
+          }}>
+            <span style={{ opacity: 0.4 }}>{I.search}</span>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search..."
+              style={{ flex: 1, background: "transparent", border: "none", color: S.text, fontSize: 12, height: 36, outline: "none" }}
+            />
+          </div>
+
+          <button
+            onClick={handleReconcile}
+            disabled={reconciling}
+            style={{
+              padding: "8px 14px", borderRadius: 10, border: `1px solid ${S.border}`,
+              background: S.card, color: S.navy, fontSize: 12, fontWeight: 700,
+              cursor: reconciling ? "not-allowed" : "pointer", opacity: reconciling ? 0.6 : 1,
+              display: "flex", alignItems: "center", gap: 6
+            }}
+          >
+            🔄 {reconciling ? "Reconciling..." : "Reconcile Commissions"}
+          </button>
+
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "8px 16px",
+              borderRadius: 10, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 12,
+              background: `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: S.navy,
+              boxShadow: `0 4px 12px ${S.gold}40`
+            }}
+          >
+            {I.plus} Add Dispatcher
+          </button>
+        </div>
+      </div>
+
+      {/* ─── TAB 1: TEAM MEMBERS ─── */}
+      {activeTab === "members" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Dispatcher / Captain</span>
+            <span>Role</span>
+            <span>Phone</span>
+            <span>Affiliation Code</span>
+            <span style={{ textAlign: "right" }}>Riders</span>
+            <span style={{ textAlign: "right" }}>This Month</span>
+            <span style={{ textAlign: "right" }}>Lifetime</span>
+          </div>
+
+          <div>
+            {filteredDispatchers.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                No dispatchers found matching "{search}".
+              </div>
+            ) : (
+              filteredDispatchers.map((d, idx) => {
+                const name = d.contact_name || d.name || `${d.first_name || ""} ${d.last_name || ""}`.trim() || d.phone || "Dispatcher";
+                const role = d.role_display || d.role || "Dispatcher";
+                const code = d.affiliation_code || "—";
+                return (
+                  <div
+                    key={d.id || idx}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1.4fr 1fr 1fr 1fr 100px 110px 110px",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: "50%",
+                        background: S.navy, color: "#fff", display: "flex",
+                        alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13
+                      }}>
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 700, color: S.navy }}>{name}</div>
+                        <div style={{ fontSize: 11, color: S.textMuted }}>{d.email || d.username || "—"}</div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        ...roleBadgeStyle(role)
+                      }}>
+                        {role}
+                      </span>
+                    </div>
+
+                    <div style={{ color: S.textDim, fontSize: 12 }}>
+                      {d.phone || "—"}
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{
+                        fontFamily: "'Space Mono', monospace", fontWeight: 700,
+                        fontSize: 12, color: S.navy, background: S.borderLight,
+                        padding: "3px 8px", borderRadius: 6
+                      }}>
+                        {code}
+                      </span>
+                      {code !== "—" && (
+                        <button
+                          onClick={() => copyToClipboard(code)}
+                          title="Copy Code"
+                          style={{
+                            background: "transparent", border: "none", cursor: "pointer",
+                            color: copiedCode === code ? S.green : S.textMuted, padding: 4
+                          }}
+                        >
+                          {copiedCode === code ? I.check : I.copy}
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {d.affiliated_riders_count || 0}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.monthly_commission || 0).toLocaleString()}
+                    </div>
+
+                    <div style={{ textAlign: "right", fontWeight: 800, color: S.gold, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(d.total_commission_earned || 0).toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 2: AFFILIATED RIDERS ─── */}
+      {activeTab === "riders" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Rider ID</span>
+            <span>Rider Name</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredRiders.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated riders..." : "No affiliated riders found for your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredRiders.map(r => (
+                <div
+                  key={r.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {r.rider_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{r.name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Affiliated: {r.affiliated_at ? new Date(r.affiliated_at).toLocaleDateString() : "Active"}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{r.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: r.status === "online" ? S.greenBg : S.borderLight,
+                      color: r.status === "online" ? S.green : S.textMuted
+                    }}>
+                      {r.status || "offline"}
+                    </span>
+                  </div>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {r.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {r.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(r.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 3: AFFILIATED MERCHANTS ─── */}
+      {activeTab === "merchants" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Merchant ID</span>
+            <span>Business / Contact</span>
+            <span>Phone</span>
+            <span>Status</span>
+            <span>Type</span>
+            <span style={{ textAlign: "right" }}>Orders (Mo)</span>
+            <span style={{ textAlign: "right" }}>Total Completed</span>
+            <span style={{ textAlign: "right" }}>Commission (Mo)</span>
+          </div>
+
+          <div>
+            {filteredMerchants.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading affiliated merchants..." : "No affiliated merchants linked to your dispatcher profile yet."}
+              </div>
+            ) : (
+              filteredMerchants.map(m => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "100px 1.4fr 1.1fr 100px 90px 100px 120px 110px",
+                    padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                    alignItems: "center", fontSize: 13
+                  }}
+                >
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 700, color: S.gold }}>
+                    {m.merchant_id}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 700, color: S.navy }}>{m.business_name}</div>
+                    <div style={{ fontSize: 11, color: S.textMuted }}>
+                      Contact: {m.contact_name} {m.affiliated_at ? `• Affiliated: ${new Date(m.affiliated_at).toLocaleDateString()}` : ""}
+                    </div>
+                  </div>
+                  <span style={{ color: S.textDim, fontSize: 12 }}>{m.phone}</span>
+                  <div>
+                    <span style={{
+                      padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: m.activity_status === "active" ? S.greenBg : m.activity_status === "watch" ? S.goldPale : S.borderLight,
+                      color: m.activity_status === "active" ? S.green : m.activity_status === "watch" ? S.gold : S.textMuted
+                    }}>
+                      {m.activity_status || "active"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 12, color: S.textDim, textTransform: "capitalize" }}>
+                    {m.merchant_type || "regular"}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                    {m.orders_this_month || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 700, color: S.textDim }}>
+                    {m.total_completed_orders || 0}
+                  </span>
+                  <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                    ₦{parseFloat(m.commission_this_month || 0).toLocaleString()}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── TAB 4: MONTHLY LEDGERS ─── */}
+      {activeTab === "earnings" && (
+        <div style={{ background: S.card, borderRadius: 14, border: `1px solid ${S.border}`, overflow: "hidden" }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+            padding: "12px 16px", background: S.borderLight, fontSize: 11,
+            fontWeight: 700, color: S.textMuted, textTransform: "uppercase", letterSpacing: "0.5px"
+          }}>
+            <span>Month</span>
+            <span style={{ textAlign: "right" }}>Total Orders</span>
+            <span style={{ textAlign: "right" }}>Commission (₦)</span>
+            <span>Settlement Status</span>
+            <span>Last Updated</span>
+          </div>
+
+          <div>
+            {monthlyEarnings.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: S.textMuted, fontSize: 13 }}>
+                {loading ? "Loading monthly records..." : "No monthly commission ledger entries yet."}
+              </div>
+            ) : (
+              monthlyEarnings.map(m => {
+                const isPaid = m.status === "paid";
+                return (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "120px 140px 140px 140px 1.2fr",
+                      padding: "14px 16px", borderBottom: `1px solid ${S.borderLight}`,
+                      alignItems: "center", fontSize: 13
+                    }}
+                  >
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontWeight: 800, color: S.navy }}>
+                      {m.month_year}
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 700, color: S.navy }}>
+                      {m.total_orders} orders
+                    </span>
+                    <span style={{ textAlign: "right", fontWeight: 800, color: S.green, fontFamily: "'Space Mono', monospace" }}>
+                      ₦{parseFloat(m.total_commission || 0).toLocaleString()}
+                    </span>
+                    <div>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: isPaid ? S.greenBg : S.goldPale,
+                        color: isPaid ? S.green : S.gold
+                      }}>
+                        {m.status_display || m.status}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 12, color: S.textMuted }}>
+                      {m.updated_at ? new Date(m.updated_at).toLocaleString() : "—"}
+                    </span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {showAdd && (
         <AddDispatcherModal
-          onClose={()=>setShowAddModal(false)}
-          onCreated={d=>{onDispatcherAdded(d);setShowAddModal(false);}}
+          onClose={() => setShowAdd(false)}
+          onCreated={(d) => {
+            onDispatcherCreated(d);
+            setShowAdd(false);
+            loadAffiliationData();
+            setToast(`Dispatcher ${d.name || d.first_name || ''} created successfully`);
+            setTimeout(() => setToast(""), 3500);
+          }}
         />
+      )}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 30, left: "50%", transform: "translateX(-50%)", background: S.navy, color: "#fff", padding: "12px 24px", borderRadius: 30, fontSize: 13, fontWeight: 600, boxShadow: "0 10px 30px rgba(0,0,0,0.2)", zIndex: 2000, animation: "fadeIn 0.3s ease", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ color: S.green }}>{I.check}</span> {toast}
+        </div>
       )}
     </div>
   );
@@ -3648,102 +9277,154 @@ function TeamsScreen({ dispatchers, onDispatcherAdded, onDispatcherRemoved }) {
 
 // ─── ADD DISPATCHER MODAL ────────────────────────────────────────
 function AddDispatcherModal({ onClose, onCreated }) {
-  const [form, setForm] = useState({ contact_name:"", phone:"", email:"", password:"" });
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "", role: "admin" });
   const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState({});
+  const [error, setError] = useState("");
 
-  const set = (k, v) => { setForm(p=>({...p,[k]:v})); setErrors(p=>({...p,[k]:undefined,general:undefined})); };
-
-  const validate = () => {
-    const e = {};
-    if (!form.contact_name.trim()) e.contact_name = "Name is required";
-    if (!form.phone.trim()) e.phone = "Phone is required";
-    if (!form.email.trim()) e.email = "Email is required";
-    else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = "Enter a valid email";
-    if (!form.password) e.password = "Password is required";
-    else if (form.password.length < 6) e.password = "Min 6 characters";
-    return e;
-  };
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const iSt = { width: "100%", padding: "10px 12px", borderRadius: 8, border: `1px solid ${S.border}`, fontSize: 13, fontFamily: "inherit", color: S.text, background: "#fff", outline: "none" };
+  const lSt = { display: "block", fontSize: 12, fontWeight: 600, color: S.textDim, marginBottom: 5 };
 
   const handleSubmit = async () => {
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    setSubmitting(true);
-    setErrors({});
+    if (!form.first_name || !form.last_name || !form.phone || !form.email || !form.password || !form.role) {
+      setError("All fields are required."); return;
+    }
+    setSubmitting(true); setError("");
     try {
-      const dispatcher = await DispatchersAPI.create(form);
-      onCreated(dispatcher);
-    } catch (err) {
-      // err is the parsed JSON error body from DRF
-      const fieldErrors = {};
-      if (err?.phone) fieldErrors.phone = Array.isArray(err.phone) ? err.phone[0] : err.phone;
-      if (err?.email) fieldErrors.email = Array.isArray(err.email) ? err.email[0] : err.email;
-      if (err?.contact_name) fieldErrors.contact_name = Array.isArray(err.contact_name) ? err.contact_name[0] : err.contact_name;
-      if (err?.non_field_errors) fieldErrors.general = Array.isArray(err.non_field_errors) ? err.non_field_errors[0] : err.non_field_errors;
-      if (!Object.keys(fieldErrors).length) fieldErrors.general = err?.message || "Failed to create dispatcher. Please try again.";
-      setErrors(fieldErrors);
+      const created = await DispatchersAPI.create(form);
+      onCreated(created);
+    } catch (e) {
+      // e is likely the parsed error response body (object or string)
+      if (e && typeof e === "object") {
+        const msgs = Object.entries(e).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`).join("\n");
+        setError(msgs);
+      } else {
+        setError("Failed to create dispatcher. Please try again.");
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  const iStyle = { width:"100%", padding:"10px 14px", border:`1.5px solid ${S.border}`, borderRadius:8, fontSize:13, fontFamily:"inherit", color:S.text, background:S.bg, outline:"none", boxSizing:"border-box" };
-  const errStyle = { fontSize:11, color:"#ef4444", marginTop:4 };
-  const Field = ({ label, name, type="text", placeholder }) => (
-    <div style={{marginBottom:16}}>
-      <label style={{display:"block",fontSize:12,fontWeight:600,color:S.text,marginBottom:6}}>{label}</label>
-      <input type={type} value={form[name]} onChange={e=>set(name,e.target.value)} placeholder={placeholder} style={{...iStyle,borderColor:errors[name]?"#ef4444":S.border}}/>
-      {errors[name] && <div style={errStyle}>{errors[name]}</div>}
-    </div>
-  );
-
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999,backdropFilter:"blur(2px)"}}>
-      <div style={{width:480,background:S.card,borderRadius:18,boxShadow:"0 20px 60px rgba(0,0,0,0.2)",overflow:"hidden",animation:"fadeIn 0.25s ease"}}>
-        {/* Header */}
-        <div style={{padding:"20px 24px 16px",borderBottom:`1px solid ${S.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, backdropFilter: "blur(3px)" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: 480, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.2s ease" }}>
+        {/* Modal header */}
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
-            <h2 style={{margin:0,fontSize:17,fontWeight:800,color:S.navy}}>Add Dispatcher</h2>
-            <p style={{margin:"4px 0 0",fontSize:12,color:S.textMuted}}>Create a new dispatcher account with portal access</p>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Add Dispatcher</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Create a new dispatcher account with portal access</div>
           </div>
-          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",color:S.textMuted,padding:4,borderRadius:6,display:"flex"}}>{I.x}</button>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: `1px solid ${S.border}`, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: S.textMuted }}>{I.x}</button>
         </div>
 
-        {/* Body */}
-        <div style={{padding:"20px 24px"}}>
-          {errors.general && (
-            <div style={{padding:"10px 14px",background:"#fee2e2",color:"#ef4444",borderRadius:8,fontSize:12,marginBottom:16,fontWeight:500}}>
-              {errors.general}
+        {/* Form body */}
+        <div style={{ padding: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+            <div>
+              <label style={lSt}>First Name</label>
+              <input value={form.first_name} onChange={e => set("first_name", e.target.value)} placeholder="John" style={iSt} />
+            </div>
+            <div>
+              <label style={lSt}>Last Name</label>
+              <input value={form.last_name} onChange={e => set("last_name", e.target.value)} placeholder="Doe" style={iSt} />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Phone Number</label>
+            <input value={form.phone} onChange={e => set("phone", e.target.value)} placeholder="+2348012345678" style={iSt} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Email Address</label>
+            <input type="email" value={form.email} onChange={e => set("email", e.target.value)} placeholder="dispatcher@company.com" style={iSt} />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={lSt}>Password</label>
+            <input type="password" value={form.password} onChange={e => set("password", e.target.value)} placeholder="Min. 6 characters" style={iSt} />
+            <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>The dispatcher will use this to log in to the portal.</div>
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={lSt}>Role</label>
+            <select value={form.role} onChange={e => set("role", e.target.value)} style={{ ...iSt, cursor: "pointer" }}>
+              <option value="admin">Admin</option>
+              <option value="zone_lead">Zone Lead</option>
+              <option value="hub_captain">Hub Captain</option>
+            </select>
+            <div style={{ fontSize: 11, color: S.textMuted, marginTop: 4 }}>Access level granted to this dispatcher.</div>
+          </div>
+
+          {error && (
+            <div style={{ padding: "10px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 13, color: S.red, marginBottom: 14, whiteSpace: "pre-line" }}>
+              {error}
             </div>
           )}
 
-          <Field label="Full Name *" name="contact_name" placeholder="e.g. Amaka Okafor"/>
-
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            <Field label="Phone *" name="phone" placeholder="+2348012345678"/>
-            <div style={{marginBottom:16}}>
-              <label style={{display:"block",fontSize:12,fontWeight:600,color:S.text,marginBottom:6}}>Email *</label>
-              <input type="email" value={form.email} onChange={e=>set("email",e.target.value)} placeholder="name@example.com" style={{...iStyle,borderColor:errors.email?"#ef4444":S.border}}/>
-              {errors.email && <div style={errStyle}>{errors.email}</div>}
-            </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={onClose} style={{ flex: 1, padding: "12px 0", borderRadius: 10, border: `1px solid ${S.border}`, background: "transparent", color: S.textDim, cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600 }}>Cancel</button>
+            <button onClick={handleSubmit} disabled={submitting} style={{ flex: 2, padding: "12px 0", borderRadius: 10, border: "none", cursor: submitting ? "not-allowed" : "pointer", fontFamily: "inherit", background: submitting ? "#e2e8f0" : `linear-gradient(135deg,${S.gold},${S.goldLight})`, color: submitting ? S.textMuted : S.navy, fontWeight: 800, fontSize: 14 }}>
+              {submitting ? "Creating..." : "Add Dispatcher"}
+            </button>
           </div>
-
-          <div style={{marginBottom:8}}>
-            <label style={{display:"block",fontSize:12,fontWeight:600,color:S.text,marginBottom:6}}>Password *</label>
-            <input type="password" value={form.password} onChange={e=>set("password",e.target.value)} placeholder="Min 6 characters" style={{...iStyle,borderColor:errors.password?"#ef4444":S.border}}/>
-            {errors.password && <div style={errStyle}>{errors.password}</div>}
-            <div style={{fontSize:11,color:S.textMuted,marginTop:4}}>The dispatcher will use this password to log in to the portal.</div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div style={{padding:"14px 24px",borderTop:`1px solid ${S.border}`,display:"flex",gap:10}}>
-          <button onClick={onClose} style={{flex:1,padding:"11px 0",borderRadius:10,border:`1px solid ${S.border}`,background:"transparent",color:S.textDim,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>Cancel</button>
-          <button onClick={handleSubmit} disabled={submitting} style={{flex:2,padding:"11px 0",borderRadius:10,border:"none",cursor:submitting?"not-allowed":"pointer",fontFamily:"inherit",background:submitting?"#e2e8f0":`linear-gradient(135deg,${S.gold},${S.goldLight})`,color:submitting?S.textMuted:S.navy,fontWeight:800,fontSize:14,transition:"opacity 0.2s",opacity:submitting?0.7:1}}>
-            {submitting ? "Creating…" : "Create Dispatcher"}
-          </button>
         </div>
       </div>
     </div>
   );
 }
+
+// ─── PAYMENT DETAILS MODAL ────────────────────────────────────────
+function PaymentDetailsModal({ order, onClose }) {
+  const [copied, setCopied] = useState(false);
+  const info = order.paymentInfo || {};
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(info.account_number);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100, backdropFilter: "blur(3px)" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: "#fff", borderRadius: 16, width: 400, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", animation: "fadeIn 0.2s ease" }}>
+        <div style={{ padding: "20px 24px 16px", borderBottom: `1px solid ${S.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 17, fontWeight: 800, color: S.navy }}>Payment Details</div>
+            <div style={{ fontSize: 12, color: S.textMuted, marginTop: 2 }}>Order {order.id}</div>
+          </div>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: `1px solid ${S.border}`, background: "transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: S.textMuted }}>{I.x}</button>
+        </div>
+
+        <div style={{ padding: 24 }}>
+          <div style={{ background: S.goldPale, border: `1.5px dashed ${S.gold}40`, borderRadius: 12, padding: 20, textAlign: "center", marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: S.gold, textTransform: "uppercase", letterSpacing: "1px", marginBottom: 14 }}>Transfer to this account</div>
+
+            <div style={{ fontSize: 14, color: S.textDim, marginBottom: 4 }}>{info.bank_name || "Wema Bank"}</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace", marginBottom: 6 }}>{info.account_number || "—"}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: S.text }}>{info.account_name || "—"}</div>
+
+            <button onClick={handleCopy} style={{ marginTop: 16, padding: "8px 16px", borderRadius: 8, border: `1px solid ${S.gold}40`, background: "#fff", color: S.gold, fontSize: 12, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, transition: "all 0.2s" }}>
+              {copied ? <>{I.check} Copied!</> : <>{I.copy} Copy Account Number</>}
+            </button>
+          </div>
+
+          <div style={{ background: S.borderLight, borderRadius: 12, padding: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: S.textDim }}>Total Amount</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono',monospace" }}>₦{(order.amount + (order.codFee || 0)).toLocaleString()}</span>
+          </div>
+
+          <div style={{ marginTop: 20, padding: "10px 14px", borderRadius: 8, background: S.blueBg, border: `1px solid ${S.blue}20`, fontSize: 11, color: S.blue, lineHeight: 1.5 }}>
+            💡 Your order will be automatically marked as <b>Paid</b> once your wallet is funded with the exact amount.
+          </div>
+
+          <button onClick={onClose} style={{ width: "100%", marginTop: 20, padding: "12px 0", borderRadius: 10, border: "none", cursor: "pointer", fontFamily: "inherit", background: S.navy, color: "#fff", fontWeight: 700, fontSize: 13 }}>Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

@@ -1,25 +1,75 @@
+from decimal import Decimal
+from dispatcher.utils import generate_notification_id, generate_random_code
+from email.policy import default
+import hashlib
 import math
 
 from django.db import models
 from django.conf import settings
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 import uuid
 import random
 import string
-
+from django.utils import timezone
 
 # ---------------------------------------------------------------------------
 # Relay Delivery Infrastructure
 # ---------------------------------------------------------------------------
 
 
-class Zone(models.Model):
+class Vertical(models.Model):
     """
-    A delivery zone defined by a center point and radius.
-    Zones are used to assign riders to home areas and segment relay paths.
+    An organizational unit that groups multiple zones.
+    Each Vertical has a lead and a unique code (A, B, C, D).
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=100)
+    code = models.CharField(
+        max_length=10, unique=True, help_text="Vertical code (A, B, C, D)"
+    )
+    lead_name = models.CharField(max_length=100, help_text="Vertical Lead name")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "verticals"
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"Vertical {self.code}: {self.name} (Lead: {self.lead_name})"
+
+
+class Zone(models.Model):
+    """
+    A delivery zone aka (verticals) defined by a center point and radius.
+    Zones are used to assign riders to home areas and segment relay paths.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # deprecated
+    vertical = models.ForeignKey(
+        Vertical,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="zones",
+    )
+    name = models.CharField(max_length=100)
+    description = models.TextField(
+        blank=True,
+        default="",
+        help_text="List of areas covered by this zone",
+    )
+    zone_lead = models.ForeignKey(
+        "dispatcher.VerticalLead",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="area_zones",
+    )
     center_lat = models.FloatField(help_text="Zone center latitude")
     center_lng = models.FloatField(help_text="Zone center longitude")
     radius_km = models.FloatField(default=5.0, help_text="Zone radius in kilometers")
@@ -30,6 +80,8 @@ class Zone(models.Model):
     class Meta:
         db_table = "zones"
         ordering = ["name"]
+        verbose_name = "Zone/Vertical"
+        verbose_name_plural = "Zones/Verticals"
 
     def __str__(self):
         return f"{self.name} ({self.radius_km}km radius)"
@@ -37,6 +89,8 @@ class Zone(models.Model):
     @staticmethod
     def haversine_distance(lat1, lng1, lat2, lng2):
         """Return great-circle distance in km between two (lat, lng) points."""
+        # Ensure all coordinates are floats to avoid TypeError with math functions or mixed Decimal/float
+        lat1, lng1, lat2, lng2 = float(lat1), float(lng1), float(lat2), float(lng2)
         R = 6371.0
         phi1, phi2 = math.radians(lat1), math.radians(lat2)
         dphi = math.radians(lat2 - lat1)
@@ -72,6 +126,8 @@ class RelayNode(models.Model):
         default=0.5,
         help_text="Radius (km) within which riders are eligible to pick up at this node",
     )
+    hub_captain_name = models.CharField(max_length=255, null=True, blank=True)
+    hub_captain_phone = models.CharField(max_length=50, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -85,6 +141,290 @@ class RelayNode(models.Model):
 
 
 # ---------------------------------------------------------------------------
+# Vehicle Assets
+# ---------------------------------------------------------------------------
+
+
+class VehicleAsset(models.Model):
+    """
+    A physical vehicle asset that can be assigned to riders.
+    Tracks real-time GPS telemetry, engine status, and vehicle identification.
+    """
+
+    class VehicleType(models.TextChoices):
+        BIKE = "bike", "Bike"
+        CAR = "car", "Car"
+        VAN = "van", "Van"
+
+    class EngineStatus(models.TextChoices):
+        ON = "on", "On"
+        OFF = "off", "Off"
+        IDLE = "idle", "Idle"
+        UNKNOWN = "unknown", "Unknown"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    asset_id = models.CharField(
+        max_length=10,
+        unique=True,
+        db_index=True,
+        blank=True,
+        help_text="Auto-generated short identifier (e.g. AX-0001)",
+    )
+
+    # ── Identification ──────────────────────────────────────────────
+    plate_number = models.CharField(max_length=20, unique=True, db_index=True)
+    vehicle_type = models.CharField(
+        max_length=10,
+        choices=VehicleType.choices,
+        default=VehicleType.BIKE,
+    )
+    make = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Manufacturer (e.g. Honda, Toyota)",
+    )
+    model = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        help_text="Model name (e.g. ACE 125, Hiace)",
+    )
+    year = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Year of manufacture"
+    )
+    color = models.CharField(max_length=50, blank=True, default="")
+    vin = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Vehicle Identification Number / chassis number",
+    )
+    photo = models.CharField(
+        max_length=500, blank=True, default="", help_text="S3 URL for vehicle photo"
+    )
+
+    # ── Documents / compliance ──────────────────────────────────────
+    insurance_expiry = models.DateField(null=True, blank=True)
+    registration_expiry = models.DateField(null=True, blank=True)
+    road_worthiness_expiry = models.DateField(null=True, blank=True)
+
+    # ── Telemetry (updated by GPS tracker) ──────────────────────────
+    engine_status = models.CharField(
+        max_length=10,
+        choices=EngineStatus.choices,
+        default=EngineStatus.UNKNOWN,
+    )
+
+    # ── Distance / odometer (from telemetry provider) ───────────────
+    # NOTE: These may be null if the provider does not send them for a device.
+    total_distance = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Lifetime / odometer-like distance value from telemetry provider",
+    )
+    unit_of_distance = models.CharField(
+        max_length=10,
+        null=True,
+        blank=True,
+        help_text="Unit for total_distance (e.g. km, mi)",
+    )
+    # Prepared for a future aggregation job; may remain null initially.
+    distance_today = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Distance travelled since start of local day (computed by job)",
+    )
+    # Sum of distance_km from completed orders today (updated by compute_deliveries_today job).
+    # Stored here so Ably real-time publishes include the correct value without DB annotation.
+    deliveries_km_today = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=0,
+        help_text="Total km of completed orders today for riders on this asset (computed by job)",
+    )
+    stop_duration = models.DurationField(
+        null=True,
+        blank=True,
+        help_text="How long the vehicle has been stationary",
+    )
+    moved_timestamp = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time the vehicle was detected moving",
+    )
+    latitude = models.DecimalField(
+        max_digits=10, decimal_places=7, null=True, blank=True
+    )
+    longitude = models.DecimalField(
+        max_digits=10, decimal_places=7, null=True, blank=True
+    )
+    course = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Direction / heading in degrees (0-360)",
+    )
+    speed = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=0.00,
+        help_text="Current speed in km/h",
+    )
+    last_telemetry_at = models.DateTimeField(null=True, blank=True)
+
+    # ── External tracking provider ───────────────────────────────────
+    provider_id = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Device ID from the Concept Nova tracking API (used for telemetry sync)",
+    )
+
+    # ── Sync metadata (set by sync_bike_telemetry command) ───────────
+    sync_meta = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Last sync result: {response_code, response_snippet, synced_at}",
+    )
+
+    # ── Status flags ────────────────────────────────────────────────
+    is_active = models.BooleanField(default=True, help_text="Available for assignment")
+    amortization_amount = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=1200000,
+        help_text="Amortization amount for the vehicle",
+    )
+    target_ratio = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=0,
+        help_text="Target amount-earned/distance ratio for this vehicle. Used by the Revenue report.",
+    )
+
+    # ── Timestamps ──────────────────────────────────────────────────
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "vehicle_assets"
+        ordering = ["plate_number"]
+
+    def save(self, *args, **kwargs):
+        if not self.asset_id:
+            # Generate sequential short ID: AX-0001, AX-0002, …
+            last = (
+                VehicleAsset.objects.order_by("-asset_id")
+                .values_list("asset_id", flat=True)
+                .first()
+            )
+            if last and last.startswith("AX-"):
+                try:
+                    seq = int(last.split("-")[1]) + 1
+                except (IndexError, ValueError):
+                    seq = 1
+            else:
+                seq = 1
+            self.asset_id = f"AX-{seq:04d}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return (
+            f"{self.plate_number} ({self.get_vehicle_type_display()}) [{self.asset_id}]"
+        )
+
+
+class VehicleTracking(models.Model):
+    """Historical telemetry snapshot used for distance tracking & analytics."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.CASCADE,
+        related_name="tracking",
+        db_index=True,
+    )
+    latitude = models.DecimalField(max_digits=10, decimal_places=7)
+    longitude = models.DecimalField(max_digits=10, decimal_places=7)
+    travelled = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Poll-time odometer snapshot (typically equals VehicleAsset.total_distance)",
+    )
+    unit_of_distance = models.CharField(max_length=10, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicle_tracking"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["vehicle_asset", "created_at"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.vehicle_asset.plate_number} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+        )
+
+
+# ---------------------------------------------------------------------------
+
+
+class SoftDeleteQuerySet(models.QuerySet):
+    def delete(self):
+        return super().update(is_deleted=True, updated_at=timezone.now())
+
+    def hard_delete(self):
+        return super().delete()
+
+    def alive(self):
+        return self.filter(is_deleted=False)
+
+    def dead(self):
+        return self.filter(is_deleted=True)
+
+
+from typing import Any
+
+
+class SoftDeleteManager(models.Manager):
+    def get_queryset(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).alive()
+
+    def all_with_deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db)
+
+    def deleted(self):
+        return SoftDeleteQuerySet(self.model, using=self._db).dead()
+
+
+class RiderManager(SoftDeleteManager):
+    def create(self, **kwargs: Any) -> "Rider":
+        user = kwargs.get("user")
+        if user:
+            try:
+                rider = user.rider_profile
+                for k, v in kwargs.items():
+                    if k != "user":
+                        setattr(rider, k, v)
+                rider.save(using=self._db)
+                return rider
+            except Exception:
+                pass
+        return super().create(**kwargs)
 
 
 class Rider(models.Model):
@@ -95,6 +435,11 @@ class Rider(models.Model):
 
     STATUS_CHOICES = Status.choices
 
+    class ApprovalStatus(models.TextChoices):
+        PENDING = "pending", "Pending Review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     # Auto-generated short ID
     rider_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
@@ -103,10 +448,16 @@ class Rider(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="rider_profile"
     )
 
-    # Banking
+    # Banking & Transaction PIN
     bank_name = models.CharField(max_length=100, null=True, blank=True)
     bank_account_number = models.CharField(max_length=20, null=True, blank=True)
     bank_routing_code = models.CharField(max_length=20, null=True, blank=True)
+    transaction_pin = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="Hashed 4-digit transaction PIN for wallet withdrawals",
+    )
 
     # Status & Settings
     WORKING_TYPE_CHOICES = (
@@ -114,14 +465,33 @@ class Rider(models.Model):
         ("full_time", "Full Time"),
     )
     working_type = models.CharField(
-        max_length=20, choices=WORKING_TYPE_CHOICES, default="freelancer"
+        max_length=20, choices=WORKING_TYPE_CHOICES, default="full_time"
     )
     team = models.CharField(max_length=100, default="Main Team")
     is_authorized = models.BooleanField(
         default=False, help_text="Controls whether driver can receive jobs"
     )
+    is_jumia_rider = models.BooleanField(default=False)
     is_registration_verified = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True, help_text="Soft disable driver")
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    is_independent_rider = models.BooleanField(default=False)
+    last_face_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of last successful face verification",
+    )
+    face_verification_required = models.BooleanField(
+        default=False,
+        help_text="Flag indicating whether the rider must complete face verification before receiving orders",
+    )
+    approval_status = models.CharField(
+        max_length=20,
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING,
+        help_text="KYC/application review status for self-registered riders",
+    )
+    rejection_reason = models.TextField(blank=True, default="")
 
     # Vehicle Details (Expanded)
     vehicle_type = models.ForeignKey(
@@ -130,6 +500,14 @@ class Rider(models.Model):
         null=True,
         blank=True,
         related_name="riders",
+    )
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="riders",
+        help_text="Physical vehicle asset assigned to this rider",
     )
     vehicle_model = models.CharField(max_length=100, default="Unknown")
     vehicle_plate_number = models.CharField(max_length=20, default="TEMP_PLATE")
@@ -147,6 +525,7 @@ class Rider(models.Model):
     current_order = models.CharField(max_length=100, null=True, blank=True)
 
     # Contact & Location
+    emergency_contact_name = models.CharField(max_length=100, null=True, blank=True)
     emergency_phone = models.CharField(max_length=20, null=True, blank=True)
     city = models.CharField(max_length=100, null=True, blank=True)
     address = models.TextField(null=True, blank=True)
@@ -171,6 +550,7 @@ class Rider(models.Model):
     onro_location_lat = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
     onro_location_lng = models.DecimalField(max_digits=9, decimal_places=6, default=0.0)
 
+    # deprecated
     # Home Zone (used for relay dispatch — rider is assigned legs within this zone)
     home_zone = models.ForeignKey(
         Zone,
@@ -180,13 +560,30 @@ class Rider(models.Model):
         related_name="riders",
     )
 
+    hub = models.ForeignKey(
+        "dispatcher.RelayNode",
+        verbose_name="Hub",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+    )
+
     # GPS Tracking
     gpswox_device_id = models.CharField(max_length=100, null=True, blank=True)
     current_latitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=30, decimal_places=20, null=True, blank=True
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_riders",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
     current_longitude = models.DecimalField(
-        max_digits=9, decimal_places=6, null=True, blank=True
+        max_digits=30, decimal_places=20, null=True, blank=True
     )
     current_speed = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
     is_moving = models.BooleanField(default=False)
@@ -202,8 +599,18 @@ class Rider(models.Model):
         max_length=500, null=True, blank=True, help_text="S3 URL for ID card"
     )
 
+    # Referral
+    referral_code = models.CharField(
+        max_length=30,
+        db_index=True,
+        blank=True,
+        help_text="Unique referral code, e.g. AX-RIDER-MK042",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = RiderManager()
 
     class Meta:
         db_table = "riders"
@@ -213,10 +620,38 @@ class Rider(models.Model):
             # Generate unique 6-digit ID
             while True:
                 new_id = "".join(random.choices(string.digits, k=6))
-                if not Rider.objects.filter(rider_id=new_id).exists():
+                if (
+                    not Rider.objects.all_with_deleted()
+                    .filter(rider_id=new_id)
+                    .exists()
+                ):
                     self.rider_id = new_id
                     break
+
+        if not self.referral_code:
+            # Generate referral code: AX-RIDER-{INITIALS}{rider_id}
+            # Initials from contact_name on the user (first 2 chars uppercased)
+            try:
+                name = self.user.contact_name or ""
+                parts = name.strip().split()
+                if len(parts) >= 2:
+                    initials = (parts[0][0] + parts[-1][0]).upper()
+                elif len(parts) == 1 and parts[0]:
+                    initials = parts[0][:2].upper()
+                else:
+                    initials = "RX"
+            except Exception:
+                initials = "RX"
+            self.referral_code = f"AX-RIDER-{initials}{self.rider_id}"
+
         super().save(*args, **kwargs)
+
+    def delete(self, using=None, keep_parents=False):
+        self.is_deleted = True
+        self.save(update_fields=["is_deleted", "updated_at"])
+
+    def hard_delete(self, using=None, keep_parents=False):
+        super().delete(using=using, keep_parents=keep_parents)
 
     def go_online(self):
         self.status = self.Status.ONLINE
@@ -234,16 +669,208 @@ class Rider(models.Model):
         self.status = self.Status.ONLINE
         self.save()
 
+    @property
+    def has_transaction_pin(self) -> bool:
+        """Check if rider has configured a transaction PIN."""
+        return bool(self.transaction_pin)
+
+    def set_transaction_pin(self, raw_pin: str) -> None:
+        """Hash and persist rider's 4-digit transaction PIN."""
+        from django.contrib.auth.hashers import make_password
+
+        cleaned_pin = str(raw_pin).strip()
+        if not cleaned_pin.isdigit() or len(cleaned_pin) != 4:
+            raise ValueError("Transaction PIN must be exactly 4 digits.")
+        self.transaction_pin = make_password(cleaned_pin)
+        self.save(update_fields=["transaction_pin", "updated_at"])
+
+    def check_transaction_pin(self, raw_pin: str) -> bool:
+        """Verify provided transaction PIN against hashed PIN."""
+        from django.contrib.auth.hashers import check_password
+
+        if not self.transaction_pin or not raw_pin:
+            return False
+        return check_password(str(raw_pin).strip(), self.transaction_pin)
+
+    @property
+    def orders_completed_today(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date=today
+        ).count()
+
+    @property
+    def orders_completed_this_week(self) -> int:
+        from django.utils import timezone
+        from datetime import timedelta
+        from orders.models import Order
+
+        today = timezone.now().date()
+        week_start = today - timedelta(days=today.weekday())  # Monday
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=week_start
+        ).count()
+
+    @property
+    def orders_completed_this_month(self) -> int:
+        from django.utils import timezone
+        from orders.models import Order
+
+        today = timezone.now().date()
+        month_start = today.replace(day=1)
+        return Order.objects.filter(
+            rider=self, status="Done", completed_at__date__gte=month_start
+        ).count()
+
+    @property
+    def total_distance_covered(self) -> float:
+        from django.db.models import Sum
+        from orders.models import Order
+
+        val = Order.objects.filter(rider=self, status="Done").aggregate(
+            total=Sum("distance_km")
+        )["total"]
+        return float(round(val, 2)) if val else 0.00
+
+    @property
+    def total_completed_orders(self) -> int:
+        from orders.models import Order
+
+        return Order.objects.filter(rider=self, status="Done").count()
+
+    def yesterday_distance_covered(self):
+        """Return yesterday's odometer delta for the rider's assigned asset."""
+        if not self.vehicle_asset_id:
+            return 0.00
+
+        from datetime import timedelta
+        from django.core.cache import cache
+        from django.utils import timezone
+
+        yesterday = timezone.now().date() - timedelta(days=1)
+        cache_key = f"yesterday_distance_{self.vehicle_asset_id}_{yesterday.strftime('%Y-%m-%d')}"
+
+        cached_distance = cache.get(cache_key)
+        if cached_distance is not None:
+            return round(cached_distance, 2) if cached_distance else 0.00
+
+        trackings = VehicleTracking.objects.filter(
+            vehicle_asset_id=self.vehicle_asset_id, created_at__date=yesterday
+        ).order_by("created_at")
+
+        distance = 0
+        if trackings.exists():
+            first_entry = trackings.first()
+            last_entry = trackings.last()
+            if first_entry.travelled is not None and last_entry.travelled is not None:
+                distance = float(last_entry.travelled) - float(first_entry.travelled)
+
+        cache.set(cache_key, distance, 60 * 60 * 24)
+        return round(distance, 2)
+
+    yesterday_distance_covered.short_description = "Prev Day Distance (km)"
+
+    def update_rider_average_rating(self):
+        from riders.models import RiderRating
+
+        all_ratings = RiderRating.objects.filter(rider=self)
+        avg_rating = all_ratings.aggregate(models.Avg("rating"))["rating__avg"]
+        self.rating = round(avg_rating, 2) if avg_rating else 0.00
+        self.save(update_fields=["rating"])
+
     def __str__(self):
         return f"{self.user.contact_name or self.user.phone} ({self.rider_id})"
 
 
+class VehicleReassignment(models.Model):
+    """Tracks history of vehicle asset assignments to riders."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    from_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_from",
+    )
+    to_rider = models.ForeignKey(
+        Rider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_to",
+    )
+    vehicle_asset = models.ForeignKey(
+        VehicleAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reassignments",
+        help_text="The vehicle asset assigned (null if unassigned)",
+    )
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="vehicle_assignments_initiated",
+        help_text="The admin who performed this assignment",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vehicle_reassignments"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        v_plate = self.vehicle_asset.plate_number if self.vehicle_asset else "None"
+        f_rider = self.from_rider.rider_id if self.from_rider else "None"
+        t_rider = self.to_rider.rider_id if self.to_rider else "None"
+        return f"Reassignment: {v_plate} ({f_rider} -> {t_rider}) by {self.admin}"
+
+
 class DispatcherProfile(models.Model):
+    class Role(models.TextChoices):
+        ZONE_LEAD = "zone_lead", "Zone Lead"
+        HUB_CAPTAIN = "hub_captain", "Hub Captain"
+        ADMIN = "admin", "Admin"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="dispatcher_profile",
+    )
+    affiliation_code = models.CharField(
+        max_length=100, null=True, blank=True
+    )
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.ADMIN)
+    monthly_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Current month accumulated commission",
+    )
+    previous_month_commission = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Previous month total commission",
+    )
+    total_commission_earned = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Lifetime accumulated commission",
+    )
+    last_commission_month = models.CharField(
+        max_length=7,
+        default="",
+        blank=True,
+        help_text="YYYY-MM of current active commission month",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -252,10 +879,41 @@ class DispatcherProfile(models.Model):
         db_table = "dispatcher_profiles"
 
     def __str__(self):
-        return f"Dispatcher: {self.user.contact_name or self.user.phone}"
+        return f"Dispatcher: {self.user.contact_name or self.user.phone} ({self.affiliation_code})"
+
+    def save(self, *args, **kwargs):
+        if self.role in [self.Role.ZONE_LEAD, self.Role.HUB_CAPTAIN]:
+            if not self.affiliation_code:
+                self.affiliation_code = generate_random_code()
+                while (
+                    DispatcherProfile.objects.filter(affiliation_code=self.affiliation_code)
+                    .exclude(pk=self.pk)
+                    .exists()
+                ):
+                    self.affiliation_code = generate_random_code()
+        super().save(*args, **kwargs)
+
+    @property
+    def affiliated_riders_count(self) -> int:
+        return self.affiliated_riders.count()
+
+    @property
+    def affiliated_merchants_count(self) -> int:
+        return self.affiliated_merchants.count()
 
 
 class Merchant(models.Model):
+    ACTIVITY_STATUS_CHOICES = [
+        ("active", "Active"),
+        ("watch", "Watch"),
+        ("inactive", "Inactive"),
+    ]
+
+    MERCHANT_TYPE_CHOICES = [
+        ("regular", "Regular"),
+        ("api", "API"),
+    ]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     merchant_id = models.CharField(max_length=6, unique=True, db_index=True, blank=True)
     user = models.OneToOneField(
@@ -263,8 +921,59 @@ class Merchant(models.Model):
         on_delete=models.CASCADE,
         related_name="merchant_profile",
     )
+    affiliated_to = models.ForeignKey(
+        "dispatcher.DispatcherProfile",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="affiliated_merchants",
+    )
+    is_affiliated = models.BooleanField(default=False)
+    affiliated_at = models.DateTimeField(null=True, blank=True)
+    can_group_orders = models.BooleanField(default=False)
+    zone = models.ForeignKey(
+        Zone,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="merchants",
+        help_text="Zone this merchant is assigned to",
+    )
+    acquisition_source = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        default="",
+        help_text='How the merchant was acquired: "experiential", "referral", "organic"',
+    )
+    activity_status = models.CharField(
+        max_length=20,
+        choices=ACTIVITY_STATUS_CHOICES,
+        default="active",
+        help_text="Computed from order frequency",
+    )
+    last_order_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of most recent order",
+    )
+    referral_code = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        help_text="Referral code used during signup",
+    )
+    merchant_type = models.CharField(
+        max_length=50, choices=MERCHANT_TYPE_CHOICES, default="regular"
+    )
+    has_active_subscription = models.BooleanField(default=False)
+    has_price_list = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    is_partner = models.BooleanField(default=False)
+    partner_base_price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True
+    )
 
     class Meta:
         db_table = "merchants"
@@ -287,6 +996,7 @@ class SystemSettings(models.Model):
     """
     Singleton model to store global system settings/pricing configuration.
     """
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Zone Surcharges
@@ -335,6 +1045,13 @@ class SystemSettings(models.Model):
     # Fees
     cod_flat_fee = models.DecimalField(max_digits=10, decimal_places=2, default=500)
     cod_pct_fee = models.DecimalField(max_digits=4, decimal_places=2, default=1.5)
+    commission_pct = models.DecimalField(max_digits=4, decimal_places=2, default=20)
+    affiliation_commission_per_order = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("3000.00"),
+        help_text="Commission earned by dispatcher per completed order of affiliated rider",
+    )
 
     # Notifications
     notif_new_order = models.BooleanField(default=True)
@@ -394,3 +1111,471 @@ class ActivityFeed(models.Model):
 
     def __str__(self):
         return f"[{self.event_type}] {self.order_id} — {self.text[:50]}"
+
+
+# ---------------------------------------------------------------------------
+# Service API Keys (inter-project auth for OCC)
+# ---------------------------------------------------------------------------
+
+
+class ServiceAPIKey(models.Model):
+    """
+    API keys for server-to-server authentication.
+    Used by the OCC backend to call this main backend.
+    Keys are hashed (SHA-256); the raw key is shown once at creation time.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(
+        max_length=100,
+        help_text='Descriptive name, e.g. "OCC Production"',
+    )
+    key_hash = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="SHA-256 hash of the raw API key",
+    )
+    prefix = models.CharField(
+        max_length=12,
+        unique=True,
+        help_text="First 11 chars of the key (sk_ + 8) for DB lookup",
+    )
+    scopes = models.JSONField(
+        default=list,
+        help_text='Allowed scopes, e.g. ["occ:read", "occ:write"]',
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "service_api_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.prefix}…)"
+
+
+# ---------------------------------------------------------------------------
+# OCC Hierarchy: Vertical Lead & Zone Captain
+# ---------------------------------------------------------------------------
+
+
+class VerticalLead(models.Model):
+    """Links a user to a vertical as its lead."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="vertical_lead_profile",
+    )
+    # deprecated
+    vertical = models.OneToOneField(
+        Vertical, on_delete=models.CASCADE, related_name="lead"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "vertical_leads"
+
+    def __str__(self):
+        return (
+            f"Lead: {self.user.contact_name or self.user.phone} → {self.vertical.name}"
+        )
+
+
+class ZoneCaptain(models.Model):
+    """Links a user to a zone as its captain."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="zone_captain_profile",
+    )
+    zone = models.OneToOneField(Zone, on_delete=models.CASCADE, related_name="captain")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "zone_captains"
+
+    def __str__(self):
+        return (
+            f"Captain: {self.user.contact_name or self.user.phone} → {self.zone.name}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# OCC Snapshot & Analytics Models
+# ---------------------------------------------------------------------------
+
+
+class RiderDutyLog(models.Model):
+    """Tracks every on/off duty transition for peak-hour analysis."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(Rider, on_delete=models.CASCADE, related_name="duty_logs")
+    went_online = models.DateTimeField()
+    went_offline = models.DateTimeField(null=True, blank=True)
+    duration_minutes = models.IntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "rider_duty_logs"
+        ordering = ["-went_online"]
+        indexes = [
+            models.Index(fields=["rider", "-went_online"]),
+        ]
+
+    def __str__(self):
+        return f"DutyLog: {self.rider.rider_id} online {self.went_online}"
+
+
+class RiderDailySnapshot(models.Model):
+    """Pre-aggregated daily metrics per rider, computed by nightly Celery task."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    rider = models.ForeignKey(
+        Rider, on_delete=models.CASCADE, related_name="daily_snapshots"
+    )
+    date = models.DateField(db_index=True)
+    orders_completed = models.IntegerField(default=0)
+    orders_rejected = models.IntegerField(default=0)
+    orders_failed = models.IntegerField(default=0)
+    revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    distance_km = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    online_minutes = models.IntegerField(default=0)
+    peak_hour_minutes = models.IntegerField(
+        default=0, help_text="Minutes online during 12-3pm + 5-8pm"
+    )
+    ghost_ride_minutes = models.IntegerField(
+        default=0, help_text="Minutes offline but GPS shows movement"
+    )
+
+    class Meta:
+        db_table = "rider_daily_snapshots"
+        unique_together = ("rider", "date")
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"Snapshot: {self.rider.rider_id} on {self.date}"
+
+
+class MerchantDailySnapshot(models.Model):
+    """Pre-aggregated daily metrics per merchant, computed by nightly Celery task."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_daily_snapshots",
+    )
+    date = models.DateField(db_index=True)
+    orders_placed = models.IntegerField(default=0)
+    orders_completed = models.IntegerField(default=0)
+    orders_failed = models.IntegerField(default=0)
+    revenue = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "merchant_daily_snapshots"
+        unique_together = ("merchant", "date")
+        ordering = ["-date"]
+
+    def __str__(self):
+        return f"MerchantSnapshot: {self.merchant_id} on {self.date}"
+
+
+class DeliveryRating(models.Model):
+    """Per-delivery CSAT rating from the customer."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.OneToOneField(
+        "orders.Order", on_delete=models.CASCADE, related_name="rating"
+    )
+    rider = models.ForeignKey(
+        Rider, on_delete=models.CASCADE, related_name="delivery_ratings"
+    )
+    score = models.IntegerField(help_text="1-5 star rating")
+    comment = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "delivery_ratings"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Rating: {self.rider.rider_id} — {self.score}★"
+
+
+class ZoneTarget(models.Model):
+    """Monthly order/revenue targets per zone."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    zone = models.ForeignKey(Zone, on_delete=models.CASCADE, related_name="targets")
+    month = models.DateField(help_text="First day of the target month")
+    target_orders = models.IntegerField(default=2000, help_text="5 riders × 400 orders")
+    target_revenue = models.DecimalField(
+        max_digits=12, decimal_places=2, default=600000
+    )
+
+    class Meta:
+        db_table = "zone_targets"
+        unique_together = ("zone", "month")
+        ordering = ["-month"]
+
+    def __str__(self):
+        return f"Target: {self.zone.name} — {self.month.strftime('%b %Y')}"
+
+
+class MerchantAPIKey(models.Model):
+    """
+    API keys for merchants of type 'api'.
+    Used for authenticating programmatic requests.
+    Keys are hashed (SHA-256); the raw key is shown once at creation time.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="merchant_api_key_profile",
+    )
+    key_hash = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="SHA-256 hash of the raw API key",
+    )
+    prefix = models.CharField(
+        max_length=16,
+        unique=True,
+        help_text="First characters of the key (ak_live_) for DB lookup",
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "merchant_api_keys"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"API Key for {self.merchant.business_name or self.merchant.phone} ({self.prefix}...)"
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications & Devices
+# ---------------------------------------------------------------------------
+
+
+class MerchantDevice(models.Model):
+    """
+    Stores FCM registration tokens and device metadata for merchants.
+    A single merchant may have multiple devices (e.g. phone and tablet).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="devices"
+    )
+    device_id = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Unique hardware/vendor ID from the mobile app",
+    )
+    fcm_token = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        help_text="Firebase Cloud Messaging token for push delivery",
+    )
+    platform = models.CharField(
+        max_length=50, blank=True, default="", help_text='e.g. "ios", "android"'
+    )
+    model_name = models.CharField(
+        max_length=255, blank=True, default="", help_text='e.g. "iPhone 13", "Pixel 6"'
+    )
+    os_version = models.CharField(max_length=50, blank=True, default="")
+    app_version = models.CharField(max_length=50, blank=True, default="")
+    is_active = models.BooleanField(
+        default=True, help_text="Set to False if token is invalid/expired"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_devices"
+        verbose_name = "Merchant Device"
+        verbose_name_plural = "Merchant Devices"
+
+    def __str__(self):
+        return f"{self.merchant.merchant_id} — {self.model_name or self.device_id[:8]}"
+
+
+class MerchantNotification(models.Model):
+    """
+    Stores the history of push notifications sent to a merchant.
+    Allows for in-app 'Notification Center' / inbox functionality.
+    """
+
+    merchant = models.ForeignKey(
+        Merchant, on_delete=models.CASCADE, related_name="notifications"
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    data = models.JSONField(
+        default=dict, blank=True, help_text="Arbitrary JSON payload for deep linking"
+    )
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "merchant_notifications"
+        ordering = ["-created_at"]
+        verbose_name = "Merchant Notification"
+        verbose_name_plural = "Merchant Notifications"
+
+    def __str__(self):
+        return f"[{'READ' if self.is_read else 'UNREAD'}] {self.merchant.merchant_id}: {self.title[:30]}"
+
+
+class MerchantNotificationSettings(models.Model):
+    """
+    Per-merchant notification preference toggles.
+    """
+
+    merchant = models.OneToOneField(
+        Merchant, on_delete=models.CASCADE, related_name="notification_settings"
+    )
+
+    # Master switch
+    push_enabled = models.BooleanField(
+        default=True, help_text="Global master switch for all push notifications"
+    )
+
+    # Category toggles
+    order_assigned = models.BooleanField(default=True)
+    order_completed = models.BooleanField(default=True)
+    order_cancelled = models.BooleanField(default=True)
+    wallet_credit = models.BooleanField(default=True)
+    marketing = models.BooleanField(default=True)
+    email_notification = models.BooleanField(default=True)
+    sms_notification = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "merchant_notification_settings"
+        verbose_name = "Merchant Notification Settings"
+        verbose_name_plural = "Merchant Notification Settings"
+
+    def __str__(self):
+        return f"Settings for {self.merchant.merchant_id}"
+
+
+class DispatcherCommission(models.Model):
+    """
+    Immutable ledger entry for each commission earned by a dispatcher
+    from an affiliated rider's completed order.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="commissions",
+    )
+    rider = models.ForeignKey(
+        Rider,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dispatcher_commissions",
+    )
+    merchant = models.ForeignKey(
+        "dispatcher.Merchant",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dispatcher_commissions",
+    )
+    affiliation_source = models.CharField(
+        max_length=20,
+        choices=[
+            ("rider", "Rider"),
+            ("merchant", "Merchant"),
+            ("both", "Both / Deduplicated"),
+        ],
+        default="rider",
+    )
+    order = models.ForeignKey(
+        "orders.Order",
+        on_delete=models.CASCADE,
+        related_name="dispatcher_commissions",
+    )
+    order_number = models.CharField(max_length=100, blank=True, db_index=True)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("3000.00")
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    description = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "dispatcher_commissions"
+        unique_together = ("dispatcher", "order")
+        ordering = ["-created_at"]
+        verbose_name = "Dispatcher Commission"
+        verbose_name_plural = "Dispatcher Commissions"
+
+    def __str__(self):
+        return f"Commission #{self.id}: ₦{self.amount} for {self.dispatcher} (Order: {self.order_number})"
+
+
+class DispatcherMonthlyEarning(models.Model):
+    """
+    Aggregated monthly summary for dispatcher earnings and monthly salary reconciliation.
+    """
+
+    class SettlementStatus(models.TextChoices):
+        ACCUMULATING = "accumulating", "Accumulating"
+        PENDING_PAYMENT = "pending_payment", "Pending Payment"
+        PAID = "paid", "Paid"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dispatcher = models.ForeignKey(
+        DispatcherProfile,
+        on_delete=models.CASCADE,
+        related_name="monthly_earnings",
+    )
+    month_year = models.CharField(
+        max_length=7, db_index=True, help_text="Format: YYYY-MM (e.g. 2026-10)"
+    )
+    total_orders = models.PositiveIntegerField(default=0)
+    total_commission = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00")
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=SettlementStatus.choices,
+        default=SettlementStatus.ACCUMULATING,
+    )
+    paid_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "dispatcher_monthly_earnings"
+        unique_together = ("dispatcher", "month_year")
+        ordering = ["-month_year"]
+        verbose_name = "Dispatcher Monthly Earning"
+        verbose_name_plural = "Dispatcher Monthly Earnings"
+
+    def __str__(self):
+        return f"{self.dispatcher} - {self.month_year}: ₦{self.total_commission} ({self.total_orders} orders)"

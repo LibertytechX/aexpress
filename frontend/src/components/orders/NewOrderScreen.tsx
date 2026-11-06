@@ -1,0 +1,1120 @@
+'use client';
+
+import React, { useState, useEffect, useRef } from 'react';
+import Icons from '@/components/Icons';
+import { S } from '@/lib/theme';
+import AddressAutocompleteInput from '@/components/common/AddressAutocompleteInput';
+import DeliveryMapView from '@/components/common/DeliveryMapView';
+import API, { User } from '@/lib/api';
+
+interface NewOrderScreenProps {
+  balance: number;
+  currentUser: User | null;
+  onPlaceOrder: (orderData: any) => Promise<void>;
+}
+
+export default function NewOrderScreen({ balance, currentUser, onPlaceOrder }: NewOrderScreenProps) {
+  // ─── Mode: "quick" | "multi" | "bulk" ───
+  const [mode, setMode] = useState("quick");
+
+  // ─── Shared state ───
+  const [vehicle, setVehicle] = useState("Bike");
+  const [payMethod, setPayMethod] = useState("wallet");
+  const [step, setStep] = useState(1); // 1=form, 2=review
+
+  // ─── Vehicle pricing from backend ───
+  // Defaults mirror the production tiered pricing so the UI is correct even
+  // before the API response arrives (or if it fails).
+  const [vehiclePricing, setVehiclePricing] = useState<Record<string, any>>({
+    Bike: {
+      base_fare: 0, rate_per_km: 275, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 6, floor_fee: 1700,
+        tiers: [{ max_km: 10, rate: 275 }, { max_km: 15, rate: 235 }, { rate: 200 }]
+      }
+    },
+    Car: {
+      base_fare: 0, rate_per_km: 350, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 3, floor_fee: 2500,
+        tiers: [{ max_km: 8, rate: 350 }, { max_km: 15, rate: 300 }, { rate: 250 }]
+      }
+    },
+    Van: {
+      base_fare: 0, rate_per_km: 500, rate_per_minute: 0,
+      pricing_tiers: {
+        type: 'tiered', floor_km: 3, floor_fee: 5000,
+        tiers: [{ max_km: 8, rate: 500 }, { max_km: 15, rate: 450 }, { rate: 400 }]
+      }
+    },
+  });
+
+  // ─── Early price estimation (Step 1) ───
+  const [earlyRouteDistance, setEarlyRouteDistance] = useState<number | null>(null);
+  const [earlyRouteDuration, setEarlyRouteDuration] = useState<number | null>(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
+  const [routeError, setRouteError] = useState<string | null>(null);
+
+  // ─── Pickup (shared across modes) ───
+  const [pickupAddress, setPickupAddress] = useState("");
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number, lng: number } | null>(null);
+  const [senderName, setSenderName] = useState(currentUser?.contact_name || "");
+  const [senderPhone, setSenderPhone] = useState(currentUser?.phone || "");
+
+  // ─── Quick Send state ───
+  const [dropoffAddress, setDropoffAddress] = useState("");
+  const [dropoffCoords, setDropoffCoords] = useState<{ lat: number, lng: number } | null>(null);
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [notes, setNotes] = useState("");
+  const [estimatedCost, setEstimatedCost] = useState(null);
+
+  // ─── Same-address validation ───
+  const [sameAddressError, setSameAddressError] = useState("");
+
+  // Normalise addresses for comparison (lower, trim, collapse spaces)
+  const normaliseAddr = (s: string) => s.toLowerCase().trim().replace(/\s+/g, " ");
+
+  // Reactively detect same address — fires whenever either field changes,
+  // regardless of HOW the value was set (typing, autocomplete selection, etc.)
+  useEffect(() => {
+    if (pickupAddress && dropoffAddress && normaliseAddr(pickupAddress) === normaliseAddr(dropoffAddress)) {
+      setSameAddressError("same-quick");
+    } else {
+      setSameAddressError("");
+    }
+  }, [pickupAddress, dropoffAddress]);
+
+  // ─── Multi-Drop state ───
+  const [drops, setDrops] = useState([
+    { id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" },
+  ]);
+  const nextDropId = useRef(2);
+
+  // ─── Bulk Import state ───
+  const [bulkText, setBulkText] = useState("");
+  const [bulkRows, setBulkRows] = useState<any[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [scanPreview, setScanPreview] = useState<string | null>(null);
+
+  // ─── Route information state (for pricing) ───
+  const [routeDistance, setRouteDistance] = useState<number | null>(null); // in kilometers
+  const [routeDuration, setRouteDuration] = useState<number | null>(null); // in minutes
+
+  // ─── SmartParcel Integration state ───
+  const [isPickupParcel, setIsPickupParcel] = useState(false);
+  const [collectCode, setCollectCode] = useState("");
+  const [isResolvingCode, setIsResolvingCode] = useState(false);
+  const [resolveError, setResolveError] = useState("");
+
+  const [isDeliveryParcel, setIsDeliveryParcel] = useState(false);
+  const [spStates, setSpStates] = useState<any[]>([]);
+  const [spCities, setSpCities] = useState<any[]>([]);
+  const [spBoxes, setSpBoxes] = useState<any[]>([]);
+  const [spSizes, setSpSizes] = useState<any[]>([]);
+
+  const [selectedSpStateId, setSelectedSpStateId] = useState("");
+  const [selectedSpCityId, setSelectedSpCityId] = useState("");
+  const [selectedSpBoxId, setSelectedSpBoxId] = useState("");
+  const [selectedSpSizeId, setSelectedSpSizeId] = useState("");
+
+  // Load locker states and sizes on mount
+  useEffect(() => {
+    const loadSPInitialData = async () => {
+      try {
+        const [statesRes, sizesRes] = await Promise.all([
+          API.SmartParcel.listStates(),
+          API.SmartParcel.listLockerSizes(),
+        ]);
+        if (statesRes.status === 'success') setSpStates(statesRes.data);
+        if (sizesRes.status === 'success') setSpSizes(sizesRes.data);
+      } catch (err) {
+        console.error('Failed to load SmartParcel initial data:', err);
+      }
+    };
+    loadSPInitialData();
+  }, []);
+
+  // Fetch cities when state changes
+  useEffect(() => {
+    if (!selectedSpStateId) {
+      setSpCities([]);
+      return;
+    }
+    const loadCities = async () => {
+      try {
+        const res = await API.SmartParcel.listCities(selectedSpStateId);
+        if (res.status === 'success') setSpCities(res.data);
+      } catch (err) {
+        console.error('Failed to load cities:', err);
+      }
+    };
+    loadCities();
+  }, [selectedSpStateId]);
+
+  // Fetch assigned boxes when city changes
+  useEffect(() => {
+    if (!selectedSpCityId) {
+      setSpBoxes([]);
+      return;
+    }
+    const loadBoxes = async () => {
+      try {
+        const res = await API.SmartParcel.listAssignedBoxes(selectedSpCityId);
+        if (res.status === 'success') setSpBoxes(res.data.boxes || res.data);
+      } catch (err) {
+        console.error('Failed to load assigned boxes:', err);
+      }
+    };
+    loadBoxes();
+  }, [selectedSpCityId]);
+
+  // Handle collect code resolution
+  const handleResolveCollectCode = async () => {
+    if (!collectCode) return;
+    setIsResolvingCode(true);
+    setResolveError("");
+    try {
+      const res = await API.SmartParcel.resolveCollectCode(collectCode);
+      if (res.status === 'success' && res.data) {
+        setPickupAddress(res.data.boxaddress);
+        // We might also want to lock the address or show a success state
+      } else {
+        setResolveError(res.message || "Could not resolve collect code.");
+      }
+    } catch (err: any) {
+      setResolveError(err.message || "Failed to resolve collect code.");
+    } finally {
+      setIsResolvingCode(false);
+    }
+  };
+
+  // Load vehicle pricing
+  useEffect(() => {
+    const loadVehiclePricing = async () => {
+      try {
+        const response = await API.Orders.getVehicles();
+        if (response.success && response.vehicles) {
+          const pricing: any = {};
+          response.vehicles.forEach((v: any) => {
+            pricing[v.name] = {
+              base_fare: parseFloat(v.base_fare),
+              rate_per_km: parseFloat(v.rate_per_km),
+              rate_per_minute: parseFloat(v.rate_per_minute),
+              pricing_tiers: typeof v.pricing_tiers === 'string' ? JSON.parse(v.pricing_tiers) : (v.pricing_tiers || null),
+              has_manual_pricing: v.has_manual_pricing || false,
+              manual_price_list: v.manual_price_list || null,
+            };
+          });
+          setVehiclePricing(pricing);
+          console.log('✅ Loaded vehicle pricing from backend:', pricing);
+        }
+      } catch (error) {
+        console.error('Failed to load vehicle pricing:', error);
+      }
+    };
+    loadVehiclePricing();
+  }, []);
+
+  // Calculate early route
+  useEffect(() => {
+    if ((mode !== 'quick' && mode !== 'grouped') || !pickupAddress || !dropoffAddress) {
+      setCalculatingRoute(false);
+      setEarlyRouteDistance(null);
+      setEarlyRouteDuration(null);
+      setRouteError(null);
+      return;
+    }
+
+    setEarlyRouteDistance(null);
+    setEarlyRouteDuration(null);
+    setRouteError(null);
+    setCalculatingRoute(true);
+
+    const geocodeAddress = (address: string): Promise<{ lat: number, lng: number } | null> => {
+      return new Promise((resolve) => {
+        const handleAwsGeocode = () => {
+          API.Places.geocode(address)
+            .then((res: any) => {
+              if (res.status === 'success' && res.data) {
+                resolve({ lat: res.data.lat, lng: res.data.lng });
+              } else {
+                resolve(null);
+              }
+            })
+            .catch((err) => {
+              console.error('[Geocode fallback] AWS geocoding error:', err);
+              resolve(null);
+            });
+        };
+
+        if (!window.google?.maps?.Geocoder) {
+          handleAwsGeocode();
+          return;
+        }
+
+        const geocoder = new window.google.maps.Geocoder();
+        const lagosAddress = address.toLowerCase().includes('lagos') ? address : `${address}, Lagos, Nigeria`;
+        geocoder.geocode({ address: lagosAddress }, (results, status) => {
+          if (status === 'OK' && results?.[0]?.geometry?.location) {
+            const loc = results[0].geometry.location;
+            resolve({ lat: loc.lat(), lng: loc.lng() });
+          } else {
+            console.warn('[Geocode] Google geocoding failed with status:', status, 'falling back to AWS');
+            handleAwsGeocode();
+          }
+        });
+      });
+    };
+
+    const calculateEarlyRoute = async () => {
+      console.log('🔄 Starting early route calculation (Backend)...', { pickupAddress, dropoffAddress });
+      setRouteError(null);
+
+      try {
+        let currentPickup = pickupCoords || pickupAddress;
+        let currentDropoff = dropoffCoords || dropoffAddress;
+
+        if (!pickupCoords && pickupAddress && pickupAddress.length > 5) {
+          const coords = await geocodeAddress(pickupAddress);
+          if (coords) {
+            setPickupCoords(coords);
+            currentPickup = coords;
+          }
+        }
+        if (!dropoffCoords && dropoffAddress && dropoffAddress.length > 5) {
+          const coords = await geocodeAddress(dropoffAddress);
+          if (coords) {
+            setDropoffCoords(coords);
+            currentDropoff = coords;
+          }
+        }
+
+        const payload = {
+          mode: mode === 'grouped' ? 'quick' : mode,
+          pickup: currentPickup,
+          deliveries: [currentDropoff]
+        };
+
+        const res = await API.Orders.bulkCalculateFare(payload);
+        if (res.success && res.vehicles) {
+          // In this component, we don't have multiFares state yet, 
+          // let's see if we should add it or just update earlyRouteDistance/Duration.
+          const vehicleData = res.vehicles[vehicle];
+          if (vehicleData) {
+            setEarlyRouteDistance(vehicleData.distance_km);
+            setEarlyRouteDuration(vehicleData.duration_minutes);
+            // We might want to store the full result if we want to bypass frontend pricing
+          }
+          setCalculatingRoute(false);
+        } else {
+          setRouteError('Unable to calculate route via backend');
+          setCalculatingRoute(false);
+        }
+      } catch (error: any) {
+        console.error('❌ Error calculating route via backend:', error);
+        setRouteError(error.message || 'Error calculating route');
+        setCalculatingRoute(false);
+      }
+    };
+
+
+    const timeoutId = setTimeout(calculateEarlyRoute, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [mode, pickupAddress, dropoffAddress]);
+
+  // Load default address
+  useEffect(() => {
+    const loadDefaultAddress = async () => {
+      try {
+        const response = await API.Auth.getAddresses();
+        // The API response type needs to be handled, simplistic check here
+        const addresses = (response as any).addresses || [];
+        if (addresses.length > 0) {
+          const defaultAddress = addresses.find((addr: any) => addr.is_default);
+          if (defaultAddress && defaultAddress.address) {
+            setPickupAddress(defaultAddress.address);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load default address:', error);
+      }
+    };
+    if (currentUser) {
+      loadDefaultAddress();
+    }
+  }, [currentUser]);
+
+  // Reset route data when going back to step 1
+  useEffect(() => {
+    if (step === 1) {
+      setRouteDistance(null);
+      setRouteDuration(null);
+    }
+  }, [step]);
+
+
+  const addDrop = () => setDrops([...drops, { id: nextDropId.current++, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+  const removeDrop = (id: number) => drops.length > 1 && setDrops(drops.filter(d => d.id !== id));
+  const updateDrop = (id: number, field: string, value: string) => setDrops(drops.map(d => d.id === id ? { ...d, [field]: value } : d));
+
+  const parseBulkText = (text: string) => {
+    const lines = text.trim().split("\n").filter(l => l.trim());
+    return lines.map((line, i) => {
+      const parts = line.includes("|") ? line.split("|") : line.includes("\t") ? line.split("\t") : line.split(",");
+      return {
+        id: i + 1,
+        address: (parts[0] || "").trim(),
+        name: (parts[1] || "").trim(),
+        phone: (parts[2] || "").trim(),
+        pkg: "Box",
+        valid: (parts[0] || "").trim().length > 5,
+      };
+    });
+  };
+
+  const handleParseBulk = () => setBulkRows(parseBulkText(bulkText));
+
+  const handleSnap = () => {
+    setScanning(true);
+    setScanPreview("/mock-scan.jpg");
+    setTimeout(() => {
+      setScanning(false);
+      const mockOCR = [
+        { id: 1, address: "15 Awolowo Rd, Ikoyi", name: "Mrs. Adeyemi", phone: "08034567890", pkg: "Box", valid: true },
+        { id: 2, address: "22 Bode Thomas St, Surulere", name: "Chinedu O.", phone: "09098765432", pkg: "Envelope", valid: true },
+      ];
+      setBulkRows(mockOCR);
+      setBulkText(mockOCR.map(r => `${r.address} | ${r.name} | ${r.phone}`).join("\n"));
+    }, 2000);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type.startsWith("image/")) {
+      const url = URL.createObjectURL(file);
+      setScanPreview(url);
+      setScanning(true);
+      setTimeout(() => {
+        setScanning(false);
+        setBulkRows([{ id: 1, address: "Mock Address", name: "Mock Name", phone: "000", pkg: "Box", valid: true }]);
+      }, 2000);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const text = ev.target?.result as string;
+        setBulkText(text);
+        setBulkRows(parseBulkText(text));
+      };
+      reader.readAsText(file);
+    }
+  }
+
+  // ─── Tiered price calculation (rate-switch with boundary floors) ───
+  const calcTieredPrice = (km: number, pt: any) => {
+    if (!pt || pt.type !== 'tiered') return null;
+    if (km <= pt.floor_km) return pt.floor_fee;
+    const tiers = Array.isArray(pt.tiers) ? pt.tiers : [];
+    let prevMaxKm = Number(pt.floor_km || 0);
+    let prevRate = null;
+    for (let i = 0; i < tiers.length; i++) {
+      const tier = tiers[i] || {};
+      const rate = Number(tier.rate || 0);
+      const maxKm = tier.max_km;
+      const minFloor = i === 0 ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+      if (maxKm === undefined || maxKm === null || km <= Number(maxKm)) {
+        return Math.max(Math.round(km * rate), minFloor);
+      }
+      prevMaxKm = Number(maxKm);
+      prevRate = rate;
+    }
+    const lastRate = Number((tiers[tiers.length - 1] || {}).rate || 0);
+    const minFloor = prevRate == null ? Number(pt.floor_fee || 0) : Math.round(prevMaxKm * Number(prevRate || 0));
+    return Math.max(Math.round(km * lastRate), minFloor);
+  };
+
+  // ─── Price calculation ───
+  // Calculate price for a specific vehicle using distance and duration
+  const calcFareForVehicle = (vName: string, distanceKm: number | null, durationMin: number | null) => {
+    const pricing = vehiclePricing[vName];
+    if (!pricing) return 0;
+
+    // 1. Manual pricing list
+    if (pricing.has_manual_pricing && pricing.manual_price_list && distanceKm !== null) {
+      const getVal = (v: any) => (typeof v === 'object' && v !== null && 'parsedValue' in v) ? Number(v.parsedValue) : Number(v);
+      const matchedBucket = pricing.manual_price_list.items.find((item: any) => {
+        const minKm = getVal(item.min_km);
+        const maxKm = getVal(item.max_km);
+        return distanceKm >= minKm && distanceKm <= maxKm;
+      });
+      if (matchedBucket) {
+        return getVal(matchedBucket.fixed_fee);
+      }
+    }
+
+    // 2. Tiered pricing
+    if (distanceKm !== null) {
+      const tiered = calcTieredPrice(distanceKm, pricing.pricing_tiers);
+      if (tiered !== null) return tiered;
+    }
+
+    // 3. Simple distance/duration
+    if (distanceKm !== null && durationMin !== null) {
+      return Math.round(pricing.base_fare + distanceKm * pricing.rate_per_km + durationMin * pricing.rate_per_minute);
+    }
+
+    // Fallback
+    if (pricing.pricing_tiers?.type === 'tiered') return pricing.pricing_tiers.floor_fee;
+    return pricing.base_fare;
+  };
+
+  const getActiveDropoffs = () => {
+    if (mode === "quick" || mode === "grouped") return dropoffAddress ? [{ address: dropoffAddress, name: receiverName, phone: receiverPhone }] : [];
+    if (mode === "multi") return drops.filter(d => d.address.trim());
+    if (mode === "bulk") return bulkRows.filter(r => r.valid !== false && r.address.trim());
+    return [];
+  };
+
+  const totalDeliveries = getActiveDropoffs().length;
+
+  // Calculate dynamic cost based on route distance and duration
+  const calculateCost = () => {
+    // Step 2 uses the full route (map) calculation.
+    if (step === 2 && routeDistance && routeDuration) {
+      return calcFareForVehicle(vehicle, routeDistance, routeDuration);
+    }
+    // Step 1 (Quick Send): if we already calculated an early route, use it
+    if ((mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration) {
+      return calcFareForVehicle(vehicle, earlyRouteDistance, earlyRouteDuration);
+    }
+    // Fallback
+    return calcFareForVehicle(vehicle, null, null);
+  };
+
+  const unitCost = calculateCost();
+  const rawTotal = totalDeliveries * unitCost;
+  const totalCost = mode === 'grouped' ? Math.round(rawTotal * 0.7) : rawTotal;
+
+  // ─── Review & Confirm ───
+  const isBlank = (v: any) => !v || !String(v).trim();
+  const proceedErrors: string[] = [];
+
+  if (isBlank(pickupAddress)) proceedErrors.push('Pickup address is required.');
+  if (isBlank(senderName)) proceedErrors.push('Sender name is required.');
+  if (isBlank(senderPhone)) proceedErrors.push('Sender phone is required.');
+
+  if (isPickupParcel && isBlank(collectCode)) {
+    proceedErrors.push('Please enter and verify a collect code for parcel pickup.');
+  }
+
+  if (isDeliveryParcel) {
+    if (isBlank(selectedSpBoxId) || isBlank(selectedSpSizeId)) {
+      proceedErrors.push('Please select a locker box and size for parcel delivery.');
+    }
+  }
+
+  if (mode === 'quick' || mode === 'grouped') {
+    if (isBlank(dropoffAddress)) proceedErrors.push('Delivery address is required.');
+    if (isBlank(receiverName)) proceedErrors.push('Receiver name is required.');
+    if (isBlank(receiverPhone)) proceedErrors.push('Receiver phone is required.');
+    if (pickupAddress && dropoffAddress && normaliseAddr(pickupAddress) === normaliseAddr(dropoffAddress)) {
+      proceedErrors.push('Pickup and dropoff address cannot be the same.');
+    }
+  } else if (mode === 'multi' || mode === 'bulk') {
+    if (totalDeliveries <= 0) proceedErrors.push('At least one delivery is required.');
+    const active = getActiveDropoffs();
+    const missingReceiver = active.some((d: any) => isBlank(d.name) || isBlank(d.phone));
+    if (missingReceiver) proceedErrors.push('Receiver name and phone are required for all deliveries.');
+    const hasSameAddr = active.some((d: any) => d.address && pickupAddress && normaliseAddr(pickupAddress) === normaliseAddr(d.address));
+    if (hasSameAddr) proceedErrors.push('One or more dropoff addresses match the pickup address.');
+  }
+
+  const canProceed = proceedErrors.length === 0;
+  const showProceedErrors = !canProceed && (
+    totalDeliveries > 0 ||
+    (mode === 'quick' && !isBlank(dropoffAddress)) ||
+    (mode === 'multi' && drops.some(d => !isBlank(d.address) || !isBlank(d.name) || !isBlank(d.phone))) ||
+    (mode === 'bulk' && (!isBlank(bulkText) || bulkRows.length > 0))
+  );
+
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleConfirmAll = async () => {
+    if (submitting) return;
+    const deliveries = getActiveDropoffs();
+
+    // Prepare order data based on mode
+    const orderData: any = {
+      mode: mode,
+      pickup: pickupAddress,
+      senderName: senderName,
+      senderPhone: senderPhone,
+      vehicle: vehicle,
+      payMethod: payMethod,
+      notes: notes,
+      // Include route information for pricing calculation.
+      // Prefer the map-calculated distance (Step 2); fall back to the early
+      // estimate (Step 1) so the backend never receives 0 when the user
+      // submits before DeliveryMapView finishes its geocode/route request.
+      distance_km: routeDistance || earlyRouteDistance || 0,
+      duration_minutes: routeDuration || earlyRouteDuration || 0,
+      // Total cost — required for pay_with_transfer Paystack initialization
+      totalCost: totalCost,
+
+      // SmartParcel fields
+      is_percel_order: isPickupParcel || isDeliveryParcel,
+      is_pickup_percel: isPickupParcel,
+      collect_code: isPickupParcel ? collectCode : undefined,
+      isdelivery_percel: isDeliveryParcel,
+      box_id: isDeliveryParcel ? selectedSpBoxId : undefined,
+      locker_size_id: isDeliveryParcel ? selectedSpSizeId : undefined,
+    };
+
+    if (mode === 'quick' || mode === 'grouped') {
+      orderData.dropoff = dropoffAddress;
+      orderData.receiverName = receiverName;
+      orderData.receiverPhone = receiverPhone;
+      orderData.packageType = drops[0]?.pkg || 'Box';
+    } else if (mode === 'multi' || mode === 'bulk') {
+      orderData.deliveries = deliveries.map((d: any) => ({
+        dropoff_address: d.address,
+        receiver_name: d.name,
+        receiver_phone: d.phone,
+        package_type: d.pkg || 'Box',
+        notes: d.notes || ''
+      }));
+    }
+
+    setSubmitting(true);
+    try {
+      await onPlaceOrder(orderData);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 24, paddingBottom: 40, height: "calc(100vh - 140px)" }}>
+      {/* LEFT PANEL */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 24, overflowY: "auto", paddingRight: 4 }}>
+        <div>
+          <h2 style={{ fontSize: 24, fontWeight: 700, color: S.navy, margin: "0 0 8px" }}>New Delivery</h2>
+          <p style={{ color: S.gray, fontSize: 14, margin: 0 }}>
+            {step === 1 ? "Get a rider instantly or schedule for later" : "Review details and confirm price"}
+          </p>
+        </div>
+
+        {step === 1 && (
+          <div style={{ background: "#fff", padding: 24, borderRadius: 16, border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 24 }}>
+
+            {/* Mode Selection */}
+            <div style={{ display: "flex", background: "#f1f5f9", padding: 4, borderRadius: 10 }}>
+              {["quick", "multi", "bulk"].map(m => {
+                const isActive = (m === 'quick') ? (mode === 'quick' || mode === 'grouped') : (mode === m);
+                return (
+                  <button key={m} onClick={() => {
+                    if (m === 'quick') {
+                      // Don't reset to 'quick' if already on 'grouped'
+                      if (mode !== 'quick' && mode !== 'grouped') setMode('quick');
+                    } else {
+                      setMode(m);
+                    }
+                    setDrops([{ id: 1, address: "", name: "", phone: "", pkg: "Box", notes: "" }]);
+                    setBulkRows([]);
+                  }}
+                    style={{
+                      flex: 1, padding: "8px", borderRadius: 8, border: "none", cursor: "pointer",
+                      background: isActive ? "#fff" : "transparent",
+                      color: isActive ? S.navy : S.gray, fontWeight: 600, fontSize: 13,
+                      boxShadow: isActive ? "0 2px 8px rgba(0,0,0,0.05)" : "none",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {m === "quick" ? "⚡ Quick Send" : m === "multi" ? "📍 Multi-Drop" : "📂 Bulk Import"}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Quick vs Grouped selection (Exclusive to Quick Send flow) */}
+            {(mode === 'quick' || mode === 'grouped') && (
+              <div style={{ display: "flex", gap: 12 }}>
+                <button
+                  onClick={() => setMode('quick')}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'quick' ? S.navy : '#e2e8f0'}`,
+                    background: mode === 'quick' ? S.navy : '#fff', color: mode === 'quick' ? '#fff' : S.navy,
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  Quick Send (Single)
+                </button>
+                <button
+                  onClick={() => setMode('grouped')}
+                  style={{
+                    flex: 1, padding: "10px", borderRadius: 10, border: `1.5px solid ${mode === 'grouped' ? S.navy : '#e2e8f0'}`,
+                    background: mode === 'grouped' ? S.navy : '#fff', color: mode === 'grouped' ? '#fff' : S.navy,
+                    fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s"
+                  }}
+                >
+                  Grouped Order
+                </button>
+              </div>
+            )}
+
+            {/* Pickup */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Pickup From</label>
+              <AddressAutocompleteInput
+                value={pickupAddress}
+                onChange={(val: string) => {
+                  setPickupAddress(val);
+                  setPickupCoords(null);
+                }}
+                onSelect={(addr: string, coords: any) => {
+                  setPickupAddress(addr);
+                  setPickupCoords(coords);
+                }}
+                placeholder="Enter pickup address"
+                style={{ width: "100%", height: 48, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }}
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                <input value={senderName} onChange={e => setSenderName(e.target.value)} placeholder="Sender Name" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
+                <input value={senderPhone} onChange={e => setSenderPhone(e.target.value)} placeholder="Sender Phone" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
+              </div>
+
+              {/* SmartParcel Pickup toggle */}
+              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: S.navy, cursor: "pointer", width: "fit-content" }}>
+                <input type="checkbox" checked={isPickupParcel} onChange={e => setIsPickupParcel(e.target.checked)} />
+                Pickup from SmartParcel Locker
+              </label>
+
+              {isPickupParcel && (
+                <div style={{ marginTop: 10, background: "#f8fafc", padding: 14, borderRadius: 12, border: "1.5px solid #e2e8f0" }}>
+                  <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, marginBottom: 8, textTransform: "uppercase" as const }}>Enter Percel Box Locker Number</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <input
+                      value={collectCode}
+                      onChange={e => setCollectCode(e.target.value)}
+                      placeholder="e.g. TBKJ"
+                      style={{ flex: 1, height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #cbd5e1", fontSize: 14 }}
+                    />
+                    <button
+                      onClick={handleResolveCollectCode}
+                      disabled={isResolvingCode || !collectCode}
+                      style={{
+                        padding: "0 20px", borderRadius: 10, border: "none",
+                        background: S.navy, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                        opacity: (isResolvingCode || !collectCode) ? 0.6 : 1
+                      }}
+                    >
+                      {isResolvingCode ? "Verifying..." : "Verify"}
+                    </button>
+                  </div>
+                  {resolveError && <div style={{ color: S.red, fontSize: 11, marginTop: 6, fontWeight: 600 }}>{resolveError}</div>}
+                  {pickupAddress && !resolveError && !isResolvingCode && collectCode && (
+                    <div style={{ marginTop: 8, padding: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 12, color: "#166534" }}>
+                      ✅ Resolved: <strong>{pickupAddress}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {mode === "quick" && (
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Deliver To</label>
+                <AddressAutocompleteInput
+                  value={dropoffAddress}
+                  onChange={(val: string) => {
+                    setDropoffAddress(val);
+                    setDropoffCoords(null);
+                  }}
+                  onSelect={(addr: string, coords: any) => {
+                    setDropoffAddress(addr);
+                    setDropoffCoords(coords);
+                  }}
+                  placeholder="Enter delivery address"
+                  style={{
+                    width: "100%", height: 48, padding: "0 16px", borderRadius: 10, fontSize: 14,
+                    border: sameAddressError === "same-quick" ? "1.5px solid #ef4444" : "1.5px solid #e2e8f0"
+                  }}
+                />
+
+                {/* Same-address error banner */}
+                {sameAddressError === "same-quick" && (
+                  <div style={{
+                    marginTop: 8, padding: "10px 14px",
+                    background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10,
+                    display: "flex", alignItems: "flex-start", gap: 10
+                  }}>
+                    <span style={{ fontSize: 16, flexShrink: 0 }}>🚧</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", marginBottom: 2 }}>Pickup &amp; dropoff can&apos;t be the same address</div>
+                      <div style={{ fontSize: 11, color: "#dc2626" }}>Please enter a different delivery destination.</div>
+                    </div>
+                  </div>
+                )}
+
+                {routeError && !sameAddressError && <div style={{ color: S.red, fontSize: 12, marginTop: 4 }}>{routeError}</div>}
+                {calculatingRoute && !sameAddressError && <div style={{ color: S.gold, fontSize: 12, marginTop: 4 }}>Computing route...</div>}
+
+                {/* SmartParcel Delivery toggle */}
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 12, color: S.navy, cursor: "pointer", width: "fit-content" }}>
+                  <input type="checkbox" checked={isDeliveryParcel} onChange={e => setIsDeliveryParcel(e.target.checked)} />
+                  Deliver to SmartParcel Locker
+                </label>
+
+                {isDeliveryParcel && (
+                  <div style={{ marginTop: 10, background: "#f8fafc", padding: 14, borderRadius: 12, border: "1.5px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ fontSize: 11, color: S.gray, fontWeight: 700, textTransform: "uppercase" as const }}>Select Locker Station</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <select
+                        value={selectedSpStateId}
+                        onChange={e => { setSelectedSpStateId(e.target.value); setSelectedSpCityId(""); setSelectedSpBoxId(""); }}
+                        style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13 }}
+                      >
+                        <option value="">Select State</option>
+                        {spStates.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+
+                      <select
+                        value={selectedSpCityId}
+                        onChange={e => { setSelectedSpCityId(e.target.value); setSelectedSpBoxId(""); }}
+                        disabled={!selectedSpStateId}
+                        style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13, opacity: !selectedSpStateId ? 0.6 : 1 }}
+                      >
+                        <option value="">Select City</option>
+                        {spCities.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                    </div>
+
+                    <select
+                      value={selectedSpBoxId}
+                      onChange={e => {
+                        const boxId = e.target.value;
+                        setSelectedSpBoxId(boxId);
+                        const box = spBoxes.find(b => String(b.boxid) === String(boxId));
+                        if (box) setDropoffAddress(box.boxaddress);
+                      }}
+                      disabled={!selectedSpCityId}
+                      style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13, opacity: !selectedSpCityId ? 0.6 : 1 }}
+                    >
+                      <option value="">Select Assigned Box</option>
+                      {spBoxes.map(b => <option key={b.boxid} value={b.boxid}>{b.boxname} — {b.boxaddress}</option>)}
+                    </select>
+
+                    <select
+                      value={selectedSpSizeId}
+                      onChange={e => setSelectedSpSizeId(e.target.value)}
+                      style={{ height: 44, borderRadius: 10, border: "1.5px solid #cbd5e1", padding: "0 10px", fontSize: 13 }}
+                    >
+                      <option value="">Select Locker Size</option>
+                      {spSizes.map(sz => <option key={sz.id} value={sz.id}>{sz.name}</option>)}
+                    </select>
+                  </div>
+                )}
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+                  <input value={receiverName} onChange={e => setReceiverName(e.target.value)} placeholder="Receiver Name" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
+                  <input value={receiverPhone} onChange={e => setReceiverPhone(e.target.value)} placeholder="Receiver Phone" style={{ height: 44, padding: "0 14px", borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14 }} />
+                </div>
+                <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Delivery instructions (optional)" style={{ width: "100%", height: 80, padding: 14, borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 14, marginTop: 12, fontFamily: "inherit", resize: "none" }} />
+              </div>
+            )}
+
+            {/* MULTI MODE */}
+            {mode === "multi" && (
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Drop-off Locations</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                  {drops.map((drop, i) => {
+                    const isSameAsPickup = !!pickupAddress && !!drop.address && normaliseAddr(pickupAddress) === normaliseAddr(drop.address);
+                    return (
+                      <div key={drop.id} style={{ border: `1.5px solid ${isSameAsPickup ? "#fecaca" : "#e2e8f0"}`, borderRadius: 10, padding: 16, position: "relative", background: isSameAsPickup ? "#fef9f9" : "#fff" }}>
+                        <div style={{ position: "absolute", top: 16, left: 16, width: 24, height: 24, borderRadius: "50%", background: S.gold, color: S.navy, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div>
+                        {drops.length > 1 && (
+                          <button onClick={() => removeDrop(drop.id)} style={{ position: "absolute", top: 16, right: 16, background: "none", border: "none", color: S.red, cursor: "pointer", fontSize: 18 }}>×</button>
+                        )}
+                        <div style={{ marginLeft: 36 }}>
+                          <AddressAutocompleteInput
+                            value={drop.address}
+                            onChange={(val) => updateDrop(drop.id, "address", val)}
+                            placeholder="Dropoff address"
+                            style={{ width: "100%", height: 40, padding: "0 12px", borderRadius: 8, border: `1px solid ${isSameAsPickup ? "#ef4444" : "#cbd5e1"}`, fontSize: 14, marginBottom: isSameAsPickup ? 8 : 12 }}
+                          />
+                          {isSameAsPickup && (
+                            <div style={{
+                              marginBottom: 12, padding: "8px 12px",
+                              background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8,
+                              display: "flex", alignItems: "center", gap: 8
+                            }}>
+                              <span style={{ fontSize: 14 }}>🚧</span>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: "#b91c1c" }}>This address is the same as your pickup — please choose a different destination.</div>
+                            </div>
+                          )}
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                            <input value={drop.name} onChange={(e) => updateDrop(drop.id, "name", e.target.value)} placeholder="Receiver Name" style={{ height: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13 }} />
+                            <input value={drop.phone} onChange={(e) => updateDrop(drop.id, "phone", e.target.value)} placeholder="Receiver Phone" style={{ height: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 13 }} />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <button onClick={addDrop} style={{ width: "100%", padding: "12px", border: "1px dashed #cbd5e1", borderRadius: 10, background: "#f8fafc", color: S.navy, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Add Another Dropoff</button>
+                </div>
+              </div>
+            )}
+
+            {mode === "bulk" && (
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 8 }}>Bulk Import</label>
+                <div style={{ marginBottom: 16, display: "flex", gap: 8 }}>
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <input type="file" accept="image/*,.csv,.txt" onChange={handleFileUpload} style={{ opacity: 0, position: "absolute", inset: 0, cursor: "pointer" }} />
+                    <button style={{ width: "100%", height: 44, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", color: S.navy, fontWeight: 600 }}>📂 Upload Photo/CSV</button>
+                  </div>
+                  <button onClick={handleSnap} style={{ flex: 1, height: 44, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", color: S.navy, fontWeight: 600 }}>📷 Snap Photo</button>
+                </div>
+
+                {scanning ? (
+                  <div style={{ height: 150, background: "#000", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", color: "#fff" }}>
+                    Scannning...
+                  </div>
+                ) : (
+                  <textarea value={bulkText} onChange={e => setBulkText(e.target.value)} placeholder={`Paste addresses or type here...\nFormat: Address | Name | Phone`} style={{ width: "100%", height: 120, padding: 14, borderRadius: 10, border: "1.5px solid #e2e8f0", fontSize: 13, fontFamily: "inherit" }} />
+                )}
+                <button onClick={handleParseBulk} style={{ marginTop: 8, padding: "8px 16px", borderRadius: 8, background: S.navy, color: "#fff", border: "none", fontWeight: 600, fontSize: 13 }}>Parse Text</button>
+
+                {bulkRows.length > 0 && (
+                  <div style={{ marginTop: 16, border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden" }}>
+                    {bulkRows.map((row, i) => (
+                      <div key={i} style={{ padding: 12, borderBottom: "1px solid #e2e8f0", fontSize: 13, display: "flex", justifyContent: "space-between", background: row.valid ? '#fff' : '#fee2e2' }}>
+                        <span>{i + 1}. {row.address}</span>
+                        <span>{row.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Vehicle Selection */}
+            <div>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, color: S.navy, marginBottom: 12 }}>Select Vehicle</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                {Object.keys(vehiclePricing).map(vName => {
+                  const isComingSoon = vName === 'Car' || vName === 'Van';
+                  const isSelected = vehicle === vName && !isComingSoon;
+                  const earlyP = ((mode === 'quick' || mode === 'grouped') && earlyRouteDistance && earlyRouteDuration)
+                    ? calcFareForVehicle(vName, earlyRouteDistance, earlyRouteDuration)
+                    : null;
+
+                  return (
+                    <button
+                      key={vName}
+                      onClick={() => !isComingSoon && setVehicle(vName)}
+                      disabled={isComingSoon}
+                      style={{
+                        display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 16,
+                        borderRadius: 12,
+                        border: isSelected ? `2px solid ${S.gold}` : "1px solid #e2e8f0",
+                        background: isSelected ? S.goldPale : "#fff",
+                        cursor: isComingSoon ? "not-allowed" : "pointer",
+                        transition: "all 0.2s",
+                        opacity: isComingSoon ? 0.7 : 1,
+                        position: "relative"
+                      }}
+                    >
+                      {isComingSoon && (
+                        <div style={{
+                          position: "absolute", top: 6, right: 6,
+                          background: "#e2e8f0", color: "#64748b",
+                          fontSize: 8, fontWeight: 700, padding: "2px 5px",
+                          borderRadius: 4, textTransform: "uppercase" as const, letterSpacing: 0.3
+                        }}>Soon</div>
+                      )}
+                      <div style={{ color: isSelected ? S.navy : S.gray }}>
+                        {vName === 'Bike' ? Icons.bike : vName === 'Car' ? Icons.car : Icons.van}
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: isComingSoon ? S.grayLight : S.navy }}>{vName}</span>
+                      {earlyP != null && (
+                        <span style={{ fontSize: 11, color: isComingSoon ? S.grayLight : S.gold, fontWeight: 700 }}>
+                          ₦{earlyP.toLocaleString()}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* ── Sticky bottom: Summary + Continue ── */}
+            <div style={{
+              background: "#fff", borderRadius: 14, border: `2px solid ${canProceed ? S.gold : "#e2e8f0"}`,
+              padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+              transition: "all 0.3s"
+            }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ fontSize: 13, color: S.gray }}>
+                    <span style={{ fontWeight: 700, color: S.navy, fontSize: 20, fontFamily: "'Space Mono', monospace" }}>{totalDeliveries}</span>
+                    <span style={{ marginLeft: 4 }}>{totalDeliveries === 1 ? "delivery" : "deliveries"}</span>
+                  </div>
+                  {totalDeliveries > 0 && (
+                    <div style={{ width: 1, height: 24, background: "#e2e8f0" }} />
+                  )}
+                  {totalDeliveries > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, color: S.grayLight }}>Estimated Total</div>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: S.navy, fontFamily: "'Space Mono', monospace" }}>
+                        ₦{((mode === 'quick' || mode === 'grouped') && pickupAddress && dropoffAddress && calculatingRoute && !earlyRouteDistance) ? '—' : totalCost.toLocaleString()}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {totalDeliveries > 1 && (
+                  <div style={{ fontSize: 11, color: S.grayLight, marginTop: 2 }}>
+                    ₦{unitCost.toLocaleString()} × {totalDeliveries} deliveries
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={() => setStep(2)}
+                disabled={!canProceed}
+                style={{
+                  padding: "14px 32px", borderRadius: 12, border: "none", fontSize: 15, fontWeight: 700, cursor: canProceed ? "pointer" : "default",
+                  background: canProceed ? `linear-gradient(135deg, ${S.gold}, ${S.gold})` : "#e2e8f0",
+                  color: canProceed ? S.navy : "#94a3b8", fontFamily: "inherit",
+                  boxShadow: canProceed ? "0 4px 12px rgba(232,168,56,0.3)" : "none",
+                  transition: "all 0.2s"
+                }}>
+                Review & Pay →
+              </button>
+            </div>
+            {showProceedErrors && (
+              <div style={{
+                marginTop: 10,
+                padding: '10px 14px',
+                borderRadius: 12,
+                border: '1px solid #fecaca',
+                background: '#fef2f2',
+                color: '#991b1b',
+                fontSize: 12,
+                fontWeight: 600
+              }}>
+                <div style={{ marginBottom: 6 }}>Please complete the required fields:</div>
+                <ul style={{ margin: 0, paddingLeft: 18 }}>
+                  {proceedErrors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
+        {step === 2 && (
+          <div style={{ background: "#fff", padding: 24, borderRadius: 16, border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 24 }}>
+
+            {/* Order Summary List */}
+            <div>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: S.navy, borderBottom: `1px solid ${S.grayBg}`, paddingBottom: 12, marginBottom: 12 }}>Order Summary</h3>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 16 }}>
+                <div style={{ marginTop: 2, color: S.green }}>{Icons.pin}</div>
+                <div>
+                  <div style={{ fontSize: 11, color: S.gray, fontWeight: 600 }}>PICKUP</div>
+                  <div style={{ fontSize: 14, color: S.navy, fontWeight: 500 }}>{pickupAddress}</div>
+                  <div style={{ fontSize: 12, color: S.gray }}>{senderName}, {senderPhone}</div>
+                </div>
+              </div>
+
+              {getActiveDropoffs().map((d: any, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 12 }}>
+                  <div style={{ marginTop: 2, color: S.gold }}>{Icons.pin}</div>
+                  <div>
+                    <div style={{ fontSize: 11, color: S.gray, fontWeight: 600 }}>DELIVERY #{i + 1}</div>
+                    <div style={{ fontSize: 14, color: S.navy, fontWeight: 500 }}>{d.address}</div>
+                    <div style={{ fontSize: 12, color: S.gray }}>{d.name}, {d.phone}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Payment Method */}
+            <div>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: S.navy, marginBottom: 12 }}>Payment Method</h3>
+              <div style={{ display: "flex", gap: 12 }}>
+                <button onClick={() => setPayMethod('wallet')} style={{ flex: 1, padding: 12, border: payMethod === 'wallet' ? `2px solid ${S.navy}` : '1px solid #e2e8f0', borderRadius: 10, background: payMethod === 'wallet' ? '#f8fafc' : '#fff', textAlign: "left", cursor: "pointer" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: S.navy, display: "flex", alignItems: "center", gap: 8 }}>
+                    {Icons.wallet} Wallet
+                  </div>
+                  <div style={{ fontSize: 12, color: S.gray, marginTop: 4 }}>Balance: ₦{balance.toLocaleString()}</div>
+                </button>
+                <button onClick={() => setPayMethod('pay_with_transfer')} style={{ flex: 1, padding: 12, border: payMethod === 'pay_with_transfer' ? `2px solid ${S.navy}` : '1px solid #e2e8f0', borderRadius: 10, background: payMethod === 'pay_with_transfer' ? '#f8fafc' : '#fff', textAlign: "left", cursor: "pointer" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: S.navy, display: "flex", alignItems: "center", gap: 8 }}>
+                    🏛️ Bank Transfer
+                  </div>
+                  <div style={{ fontSize: 12, color: S.gray, marginTop: 4 }}>Paystack Transfer</div>
+                </button>
+                <button onClick={() => setPayMethod('receiver_pays')} style={{ flex: 1, padding: 12, border: payMethod === 'receiver_pays' ? `2px solid ${S.navy}` : '1px solid #e2e8f0', borderRadius: 10, background: payMethod === 'receiver_pays' ? '#f8fafc' : '#fff', textAlign: "left", cursor: "pointer" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: S.navy, display: "flex", alignItems: "center", gap: 8 }}>
+                    🤝 Receiver Pays
+                  </div>
+                  <div style={{ fontSize: 12, color: S.gray, marginTop: 4 }}>Pay on delivery</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Total */}
+            <div style={{ background: S.navy, padding: 20, borderRadius: 12, color: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ opacity: 0.8, fontSize: 13 }}>Total Cost</span>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>₦{totalCost.toLocaleString()}</span>
+              </div>
+              {routeDistance && (
+                <div style={{ fontSize: 12, opacity: 0.6 }}>Est. Distance: {routeDistance} km • Time: {routeDuration} mins</div>
+              )}
+            </div>
+
+            {/* Buttons */}
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={() => setStep(1)} style={{ flex: 1, padding: 16, borderRadius: 12, border: "1px solid #e2e8f0", background: "#fff", color: S.navy, fontWeight: 700, cursor: "pointer" }}>Back</button>
+              <button
+                onClick={handleConfirmAll}
+                disabled={submitting || (payMethod === 'wallet' && totalCost > balance)}
+                style={{
+                  flex: 2, padding: 16, borderRadius: 12, border: "none",
+                  background: (payMethod === 'wallet' && totalCost > balance) ? '#e2e8f0' : S.navy,
+                  color: (payMethod === 'wallet' && totalCost > balance) ? '#94a3b8' : '#fff',
+                  fontWeight: 700, cursor: (payMethod === 'wallet' && totalCost > balance) ? "not-allowed" : "pointer"
+                }}
+              >
+                {(payMethod === 'wallet' && totalCost > balance) ? 'Insufficient Funds' : (payMethod === 'pay_with_transfer' ? (submitting ? 'Initializing...' : 'Pay & Confirm') : (submitting ? 'Confirming...' : 'Confirm Order'))}
+              </button>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT PANEL - MAP */}
+      <div style={{ flex: 1, background: "#e2e8f0", borderRadius: 20, overflow: "hidden", position: "relative" }}>
+        <DeliveryMapView
+          pickupAddress={pickupAddress}
+          dropoffs={getActiveDropoffs().map((d: any) => ({ address: d.address }))}
+          vehicle={vehicle}
+          totalDeliveries={getActiveDropoffs().length}
+          totalCost={totalCost}
+          onRouteCalculated={(dist: number, time: number) => {
+            setRouteDistance(dist);
+            setRouteDuration(time);
+          }}
+        />
+      </div>
+    </div>
+  );
+}

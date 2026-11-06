@@ -1,0 +1,26 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>We've received your delivery request! 📥</p>
+
+<p>Your order is currently pending and we are searching for the nearest available rider to assign to it.</p>
+
+<h3>📦 Delivery Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Item(s): <strong>{{ order.notes|default:"Package" }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+    <li>Total Fare: <strong>₦{{ order.total_amount }}</strong></li>
+</ul>
+
+<p>You can track the progress of this order directly from your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Order Status</a>
+</div>
+
+<p>We'll notify you as soon as a rider is assigned.</p>
+{% endblock %}

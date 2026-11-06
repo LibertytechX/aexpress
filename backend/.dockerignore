@@ -1,0 +1,25 @@
+# Exclude virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Exclude git repository
+.git/
+.gitignore
+
+# Exclude python cache and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Exclude IDE settings and local config
+.idea/
+.vscode/
+.env
+
+# Exclude testing/coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/

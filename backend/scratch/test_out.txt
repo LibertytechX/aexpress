@@ -1,0 +1,13 @@
+2026-03-20 17:06:41,438 [INFO] firebase - Firebase Admin SDK initialized successfully.
+Found 1 test(s).
+System check identified no issues (0 silenced).
+E
+======================================================================
+ERROR: test_orders (unittest.loader._FailedTest.test_orders)
+----------------------------------------------------------------------
+AttributeError: module 'orders.tests' has no attribute 'test_orders'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

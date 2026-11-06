@@ -68,6 +68,7 @@ class Command(BaseCommand):
                 for order in pending_orders:
                     order.rider = rider
                     order.status = "Assigned"
+                    order.dispatcher_assigned = True
                     order.save()
 
                     # Emit activity for tracking

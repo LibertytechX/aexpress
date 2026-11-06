@@ -1,0 +1,31 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Delivery confirmed! ✅ Your customer has received their order.</p>
+
+<h3>📦 Delivery Confirmation</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Item(s): <strong>{{ order.notes|default:"Package" }}</strong></li>
+    <li>Delivered To: <strong>{{ delivery.receiver_name }} at {{ delivery.dropoff_address }}</strong></li>
+    <li>Delivered By: <strong>{{ order.rider.user.get_full_name }}</strong></li>
+    <li>Time of Delivery: <strong>{{ order.completed_at|date:"Y-m-d H:i" }}</strong></li>
+</ul>
+
+<p>This order has been successfully completed and recorded in your dashboard.</p>
+
+<h3>⭐ A Happy Customer is a Returning Customer</h3>
+<p>Consider following up with your customer to confirm they're satisfied — a simple check-in goes a long way in building loyalty.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Full Delivery History</a>
+</div>
+
+<p>Thank you for trusting Assured Express with this delivery. Ready to send your next one?</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">🚀 Request Another Delivery</a>
+</div>
+{% endblock %}

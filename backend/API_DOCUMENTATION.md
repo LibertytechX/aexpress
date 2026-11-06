@@ -21,7 +21,8 @@ http://127.0.0.1:8000/api/auth
   "email": "test@testlogistics.com",
   "address": "123 Test Street, Lagos",
   "password": "securepass123",
-  "confirm_password": "securepass123"
+  "confirm_password": "securepass123",
+  "referral_code": "LP-12345"
 }
 ```
 
@@ -180,7 +181,14 @@ Authorization: Bearer <access_token>
 
 ---
 
-### 5. Refresh Access Token
+### 5. List Subscription Invoices
+**Endpoint:** `GET /api/subscriptions/invoices/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** List all subscription invoices for the merchant.
+
+---
+
+### 6. Refresh Access Token
 **Endpoint:** `POST /api/auth/refresh/`  
 **Authentication:** Not required  
 **Description:** Get a new access token using refresh token
@@ -241,4 +249,172 @@ Authorization: Bearer <access_token>
 - `403` - Forbidden
 - `404` - Not Found
 - `500` - Internal Server Error
+
+
+---
+
+## Postpaid Payment Plan Endpoints
+
+### 1. List Postpaid Plans
+**Endpoint:** `GET /api/subscriptions/postpaid/plans/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** List all available postpaid plans (Weekly/Monthly)
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid plans retrieved successfully.",
+  "data": [
+    {
+      "id": "uuid-here",
+      "name": "Weekly Postpaid",
+      "plan_type": "weekly",
+      "is_active": true
+    }
+  ]
+}
+```
+
+---
+
+### 2. Activate Postpaid Plan
+**Endpoint:** `POST /api/subscriptions/postpaid/plans/<plan_id>/activate/`  
+**Authentication:** Required (Merchant only)  
+**Description:** Activate a postpaid plan for the merchant
+
+**Success Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "Successfully activated Weekly Postpaid plan.",
+  "data": {
+    "id": "uuid-here",
+    "status": "active",
+    "accumulated_amount": "0.00",
+    "current_period_start": "2026-03-27T15:18:51Z",
+    "current_period_end": "2026-04-03T15:18:51Z",
+    "plan": { ... }
+  }
+}
+```
+
+---
+
+### 3. Get Active Postpaid Subscription
+**Endpoint:** `GET /api/subscriptions/postpaid/active/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Get the merchant's current active or blocked postpaid subscription and accumulation status
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid subscription retrieved successfully.",
+  "data": {
+    "id": "uuid-here",
+    "status": "active", // active, blocked, inactive
+    "accumulated_amount": "1500.00",
+    "current_period_end": "2026-04-03T15:18:51Z",
+    "invoices": [ ... ]
+  }
+}
+```
+
+---
+
+### 4. Get Postpaid Invoice Detail
+**Endpoint:** `GET /api/subscriptions/postpaid/invoices/<invoice_id>/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Get details and payment info (virtual account) for a postpaid invoice
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Postpaid invoice retrieved successfully.",
+  "data": {
+    "id": "uuid-here",
+    "amount": "5000.00",
+    "status": "pending", // pending, paid, failed
+    "payment_ref": "POST-INV-...",
+    "payment_info": {
+      "account_number": "1234567890",
+      "bank_name": "Test Bank",
+      "account_name": "Liberty AXpress"
+    },
+    "due_date": "2026-03-28T15:18:51Z"
+  }
+}
+```
+
+
+---
+
+## Merchant API Key Management
+
+### 0. Request API Access
+**Endpoint:** `POST /api/merchant/request-api-access/`  
+**Authentication:** Required (Bearer Token)  
+**Description:** Switches a regular merchant account to an `api` account type. This is required before an API key can be requested.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Your account has been switched to API type successfully.",
+  "data": {},
+  "status_code": 200
+}
+```
+
+---
+
+### 1. Request API Key Retrieval OTP
+**Endpoint:** `POST /api/merchant/apikey/request-otp/`  
+**Authentication:** Required (Bearer Token)  
+**Requirement:** `merchant_type` must be `'api'`.  
+**Description:** Generates a 6-digit OTP and sends it to the merchant's registered email for secure retrieval or rotation of the API key.
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "OTP sent to your registered email.",
+  "data": {},
+  "status_code": 200
+}
+```
+
+---
+
+### 2. Retrieve Merchant API Key
+**Endpoint:** `POST /api/merchant/apikey/retrieve/`  
+**Authentication:** Required (Bearer Token)  
+**Requirement:** `merchant_type` must be `'api'`.  
+**Description:** Verifies the 6-digit OTP and returns a newly generated raw API key. **Store this key securely as it is only shown once.** Subsequent calls with a valid OTP will rotate/overwrite the existing key.
+
+**Request Body:**
+```json
+{
+  "otp": "123456"
+}
+```
+
+**Success Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "API Key generated successfully. Please store it securely.",
+  "data": {
+    "api_key": "ak_live_..."
+  },
+  "status_code": 200
+}
+```
+
+**Security Note:** 
+- API Keys are prefixed with `ak_live_`.
+- Only the SHA-256 hash is stored in the database.
+- Key rotation is mandatory upon each retrieval call (every call to this endpoint generates a *new* key and voids the previous one).
 

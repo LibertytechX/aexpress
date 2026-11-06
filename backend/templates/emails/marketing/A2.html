@@ -1,0 +1,24 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>We noticed you started setting up your Assured Express account but didn't quite finish — no worries, it happens!</p>
+
+<p>But we'd hate for you to miss out on:</p>
+<ul>
+    <li>Safe, insured delivery for your business</li>
+    <li>Real-time tracking for every order</li>
+    <li>A growing community of merchants across Nigeria who trust us every day</li>
+</ul>
+
+<p>Your account is almost ready. Just a few more steps — it takes less than 2 minutes.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">✅ Complete My Signup</a>
+</div>
+
+<p>If you ran into any issues or have questions, please reach out — we're happy to guide you through.</p>
+
+<p>See you on the other side!</p>
+{% endblock %}

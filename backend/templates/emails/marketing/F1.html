@@ -1,0 +1,24 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Great news — your delivery is on the move! 🚚</p>
+
+<h3>📦 Delivery Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Item(s): <strong>{{ order.notes|default:"Package" }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+    <li>Rider: <strong>{{ order.rider.user.get_full_name }} — {{ order.rider.user.phone }}</strong></li>
+</ul>
+
+<p>You can track this delivery in real time from your dashboard.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📍 Track This Delivery Live</a>
+</div>
+
+<p>We'll send you another update as soon as the delivery is completed.</p>
+{% endblock %}

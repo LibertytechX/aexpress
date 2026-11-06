@@ -1,0 +1,46 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block hero_badge %}✦&nbsp; New Order Alert{% endblock %}
+{% block hero_title %}<span style="color:#FBB12F;">New Order</span> Created{% endblock %}
+{% block hero_subtitle %}A new delivery request has been placed on the system.{% endblock %}
+
+{% block content %}
+<p>Hello Dispatcher,</p>
+
+<p>A new order has been created. Here are the details:</p>
+
+<h3>📦 Order Details</h3>
+<ul>
+    <li>Order Number: <strong>#{{ order.order_number }}</strong></li>
+    <li>Customer/Merchant: <strong>{{ order.user.contact_name|default:order.user.business_name|default:order.user.phone }} ({{ order.user.phone }})</strong></li>
+    <li>Payment Method: <strong>{{ order.get_payment_method_display }}</strong></li>
+    <li>Payment Status: <strong>{{ order.payment_status }}</strong></li>
+    <li>Total Amount: <strong>₦{{ order.total_amount }}</strong></li>
+    <li>Created At: <strong>{{ order.created_at|date:"Y-m-d H:i:s" }}</strong></li>
+</ul>
+
+<h3>📍 Pickup Location</h3>
+<ul>
+    <li>Address: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Sender: <strong>{{ order.sender_name }} ({{ order.sender_phone }})</strong></li>
+</ul>
+
+<h3>🏁 Deliveries</h3>
+{% for delivery in deliveries %}
+<div style="border-left: 3px solid #FBB12F; padding-left: 12px; margin-bottom: 16px;">
+    <strong>Stop #{{ forloop.counter }}</strong>
+    <ul>
+        <li>Dropoff Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+        <li>Receiver: <strong>{{ delivery.receiver_name }} ({{ delivery.receiver_phone }})</strong></li>
+        <li>Package Type: <strong>{{ delivery.package_type }}</strong></li>
+        {% if delivery.cod_amount > 0 %}
+        <li>COD Amount: <strong>₦{{ delivery.cod_amount }} (From: {{ delivery.cod_from }})</strong></li>
+        {% endif %}
+    </ul>
+</div>
+{% endfor %}
+
+<div style="text-align: center; margin-top: 24px;">
+    <a href="https://dispatcher.axpress.net" class="button">Go to Dispatcher Dashboard</a>
+</div>
+{% endblock %}

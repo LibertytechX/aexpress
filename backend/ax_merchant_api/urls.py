@@ -15,6 +15,12 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 
+from orders.views import OrderCompleteView
+from dispatcher.views import (
+    MerchantAPIKeyRequestOTPView,
+    MerchantAPIKeyRetrieveView,
+    MerchantRequestAPIAccessView,
+)
 from django.contrib import admin
 from django.urls import path, include
 
@@ -23,7 +29,54 @@ urlpatterns = [
     path("api/auth/", include("authentication.urls")),
     path("api/orders/", include("orders.urls")),
     path("api/wallet/", include("wallet.urls")),
+    path(
+        "orders/<str:order_number>/complete/",
+        OrderCompleteView.as_view(),
+        name="order_complete",
+    ),
     path("api/dispatch/", include("dispatcher.urls")),
+    path("api/operations/v1/", include("operations.urls")),
     path("api/riders/", include("riders.urls")),
-    path("api/bot/", include('bot.urls')),
+    path("api/bot/", include("bot.urls")),
+    path("api/webhooks/", include("webhooks.urls")),
+    path("api/occ/", include("dispatcher.occ_urls")),
+    path("api/ops/", include("oprtn_dashboard.urls")),
+    path("api/riders/referrals/", include("referrals.urls")),
+    path("api/riders/support/", include("support.urls")),
+    path("api/chats/", include("chats.urls")),
+    path("api/whatsapp/", include("whatsapp_messaging.urls")),
+    path("api/subscriptions/", include("subscriptions.urls")),
+    
+    path(
+        "api/merchant/request-api-access/",
+        MerchantRequestAPIAccessView.as_view(),
+        name="merchant_request_api_access",
+    ),
+
+    # Merchant API Key management
+    path(
+        "api/merchant/apikey/request-otp/",
+        MerchantAPIKeyRequestOTPView.as_view(),
+        name="merchant_apikey_request_otp",
+    ),
+    path(
+        "api/merchant/apikey/retrieve/",
+        MerchantAPIKeyRetrieveView.as_view(),
+        name="merchant_apikey_retrieve",
+    ),
+    path(
+        "api/merchant/affiliation/",
+        __import__("authentication.views", fromlist=["MerchantAffiliationView"]).MerchantAffiliationView.as_view(),
+        name="merchant_affiliation_direct",
+    ),
+    path(
+        "api/merchant/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="merchant_affiliation_verify_direct",
+    ),
+    path(
+        "api/affiliation/verify/",
+        __import__("authentication.views", fromlist=["VerifyAffiliationCodeView"]).VerifyAffiliationCodeView.as_view(),
+        name="affiliation_verify_direct",
+    ),
 ]

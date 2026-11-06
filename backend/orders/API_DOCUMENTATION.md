@@ -3,9 +3,9 @@
 ## Overview
 
 The Order Management API provides endpoints for creating and managing delivery orders in three modes:
-- **Quick Send**: Single pickup, single delivery
-- **Multi-Drop**: Single pickup, multiple deliveries
-- **Bulk Import**: Single pickup, multiple deliveries (imported from CSV/text/OCR)
+- **Quick Send**: Single pickup, single delivery (Modes: `quick`, `grouped`)
+- **Multi-Drop**: Single pickup, multiple deliveries (Mode: `multi`)
+- **Bulk Import**: Single pickup, multiple deliveries (imported from CSV/text/OCR) (Mode: `bulk`)
 
 All endpoints require JWT authentication via the `Authorization: Bearer <token>` header.
 
@@ -20,6 +20,16 @@ http://127.0.0.1:8000/api/orders/
 ---
 
 ## Endpoints
+
+### Subscription Benefits & Pricing
+
+Merchants with an active subscription plan enjoy special pricing and billing:
+- **Free Orders**: Each plan includes a monthly quota of free orders.
+- **Zero Upfront Cost**: For subscribed merchants, order `total_amount` is set to `0.00` during creation—this applies to both free orders and overages.
+- **Deferred Billing**: The base plan fee and all accumulated overage fees are aggregated into a single invoice at the end of the billing cycle.
+- **Dedicated Rider**: Subscriptions can include a "Dedicated Rider" benefit, which prioritizes a specific rider for all the merchant's orders if that rider is online.
+
+---
 
 ### 1. Get Available Vehicles
 
@@ -97,10 +107,16 @@ Create a Quick Send order with a single delivery.
 - `receiver_name` (required): Name of receiver
 - `receiver_phone` (required): Phone number of receiver
 - `vehicle` (required): Vehicle type - "Bike", "Car", or "Van"
+- `mode` (optional): "quick" (default) or "grouped"
 - `payment_method` (optional): "wallet" (default), "cash_on_pickup", or "receiver_pays"
 - `package_type` (optional): "Box" (default), "Envelope", "Fragile", "Food", "Document", or "Other"
 - `notes` (optional): Additional delivery instructions
 - `scheduled_pickup_time` (optional): ISO 8601 datetime for scheduled pickup
+- `is_pickup_percel` (optional): Boolean flag indicating pickup from a SmartParcel locker (default: false)
+- `isdelivery_percel` (optional): Boolean flag indicating delivery to a SmartParcel locker (default: false)
+- `collect_code` (optional): String collect code required for SmartParcel locker pickup
+- `box_id` (optional): String box/locker identifier for SmartParcel locker delivery
+- `locker_size_id` (optional): String locker size identifier for SmartParcel locker delivery
 
 **Response** (201 Created):
 ```json
@@ -263,6 +279,41 @@ Create a Bulk Import order with multiple deliveries (typically from CSV/text/OCR
 
 ---
 
+### 5. Merge Grouped Orders
+
+**POST** `/api/orders/merge-grouped-orders/`
+
+Merge multiple single-delivery "grouped" orders into a single parent/sub-order container for easier management and assignment.
+
+**Authentication**: Required
+
+**Request Body**:
+```json
+{
+  "order_ids": [
+    "uuid-grouped-order-1",
+    "uuid-grouped-order-2"
+  ]
+}
+```
+
+**Field Descriptions**:
+- `order_ids` (required): List of UUIDs of orders to merge. All orders must be in `grouped` mode and `Pending` status.
+
+**Response** (201 Created):
+```json
+{
+  "status": "success",
+  "message": "Successfully merged 2 orders into parent 6158003",
+  "data": {
+    "parent_order_number": "6158003",
+    "parent_id": "uuid-parent-order"
+  }
+}
+```
+
+---
+
 ### 5. Get All Orders
 
 **GET** `/api/orders/`
@@ -273,7 +324,7 @@ Get all orders for the authenticated user with optional filtering.
 
 **Query Parameters**:
 - `status` (optional): Filter by status - "Pending", "Assigned", "Started", "Done", "CustomerCanceled", "RiderCanceled", "Failed"
-- `mode` (optional): Filter by mode - "quick", "multi", "bulk"
+- `mode` (optional): Filter by mode - "quick", "grouped", "multi", "bulk"
 - `limit` (optional): Limit number of results (integer)
 
 **Examples**:

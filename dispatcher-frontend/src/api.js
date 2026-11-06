@@ -7,13 +7,102 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://www.orders.ax
 const getToken = () => localStorage.getItem('access_token');
 
 // Helper for authenticated requests
-const authHeaders = () => {
+const authHeaders = (customHeaders = {}) => {
     const token = getToken();
     return {
         'Content-Type': 'application/json',
-        ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...customHeaders
     };
 };
+
+// ─── AUTO-REFRESH LOGIC ─────────────────────────────────────────
+let isRefreshing = false;
+let refreshSubscribers = [];
+
+function onRefreshed(token) {
+    refreshSubscribers.forEach((callback) => callback(token));
+    refreshSubscribers = [];
+}
+
+function addRefreshSubscriber(callback) {
+    refreshSubscribers.push(callback);
+}
+
+// ─── CENTRALIZED AUTH FETCH ─────────────────────────────────────
+export async function fetchWithAuth(endpoint, options = {}) {
+    // Determine headers. If passing FormData, browser sets multipart/form-data boundary automatically, so omit Content-Type.
+    const isFormData = options.body instanceof FormData;
+    const defaultHeaders = isFormData ? {} : { 'Content-Type': 'application/json' };
+    const baseHeaders = { ...defaultHeaders, ...options.headers };
+
+    // Inject auth token
+    const token = getToken();
+    if (token) baseHeaders['Authorization'] = `Bearer ${token}`;
+
+    const config = { ...options, headers: baseHeaders };
+
+    // Initial fetch
+    let res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+
+    // If 401 Unauthorized, attempt refresh
+    if (!res.ok && res.status === 401) {
+        const refreshToken = localStorage.getItem('refresh_token');
+        if (refreshToken) {
+            if (!isRefreshing) {
+                isRefreshing = true;
+                try {
+                    const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh/`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ refresh: refreshToken }),
+                    });
+                    const refreshData = await refreshRes.json();
+
+                    if (refreshRes.ok && refreshData.access) {
+                        localStorage.setItem('access_token', refreshData.access);
+                        if (refreshData.refresh) localStorage.setItem('refresh_token', refreshData.refresh);
+
+                        isRefreshing = false;
+                        onRefreshed(refreshData.access);
+
+                        // Retry original request
+                        config.headers['Authorization'] = `Bearer ${refreshData.access}`;
+                        res = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                    } else {
+                        throw new Error('Refresh failed');
+                    }
+                } catch (refreshErr) {
+                    isRefreshing = false;
+                    localStorage.clear();
+                    sessionStorage.clear();
+                    window.dispatchEvent(new Event('auth:unauthorized'));
+                    throw refreshErr;
+                }
+            } else {
+                // Wait for ongoing refresh
+                return new Promise((resolve, reject) => {
+                    addRefreshSubscriber(async (newToken) => {
+                        config.headers['Authorization'] = `Bearer ${newToken}`;
+                        try {
+                            const retryRes = await fetch(`${API_BASE_URL}${endpoint}`, config);
+                            resolve(retryRes);
+                        } catch (err) {
+                            reject(err);
+                        }
+                    });
+                });
+            }
+        } else {
+            // 401 but no refresh token
+            localStorage.clear();
+            sessionStorage.clear();
+            window.dispatchEvent(new Event('auth:unauthorized'));
+        }
+    }
+
+    return res;
+}
 
 // ─── AUTHENTICATION ─────────────────────────────────────────────
 export const AuthAPI = {
@@ -36,14 +125,9 @@ export const AuthAPI = {
         // Blacklist the refresh token on the server (best-effort)
         try {
             const refreshToken = localStorage.getItem('refresh_token');
-            const accessToken = localStorage.getItem('access_token');
             if (refreshToken) {
-                await fetch(`${API_BASE_URL}/auth/logout/`, {
+                await fetchWithAuth(`/auth/logout/`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...(accessToken ? { 'Authorization': `Bearer ${accessToken}` } : {})
-                    },
                     body: JSON.stringify({ refresh_token: refreshToken })
                 });
             }
@@ -56,21 +140,41 @@ export const AuthAPI = {
             try {
                 const keys = await caches.keys();
                 await Promise.all(keys.map(k => caches.delete(k)));
-            } catch (_) {}
+            } catch (_) { }
         }
     },
 
     isAuthenticated() {
         return !!getToken();
+    },
+
+    async requestPasswordReset(email) {
+        const res = await fetch(`${API_BASE_URL}/auth/request-password-reset/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async resetPassword(token, newPassword) {
+        const res = await fetch(`${API_BASE_URL}/auth/reset-password/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, new_password: newPassword, confirm_password: newPassword })
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     }
 };
 
 // ─── RIDERS ─────────────────────────────────────────────────────
 export const RidersAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/riders/`);
         if (!res.ok) throw new Error('Failed to fetch riders');
         const data = await res.json();
         // Transform backend data to match frontend interface
@@ -79,10 +183,13 @@ export const RidersAPI = {
             name: r.name || 'Unknown',
             phone: r.phone || '',
             vehicle: r.vehicle || 'Bike',
+            vehicle_asset: r.vehicle_asset_detail || null,
             status: r.status || 'offline',
             currentOrder: r.current_order || null,
             todayOrders: r.todayOrders || 0,
             todayEarnings: r.todayEarnings || 0,
+            total_yesterday_order_distance: r.total_yesterday_orders_distance_km ?? r.total_yesterday_order_distance ?? 0,
+            total_yesterday_orders_distance_km: r.total_yesterday_orders_distance_km ?? r.total_yesterday_order_distance ?? 0,
             rating: parseFloat(r.rating) || 4.5,
             totalDeliveries: r.total_deliveries || 0,
             completionRate: r.completionRate || 95,
@@ -96,9 +203,8 @@ export const RidersAPI = {
     },
 
     async updateLocation(riderUuid, lat, lng) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/${riderUuid}/update_location/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/update_location/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify({ lat, lng })
         });
         if (!res.ok) throw new Error('Failed to update rider location');
@@ -111,11 +217,65 @@ export const RidersAPI = {
         Object.entries(fields).forEach(([k, v]) => {
             if (v !== null && v !== undefined && v !== '') form.append(k, v);
         });
-        const token = localStorage.getItem('access_token');
-        const res = await fetch(`${API_BASE_URL}/dispatch/riders/onboarding/`, {
+        const res = await fetchWithAuth(`/dispatch/riders/onboarding/`, {
             method: 'POST',
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
             body: form
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async resetPassword(riderUuid, newPassword) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/reset_password/`, {
+            method: 'POST',
+            body: JSON.stringify({ new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async assignVehicle(riderUuid, vehicleAssetId) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/assign_vehicle/`, {
+            method: 'POST',
+            body: JSON.stringify({ vehicle_asset_id: vehicleAssetId || null }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async toggleDuty(riderUuid, status) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderUuid}/toggle_duty/`, {
+            method: 'POST',
+            body: JSON.stringify({ status }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async getPendingApproval() {
+        const res = await fetchWithAuth(`/dispatch/riders/pending-approval/`);
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data; // { success, count, data: [...] }
+    },
+
+    async approveRider(riderId) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/approve/`, {
+            method: 'POST',
+        });
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
+    },
+
+    async rejectRider(riderId, reason, rejectedDocuments = []) {
+        const res = await fetchWithAuth(`/dispatch/riders/${riderId}/reject/`, {
+            method: 'POST',
+            body: JSON.stringify({ reason, rejected_documents: rejectedDocuments }),
         });
         const data = await res.json();
         if (!res.ok) throw data;
@@ -138,45 +298,126 @@ const normalizeOrder = (o) => ({
     amount: parseFloat(o.amount) || 0,
     cod: parseFloat(o.cod) || 0,
     codFee: parseFloat(o.codFee) || 0,
+    collectOnDelivery: o.collect_on_delivery || false,
     vehicle: o.vehicle || 'Bike',
     created: o.created || new Date().toLocaleString(),
     pkg: o.pkg || 'Box',
+    paymentInfo: o.payment_info || null,
+    payment_status: o.payment_status || null,
+    charge: o.charge || null,
+    isPartnerOrder: o.is_partner_order || false,
+    partnerOrderCount: o.partner_order_count || null,
+    dayReturnedCount: o.day_returned_count || 0,
+    riderCompletedCount: o.rider_completed_count || 0,
+    fileUploadedUrl: o.file_uploaded_urls && o.file_uploaded_urls.length > 0 ? o.file_uploaded_urls[0] : (o.file_uploaded_url || null),
+    fileUploadedUrls: o.file_uploaded_urls || [],
     // Relay routing fields
     isRelayOrder: o.is_relay_order || false,
     routingStatus: o.routing_status || 'ready',
     routingError: o.routing_error || '',
     relayLegsCount: o.relay_legs_count || 0,
     suggestedRiderId: o.suggested_rider_id || null,
+    distance: o.distance || null,
+    time: o.time || null,
+    waitingTime: o.waiting_time || null,
+    deliveryTime: o.delivery_time || null,
+    totalOrderTime: o.total_order_time || null,
+    pricePerKm: o.price_per_km != null ? parseFloat(o.price_per_km) : null,
     pickupLat: o.pickup_lat || null,
     pickupLng: o.pickup_lng || null,
     dropoffLat: o.dropoff_lat || null,
     dropoffLng: o.dropoff_lng || null,
-    relayLegs: o.relay_legs || [],
+    relayLegs: (o.relay_legs || []).map(leg => ({
+        ...leg,
+        riderId: leg.rider_id || null,
+        riderName: leg.rider_name || null,
+        suggestedRiderId: leg.suggested_rider_id || null,
+        suggestedRiderName: leg.suggested_rider_name || null,
+        subOrderNumber: leg.sub_order_number || null,
+    })),
+    events: (o.events || []).map(ev => ({
+        eventType: ev.event_type || ev.event || '',
+        oldValue: ev.old_value || '',
+        newValue: ev.new_value || '',
+        createdBy: ev.created_by || null,
+        createdAt: ev.created_at || null,
+    })),
+    sub_orders: o.sub_orders || [],
+    sub_order_numbers: o.sub_order_numbers || [],
+    parentOrderNumber: o.parent_order_number || null,
+    relayLegNumber: o.relay_leg_number || 0,
+    source: o.source || 'merchant_web',
+    mode: o.mode || 'quick',
+    dispatcher_assigned: o.dispatcher_assigned || false,
+    verticalLeadName: o.vertical_lead_name || null,
+    cancellation_reason: o.cancellation_reason || '',
+    deliveries: o.deliveries || [],
 });
 
 export const OrdersAPI = {
-    async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
-            headers: authHeaders()
-        });
-        if (!res.ok) throw new Error('Failed to fetch orders');
+    async getAll(params = {}) {
+        const query = new URLSearchParams(params).toString();
+        const res = await fetchWithAuth(`/dispatch/orders/${query ? `?${query}` : ""}`);
+        if (!res.ok) throw new Error("Failed to fetch orders");
         const data = await res.json();
-        return data.map(normalizeOrder);
+
+        // Support both paginated (data.results) and non-paginated (data is array) responses.
+        // Also support wrapped service_response (data.data) if backend uses it.
+        const rawList = data.results || (Array.isArray(data) ? data : data.data) || [];
+
+        if (data && data.results) {
+            return {
+                results: rawList.map(normalizeOrder),
+                count: data.count,
+                next: data.next,
+                previous: data.previous,
+            };
+        }
+        // If it's a plain list (or wrapped in .data), return it normalized
+        return rawList.map(normalizeOrder);
+    },
+
+    async exportHistory(params = {}) {
+        const res = await fetchWithAuth(`/dispatch/orders/export-history/`, {
+            method: "POST",
+            body: JSON.stringify(params),
+        });
+        if (!res.ok) throw new Error("Failed to trigger export");
+        return await res.json();
     },
 
     async getOne(orderNumber) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/`);
         if (!res.ok) throw new Error('Failed to fetch order');
         const data = await res.json();
         return normalizeOrder(data);
     },
 
+    async updatePrice(orderNumber, amount) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-price/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ amount })
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update price'));
+        return normalizeOrder(data);
+    },
+
+    async updatePartnerStats(orderNumber, partnerData) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update-partner-stats/`, {
+            method: 'PATCH',
+            body: JSON.stringify(partnerData)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to update partner stats'));
+        return normalizeOrder(data);
+    },
+
     async create(orderData) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(orderData)
         });
         let data;
@@ -192,48 +433,104 @@ export const OrdersAPI = {
     },
 
     async assignRider(orderNumber, riderId) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/assign_rider/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/assign_rider/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ rider_id: riderId })
         });
         if (!res.ok) throw new Error('Failed to assign rider');
         return await res.json();
     },
 
-    async updateStatus(orderNumber, newStatus) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/update_status/`, {
+    async updateStatus(orderNumber, newStatus, reason = null) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/update_status/`, {
             method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify({ status: newStatus })
+            body: JSON.stringify({ status: newStatus, reason })
         });
         if (!res.ok) throw new Error('Failed to update status');
         return await res.json();
     },
 
     async generateRelayRoute(orderNumber, force = false) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/orders/${orderNumber}/generate-relay-route/`, {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/generate-relay-route/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify({ force })
         });
         let data;
         try { data = await res.json(); } catch (e) { throw new Error('Failed to generate relay route'); }
         if (!res.ok) throw data || new Error('Failed to generate relay route');
         return normalizeOrder(data);
+    },
+
+    async acceptRelayRoute(orderNumber) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/accept-relay-route/`, {
+            method: 'POST'
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to accept relay route'); }
+        if (!res.ok) throw data || new Error('Failed to accept relay route');
+        return normalizeOrder(data);
+    },
+
+    async assignRelayLeg(orderNumber, legNumber, riderId) {
+        const res = await fetchWithAuth(`/dispatch/orders/${orderNumber}/assign-relay-leg/`, {
+            method: 'POST',
+            body: JSON.stringify({ leg_number: legNumber, rider_id: riderId || null })
+        });
+        let data;
+        try { data = await res.json(); } catch (e) { throw new Error('Failed to assign relay leg'); }
+        if (!res.ok) throw data || new Error('Failed to assign relay leg');
+        return normalizeOrder(data);
+    },
+
+    async payNow(orderNumber) {
+        const res = await fetchWithAuth(`/orders/${orderNumber}/pay-now/`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to initiate payment'));
+        return data;
+    },
+
+    async generateCODAccount(orderNumber) {
+        const res = await fetchWithAuth(`/riders/cod/${orderNumber}/generate-account/`, {
+            method: 'POST'
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to generate COD account'));
+        return data;
+    },
+
+    async mergeGroupedOrders(orderIds) {
+        const res = await fetchWithAuth(`/dispatch/orders/merge-grouped-orders/`, {
+            method: "POST",
+            body: JSON.stringify({ order_ids: orderIds }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to merge orders'));
+        return data;
+    },
+
+    async bulkCalculateFare(payload) {
+        const res = await fetchWithAuth(`/orders/bulk-calculate-fare/`, {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to calculate fare'));
+        return data;
     }
 };
 
 // ─── MERCHANTS ──────────────────────────────────────────────────
 export const MerchantsAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/merchants/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/merchants/`);
         if (!res.ok) throw new Error('Failed to fetch merchants');
         const data = await res.json();
         return data.map(m => ({
             id: m.id || 'N/A',
+            // Backend exposes the merchant's UUID as userId; we need it for per-merchant override endpoints.
+            userId: m.userId || m.user_id || m.user || null,
             name: m.name || 'Unknown',
             contact: m.contact || '',
             phone: m.phone || '',
@@ -242,17 +539,58 @@ export const MerchantsAPI = {
             monthOrders: m.monthOrders || 0,
             walletBalance: parseFloat(m.walletBalance) || 0,
             status: m.status || 'Active',
-            joined: m.joined || 'N/A'
+            joined: m.joined || 'N/A',
+            isPartner: m.isPartner || false,
+            partnerBasePrice: parseFloat(m.partnerBasePrice) || 0
         }));
+    }
+};
+
+// ─── MERCHANT PRICING OVERRIDES ─────────────────────────────────
+export const MerchantPricingOverridesAPI = {
+    async list({ merchant, vehicle, active } = {}) {
+        const qs = new URLSearchParams();
+        if (merchant) qs.set('merchant', merchant);
+        if (vehicle) qs.set('vehicle', vehicle);
+        if (active !== undefined && active !== null) qs.set('active', String(active));
+        const url = `${API_BASE_URL}/dispatch/merchant-pricing-overrides/${qs.toString() ? `?${qs.toString()}` : ''}`;
+        const res = await fetch(url, { headers: authHeaders() });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to fetch merchant pricing overrides'));
+        return Array.isArray(data) ? data : (data?.results || []);
+    },
+
+    async upsert(payload) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/`, {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify(payload)
+        });
+        let data;
+        try { data = await res.json(); } catch (_) { data = null; }
+        if (!res.ok) throw (data || new Error('Failed to save merchant pricing override'));
+        return data;
+    },
+
+    async remove(id) {
+        const res = await fetch(`${API_BASE_URL}/dispatch/merchant-pricing-overrides/${id}/`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (!res.ok) {
+            let data;
+            try { data = await res.json(); } catch (_) { data = null; }
+            throw (data || new Error('Failed to delete merchant pricing override'));
+        }
+        return true;
     }
 };
 
 // ─── VEHICLES ───────────────────────────────────────────────────
 export const VehiclesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/orders/vehicles/`);
         if (!res.ok) throw new Error('Failed to fetch vehicles');
         const data = await res.json();
         // Response shape is { success: true, vehicles: [...] }
@@ -260,9 +598,8 @@ export const VehiclesAPI = {
     },
 
     async update(id, data) {
-        const res = await fetch(`${API_BASE_URL}/orders/vehicles/${id}/`, {
+        const res = await fetchWithAuth(`/orders/vehicles/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(data)
         });
         if (!res.ok) throw new Error('Failed to update vehicle');
@@ -270,20 +607,68 @@ export const VehiclesAPI = {
     }
 };
 
+// ─── VEHICLE ASSETS ─────────────────────────────────────────────
+export const VehicleAssetsAPI = {
+    async getAll() {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/`);
+        if (!res.ok) throw new Error('Failed to fetch vehicle assets');
+        return await res.json();
+    },
+
+    async get(id) {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`);
+        if (!res.ok) throw new Error('Failed to fetch vehicle asset');
+        return await res.json();
+    },
+
+    async create(data) {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw err;
+        }
+        return await res.json();
+    },
+
+    async update(id, data) {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`, {
+            method: 'PATCH',
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) throw new Error('Failed to update vehicle asset');
+        return await res.json();
+    },
+
+    async delete(id) {
+        const res = await fetchWithAuth(`/dispatch/vehicle-assets/${id}/`, {
+            method: 'DELETE'
+        });
+        if (!res.ok) throw new Error('Failed to delete vehicle asset');
+    }
+};
+
+// ─── REVENUE ─────────────────────────────────────────────────────
+export const RevenueAPI = {
+    async getAll({ period = "this_month" } = {}) {
+        const res = await fetchWithAuth(`/dispatch/revenue/?period=${encodeURIComponent(period)}`);
+        if (!res.ok) throw new Error('Failed to fetch revenue report');
+        return await res.json();
+    }
+};
+
 // ─── ACTIVITY FEED ──────────────────────────────────────────────
 export const ActivityFeedAPI = {
     async getRecent(limit = 50) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/activity/?limit=${limit}`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/activity/?limit=${limit}`);
         if (!res.ok) throw new Error('Failed to fetch activity feed');
         return await res.json();
     },
 
     async getAblyToken() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/ably-token/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/ably-token/`);
         if (!res.ok) throw new Error('Failed to get Ably token');
         return await res.json();
     }
@@ -292,17 +677,14 @@ export const ActivityFeedAPI = {
 // ─── SETTINGS ───────────────────────────────────────────────────
 export const SettingsAPI = {
     async get() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/settings/`);
         if (!res.ok) throw new Error('Failed to fetch settings');
         return await res.json();
     },
 
     async update(settings) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/settings/`, {
+        const res = await fetchWithAuth(`/dispatch/settings/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(settings)
         });
         if (!res.ok) throw new Error('Failed to update settings');
@@ -313,18 +695,15 @@ export const SettingsAPI = {
 // ─── ZONES ──────────────────────────────────────────────────────
 export const ZonesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/zones/`);
         if (!res.ok) throw new Error('Failed to fetch zones');
         const data = await res.json();
         return Array.isArray(data) ? data : (data.results || []);
     },
 
     async create(zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/`, {
+        const res = await fetchWithAuth(`/dispatch/zones/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(zone)
         });
         if (!res.ok) throw new Error('Failed to create zone');
@@ -332,9 +711,8 @@ export const ZonesAPI = {
     },
 
     async update(id, zone) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
+        const res = await fetchWithAuth(`/dispatch/zones/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(zone)
         });
         if (!res.ok) throw new Error('Failed to update zone');
@@ -342,9 +720,8 @@ export const ZonesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/zones/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/zones/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete zone');
     }
@@ -353,18 +730,15 @@ export const ZonesAPI = {
 // ─── RELAY NODES ─────────────────────────────────────────────────
 export const RelayNodesAPI = {
     async getAll() {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/`);
         if (!res.ok) throw new Error('Failed to fetch relay nodes');
         const data = await res.json();
         return Array.isArray(data) ? data : (data.results || []);
     },
 
     async create(node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/`, {
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/`, {
             method: 'POST',
-            headers: authHeaders(),
             body: JSON.stringify(node)
         });
         if (!res.ok) throw new Error('Failed to create relay node');
@@ -372,9 +746,8 @@ export const RelayNodesAPI = {
     },
 
     async update(id, node) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/${id}/`, {
             method: 'PATCH',
-            headers: authHeaders(),
             body: JSON.stringify(node)
         });
         if (!res.ok) throw new Error('Failed to update relay node');
@@ -382,57 +755,120 @@ export const RelayNodesAPI = {
     },
 
     async remove(id) {
-        const res = await fetch(`${API_BASE_URL}/dispatch/relay-nodes/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/relay-nodes/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete relay node');
     }
 };
 
-
 // ─── DISPATCHERS ─────────────────────────────────────────────────
 export const DispatchersAPI = {
     async getAll() {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/`, {
-            headers: authHeaders()
-        });
+        const res = await fetchWithAuth(`/dispatch/dispatchers/`);
         if (!res.ok) throw new Error('Failed to fetch dispatchers');
-        const data = await res.json();
-        return data.map(d => ({
-            id: d.id,
-            name: d.name || 'Unknown',
-            phone: d.phone || '',
-            email: d.email || '',
-            isActive: d.is_active !== false,
-            joined: d.created_at ? new Date(d.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
-        }));
+        return await res.json();
     },
 
-    async create(data) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/`, {
+    async create(fields) {
+        const res = await fetchWithAuth(`/dispatch/dispatchers/`, {
             method: 'POST',
-            headers: authHeaders(),
-            body: JSON.stringify(data)
+            body: JSON.stringify(fields)
         });
-        const json = await res.json();
-        if (!res.ok) throw json;
-        return {
-            id: json.id,
-            name: json.name || data.contact_name || 'Unknown',
-            phone: json.phone || data.phone || '',
-            email: json.email || data.email || '',
-            isActive: json.is_active !== false,
-            joined: json.created_at ? new Date(json.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'N/A',
-        };
+        const data = await res.json();
+        if (!res.ok) throw data;
+        return data;
     },
 
+    // Soft-delete: deactivates the dispatcher's user account (they can no longer log in)
     async remove(id) {
-        const res = await fetch(`https://www.orders.axpress.net/api/dispatch/dispatchers/${id}/`, {
-            method: 'DELETE',
-            headers: authHeaders()
+        const res = await fetchWithAuth(`/dispatch/dispatchers/${id}/`, {
+            method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to deactivate dispatcher');
         return await res.json();
+    }
+};
+
+
+// ─── CHATS ───────────────────────────────────────────────────────
+export const ChatsAPI = {
+    // Dispatcher: list all conversations (sidebar)
+    async list({ type } = {}) {
+        const qs = type ? `?type=${type}` : '';
+        const res = await fetchWithAuth(`/chats/conversations/${qs}`);
+        if (!res.ok) throw new Error('Failed to fetch conversations');
+        return await res.json();
+    },
+
+    // Load message history for a conversation
+    async getMessages(conversationId) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/messages/`);
+        if (!res.ok) throw new Error('Failed to fetch messages');
+        return await res.json();
+    },
+
+    // Send a message (agent or user side)
+    async sendMessage(conversationId, content) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/messages/send/`, {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw (data || new Error('Failed to send message'));
+        return data;
+    },
+
+    // Mark all messages in a conversation as read (resets unread_count to 0)
+    async markRead(conversationId) {
+        const res = await fetchWithAuth(`/chats/conversations/${conversationId}/read/`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error('Failed to mark read');
+        return await res.json();
+    },
+};
+
+// ─── AFFILIATION & COMMISSIONS ──────────────────────────────────
+export const AffiliationAPI = {
+    async getSummary() {
+        const res = await fetchWithAuth('/dispatch/affiliation/summary/');
+        if (!res.ok) throw new Error('Failed to fetch affiliation summary');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getCommissions(params = {}) {
+        const qs = new URLSearchParams(params).toString();
+        const res = await fetchWithAuth(`/dispatch/affiliation/commissions/${qs ? '?' + qs : ''}`);
+        if (!res.ok) throw new Error('Failed to fetch commissions');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getMonthlyEarnings() {
+        const res = await fetchWithAuth('/dispatch/affiliation/monthly-earnings/');
+        if (!res.ok) throw new Error('Failed to fetch monthly earnings');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getAffiliatedRiders() {
+        const res = await fetchWithAuth('/dispatch/affiliation/riders/');
+        if (!res.ok) throw new Error('Failed to fetch affiliated riders');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async getAffiliatedMerchants() {
+        const res = await fetchWithAuth('/dispatch/affiliation/merchants/');
+        if (!res.ok) throw new Error('Failed to fetch affiliated merchants');
+        const json = await res.json();
+        return json.data || json;
+    },
+    async reconcile(month) {
+        const res = await fetchWithAuth('/dispatch/affiliation/reconcile/', {
+            method: 'POST',
+            body: JSON.stringify(month ? { month } : {})
+        });
+        const json = await res.json();
+        if (!res.ok) throw json;
+        return json.data || json;
     }
 };

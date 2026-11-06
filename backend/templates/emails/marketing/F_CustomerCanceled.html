@@ -1,0 +1,21 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>Order canceled by customer ⚠️</p>
+
+<p>Your order has been canceled by the customer.</p>
+
+<h3>📦 Order Details</h3>
+<ul>
+    <li>Order ID: <strong>#{{ order.order_number }}</strong></li>
+    <li>Reason: <strong>{{ order.cancellation_reason|default:"No reason provided" }}</strong></li>
+    <li>Pickup Location: <strong>{{ order.pickup_address }}</strong></li>
+    <li>Delivery Address: <strong>{{ delivery.dropoff_address }}</strong></li>
+</ul>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">📊 View Dashboard</a>
+</div>
+{% endblock %}

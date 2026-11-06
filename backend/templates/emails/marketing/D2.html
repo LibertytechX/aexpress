@@ -1,0 +1,28 @@
+{% extends "emails/marketing/base.html" %}
+
+{% block content %}
+<p>Hi {{ merchant.first_name|default:merchant.contact_name|default:"there" }},</p>
+
+<p>We know how hard it can be to grow a business when capital is the bottleneck.</p>
+
+<p>Stock is running low. A big order just came in. You want to expand — but your cash flow doesn't match your ambition.</p>
+
+<p>That's about to change.</p>
+
+<p><strong>Introducing: Assured Express Business Loans 💼</strong></p>
+
+<p>Flexible loan products designed specifically for merchants like you:</p>
+<ul>
+    <li><strong>14-Day Loan</strong> — Quick stock refills or urgent business expenses</li>
+    <li><strong>30-Day Loan</strong> — Short-term cash flow gaps and medium restocking</li>
+    <li><strong>60-Day Loan</strong> — Bigger investments: expanding stock, hiring staff, scaling up</li>
+</ul>
+
+<p>No long queues. No collateral stress. Just capital to keep your business moving — and the merchants who are most active on our platform will qualify first.</p>
+
+<div style="text-align: center;">
+    <a href="https://send.axpress.net" class="button">💰 Get Notified When Loans Go Live</a>
+</div>
+
+<p>Building your future, together.</p>
+{% endblock %}

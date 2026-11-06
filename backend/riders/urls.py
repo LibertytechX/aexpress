@@ -1,5 +1,9 @@
 from django.urls import path
 from .views import (
+    CustomerRatesRiderAPIView,
+    RiderSelfRegisterView,
+    RiderDocumentListView,
+    RiderDocumentReuploadView,
     RiderLoginView,
     RiderTokenRefreshView,
     RiderDeviceRegistrationView,
@@ -16,22 +20,59 @@ from .views import (
     RiderWalletInfoView,
     RiderTransactionListView,
     RiderLocationUpdateView,
+    RiderNotificationListView,
+    RiderNotificationDetailView,
+    RiderNotificationMarkReadView,
+    GenerateCODAccountView,
+    RiderAssignmentActionView,
+    RiderDocumentListCreateView,
+    RiderDocumentDetailView,
+    RiderAffiliationView,
+    RiderBankListView,
+    RiderVerifyAccountView,
+    RiderWithdrawalView,
+    RiderSetTransactionPinView,
+    RiderVerifyTransactionPinView,
+    RiderFaceMatchView,
+    RiderFaceMatchLogListView,
+)
+from .gamification_views import (
+    RideToOwnView,
+    MonthlyTargetView,
+    ChallengeListView,
+    LeaderboardView,
+    DashboardSummaryView,
 )
 
 app_name = "riders"
 
 urlpatterns = [
+    path("auth/register/", RiderSelfRegisterView.as_view(), name="rider-register"),
     path("auth/login/", RiderLoginView.as_view(), name="rider-login"),
     path("auth/refresh/", RiderTokenRefreshView.as_view(), name="rider-token-refresh"),
     path(
         "device/", RiderDeviceRegistrationView.as_view(), name="rider-device-register"
     ),
+    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
     path(
         "device/permissions/",
         RiderUpdatePermissionsView.as_view(),
         name="rider-device-permissions",
     ),
-    path("auth/me/", RiderMeView.as_view(), name="rider-me"),
+    path("affiliation/", RiderAffiliationView.as_view(), name="rider-affiliation"),
+    path(
+        "affiliation/verify/",
+        __import__(
+            "authentication.views", fromlist=["VerifyAffiliationCodeView"]
+        ).VerifyAffiliationCodeView.as_view(),
+        name="rider-affiliation-verify",
+    ),
+    path("documents/", RiderDocumentListView.as_view(), name="rider-documents"),
+    path(
+        "documents/<uuid:pk>/reupload/",
+        RiderDocumentReuploadView.as_view(),
+        name="rider-document-reupload",
+    ),
     path("duty/", RiderToggleDutyView.as_view(), name="rider-duty-toggle"),
     path("area-demand/", AreaDemandListView.as_view(), name="area-demand-list"),
     path(
@@ -48,12 +89,43 @@ urlpatterns = [
         RiderOrderDetailView.as_view(),
         name="rider-order-detail",
     ),
+    path(
+        "orders/<str:order_number>/assignment-action/",
+        RiderAssignmentActionView.as_view(),
+        name="rider-assignment-action",
+    ),
     path("earnings/", RiderEarningsView.as_view(), name="rider-earnings"),
+    path("banks/", RiderBankListView.as_view(), name="rider-banks"),
     path("wallet/info/", RiderWalletInfoView.as_view(), name="rider-wallet-info"),
     path(
         "wallet/transactions/",
         RiderTransactionListView.as_view(),
         name="rider-wallet-transactions",
+    ),
+    path(
+        "wallet/verify-account/",
+        RiderVerifyAccountView.as_view(),
+        name="rider-wallet-verify-account",
+    ),
+    path(
+        "wallet/withdraw/",
+        RiderWithdrawalView.as_view(),
+        name="rider-wallet-withdraw",
+    ),
+    path(
+        "wallet/pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-pin",
+    ),
+    path(
+        "wallet/pin/verify/",
+        RiderVerifyTransactionPinView.as_view(),
+        name="rider-wallet-pin-verify",
+    ),
+    path(
+        "wallet/set-pin/",
+        RiderSetTransactionPinView.as_view(),
+        name="rider-wallet-set-pin",
     ),
     path("orders-today/", RiderTodayTripsView.as_view(), name="rider-orders-today"),
     path(
@@ -61,4 +133,61 @@ urlpatterns = [
         RiderLocationUpdateView.as_view(),
         name="rider-location-update",
     ),
+    path(
+        "notifications/",
+        RiderNotificationListView.as_view(),
+        name="rider-notifications",
+    ),
+    path(
+        "notifications/<uuid:pk>/",
+        RiderNotificationDetailView.as_view(),
+        name="rider-notification-detail",
+    ),
+    path(
+        "notifications/<uuid:pk>/read/",
+        RiderNotificationMarkReadView.as_view(),
+        name="rider-notification-mark-read",
+    ),
+    path(
+        "cod/<str:order_id>/generate-account/",
+        GenerateCODAccountView.as_view(),
+        name="rider-cod-generate-account",
+    ),
+    path(
+        "documents/",
+        RiderDocumentListCreateView.as_view(),
+        name="rider-document-list-create",
+    ),
+    path(
+        "documents/<uuid:pk>/",
+        RiderDocumentDetailView.as_view(),
+        name="rider-document-detail",
+    ),
+    # ── Gamification ─────────────────────────────────────────────────────────
+    path("ride-to-own/", RideToOwnView.as_view(), name="rider-ride-to-own"),
+    path("monthly-target/", MonthlyTargetView.as_view(), name="rider-monthly-target"),
+    path("challenges/", ChallengeListView.as_view(), name="rider-challenges"),
+    path("leaderboard/", LeaderboardView.as_view(), name="rider-leaderboard"),
+    path(
+        "dashboard-summary/",
+        DashboardSummaryView.as_view(),
+        name="rider-dashboard-summary",
+    ),
+    path(
+        "customer-order-rating/",
+        CustomerRatesRiderAPIView.as_view(),
+        name="customer-order-rating",
+    ),
+    path(
+        "facematch/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-facematch-logs",
+    ),
+    path(
+        "face-match/logs/",
+        RiderFaceMatchLogListView.as_view(),
+        name="rider-face-match-logs",
+    ),
+    path("facematch/", RiderFaceMatchView.as_view(), name="rider-facematch"),
+    path("face-match/", RiderFaceMatchView.as_view(), name="rider-face-match"),
 ]

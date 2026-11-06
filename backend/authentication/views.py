@@ -1,3 +1,4 @@
+from django.db.models import Q
 from rest_framework import status, generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,9 +14,25 @@ from .serializers import (
     UserProfileSerializer,
     AddressSerializer,
 )
-from .emails import send_verification_email, send_password_reset_email
+from .emails import (
+    prep_user_for_otp,
+    send_password_reset_otp_to_email,
+    send_verification_email,
+    send_password_reset_email,
+    send_mobile_password_reset_email,
+)
 from .services import OTPService
+from .tasks import (
+    send_onboarding_email_task,
+    send_password_reset_otp_task,
+    send_mobile_password_reset_otp_task,
+)
 import logging
+from django.db import models
+from sparky_utils.response import service_response
+from sparky_utils.advice import exception_advice
+from sparky_utils.exceptions import ServiceException
+from devs.models import ErrorLog
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +42,15 @@ class SignupView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Register a new merchant user."""
         serializer = SignupSerializer(data=request.data)
+        # get the acquisition from the query param
 
         if serializer.is_valid():
-            user = serializer.save()
+            reg_source = request.query_params.get("source", "web")
+            user = serializer.save(registration_source=reg_source)
 
             # Generate OTP
             otp = OTPService.generate_otp()
@@ -73,6 +93,7 @@ class LoginView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
+    @exception_advice(model_object=ErrorLog)
     def post(self, request):
         """Authenticate user and return JWT tokens."""
         serializer = LoginSerializer(data=request.data)
@@ -140,6 +161,44 @@ class UserProfileView(APIView):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request):
+        """Soft-deactivate own account by merchant."""
+        user = request.user
+
+        # Check for active orders
+        active_statuses = [
+            "Pending",
+            "Assigned",
+            "AssignmentAccepted",
+            "Started",
+            "Pickup",
+            "Fulfilling",
+            "Arrived",
+        ]
+        if user.orders.filter(status__in=active_statuses).exists():
+            raise ServiceException(
+                status_code=400,
+                message="Cannot deactivate account with active/ongoing orders.",
+            )
+
+        # Soft-deactivate user
+        user.is_active = False
+        user.save(update_fields=["is_active"])
+
+        # Update merchant profile status
+        if hasattr(user, "merchant_profile"):
+            profile = user.merchant_profile
+            profile.activity_status = "inactive"
+            profile.save(update_fields=["activity_status"])
+
+        return service_response(
+            status="success",
+            message="Your account has been deactivated successfully.",
+            data={},
+            status_code=200,
+        )
+
 
 class LogoutView(APIView):
     """API endpoint for user logout."""
@@ -166,7 +225,7 @@ class LogoutView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        except Exception as e:
+        except Exception:
             return Response(
                 {
                     "success": False,
@@ -219,16 +278,14 @@ class VerifyOTPView(APIView):
 
     def post(self, request):
         phone = request.data.get("phone")
+        email = request.data.get("email")
         otp = request.data.get("otp")
 
-        if not phone or not otp:
-            return Response(
-                {"success": False, "error": "Phone and OTP are required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
-            user = User.objects.get(phone=phone)
+            if phone:
+                user = User.objects.get(phone=phone)
+            elif email:
+                user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
                 {"success": False, "error": "User with this phone number not found."},
@@ -255,6 +312,13 @@ class VerifyOTPView(APIView):
         user.otp = None  # Clear OTP after verification
         user.save(update_fields=["phone_verified", "email_verified", "otp"])
 
+        # Send onboarding email via Celery
+        try:
+            send_onboarding_email_task.delay(user.id)
+            logger.info(f"Triggered onboarding email task for user {user.email}")
+        except Exception as e:
+            logger.error(f"Failed to trigger onboarding email task: {str(e)}")
+
         # Generate tokens for immediate login
         refresh = RefreshToken.for_user(user)
 
@@ -279,15 +343,13 @@ class ResendOTPView(APIView):
 
     def post(self, request):
         phone = request.data.get("phone")
-
-        if not phone:
-            return Response(
-                {"success": False, "error": "Phone number is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        email = request.data.get("email")
 
         try:
-            user = User.objects.get(phone=phone)
+            if phone:
+                user = User.objects.get(phone=phone)
+            elif email:
+                user = User.objects.get(email=email)
         except User.DoesNotExist:
             return Response(
                 {"success": False, "error": "User with this phone number not found."},
@@ -512,27 +574,32 @@ class RequestPasswordResetView(APIView):
     def post(self, request):
         """Request password reset email."""
         email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
 
-        if not email:
+        if not email and not phone_number:
             return Response(
-                {"success": False, "error": "Email address is required"},
+                {"success": False, "error": "Email address or Phone number is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            # Try to find user with this email
-            user = User.objects.filter(email=email).first()
+            # Try to find user with this email or phone number
+            user = User.objects.filter(Q(email=email) | Q(phone=phone_number)).first()
 
             if user:
-                # Send password reset email
-                send_password_reset_email(user)
-                logger.info(f"Password reset email sent to {email}")
+                prep_user_for_otp(user)
+
+                try:
+                    send_password_reset_otp_task.delay(str(user.id))
+                    logger.info(f"Triggered password reset OTP task for user {user.id}")
+                except Exception as e:
+                    logger.error(f"Failed to trigger password reset OTP task: {str(e)}") 
 
             # Always return success to prevent email enumeration
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
+                    "message": f"If an account exists with that {'email' if email else 'phone number'}, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
@@ -543,19 +610,21 @@ class RequestPasswordResetView(APIView):
             return Response(
                 {
                     "success": True,
-                    "message": "If an account exists with that email, you will receive a password reset link shortly.",
+                    "message": f"If an account exists with that {'email' if email else 'phone number'}, you will receive a password reset code shortly.",
                 },
                 status=status.HTTP_200_OK,
             )
 
 
 class ResetPasswordView(APIView):
-    """API endpoint for resetting password with token."""
+    """API endpoint for resetting password with an emailed OTP."""
 
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        """Reset password using token."""
+        """Reset password using the emailed OTP."""
+        email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
         token = request.data.get("token")
         new_password = request.data.get("new_password")
         confirm_password = request.data.get("confirm_password")
@@ -563,7 +632,13 @@ class ResetPasswordView(APIView):
         # Validate input
         if not token:
             return Response(
-                {"success": False, "error": "Reset token is required"},
+                {"success": False, "error": "Reset code is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        
+        if not email and not phone_number:
+            return Response(
+                {"success": False, "error":"Please provide your account details used to initiate password reset."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -589,17 +664,26 @@ class ResetPasswordView(APIView):
             )
 
         try:
-            # Find user with this token
-            user = User.objects.get(password_reset_token=token)
+            # Find user with this email + code combination
+            user = User.objects.filter(
+                Q(email=email) | Q(phone=phone_number),
+                password_reset_token=token
+            ).first()
 
-            # Check if token is expired (1 hour)
+            if not user:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if code is expired (15 mins)
             if user.password_reset_token_created:
                 token_age = timezone.now() - user.password_reset_token_created
-                if token_age > timedelta(hours=1):
+                if token_age > timedelta(minutes=15):
                     return Response(
                         {
                             "success": False,
-                            "error": "Password reset link has expired. Please request a new one.",
+                            "error": "Password reset code has expired. Please request a new one.",
                         },
                         status=status.HTTP_400_BAD_REQUEST,
                     )
@@ -626,11 +710,6 @@ class ResetPasswordView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        except User.DoesNotExist:
-            return Response(
-                {"success": False, "error": "Invalid or expired reset token"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
         except Exception as e:
             logger.error(f"Error resetting password: {str(e)}")
             return Response(
@@ -640,3 +719,654 @@ class ResetPasswordView(APIView):
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class VerifyPasswordResetTokenView(APIView):
+    """API endpoint for verifying if an emailed password reset OTP is valid."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Verify OTP validity."""
+        email = request.data.get("email")
+        phone_number = request.data.get("phone_number")
+        token = request.data.get("token")
+
+        if not token:
+            return Response(
+                {"success": False, "error": "Reset code is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not email and not phone_number:
+            return Response(
+                {"success": False, "error":"Please provide your account details used to initiate password reset."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Find user with this email or phone number + code combination
+        try:
+            # Try to find user with this email or phone number
+            user = User.objects.filter(Q(email=email) | Q(phone=phone_number), password_reset_token=token).first()
+
+            if user is None:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+       
+        except Exception as e:
+            return Response(
+                {"success": False, "error": "Invalid or expired reset code."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Check if code is expired (15 mins)
+        if user.password_reset_token_created:
+            token_age = timezone.now() - user.password_reset_token_created
+            if token_age > timedelta(minutes=15):
+                return Response(
+                    {
+                        "success": False,
+                        "error": "Password reset code has expired. Please request a new one.",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            # Code is valid
+            return Response(
+                {
+                    "success": True,
+                    "message": "Code is valid.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            {
+                "success": False,
+                "message": "Code is invalid.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class MobileRequestPasswordResetView(APIView):
+    """API endpoint for requesting an OTP to reset password (Mobile App)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Generate a 6-digit OTP and send via SMS and Email."""
+        email = request.data.get("email")
+        phone_number = request.data.get("phone")
+
+        if not email and not phone_number:
+            return Response(
+                {"success": False, "error": "Email or phone number is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Try to find user with this identifier (email or phone)
+            if email:
+                user = User.objects.filter(email=email).first()
+            elif phone_number:
+                phone_2, phone_3 = "", ""
+                phone = phone_number
+                phone_numbers = [phone]
+                if phone.startswith("0"):
+                    phone_2 = "+234" + phone[1:]
+                    phone_3 = phone[1:]
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                elif len(phone) == 10:
+                    phone_3 = "0" + phone
+                    phone_2 = "+234" + phone
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                elif phone.startswith("+234"):
+                    phone_2 = phone[4:]
+                    phone_3 = "0" + phone_2
+                    phone_numbers.append(phone_2)
+                    phone_numbers.append(phone_3)
+                user = User.objects.filter(phone__in=phone_numbers).first()
+
+            if user:
+                # Generate a 6-digit OTP
+                otp = OTPService.generate_otp()
+
+                # Save token to user
+                user.password_reset_token = otp
+                user.password_reset_token_created = timezone.now()
+                user.save(
+                    update_fields=[
+                        "password_reset_token",
+                        "password_reset_token_created",
+                    ]
+                )
+
+                # Send OTP via Celery background task (both SMS and Email)
+                try:
+                    send_mobile_password_reset_otp_task.delay(str(user.id))
+                    logger.info(
+                        f"Triggered mobile password reset OTP task for user {user.id}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to trigger mobile password reset OTP task: {str(e)}"
+                    )
+
+            # Always return success to prevent user enumeration
+            return Response(
+                {
+                    "success": True,
+                    "message": "If an account exists with that information, a 6-digit reset code has been sent via SMS and Email.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error in mobile password reset request: {str(e)}")
+            return Response(
+                {
+                    "success": False,
+                    "message": "An error occurred while processing your request. Please try again.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+class MobileResetPasswordView(APIView):
+    """API endpoint for verifying OTP and resetting password (Mobile App)."""
+
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        """Validate the 6-digit OTP and update the user's password."""
+        identifier = request.data.get("email") or request.data.get("phone")
+        otp = request.data.get("otp")
+        new_password = request.data.get("new_password")
+        confirm_password = request.data.get("confirm_password")
+
+        # Validate input
+        if not identifier or not otp:
+            return Response(
+                {"success": False, "error": "Email/Phone and OTP are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not new_password or not confirm_password:
+            return Response(
+                {"success": False, "error": "Both password fields are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if new_password != confirm_password:
+            return Response(
+                {"success": False, "error": "Passwords do not match."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(new_password) < 6:
+            return Response(
+                {
+                    "success": False,
+                    "error": "Password must be at least 6 characters long.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            # Find user with this identifier (email or phone)
+            user = User.objects.filter(
+                models.Q(email=identifier) | models.Q(phone=identifier)
+            ).first()
+
+            if not user or user.password_reset_token != otp:
+                return Response(
+                    {"success": False, "error": "Invalid or expired reset code."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Check if OTP is expired (15 minutes limit for mobile OTP)
+            if user.password_reset_token_created:
+                token_age = timezone.now() - user.password_reset_token_created
+                if token_age > timedelta(minutes=15):
+                    return Response(
+                        {
+                            "success": False,
+                            "error": "Your reset code has expired. Please request a new one.",
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            # Update password
+            user.set_password(new_password)
+            user.password_reset_token = None
+            user.password_reset_token_created = None
+            user.save(
+                update_fields=[
+                    "password",
+                    "password_reset_token",
+                    "password_reset_token_created",
+                ]
+            )
+
+            logger.info(f"Mobile password reset successfully for user {user.phone}")
+
+            return Response(
+                {
+                    "success": True,
+                    "message": "Password reset successfully! You can now login with your new password.",
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        except Exception as e:
+            logger.error(f"Error executing mobile password reset: {str(e)}")
+            return Response(
+                {
+                    "success": False,
+                    "error": "An error occurred while resetting your password. Please try again.",
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Merchant Notifications
+# ---------------------------------------------------------------------------
+
+from dispatcher.permissions import IsMerchant  # noqa: E402
+from dispatcher.models import (
+    MerchantDevice,
+    MerchantNotification,
+    MerchantNotificationSettings,
+)  # noqa: E402
+from .serializers import (  # noqa: E402
+    MerchantDeviceSerializer,
+    MerchantNotificationSerializer,
+    MerchantNotificationSettingsSerializer,
+)
+
+
+class MerchantDeviceRegistrationView(APIView):
+    """
+    POST /api/auth/device/
+    Register or update a merchant's mobile device for push notifications.
+    Uses device_id as the unique key — safe to call on every app launch.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request):
+        serializer = MerchantDeviceSerializer(data=request.data)
+        if not serializer.is_valid():
+            return service_response(
+                status="error",
+                message="Invalid device data.",
+                data=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        merchant = request.user.merchant_profile
+        data = serializer.validated_data
+
+        MerchantDevice.objects.update_or_create(
+            device_id=data["device_id"],
+            defaults={
+                "merchant": merchant,
+                "fcm_token": data["fcm_token"],
+                "platform": data["platform"],
+                "model_name": data["model_name"],
+                "os_version": data["os_version"],
+                "app_version": data["app_version"],
+                "is_active": True,
+            },
+        )
+
+        return service_response(
+            status="success",
+            message="Device registered successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationListView(APIView):
+    """
+    GET /api/auth/notifications/
+    Returns all notifications for the authenticated merchant, newest first.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def get(self, request):
+        merchant = request.user.merchant_profile
+        notifications = MerchantNotification.objects.filter(merchant=merchant)
+        serializer = MerchantNotificationSerializer(notifications, many=True)
+        return service_response(
+            status="success",
+            message="Notifications fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationDetailView(APIView):
+    """
+    GET /api/auth/notifications/<int:pk>/
+    Returns a single notification belonging to the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def get(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        serializer = MerchantNotificationSerializer(notification)
+        return service_response(
+            status="success",
+            message="Notification fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationMarkReadView(APIView):
+    """
+    POST /api/auth/notifications/<int:pk>/read/
+    Marks a single notification as read.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        notification.is_read = True
+        notification.save(update_fields=["is_read"])
+        return service_response(
+            status="success",
+            message="Notification marked as read.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationMarkAllReadView(APIView):
+    """
+    POST /api/auth/notifications/read-all/
+    Marks all unread notifications as read for the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def post(self, request):
+        merchant = request.user.merchant_profile
+        updated = MerchantNotification.objects.filter(
+            merchant=merchant, is_read=False
+        ).update(is_read=True)
+        return service_response(
+            status="success",
+            message=f"{updated} notification(s) marked as read.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationSettingsView(APIView):
+    """
+    GET  /api/auth/notifications/settings/  — retrieve current toggle preferences.
+    PATCH /api/auth/notifications/settings/ — update one or more toggles.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    def _get_settings(self, merchant):
+        obj, _ = MerchantNotificationSettings.objects.get_or_create(merchant=merchant)
+        return obj
+
+    def get(self, request):
+        settings_obj = self._get_settings(request.user.merchant_profile)
+        serializer = MerchantNotificationSettingsSerializer(settings_obj)
+        return service_response(
+            status="success",
+            message="Notification settings fetched successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    def patch(self, request):
+        settings_obj = self._get_settings(request.user.merchant_profile)
+        serializer = MerchantNotificationSettingsSerializer(
+            settings_obj, data=request.data, partial=True
+        )
+        if not serializer.is_valid():
+            return service_response(
+                status="error",
+                message="Invalid settings data.",
+                data=serializer.errors,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer.save()
+        return service_response(
+            status="success",
+            message="Notification settings updated successfully.",
+            data=serializer.data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationDeleteView(APIView):
+    """
+    DELETE /api/auth/notifications/<int:pk>/
+    Deletes a single notification belonging to the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request, pk):
+        merchant = request.user.merchant_profile
+        notification = get_object_or_404(MerchantNotification, pk=pk, merchant=merchant)
+        notification.delete()
+        return service_response(
+            status="success",
+            message="Notification deleted successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantNotificationDeleteAllView(APIView):
+    """
+    DELETE /api/auth/notifications/delete-all/
+    Deletes all notifications for the authenticated merchant.
+    """
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+
+    @exception_advice(model_object=ErrorLog)
+    def delete(self, request):
+        merchant = request.user.merchant_profile
+        count, _ = MerchantNotification.objects.filter(merchant=merchant).delete()
+        return service_response(
+            status="success",
+            message=f"{count} notification(s) deleted successfully.",
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class MerchantAffiliationView(APIView):
+    """
+    GET /api/auth/merchant/affiliation/
+    View current affiliation status and dispatcher details for the authenticated merchant.
+
+    POST /api/auth/merchant/affiliation/
+    Affiliate the authenticated merchant to a dispatcher using an affiliation code.
+    Payload: {"affiliation_code": "..."}
+    """
+
+    from rest_framework.parsers import JSONParser, FormParser, MultiPartParser
+
+    permission_classes = [permissions.IsAuthenticated, IsMerchant]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request):
+        from dispatcher.models import Merchant
+
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            merchant = Merchant.objects.filter(user=request.user).first()
+
+        if not merchant:
+            raise ServiceException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                message="Merchant profile not found.",
+            )
+
+        data = {
+            "is_affiliated": merchant.is_affiliated,
+            "affiliation_code": (
+                merchant.affiliated_to.affiliation_code
+                if merchant.is_affiliated and merchant.affiliated_to
+                else None
+            ),
+            "dispatcher_name": (
+                merchant.affiliated_to.user.contact_name
+                or f"{merchant.affiliated_to.user.first_name} {merchant.affiliated_to.user.last_name}".strip()
+                or merchant.affiliated_to.user.phone
+                if merchant.is_affiliated and merchant.affiliated_to and merchant.affiliated_to.user
+                else None
+            ),
+            "dispatcher_phone": (
+                merchant.affiliated_to.user.phone
+                if merchant.is_affiliated and merchant.affiliated_to and merchant.affiliated_to.user
+                else None
+            ),
+            "affiliated_at": (
+                merchant.affiliated_at.isoformat()
+                if merchant.is_affiliated and merchant.affiliated_at
+                else None
+            ),
+        }
+
+        return service_response(
+            status="success",
+            message="Merchant affiliation details retrieved successfully.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request):
+        from dispatcher.models import Merchant
+
+        merchant = getattr(request.user, "merchant_profile", None)
+        if not merchant:
+            merchant = Merchant.objects.filter(user=request.user).first()
+
+        if not merchant:
+            raise ServiceException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                message="Merchant profile not found.",
+            )
+
+        code = request.data.get("affiliation_code")
+        if not code or not str(code).strip():
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                message="Affiliation code is required.",
+            )
+
+        from dispatcher.services import affiliate_merchant_to_dispatcher
+
+        dispatcher = affiliate_merchant_to_dispatcher(merchant, str(code).strip())
+
+        disp_name = (
+            dispatcher.user.contact_name
+            or f"{dispatcher.user.first_name} {dispatcher.user.last_name}".strip()
+            or dispatcher.user.phone
+            if dispatcher.user
+            else "Dispatcher"
+        )
+
+        return service_response(
+            status="success",
+            message=f"Successfully affiliated with {disp_name}.",
+            data={
+                "is_affiliated": True,
+                "affiliation_code": dispatcher.affiliation_code,
+                "dispatcher_name": disp_name,
+                "dispatcher_phone": dispatcher.user.phone if dispatcher.user else None,
+                "affiliated_at": (
+                    merchant.affiliated_at.isoformat()
+                    if merchant.affiliated_at
+                    else None
+                ),
+            },
+            status_code=status.HTTP_200_OK,
+        )
+
+
+class VerifyAffiliationCodeView(APIView):
+    """
+    Public API endpoint to verify an affiliation code.
+    Accessible without authentication so riders and merchants can validate codes during registration.
+
+    GET /api/auth/affiliation/verify/?code=HUB001
+    POST /api/auth/affiliation/verify/ with {"affiliation_code": "HUB001"}
+    """
+
+    permission_classes = [permissions.AllowAny]
+
+    @exception_advice(model_object=ErrorLog)
+    def get(self, request, *args, **kwargs):
+        from authentication.serializers import VerifyAffiliationCodeSerializer
+        from dispatcher.services import verify_affiliation_code
+
+        code = request.query_params.get("affiliation_code") or request.query_params.get("code")
+        serializer = VerifyAffiliationCodeSerializer(data={"affiliation_code": code})
+        if not serializer.is_valid():
+            first_err = (
+                next(iter(serializer.errors.values()))[0]
+                if serializer.errors
+                else "Invalid data."
+            )
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message=str(first_err)
+            )
+
+        clean_code = serializer.validated_data["clean_code"]
+        data = verify_affiliation_code(clean_code)
+        return service_response(
+            status="success",
+            message="Affiliation code is valid.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+    @exception_advice(model_object=ErrorLog)
+    def post(self, request, *args, **kwargs):
+        from authentication.serializers import VerifyAffiliationCodeSerializer
+        from dispatcher.services import verify_affiliation_code
+
+        serializer = VerifyAffiliationCodeSerializer(data=request.data)
+        if not serializer.is_valid():
+            first_err = (
+                next(iter(serializer.errors.values()))[0]
+                if serializer.errors
+                else "Invalid data."
+            )
+            raise ServiceException(
+                status_code=status.HTTP_400_BAD_REQUEST, message=str(first_err)
+            )
+
+        clean_code = serializer.validated_data["clean_code"]
+        data = verify_affiliation_code(clean_code)
+        return service_response(
+            status="success",
+            message="Affiliation code is valid.",
+            data=data,
+            status_code=status.HTTP_200_OK,
+        )
+
+
