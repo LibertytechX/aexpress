@@ -13,7 +13,8 @@ def generate_ticket_reference():
 class SupportTicket(models.Model):
     """
     A complaint or support request lodged by a rider.
-    Triaged by the ops team from the Django admin.
+    Pushed to Whisper360's Support desk, where the ops team works it; status and
+    the team's reply come back from there (see support/whisper360.py).
     """
 
     class Category(models.TextChoices):
@@ -34,6 +35,11 @@ class SupportTicket(models.Model):
         LOW = "low", "Low"
         MEDIUM = "medium", "Medium"
         HIGH = "high", "High"
+
+    class WhisperSync(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SYNCED = "synced", "Synced"
+        FAILED = "failed", "Failed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     reference = models.CharField(
@@ -71,6 +77,18 @@ class SupportTicket(models.Model):
         related_name="resolved_support_tickets",
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
+
+    # Whisper360 Support desk link. Once synced, Whisper360 owns status and the
+    # resolution note; ops no longer edit them here.
+    whisper_ticket_id = models.UUIDField(null=True, blank=True, unique=True)
+    whisper_sync_status = models.CharField(
+        max_length=10,
+        choices=WhisperSync.choices,
+        default=WhisperSync.PENDING,
+        db_index=True,
+    )
+    whisper_sync_error = models.CharField(max_length=300, blank=True, default="")
+    whisper_synced_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True)
