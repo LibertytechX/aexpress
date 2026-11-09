@@ -242,6 +242,13 @@ CORS_ALLOWED_ORIGINS = [
 
 # Add production frontend URL if set
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+
+# Whisper360 Support desk: rider tickets are pushed there and worked by ops.
+# Left blank, the integration is off and tickets stay local (status "pending").
+WHISPER360_API_URL = os.getenv("WHISPER360_API_URL", "").rstrip("/")
+WHISPER360_API_KEY = os.getenv("WHISPER360_API_KEY", "")
+WHISPER360_WEBHOOK_SECRET = os.getenv("WHISPER360_WEBHOOK_SECRET", "")
+WHISPER360_SUPPORT_QUEUE_ID = os.getenv("WHISPER360_SUPPORT_QUEUE_ID", "")
 if FRONTEND_URL:
     CORS_ALLOWED_ORIGINS.append(FRONTEND_URL)
 

@@ -13,9 +13,10 @@ class SupportTicketAdmin(admin.ModelAdmin):
         "subject",
         "status",
         "priority",
+        "whisper_sync_status",
         "created_at",
     )
-    list_filter = ("status", "category", "priority")
+    list_filter = ("status", "category", "priority", "whisper_sync_status")
     search_fields = (
         "reference",
         "subject",
@@ -33,9 +34,21 @@ class SupportTicketAdmin(admin.ModelAdmin):
         "message",
         "resolved_by",
         "resolved_at",
+        "whisper_ticket_id",
+        "whisper_sync_status",
+        "whisper_sync_error",
+        "whisper_synced_at",
         "created_at",
         "updated_at",
     )
+
+    def get_readonly_fields(self, request, obj=None):
+        # Whisper360 owns a synced ticket: ops work it on the Support desk, and
+        # its status and reply flow back here. Editing them here would be overwritten.
+        fields = super().get_readonly_fields(request, obj)
+        if obj is not None and obj.whisper_ticket_id:
+            return (*fields, "status", "priority", "resolution_note")
+        return fields
 
     def save_model(self, request, obj, form, change):
         # Stamp who resolved the ticket and when

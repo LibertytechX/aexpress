@@ -4,6 +4,15 @@ All notable changes to the AXpress backend are documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Rider support tickets sync with the Whisper360 Support desk (`support/whisper360.py`, `support/views.py`, `support/models.py`, `support/admin.py`, `support/management/commands/sync_whisper360_tickets.py`, `ax_merchant_api/settings.py`)**:
+  - A rider's ticket is pushed to Whisper360 (`POST /v1/support/tickets`) once it is committed, on the Assured Express workspace's in-app channel, with its reference, category, order, rider ID and phone shown to agents. Whisper360 opens one ticket per our ticket id, so retries never duplicate it.
+  - Ops work the ticket on the Whisper360 Support desk. On `message.sent` or `conversation.status_changed`, Whisper360 calls `POST /api/riders/support/whisper360/webhook/` (HMAC-signed, 5-minute replay window). We then read the ticket back and copy its status and the agent's latest reply into `status` and `resolution_note`, which the rider app already shows. A reopened ticket clears `resolved_at`.
+  - New fields on `SupportTicket`: `whisper_ticket_id`, `whisper_sync_status` (`pending`/`synced`/`failed`), `whisper_sync_error` and `whisper_synced_at`. Once synced, `status`, `priority` and `resolution_note` are read-only in Django admin, because Whisper360 owns them.
+  - A push that cannot reach Whisper360 never fails the rider's request. The ticket is marked `failed`, and `python manage.py sync_whisper360_tickets` retries it. Run the command once to backfill existing tickets, then on a schedule as a safety net for missed webhooks.
+  - Off unless `WHISPER360_API_URL` and `WHISPER360_API_KEY` are set; also `WHISPER360_WEBHOOK_SECRET` and optional `WHISPER360_SUPPORT_QUEUE_ID`. **Deploy:** migrations are not in git, so run `python manage.py makemigrations support` before `migrate`.
+  - Tests: `support/tests/integration/test_whisper360_sync.py`.
+
 ### Fixed
 - **Vehicle Assets N+1 Query & Worker Timeout Resolution (`dispatcher/serializers.py`)**:
   - Fixed Gunicorn `WORKER TIMEOUT` and `SIGKILL` 502 Bad Gateway on `GET /api/dispatch/vehicle-assets/` caused by quadratic N+1 queries and sequential table scans on `VehicleTracking` during serialization.
